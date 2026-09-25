@@ -1,0 +1,35 @@
+# git-tpl — https://noirbizarre.github.io/git-tpl/configuration/
+#
+# This file is versioned with the project. Edit an answer and run
+# `git tpl update` to re-render the template with it.
+
+[template]
+source = "/tmp/opencode/refs/rust.tpl"
+
+[answers]
+aur = false
+author = "Axel H. <noirbizarre@gmail.com>"
+bin_name = "memcastle"
+categories = "command-line-utilities,database"
+copyright_holder = "Axel H."
+copyright_year = 2026
+crate = "memcastle"
+description = "Local-first, always-on memory server for AI coding agents - search, mining and background jobs over MCP/HTTP"
+docs = true
+docs_accent = "indigo"
+homebrew = false
+homebrew_tap = "noirbizarre/homebrew-tap"
+keywords = "mcp,memory,agent,search,daemon"
+man_pages = false
+msrv = true
+msrv_version = "1.90"
+owner = "noirbizarre"
+publish = false
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+workspace = false
