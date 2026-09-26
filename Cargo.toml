@@ -137,7 +137,7 @@ assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
 insta = { version = "1", features = ["filters"] }
-rstest = "0.26"
+rstest = "0.27"
 pretty_assertions = "1"
 # Only `tests/concurrency.rs` needs this (`join_all` over many simulated
 # clients) — not a real dependency, so it stays out of `[dependencies]`.
