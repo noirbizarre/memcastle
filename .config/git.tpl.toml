@@ -4,10 +4,10 @@
 # `git tpl update` to re-render the template with it.
 
 [template]
-source = "/tmp/opencode/refs/rust.tpl"
+source = "https://github.com/noirbizarre/rust.tpl"
 
 [answers]
-aur = false
+aur = true
 author = "Axel H. <noirbizarre@gmail.com>"
 bin_name = "memcastle"
 categories = "command-line-utilities,database"
@@ -17,7 +17,7 @@ crate = "memcastle"
 description = "Local-first, always-on memory server for AI coding agents over MCP/HTTP"
 docs = true
 docs_accent = "indigo"
-homebrew = false
+homebrew = true
 homebrew_tap = "noirbizarre/homebrew-tap"
 keywords = "mcp,memory,agent,search,daemon"
 man_pages = false

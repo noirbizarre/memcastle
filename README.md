@@ -42,6 +42,14 @@ for the full design and what's deliberately not built yet.
 
 ## Installation
 
+```bash
+brew install noirbizarre/homebrew-tap/memcastle
+```
+
+```bash
+paru -S memcastle-bin  # or your AUR helper of choice
+```
+
 Or download a binary for your platform from the
 [latest release](https://github.com/noirbizarre/memcastle/releases/latest).
 

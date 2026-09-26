@@ -83,6 +83,10 @@ no CI results. That means the repository needs:
 - squash-merge settings of `squash_merge_commit_title: PR_TITLE` and
   `squash_merge_commit_message: BLANK`, so the squash commit subject is the
   Conventional Commit title from `.github/ship.yml`.
+- a `homebrew` environment holding the secret `TAP_TOKEN`, scoped to push to
+  `noirbizarre/homebrew-tap` only.
+- an `aur` environment holding the secret `AUR_SSH_PRIVATE_KEY`, for the AUR
+  account that owns the `memcastle-bin` package.
 
 ## This repository is generated from a template
 
