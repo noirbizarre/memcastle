@@ -20,6 +20,17 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
 
+  # sccache caches individual compiled objects rather than Cargo's target/
+  # dir wholesale, so a Cargo.lock bump doesn't force every crate (RocksDB
+  # included) to recompile from zero the way Swatinem/rust-cache's key does.
+  RUSTC_WRAPPER: sccache
+  # Required by sccache: incremental compilation writes its own on-disk
+  # state that sccache cannot reuse, so the two are mutually exclusive.
+  CARGO_INCREMENTAL: "0"
+  # Back sccache with GitHub's own Actions cache instead of a separate
+  # cloud bucket and its credentials.
+  SCCACHE_GHA_ENABLED: "true"
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -37,6 +48,12 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+
+      # mold links faster than GNU ld, and clippy still has to link every
+      # test/example target it type-checks.
+      - uses: rui314/setup-mold@v1
+
+      - uses: mozilla-actions/sccache-action@v0.0.11
 
       # Tool versions come from mise.toml + mise.lock, so CI runs exactly
       # what `mise run default` runs locally. No pinned mise version: an
@@ -75,6 +92,14 @@ jobs:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
 
+      # mold is Linux-only (it doesn't support the Windows/macOS linkers),
+      # so it only ever applies to this one leg of the matrix.
+      - name: Install mold (faster Linux linker)
+        if: matrix.os.flag == 'linux'
+        uses: rui314/setup-mold@v1
+
+      - uses: mozilla-actions/sccache-action@v0.0.11
+
       # nextest and llvm-cov are pinned by mise.lock rather than resolved
       # per-run, so a tool release cannot change CI behaviour on its own.
       - uses: jdx/mise-action@v4
@@ -92,6 +117,39 @@ jobs:
         # project already lives with per `.github/codecov.yml`. The runner is
         # destroyed at the end of the job, so there is nothing to re-enable.
         run: Set-MpPreference -DisableRealtimeMonitoring $true
+
+      - name: Cache vcpkg-built RocksDB/Snappy (Windows)
+        if: matrix.os.flag == 'windows'
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg\installed
+          # vcpkg skips rebuilding a port already present here with a
+          # matching version/triplet — bump this suffix if the pin below
+          # (port, feature, or triplet) ever changes.
+          key: vcpkg-installed-rocksdb-snappy-x64-windows-static-md-v1
+
+      - name: Provide RocksDB/Snappy via vcpkg (Windows)
+        if: matrix.os.flag == 'windows'
+        shell: pwsh
+        # RocksDB compiles ~40 .cc files through many discrete cl.exe
+        # invocations, each paying real per-process overhead on Windows —
+        # the single largest reason this leg is slower than Linux/macOS
+        # (Defender, disabled above, is the other). windows-latest ships
+        # vcpkg preinstalled, so pointing the crate's build.rs at a prebuilt
+        # RocksDB/Snappy skips that step entirely, mirroring the
+        # ROCKSDB_LIB_DIR/SNAPPY_LIB_DIR shortcut documented for local
+        # development in docs/development.md.
+        run: |
+          vcpkg install rocksdb[snappy]:x64-windows-static-md
+          $installed = "C:\vcpkg\installed\x64-windows-static-md"
+          # static-md: static libs, dynamic CRT — matches the default
+          # (non +crt-static) x86_64-pc-windows-msvc target built here;
+          # only publish-release.yaml opts into a static CRT.
+          "ROCKSDB_LIB_DIR=$installed\lib" >> $env:GITHUB_ENV
+          "ROCKSDB_INCLUDE_DIR=$installed\include" >> $env:GITHUB_ENV
+          "ROCKSDB_STATIC=1" >> $env:GITHUB_ENV
+          "SNAPPY_LIB_DIR=$installed\lib" >> $env:GITHUB_ENV
+          "SNAPPY_STATIC=1" >> $env:GITHUB_ENV
 
       - name: Run tests (with coverage)
         run: |
