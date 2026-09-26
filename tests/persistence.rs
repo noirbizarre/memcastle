@@ -98,17 +98,20 @@ fn spawn_daemon(bin: &Path, palace: &Path) -> Child {
 /// previous process just released.
 ///
 /// SurrealDB 3.x's embedded RocksDB engine does noticeably more at open
-/// than before (group-commit setup, a datastore-version check), and on a
-/// loaded CI runner — Windows in particular — the OS can still be settling
-/// that previous process's file handle on this exact path when this spawns,
-/// occasionally failing the reopen outright rather than merely being slow.
-/// A short, bounded retry absorbs that transient race without weakening
-/// what this test actually proves (data really does survive a restart);
-/// stderr is captured so a *real* failure still fails loudly with the
-/// daemon's own diagnostic instead of just an uninformative timeout.
+/// than before (group-commit setup, a datastore-version check); a real
+/// `memcastle serve` subprocess (as opposed to `TestDaemon`'s in-process
+/// task) paying for that under Windows CI's `cargo llvm-cov` instrumentation
+/// has been observed needing well over the general 60s startup allowance —
+/// see `common::wait_for_registry` — on top of which reopening the exact
+/// path a previous process just released can transiently fail outright if
+/// the OS is still settling that file handle. A bounded retry absorbs both
+/// without weakening what this test actually proves (data really does
+/// survive a restart); stderr is captured so a *real* failure still fails
+/// loudly with the daemon's own diagnostic instead of an uninformative
+/// timeout.
 async fn spawn_daemon_for_restart(bin: &Path, palace: &Path) -> (Child, RuntimeInfo) {
     let mut last_error = "the daemon never exited or registered".to_string();
-    for attempt in 0..5 {
+    for attempt in 0..3 {
         if attempt > 0 {
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
@@ -123,7 +126,7 @@ async fn spawn_daemon_for_restart(bin: &Path, palace: &Path) -> (Child, RuntimeI
             .expect("spawn `memcastle serve`");
 
         let mut exited = false;
-        for _ in 0..300 {
+        for _ in 0..1200 {
             if let Some(info) = read_if_live(palace) {
                 return (child, info);
             }
@@ -143,7 +146,7 @@ async fn spawn_daemon_for_restart(bin: &Path, palace: &Path) -> (Child, RuntimeI
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         if !exited {
-            last_error = "did not register within 15s (the process was still running)".to_string();
+            last_error = "did not register within 60s (the process was still running)".to_string();
             // Dropping `child` here kills it (`kill_on_drop`) before the
             // next attempt spawns another one on the same path — otherwise
             // a merely-slow-not-dead daemon from this attempt would still
@@ -151,7 +154,7 @@ async fn spawn_daemon_for_restart(bin: &Path, palace: &Path) -> (Child, RuntimeI
         }
     }
     panic!(
-        "daemon did not start after 5 attempts reopening the same palace; last failure: {last_error}"
+        "daemon did not start after 3 attempts reopening the same palace; last failure: {last_error}"
     );
 }
 

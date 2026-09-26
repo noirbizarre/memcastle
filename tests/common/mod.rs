@@ -75,12 +75,21 @@ pub async fn wait_for_registry(palace_path: &Path) -> RuntimeInfo {
     // Generous relative to the ~200ms an idle daemon actually takes to bind:
     // a busy CI runner (or, locally, `mise run ci` compiling docs/lint/test
     // targets concurrently) can starve this process for several seconds
-    // without it being a real failure to detect.
-    for _ in 0..300 {
+    // without it being a real failure to detect. `TestDaemon` never comes
+    // close to this ceiling either way — it starts the daemon as an
+    // in-process Tokio task, not a real OS process, so it has no process-
+    // spawn overhead to absorb. The one caller that does — `persistence.rs`,
+    // which spawns genuine `memcastle serve` subprocesses — is also the one
+    // that has actually needed the slack: Windows CI under `cargo llvm-cov`
+    // instrumentation, spawning a real process with SurrealDB 3.x's heavier
+    // embedded-engine startup (group-commit setup, a datastore-version
+    // check), has been observed taking noticeably longer than 15s even for
+    // a first, uncontended start.
+    for _ in 0..1200 {
         if let Some(info) = memcastle::server::lifecycle::read_if_live(palace_path) {
             return info;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    panic!("daemon did not start within 15s");
+    panic!("daemon did not start within 60s");
 }
