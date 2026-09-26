@@ -4,7 +4,7 @@
 [project]
 
 site_name = "memcastle"
-site_description = "Local-first, always-on memory server for AI coding agents - search, mining and background jobs over MCP/HTTP"
+site_description = "Local-first, always-on memory server for AI coding agents over MCP/HTTP"
 site_url = "https://noirbizarre.github.io/memcastle/"
 site_author = "noirbizarre"
 

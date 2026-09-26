@@ -4,7 +4,7 @@
 
 <h1 align="center">memcastle</h1>
 
-<p align="center"><strong>Local-first, always-on memory server for AI coding agents - search, mining and background jobs over MCP/HTTP</strong></p>
+<p align="center"><strong>Local-first, always-on memory server for AI coding agents over MCP/HTTP</strong></p>
 
 <p align="center">
   <a href="https://github.com/noirbizarre/memcastle/actions/workflows/ci.yaml">
@@ -26,6 +26,14 @@
 <!-- not the implementation. -->
 
 ## Installation
+
+```bash
+brew install noirbizarre/homebrew-tap/memcastle
+```
+
+```bash
+paru -S memcastle-bin  # or your AUR helper of choice
+```
 
 Or download a binary for your platform from the
 [latest release](https://github.com/noirbizarre/memcastle/releases/latest).

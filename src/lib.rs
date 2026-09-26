@@ -1,4 +1,4 @@
-//! Local-first, always-on memory server for AI coding agents - search, mining and background jobs over MCP/HTTP
+//! Local-first, always-on memory server for AI coding agents over MCP/HTTP
 //!
 //! The engine lives here; `src/main.rs` is a thin CLI over it. That split is
 //! what lets the integration tests assert against the library for behaviour

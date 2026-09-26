@@ -6,7 +6,7 @@
 
 use clap::{Parser, Subcommand};
 
-/// Local-first, always-on memory server for AI coding agents - search, mining and background jobs over MCP/HTTP
+/// Local-first, always-on memory server for AI coding agents over MCP/HTTP
 #[derive(Debug, Parser)]
 #[command(name = "memcastle", version, about, long_about = None)]
 pub struct Cli {

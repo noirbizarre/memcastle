@@ -4,7 +4,7 @@ Notes for anyone — human or otherwise — changing this repository.
 
 ## What this project is
 
-Local-first, always-on memory server for AI coding agents - search, mining and background jobs over MCP/HTTP
+Local-first, always-on memory server for AI coding agents over MCP/HTTP
 
 <!-- Replace this with the one paragraph that, if someone read only it, would -->
 <!-- stop them proposing the wrong thing. Then list the invariants below.     -->

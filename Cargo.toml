@@ -1,4 +1,4 @@
-# memcastle — Local-first, always-on memory server for AI coding agents - search, mining and background jobs over MCP/HTTP
+# memcastle — Local-first, always-on memory server for AI coding agents over MCP/HTTP
 #
 # Single crate, `[lib]` + `[[bin]]`. The library holds the engine; the binary is
 # a thin CLI over it, so integration tests can exercise either.
@@ -16,7 +16,7 @@ license = "MIT"
 # 2021 edition — ownership on crates.io comes from the registry account that
 # published, not this field. `author` still feeds LICENSE and, when `aur` is
 # on, the PKGBUILD's `# Maintainer:` line.
-description = "Local-first, always-on memory server for AI coding agents - search, mining and background jobs over MCP/HTTP"
+description = "Local-first, always-on memory server for AI coding agents over MCP/HTTP"
 repository = "https://github.com/noirbizarre/memcastle"
 homepage = "https://noirbizarre.github.io/memcastle/"
 documentation = "https://noirbizarre.github.io/memcastle/"

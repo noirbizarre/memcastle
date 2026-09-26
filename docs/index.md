@@ -1,6 +1,6 @@
 # memcastle
 
-Local-first, always-on memory server for AI coding agents - search, mining and background jobs over MCP/HTTP
+Local-first, always-on memory server for AI coding agents over MCP/HTTP
 
 ## Installation
 
