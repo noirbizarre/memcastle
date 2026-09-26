@@ -46,18 +46,12 @@ async fn concurrent_job_submissions_and_reads_all_land_correctly() {
         assert!(result.expect("request succeeded").status().is_success());
     }
 
-    // Give the scheduler time to run every job to completion (1 step each,
-    // all fitting within the concurrency budget).
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
-    let jobs: Vec<memcastle::domain::Job> = client
-        .get(format!("{}/api/jobs", daemon.base_url))
-        .send()
-        .await
-        .expect("request")
-        .json()
-        .await
-        .expect("json");
+    // Poll for every job to reach a terminal state rather than sleeping a
+    // fixed duration: a fixed sleep is exactly the kind of assumption that
+    // holds on a fast, idle machine and flakes on a loaded CI runner with
+    // fewer cores — this instead waits as long as it actually takes, up to
+    // a generous ceiling, and only then asserts on the final state.
+    let jobs = wait_for_all_jobs_completed(&client, &daemon.base_url, N).await;
     assert_eq!(
         jobs.len(),
         N,
@@ -70,4 +64,30 @@ async fn concurrent_job_submissions_and_reads_all_land_correctly() {
     );
 
     daemon.shutdown().await;
+}
+
+async fn wait_for_all_jobs_completed(
+    client: &reqwest::Client,
+    base_url: &str,
+    expected: usize,
+) -> Vec<memcastle::domain::Job> {
+    for _ in 0..300 {
+        let jobs: Vec<memcastle::domain::Job> = client
+            .get(format!("{base_url}/api/jobs"))
+            .send()
+            .await
+            .expect("request")
+            .json()
+            .await
+            .expect("json");
+        if jobs.len() == expected
+            && jobs
+                .iter()
+                .all(|job| job.status == memcastle::domain::JobStatus::Completed)
+        {
+            return jobs;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("not every job reached Completed within 30s");
 }
