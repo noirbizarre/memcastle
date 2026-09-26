@@ -21,8 +21,38 @@ use memcastle::config::Config;
 use memcastle::domain::JobId;
 use memcastle::{Error, Result};
 
-#[tokio::main]
-async fn main() -> ExitCode {
+/// Not `#[tokio::main]`: that runs the runtime's `block_on` — and so, for
+/// any `.await` chain deep enough to still be on its calling stack rather
+/// than truly suspended, the bulk of its stack usage — on the OS's actual
+/// main thread. Windows defaults that to 1 MiB (Unix: 8 MiB), and a debug
+/// build of `memcastle serve` reliably overflows it during startup:
+/// SurrealDB 3.x split what was one crate into a dozen thin layers
+/// (`surrealdb` -> `surrealdb-engine-local` -> `surrealdb-kvs` ->
+/// `surrealdb-kvs-rocksdb` -> ...), and an uninlined debug build pays for
+/// every one of those layers in stack frames on the way down. Spawning a
+/// thread with a generous, explicit stack size — and configuring the same
+/// for the runtime's worker threads, since a `tokio::spawn`'d task (the
+/// scheduler's dispatch loop, a running job) can hit the same call chain —
+/// sidesteps the platform default entirely rather than trying to outsmart
+/// exactly how deep it needs to be.
+fn main() -> ExitCode {
+    const STACK_SIZE: usize = 16 * 1024 * 1024;
+    std::thread::Builder::new()
+        .stack_size(STACK_SIZE)
+        .spawn(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_stack_size(STACK_SIZE)
+                .build()
+                .expect("build the tokio runtime")
+                .block_on(async_main())
+        })
+        .expect("spawn the main thread")
+        .join()
+        .expect("main thread panicked")
+}
+
+async fn async_main() -> ExitCode {
     let args = Cli::parse();
     let verbose = args.verbose > 0 || std::env::var_os("RUST_BACKTRACE").is_some();
     install_miette_hook(verbose);
