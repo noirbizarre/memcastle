@@ -13,6 +13,8 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use assert_cmd::cargo::cargo_bin;
+use memcastle::server::lifecycle::{RuntimeInfo, read_if_live};
+use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 
 #[tokio::test]
@@ -57,8 +59,7 @@ async fn drawers_survive_a_daemon_restart_against_the_same_palace() {
     // Round 2: a brand-new process, same palace directory — the drawer the
     // first process mined must still be there and still searchable.
     {
-        let mut child = spawn_daemon(&bin, &palace);
-        let info = common::wait_for_registry(&palace).await;
+        let (mut child, info) = spawn_daemon_for_restart(&bin, &palace).await;
         let base = format!("http://{}", info.bind_addr);
 
         let hits: Vec<serde_json::Value> = client
@@ -91,6 +92,67 @@ fn spawn_daemon(bin: &Path, palace: &Path) -> Child {
         .kill_on_drop(true)
         .spawn()
         .expect("spawn `memcastle serve`")
+}
+
+/// Like [`spawn_daemon`], but for reopening the very palace directory a
+/// previous process just released.
+///
+/// SurrealDB 3.x's embedded RocksDB engine does noticeably more at open
+/// than before (group-commit setup, a datastore-version check), and on a
+/// loaded CI runner — Windows in particular — the OS can still be settling
+/// that previous process's file handle on this exact path when this spawns,
+/// occasionally failing the reopen outright rather than merely being slow.
+/// A short, bounded retry absorbs that transient race without weakening
+/// what this test actually proves (data really does survive a restart);
+/// stderr is captured so a *real* failure still fails loudly with the
+/// daemon's own diagnostic instead of just an uninformative timeout.
+async fn spawn_daemon_for_restart(bin: &Path, palace: &Path) -> (Child, RuntimeInfo) {
+    let mut last_error = "the daemon never exited or registered".to_string();
+    for attempt in 0..5 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        let mut child = Command::new(bin)
+            .arg("serve")
+            .env("MEMCASTLE_PALACE_PATH", palace)
+            .env("MEMCASTLE_BIND", "127.0.0.1:0")
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn `memcastle serve`");
+
+        let mut exited = false;
+        for _ in 0..300 {
+            if let Some(info) = read_if_live(palace) {
+                return (child, info);
+            }
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    let mut stderr = String::new();
+                    if let Some(mut out) = child.stderr.take() {
+                        let _ = out.read_to_string(&mut stderr).await;
+                    }
+                    last_error = format!("exited with {status}: {}", stderr.trim());
+                    exited = true;
+                    break;
+                }
+                Ok(None) => {}
+                Err(error) => last_error = format!("could not poll the process: {error}"),
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        if !exited {
+            last_error = "did not register within 15s (the process was still running)".to_string();
+            // Dropping `child` here kills it (`kill_on_drop`) before the
+            // next attempt spawns another one on the same path — otherwise
+            // a merely-slow-not-dead daemon from this attempt would still
+            // be holding the lock the next attempt needs.
+        }
+    }
+    panic!(
+        "daemon did not start after 5 attempts reopening the same palace; last failure: {last_error}"
+    );
 }
 
 async fn wait_for_all_jobs_completed(client: &reqwest::Client, base: &str) {
