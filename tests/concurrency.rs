@@ -1,0 +1,73 @@
+//! Proves multiple clients can hit the same daemon/store concurrently
+//! without corrupting state — the concurrency invariant the architecture
+//! doc calls out explicitly.
+
+mod common;
+
+use common::TestDaemon;
+use futures::future::join_all;
+
+#[tokio::test]
+async fn concurrent_job_submissions_and_reads_all_land_correctly() {
+    const N: usize = 12;
+    let daemon = TestDaemon::start_with(N).await;
+    let client = reqwest::Client::new();
+
+    // N "clients" submitting demo jobs at the same time, plus interleaved
+    // reads — every request goes through the same store/scheduler.
+    let submissions = (0..N).map(|i| {
+        let client = client.clone();
+        let base = daemon.base_url.clone();
+        async move {
+            client
+                .post(format!("{base}/api/jobs"))
+                .json(&serde_json::json!({ "type": "demo", "steps": 1, "requested_by": format!("client-{i}") }))
+                .send()
+                .await
+        }
+    });
+    let results = join_all(submissions).await;
+    for result in results {
+        let response = result.expect("request succeeded");
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            panic!("job submission failed: {status}: {body}");
+        }
+    }
+
+    // Concurrent status reads while jobs are (probably still) running.
+    let reads = (0..N).map(|_| {
+        let client = client.clone();
+        let base = daemon.base_url.clone();
+        async move { client.get(format!("{base}/api/status")).send().await }
+    });
+    for result in join_all(reads).await {
+        assert!(result.expect("request succeeded").status().is_success());
+    }
+
+    // Give the scheduler time to run every job to completion (1 step each,
+    // all fitting within the concurrency budget).
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    let jobs: Vec<memcastle::domain::Job> = client
+        .get(format!("{}/api/jobs", daemon.base_url))
+        .send()
+        .await
+        .expect("request")
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(
+        jobs.len(),
+        N,
+        "every submitted job should be visible exactly once"
+    );
+    assert!(
+        jobs.iter()
+            .all(|job| job.status == memcastle::domain::JobStatus::Completed),
+        "every demo job should have completed: {jobs:#?}"
+    );
+
+    daemon.shutdown().await;
+}

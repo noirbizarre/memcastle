@@ -103,3 +103,15 @@ pass_filenames = false
 #   entry = "bash -c '! grep -rnP --include=*.rs \"(?<![A-Za-z0-9_])ureq::\" src | grep -v \"^src/data/\"'"
 #   files = "\\.rs$"
 #   pass_filenames = false
+
+# AGENTS.md invariant #1: the CLI, MCP, and HTTP layers reach storage only
+# through `app::AppServices` — never `crate::store` directly — so any
+# interface (or a future one, like a web dashboard) can only ever do what
+# that struct exposes.
+[[repos.hooks]]
+id = "store-isolation"
+name = "cli/mcp/api reach storage only through app::AppServices"
+language = "system"
+entry = "bash -c '! grep -nP \"(?<![A-Za-z0-9_])crate::store\" src/cli.rs src/mcp/*.rs src/api/*.rs 2>/dev/null'"
+files = "^src/(cli\\.rs|mcp/|api/)"
+pass_filenames = false

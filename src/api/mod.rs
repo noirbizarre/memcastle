@@ -1,0 +1,173 @@
+//! The HTTP API: health, status, and job inspection/control.
+//!
+//! Every handler is a deserialize -> call one `AppServices` method ->
+//! serialize sandwich — no business logic lives here. This is also where
+//! `/api/shutdown` lives, which is how `memcastle stop` asks a foreground
+//! `memcastle serve` to shut down gracefully (see `server::lifecycle`).
+
+mod error;
+
+use std::str::FromStr;
+
+use axum::Router;
+use axum::extract::{Path, Query, State};
+use axum::response::{IntoResponse, Json};
+use axum::routing::{get, post};
+use serde::Deserialize;
+use tokio_util::sync::CancellationToken;
+
+use crate::app::AppServices;
+use crate::domain::{JobId, JobKind, JobStatus};
+
+pub use error::ApiError;
+
+#[derive(Clone)]
+struct ApiState {
+    app: AppServices,
+    shutdown: CancellationToken,
+}
+
+/// Build the API router. `shutdown` is fired by `POST /api/shutdown`; the
+/// caller (`server::run`) is what actually stops the listener in response.
+pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
+    let state = ApiState { app, shutdown };
+    Router::new()
+        .route("/api/health", get(health))
+        .route("/api/status", get(status))
+        .route("/api/search", get(search))
+        .route("/api/jobs", get(list_jobs).post(submit_job))
+        .route("/api/jobs/{id}", get(get_job))
+        .route("/api/jobs/{id}/pause", post(pause_job))
+        .route("/api/jobs/{id}/resume", post(resume_job))
+        .route("/api/jobs/{id}/cancel", post(cancel_job))
+        .route("/api/jobs/{id}/retry", post(retry_job))
+        .route("/api/shutdown", post(shutdown_now))
+        .with_state(state)
+}
+
+async fn health() -> impl IntoResponse {
+    Json(serde_json::json!({ "status": "ok" }))
+}
+
+async fn status(State(state): State<ApiState>) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(state.app.status().await?))
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchParams {
+    q: String,
+    #[serde(default = "default_search_limit")]
+    limit: u32,
+}
+
+fn default_search_limit() -> u32 {
+    10
+}
+
+async fn search(
+    State(state): State<ApiState>,
+    Query(params): Query<SearchParams>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(state.app.search(&params.q, params.limit).await?))
+}
+
+#[derive(Debug, Deserialize)]
+struct ListJobsParams {
+    status: Option<String>,
+}
+
+async fn list_jobs(
+    State(state): State<ApiState>,
+    Query(params): Query<ListJobsParams>,
+) -> Result<impl IntoResponse, ApiError> {
+    let status = params.status.map(|s| parse_status(&s)).transpose()?;
+    Ok(Json(state.app.list_jobs(status).await?))
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitJobBody {
+    #[serde(flatten)]
+    kind: JobKind,
+    #[serde(default = "default_requested_by")]
+    requested_by: String,
+}
+
+fn default_requested_by() -> String {
+    "http".to_string()
+}
+
+async fn submit_job(
+    State(state): State<ApiState>,
+    Json(body): Json<SubmitJobBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    let job = match body.kind {
+        JobKind::Mine { path, wing } => {
+            state.app.submit_mine(path, wing, body.requested_by).await?
+        }
+        JobKind::Demo { steps } => state.app.submit_demo(steps, body.requested_by).await?,
+    };
+    Ok(Json(job))
+}
+
+async fn get_job(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let id = parse_job_id(&id)?;
+    match state.app.get_job(id).await? {
+        Some(job) => Ok(Json(job)),
+        None => Err(ApiError::from(crate::Error::JobNotFound {
+            id: id.to_string(),
+        })),
+    }
+}
+
+async fn pause_job(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.app.pause_job(parse_job_id(&id)?)?;
+    Ok(Json(serde_json::json!({ "status": "pause_requested" })))
+}
+
+async fn resume_job(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.app.resume_job(parse_job_id(&id)?).await?;
+    Ok(Json(serde_json::json!({ "status": "resumed" })))
+}
+
+async fn cancel_job(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.app.cancel_job(parse_job_id(&id)?).await?;
+    Ok(Json(serde_json::json!({ "status": "cancel_requested" })))
+}
+
+async fn retry_job(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.app.retry_job(parse_job_id(&id)?).await?;
+    Ok(Json(serde_json::json!({ "status": "retried" })))
+}
+
+async fn shutdown_now(State(state): State<ApiState>) -> impl IntoResponse {
+    state.shutdown.cancel();
+    Json(serde_json::json!({ "status": "shutting_down" }))
+}
+
+fn parse_job_id(raw: &str) -> Result<JobId, ApiError> {
+    JobId::from_str(raw).map_err(|_| {
+        ApiError::from(crate::Error::JobNotFound {
+            id: raw.to_string(),
+        })
+    })
+}
+
+fn parse_status(raw: &str) -> Result<JobStatus, ApiError> {
+    serde_json::from_value(serde_json::Value::String(raw.to_string()))
+        .map_err(|_| ApiError::from(crate::Error::config(format!("unknown job status `{raw}`"))))
+}

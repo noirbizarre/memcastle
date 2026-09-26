@@ -1,0 +1,224 @@
+//! The CLI's HTTP client for a running daemon.
+//!
+//! Every non-`serve` CLI command is a thin wrapper over this — it never
+//! touches `store` or `jobs` directly (same rule as `api`/`mcp`; see
+//! `app`'s doc comment), which is what guarantees the CLI can only ever do
+//! what a web dashboard calling the same API could also do.
+
+use std::net::SocketAddr;
+use std::path::Path;
+
+use serde::de::DeserializeOwned;
+use serde_json::json;
+
+use crate::app::StatusReport;
+use crate::domain::{Job, JobId, JobStatus};
+use crate::error::{Error, Result};
+use crate::server::lifecycle;
+use crate::store::SearchHit;
+
+/// A client for one running daemon, discovered via the registry file for
+/// `palace_path` (falling back to the configured bind address if no live
+/// registry entry exists — see `server::lifecycle`'s doc comment on why
+/// that file is a hint, not a guarantee).
+pub struct DaemonClient {
+    base_url: String,
+    http: reqwest::Client,
+}
+
+impl DaemonClient {
+    /// Resolve the daemon's address for `palace_path` and build a client
+    /// for it. Does not itself check that anything is listening — that's
+    /// what [`Self::health`] is for.
+    #[must_use]
+    pub fn discover(palace_path: &Path, configured_bind: SocketAddr) -> Self {
+        let bind_addr = lifecycle::read_if_live(palace_path)
+            .map(|info| info.bind_addr)
+            .unwrap_or_else(|| configured_bind.to_string());
+        Self {
+            base_url: format!("http://{bind_addr}"),
+            http: reqwest::Client::new(),
+        }
+    }
+
+    async fn send<T: DeserializeOwned>(&self, request: reqwest::RequestBuilder) -> Result<T> {
+        let response = request.send().await.map_err(|source| {
+            if source.is_connect() {
+                Error::DaemonNotRunning
+            } else {
+                Error::from(source)
+            }
+        })?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body: serde_json::Value = response.json().await.unwrap_or_default();
+            let message = body
+                .get("error")
+                .and_then(serde_json::Value::as_str)
+                .map_or_else(|| status.to_string(), str::to_string);
+            return if status == reqwest::StatusCode::NOT_FOUND {
+                Err(Error::JobNotFound { id: message })
+            } else {
+                Err(Error::client(message))
+            };
+        }
+        response.json().await.map_err(Error::from)
+    }
+
+    /// Whether the daemon responds to a health check.
+    #[must_use]
+    pub async fn health(&self) -> bool {
+        self.http
+            .get(format!("{}/api/health", self.base_url))
+            .send()
+            .await
+            .is_ok_and(|resp| resp.status().is_success())
+    }
+
+    /// Fetch daemon status.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
+    pub async fn status(&self) -> Result<StatusReport> {
+        self.send(self.http.get(format!("{}/api/status", self.base_url)))
+            .await
+    }
+
+    /// Lexical search over drawer content.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
+    pub async fn search(&self, query: &str, limit: u32) -> Result<Vec<SearchHit>> {
+        self.send(
+            self.http
+                .get(format!("{}/api/search", self.base_url))
+                .query(&[("q", query), ("limit", &limit.to_string())]),
+        )
+        .await
+    }
+
+    /// Submit a mining job.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
+    pub async fn submit_mine(&self, path: std::path::PathBuf, wing: Option<String>) -> Result<Job> {
+        self.send(
+            self.http.post(format!("{}/api/jobs", self.base_url)).json(
+                &json!({ "type": "mine", "path": path, "wing": wing, "requested_by": "cli" }),
+            ),
+        )
+        .await
+    }
+
+    /// Submit a synthetic demo job (see `domain::job::JobKind::Demo`) —
+    /// useful for exercising the scheduler end-to-end without a real
+    /// directory to mine.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
+    pub async fn demo(&self, steps: u32) -> Result<Job> {
+        self.send(
+            self.http
+                .post(format!("{}/api/jobs", self.base_url))
+                .json(&json!({ "type": "demo", "steps": steps, "requested_by": "cli" })),
+        )
+        .await
+    }
+
+    /// List jobs, optionally filtered to one status.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
+    pub async fn list_jobs(&self, status: Option<JobStatus>) -> Result<Vec<Job>> {
+        let mut request = self.http.get(format!("{}/api/jobs", self.base_url));
+        if let Some(status) = status {
+            request = request.query(&[(
+                "status",
+                serde_json::to_value(status).unwrap_or_default().as_str(),
+            )]);
+        }
+        self.send(request).await
+    }
+
+    /// Fetch one job by id.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::JobNotFound`] if it doesn't exist.
+    pub async fn get_job(&self, id: JobId) -> Result<Job> {
+        self.send(self.http.get(format!("{}/api/jobs/{id}", self.base_url)))
+            .await
+    }
+
+    /// Request that a running job pause.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails.
+    pub async fn pause_job(&self, id: JobId) -> Result<()> {
+        self.send::<serde_json::Value>(
+            self.http
+                .post(format!("{}/api/jobs/{id}/pause", self.base_url)),
+        )
+        .await
+        .map(drop)
+    }
+
+    /// Resume a paused job.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails.
+    pub async fn resume_job(&self, id: JobId) -> Result<()> {
+        self.send::<serde_json::Value>(
+            self.http
+                .post(format!("{}/api/jobs/{id}/resume", self.base_url)),
+        )
+        .await
+        .map(drop)
+    }
+
+    /// Cancel a job.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails.
+    pub async fn cancel_job(&self, id: JobId) -> Result<()> {
+        self.send::<serde_json::Value>(
+            self.http
+                .post(format!("{}/api/jobs/{id}/cancel", self.base_url)),
+        )
+        .await
+        .map(drop)
+    }
+
+    /// Retry a failed job.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails.
+    pub async fn retry_job(&self, id: JobId) -> Result<()> {
+        self.send::<serde_json::Value>(
+            self.http
+                .post(format!("{}/api/jobs/{id}/retry", self.base_url)),
+        )
+        .await
+        .map(drop)
+    }
+
+    /// Ask the daemon to shut down gracefully.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails.
+    pub async fn shutdown(&self) -> Result<()> {
+        self.send::<serde_json::Value>(self.http.post(format!("{}/api/shutdown", self.base_url)))
+            .await
+            .map(drop)
+    }
+}

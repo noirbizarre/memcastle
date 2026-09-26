@@ -4,7 +4,7 @@
 [project]
 
 site_name = "memcastle"
-site_description = "Local-first, always-on memory server for AI coding agents - search, mining and background jobs over MCP/HTTP"
+site_description = "Local-first, always-on memory server for AI coding agents over MCP/HTTP"
 site_url = "https://noirbizarre.github.io/memcastle/"
 site_author = "noirbizarre"
 
@@ -21,6 +21,8 @@ Copyright &copy; 2026 Axel H. — MIT licensed
 # meaningfully conflict with additions here.
 nav = [
   { "Home" = "index.md" },
+  { "Architecture" = "architecture.md" },
+  { "Development" = "development.md" },
   { "About" = [
     { "Architecture Decisions" = "adr/README.md" },
   ] },

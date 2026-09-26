@@ -4,7 +4,7 @@
 
 <h1 align="center">memcastle</h1>
 
-<p align="center"><strong>Local-first, always-on memory server for AI coding agents - search, mining and background jobs over MCP/HTTP</strong></p>
+<p align="center"><strong>Local-first, always-on memory server for AI coding agents over MCP/HTTP</strong></p>
 
 <p align="center">
   <a href="https://github.com/noirbizarre/memcastle/actions/workflows/ci.yaml">
@@ -22,8 +22,23 @@
 
 ---
 
-<!-- One paragraph: what this does and why it exists. Lead with the problem, -->
-<!-- not the implementation. -->
+Running several AI coding agents (OpenCode, Claude Code, Cursor, ...) side by
+side usually means each one gets its own, disconnected memory — or none at
+all. MemCastle is a single daemon per project ("palace") that all of them
+talk to over MCP or HTTP, so a mining run, a search, or a saved decision from
+one agent is immediately visible to every other agent and to the CLI, backed
+by one SurrealDB store instead of a pile of SQLite files and a separate
+vector index to keep in sync.
+
+```bash
+memcastle serve &          # one daemon per palace
+memcastle mine ./project   # submits a durable, resumable job — doesn't block
+memcastle jobs list
+memcastle search "why did we switch to GraphQL?"
+```
+
+See [the architecture doc](https://noirbizarre.github.io/memcastle/architecture/)
+for the full design and what's deliberately not built yet.
 
 ## Installation
 

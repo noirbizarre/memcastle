@@ -1,35 +1,35 @@
-//! Local-first, always-on memory server for AI coding agents - search, mining and background jobs over MCP/HTTP
+//! Local-first, always-on memory server for AI coding agents over MCP/HTTP
 //!
-//! The engine lives here; `src/main.rs` is a thin CLI over it. That split is
-//! what lets the integration tests assert against the library for behaviour
-//! and against the binary for output.
+//! # Architecture
+//!
+//! ```text
+//! cli / mcp / api          <- interfaces (thin: parse, dispatch, serialize)
+//!        |
+//!       app                <- application services (the only layer the above may call)
+//!        |
+//!   domain + jobs + search  <- pure model + scheduling + retrieval logic
+//!        |
+//!      store                <- SurrealDB, embedded or remote
+//! ```
+//!
+//! `main.rs`/`cli.rs` are thin: every subcommand either runs `server::run`
+//! (the `serve`/`daemon` command) or goes through `client::DaemonClient`
+//! (everything else) — see `docs/architecture.md` for the full rationale.
 
-// miette's `Diagnostic` payloads carry source text and spans, which puts most
-// error variants past clippy's 128-byte `Result` threshold. The lint is right
-// about the cost and wrong about the trade: a large error that says what to do
-// beats a small one that does not.
 #![allow(clippy::result_large_err)]
 #![warn(missing_docs)]
 
+pub mod api;
+pub mod app;
+pub mod client;
+pub mod config;
+pub mod domain;
 pub mod error;
+pub mod jobs;
+pub mod mcp;
+pub mod mining;
+pub mod search;
+pub mod server;
+pub mod store;
 
 pub use error::{Error, Result};
-
-/// Run the thing.
-///
-/// # Errors
-///
-/// Returns [`Error`] when there is nothing to do.
-pub fn run() -> Result<()> {
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn running_with_nothing_to_do_succeeds() {
-        assert!(run().is_ok());
-    }
-}

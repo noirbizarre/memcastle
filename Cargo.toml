@@ -1,4 +1,4 @@
-# memcastle — Local-first, always-on memory server for AI coding agents - search, mining and background jobs over MCP/HTTP
+# memcastle — Local-first, always-on memory server for AI coding agents over MCP/HTTP
 #
 # Single crate, `[lib]` + `[[bin]]`. The library holds the engine; the binary is
 # a thin CLI over it, so integration tests can exercise either.
@@ -16,7 +16,7 @@ license = "MIT"
 # 2021 edition — ownership on crates.io comes from the registry account that
 # published, not this field. `author` still feeds LICENSE and, when `aur` is
 # on, the PKGBUILD's `# Maintainer:` line.
-description = "Local-first, always-on memory server for AI coding agents - search, mining and background jobs over MCP/HTTP"
+description = "Local-first, always-on memory server for AI coding agents over MCP/HTTP"
 repository = "https://github.com/noirbizarre/memcastle"
 homepage = "https://noirbizarre.github.io/memcastle/"
 documentation = "https://noirbizarre.github.io/memcastle/"
@@ -99,6 +99,38 @@ demand = "2"
 # Configuration & serialisation
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+toml = "1.1.6"
+chrono = { version = "0.4.45", features = ["serde"] }
+uuid = { version = "1.26.1", features = ["v4", "serde"] }
+
+# Async runtime. `process`/`signal` back the daemon's graceful-shutdown and
+# `restart` respawn paths; the rest is the baseline every module needs.
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "time", "process", "sync"] }
+tokio-util = "0.7.19"
+
+# Storage. `kv-rocksdb` is the embedded engine; `protocol-ws` is the remote
+# one — both go through the single `engine::any` connection type so the rest
+# of the codebase never branches on which one is active. Pinned to the 2.x
+# line deliberately: 3.x reworked the serde/type surface (`SurrealValue`
+# derive, `types` module reshuffle) weeks before this was written and its
+# latest patch failed its own docs.rs build — 2.6.x is the mature, widely
+# documented API.
+surrealdb = { version = "2.6.5", features = ["kv-rocksdb", "protocol-ws"] }
+
+# HTTP API + MCP-over-HTTP share one axum router.
+axum = "0.8.9"
+tower = "0.5.3"
+reqwest = { version = "0.13.5", features = ["json", "query"] }
+rmcp = { version = "3.4.1", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
+
+# Observability
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+# Misc
+dirs = "7.0.0"
+sha2 = "0.11.0"
+dashmap = "6.2.1"
 
 [dev-dependencies]
 assert_cmd = "2"
@@ -107,3 +139,16 @@ tempfile = "3"
 insta = { version = "1", features = ["filters"] }
 rstest = "0.26"
 pretty_assertions = "1"
+# Only `tests/concurrency.rs` needs this (`join_all` over many simulated
+# clients) — not a real dependency, so it stays out of `[dependencies]`.
+futures = "0.3.34"
+
+# `kv-mem` for fast in-memory storage tests; unions with the `kv-rocksdb`
+# feature above (Cargo merges features across dependency kinds), so tests can
+# also exercise real on-disk persistence via the main dependency's engine.
+[dev-dependencies.surrealdb]
+version = "2.6.5"
+features = ["kv-mem"]
+
+[target."cfg(unix)".dependencies]
+libc = "0.2.189"
