@@ -29,7 +29,7 @@ impl SurrealStore {
     pub async fn save_job(&self, job: &Job) -> Result<()> {
         self.db
             .query(
-                "UPSERT type::thing('job', $id) SET \
+                "UPSERT type::record('job', $id) SET \
                  kind = $kind, status = $status, priority = $priority, \
                  created_at = <datetime>$created_at, started_at = $started_at, \
                  completed_at = $completed_at, requested_by = $requested_by, \
@@ -39,7 +39,7 @@ impl SurrealStore {
             )
             .bind(("id", job.id.to_string()))
             .bind(("kind", super::bindable(&job.kind)?))
-            .bind(("status", job.status))
+            .bind(("status", super::bindable(&job.status)?))
             .bind(("priority", job.priority))
             .bind(("created_at", job.created_at.to_rfc3339()))
             .bind(("started_at", job.started_at.map(|dt| dt.to_rfc3339())))
@@ -64,23 +64,29 @@ impl SurrealStore {
 
     /// Fetch one job by id.
     pub async fn get_job(&self, id: JobId) -> Result<Option<Job>> {
-        let sql = format!("SELECT {JOB_COLUMNS} FROM job WHERE id = type::thing('job', $id)");
-        let mut jobs: Vec<Job> = self
-            .db
-            .query(sql)
-            .bind(("id", id.to_string()))
-            .await?
-            .take(0)?;
+        let sql = format!("SELECT {JOB_COLUMNS} FROM job WHERE id = type::record('job', $id)");
+        let mut response = self.db.query(sql).bind(("id", id.to_string())).await?;
+        let mut jobs: Vec<Job> = super::take_rows(&mut response, 0)?;
         Ok(jobs.pop())
     }
 
     /// List jobs, optionally filtered to one status, newest first.
     pub async fn list_jobs(&self, status: Option<JobStatus>) -> Result<Vec<Job>> {
         let sql = format!(
-            "SELECT {JOB_COLUMNS} FROM job WHERE $status = NONE OR status = $status \
+            // `NULL`, not `NONE`: binding `Option::None` through
+            // `serde_json::Value` (see `bindable`) produces SurrealDB's
+            // `NULL` (a real value), not its `NONE` (absence) sentinel —
+            // they're distinct in SurrealQL, and `$status = NONE` never
+            // matches a bound `NULL`, silently returning nothing.
+            "SELECT {JOB_COLUMNS} FROM job WHERE $status = NULL OR status = $status \
              ORDER BY created_at DESC"
         );
-        Ok(self.db.query(sql).bind(("status", status)).await?.take(0)?)
+        let mut response = self
+            .db
+            .query(sql)
+            .bind(("status", super::bindable(&status)?))
+            .await?;
+        super::take_rows(&mut response, 0)
     }
 
     /// Every job left `Running` from a previous, uncleanly stopped daemon —
@@ -100,7 +106,8 @@ impl SurrealStore {
             "SELECT {JOB_COLUMNS} FROM job WHERE status = 'queued' \
              ORDER BY priority DESC, created_at ASC LIMIT 1"
         );
-        let candidates: Vec<Job> = self.db.query(sql).await?.take(0)?;
+        let mut response = self.db.query(sql).await?;
+        let candidates: Vec<Job> = super::take_rows(&mut response, 0)?;
         let Some(mut job) = candidates.into_iter().next() else {
             return Ok(None);
         };

@@ -43,6 +43,26 @@ pub(crate) fn bindable<T: serde::Serialize>(value: &T) -> Result<serde_json::Val
     serde_json::to_value(value).map_err(|source| Error::store_malformed(source.to_string()))
 }
 
+/// Deserialize the query results at `index` into `Vec<T>`.
+///
+/// The mirror image of `bindable`: the 3.x driver's `take` only accepts
+/// its own `SurrealValue` trait now, which arbitrary domain structs don't
+/// implement (and shouldn't have to — that would put a SurrealDB-specific
+/// trait on `domain`'s pure types). `serde_json::Value` does implement
+/// `SurrealValue`, so results are taken as JSON first and decoded with
+/// `serde_json`, keeping the SDK's type surface confined to this module.
+pub(crate) fn take_rows<T: serde::de::DeserializeOwned>(
+    response: &mut surrealdb::IndexedResults,
+    index: usize,
+) -> Result<Vec<T>> {
+    let rows: Vec<serde_json::Value> = response.take(index)?;
+    rows.into_iter()
+        .map(|row| {
+            serde_json::from_value(row).map_err(|source| Error::store_malformed(source.to_string()))
+        })
+        .collect()
+}
+
 /// One migration file, applied in order and idempotently (every `DEFINE` in
 /// it is `IF NOT EXISTS`), so `Store::connect` can just re-run all of them
 /// on every startup instead of tracking an applied-version watermark.
@@ -115,7 +135,13 @@ impl SurrealStore {
                 password,
                 ..
             } => {
-                db.signin(Root { username, password }).await?;
+                // `Root`'s fields are owned `String`s as of 3.x (previously
+                // borrowed) — `backend` is `&Backend`, so these are `&String`.
+                db.signin(Root {
+                    username: username.clone(),
+                    password: password.clone(),
+                })
+                .await?;
                 (namespace.as_str(), database.as_str())
             }
         };
@@ -209,5 +235,50 @@ mod tests {
         assert_eq!(drawers.len(), 1);
         assert_eq!(drawers[0].id, drawer.id);
         assert_eq!(drawers[0].content, "hello palace");
+    }
+
+    #[tokio::test]
+    async fn a_job_can_be_saved_claimed_and_completed() {
+        let store = memory_store().await;
+        let mut job = crate::domain::Job::new(crate::domain::JobKind::Demo { steps: 1 }, "test");
+        store.save_job(&job).await.expect("save queued");
+
+        let fetched = store.get_job(job.id).await.expect("get").expect("present");
+        assert_eq!(fetched.status, crate::domain::JobStatus::Queued);
+
+        let claimed = store
+            .claim_next_job("worker-1")
+            .await
+            .expect("claim")
+            .expect("a job was claimed");
+        assert_eq!(claimed.id, job.id);
+        assert_eq!(claimed.status, crate::domain::JobStatus::Running);
+
+        job = claimed;
+        job.apply(crate::domain::JobEvent::Complete)
+            .expect("apply complete");
+        store.save_job(&job).await.expect("save completed");
+
+        let fetched = store.get_job(job.id).await.expect("get").expect("present");
+        assert_eq!(fetched.status, crate::domain::JobStatus::Completed);
+    }
+
+    // Regression test for a 3.x driver behaviour change: binding
+    // `Option::None` through `serde_json::Value` produces SurrealDB's
+    // `NULL` (a real value), not its `NONE` (absence) -- so the "no filter"
+    // branch of a query must compare against `NULL`, not `NONE`, or it
+    // silently matches nothing and every unfiltered list reads empty.
+    #[tokio::test]
+    async fn listing_jobs_with_no_status_filter_returns_every_job() {
+        let store = memory_store().await;
+        let job = crate::domain::Job::new(crate::domain::JobKind::Demo { steps: 1 }, "test");
+        store.save_job(&job).await.expect("save");
+
+        let all = store.list_jobs(None).await.expect("list all");
+        assert_eq!(
+            all.len(),
+            1,
+            "list_jobs(None) should return every job, got {all:?}"
+        );
     }
 }

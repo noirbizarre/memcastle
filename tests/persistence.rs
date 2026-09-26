@@ -6,13 +6,13 @@
 //! also the more representative test of the actual claim ("stop and restart
 //! the daemon; your data is still there").
 
-mod common;
-
 use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
 use assert_cmd::cargo::cargo_bin;
+use memcastle::server::lifecycle::{RuntimeInfo, read_if_live};
+use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 
 #[tokio::test]
@@ -32,8 +32,7 @@ async fn drawers_survive_a_daemon_restart_against_the_same_palace() {
 
     // Round 1: a fresh daemon mines the fixture, then is asked to stop.
     {
-        let mut child = spawn_daemon(&bin, &palace);
-        let info = common::wait_for_registry(&palace).await;
+        let (mut child, info) = spawn_daemon_and_wait(&bin, &palace).await;
         let base = format!("http://{}", info.bind_addr);
 
         client
@@ -57,8 +56,7 @@ async fn drawers_survive_a_daemon_restart_against_the_same_palace() {
     // Round 2: a brand-new process, same palace directory — the drawer the
     // first process mined must still be there and still searchable.
     {
-        let mut child = spawn_daemon(&bin, &palace);
-        let info = common::wait_for_registry(&palace).await;
+        let (mut child, info) = spawn_daemon_and_wait(&bin, &palace).await;
         let base = format!("http://{}", info.bind_addr);
 
         let hits: Vec<serde_json::Value> = client
@@ -79,18 +77,60 @@ async fn drawers_survive_a_daemon_restart_against_the_same_palace() {
     }
 }
 
-fn spawn_daemon(bin: &Path, palace: &Path) -> Child {
-    Command::new(bin)
+/// Spawn `memcastle serve` against `palace` and wait for it to register —
+/// i.e. for its listener to actually be up, not just the OS process to
+/// exist.
+///
+/// Diagnostic on purpose: this test's failures on Windows CI (see git log
+/// for the two prior, unsuccessful attempts at a fix) kept happening with
+/// zero information, because the daemon's own stdout/stderr were discarded.
+/// Piping stderr and surfacing it — whether the process exited early or is
+/// still running once the deadline passes — turns "didn't start in time"
+/// into an actual, actionable error message on the next failure, instead of
+/// guessing again.
+async fn spawn_daemon_and_wait(bin: &Path, palace: &Path) -> (Child, RuntimeInfo) {
+    let mut child = Command::new(bin)
         .arg("serve")
         .env("MEMCASTLE_PALACE_PATH", palace)
         .env("MEMCASTLE_BIND", "127.0.0.1:0")
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         // If the test panics before explicitly stopping the daemon, don't
         // leak a process holding the palace's RocksDB lock forever.
         .kill_on_drop(true)
         .spawn()
-        .expect("spawn `memcastle serve`")
+        .expect("spawn `memcastle serve`");
+
+    // Generous relative to the ~200ms an idle daemon actually takes to
+    // bind: a real subprocess (as opposed to `TestDaemon`'s in-process
+    // task) under Windows CI's `cargo llvm-cov` instrumentation, paying for
+    // SurrealDB 3.x's heavier embedded-engine startup, has been observed
+    // needing much longer than that.
+    for _ in 0..1200 {
+        if let Some(info) = read_if_live(palace) {
+            return (child, info);
+        }
+        if let Ok(Some(status)) = child.try_wait() {
+            let stderr = drain_stderr(&mut child).await;
+            panic!("daemon exited with {status} before registering; stderr:\n{stderr}");
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let stderr = drain_stderr(&mut child).await;
+    panic!("daemon did not register within 60s; stderr so far:\n{stderr}");
+}
+
+/// Best-effort read of whatever a still-running or just-exited child has
+/// written to stderr so far. Bounded, not a plain `read_to_string`: on a
+/// still-running process the pipe never reaches EOF, so an unbounded read
+/// would hang this diagnostic itself.
+async fn drain_stderr(child: &mut Child) -> String {
+    let mut stderr = String::new();
+    if let Some(mut out) = child.stderr.take() {
+        let _ =
+            tokio::time::timeout(Duration::from_millis(500), out.read_to_string(&mut stderr)).await;
+    }
+    stderr
 }
 
 async fn wait_for_all_jobs_completed(client: &reqwest::Client, base: &str) {

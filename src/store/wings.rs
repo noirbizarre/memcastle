@@ -23,11 +23,11 @@ impl SurrealStore {
     /// for display/status purposes (name, creation date), not as a join key
     /// anything else in this bootstrap depends on.
     pub async fn ensure_palace(&self, default_name: &str) -> Result<Palace> {
-        let existing: Vec<Palace> = self
+        let mut response = self
             .db
             .query("SELECT record::id(id) AS id, name, <string>created_at AS created_at FROM palace LIMIT 1")
-            .await?
-            .take(0)?;
+            .await?;
+        let existing: Vec<Palace> = super::take_rows(&mut response, 0)?;
         if let Some(palace) = existing.into_iter().next() {
             return Ok(palace);
         }
@@ -41,7 +41,7 @@ impl SurrealStore {
         // reports transport failures, not a rejected statement — see
         // `store::mod`'s module doc.
         self.db
-            .query("CREATE type::thing('palace', $id) SET name = $name, created_at = <datetime>$created_at")
+            .query("CREATE type::record('palace', $id) SET name = $name, created_at = <datetime>$created_at")
             .bind(("id", palace.id.to_string()))
             .bind(("name", palace.name.clone()))
             .bind(("created_at", palace.created_at.to_rfc3339()))
@@ -54,7 +54,7 @@ impl SurrealStore {
     pub async fn get_or_create_wing(&self, name: &str, description: Option<&str>) -> Result<Wing> {
         let palace = self.ensure_palace("default").await?;
 
-        let existing: Vec<Wing> = self
+        let mut response = self
             .db
             .query(
                 "SELECT record::id(id) AS id, palace, name, description, <string>created_at AS created_at \
@@ -62,8 +62,8 @@ impl SurrealStore {
             )
             .bind(("palace", palace.id.to_string()))
             .bind(("name", name.to_string()))
-            .await?
-            .take(0)?;
+            .await?;
+        let existing: Vec<Wing> = super::take_rows(&mut response, 0)?;
         if let Some(wing) = existing.into_iter().next() {
             return Ok(wing);
         }
@@ -77,7 +77,7 @@ impl SurrealStore {
         };
         self.db
             .query(
-                "CREATE type::thing('wing', $id) SET \
+                "CREATE type::record('wing', $id) SET \
                  palace = $palace, name = $name, description = $description, created_at = <datetime>$created_at",
             )
             .bind(("id", wing.id.to_string()))
@@ -97,7 +97,7 @@ impl SurrealStore {
         name: &str,
         description: Option<&str>,
     ) -> Result<Room> {
-        let existing: Vec<Room> = self
+        let mut response = self
             .db
             .query(
                 "SELECT record::id(id) AS id, wing, name, description, <string>created_at AS created_at \
@@ -105,8 +105,8 @@ impl SurrealStore {
             )
             .bind(("wing", wing.to_string()))
             .bind(("name", name.to_string()))
-            .await?
-            .take(0)?;
+            .await?;
+        let existing: Vec<Room> = super::take_rows(&mut response, 0)?;
         if let Some(room) = existing.into_iter().next() {
             return Ok(room);
         }
@@ -120,7 +120,7 @@ impl SurrealStore {
         };
         self.db
             .query(
-                "CREATE type::thing('room', $id) SET \
+                "CREATE type::record('room', $id) SET \
                  wing = $wing, name = $name, description = $description, created_at = <datetime>$created_at",
             )
             .bind(("id", room.id.to_string()))
@@ -135,26 +135,26 @@ impl SurrealStore {
 
     /// List every wing in the palace.
     pub async fn list_wings(&self) -> Result<Vec<Wing>> {
-        Ok(self
+        let mut response = self
             .db
             .query(
                 "SELECT record::id(id) AS id, palace, name, description, <string>created_at AS created_at \
                  FROM wing ORDER BY name",
             )
-            .await?
-            .take(0)?)
+            .await?;
+        super::take_rows(&mut response, 0)
     }
 
     /// List every room in `wing`.
     pub async fn list_rooms(&self, wing: WingId) -> Result<Vec<Room>> {
-        Ok(self
+        let mut response = self
             .db
             .query(
                 "SELECT record::id(id) AS id, wing, name, description, <string>created_at AS created_at \
                  FROM room WHERE wing = $wing ORDER BY name",
             )
             .bind(("wing", wing.to_string()))
-            .await?
-            .take(0)?)
+            .await?;
+        super::take_rows(&mut response, 0)
     }
 }

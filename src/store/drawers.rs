@@ -37,7 +37,7 @@ impl SurrealStore {
     pub async fn create_drawer(&self, drawer: &Drawer) -> Result<()> {
         self.db
             .query(
-                "CREATE type::thing('drawer', $id) SET \
+                "CREATE type::record('drawer', $id) SET \
                  room = $room, content = $content, content_hash = $content_hash, \
                  source = $source, tags = $tags, embedding = $embedding, provenance = $provenance, \
                  valid_from = <datetime>$valid_from, valid_to = $valid_to, \
@@ -69,12 +69,8 @@ impl SurrealStore {
         let sql = format!(
             "SELECT {DRAWER_COLUMNS} FROM drawer WHERE room = $room ORDER BY created_at DESC"
         );
-        Ok(self
-            .db
-            .query(sql)
-            .bind(("room", room.to_string()))
-            .await?
-            .take(0)?)
+        let mut response = self.db.query(sql).bind(("room", room.to_string())).await?;
+        super::take_rows(&mut response, 0)
     }
 
     /// The total number of drawers in the palace, for status reporting.
@@ -83,11 +79,11 @@ impl SurrealStore {
         struct Count {
             count: u64,
         }
-        let counts: Vec<Count> = self
+        let mut response = self
             .db
             .query("SELECT count() AS count FROM drawer GROUP ALL")
-            .await?
-            .take(0)?;
+            .await?;
+        let counts: Vec<Count> = super::take_rows(&mut response, 0)?;
         Ok(counts.into_iter().next().map_or(0, |c| c.count))
     }
 
@@ -99,12 +95,12 @@ impl SurrealStore {
             "SELECT {DRAWER_COLUMNS}, search::score(1) AS score FROM drawer \
              WHERE content @1@ $query ORDER BY score DESC LIMIT $limit"
         );
-        Ok(self
+        let mut response = self
             .db
             .query(sql)
             .bind(("query", query.to_string()))
             .bind(("limit", limit))
-            .await?
-            .take(0)?)
+            .await?;
+        super::take_rows(&mut response, 0)
     }
 }
