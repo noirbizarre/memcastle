@@ -36,11 +36,11 @@ DEFINE FIELD IF NOT EXISTS content_hash ON TABLE drawer TYPE string;
 -- table around it stays SCHEMAFULL. Applies to every nested-object field
 -- below (`provenance`, `kind`, `progress`, `properties`) for the same
 -- reason.
-DEFINE FIELD IF NOT EXISTS source ON TABLE drawer FLEXIBLE TYPE object;
+DEFINE FIELD IF NOT EXISTS source ON TABLE drawer TYPE object FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS tags ON TABLE drawer TYPE array<string>;
 DEFINE FIELD IF NOT EXISTS tags.* ON TABLE drawer TYPE string;
 DEFINE FIELD IF NOT EXISTS embedding ON TABLE drawer TYPE option<array<float>>;
-DEFINE FIELD IF NOT EXISTS provenance ON TABLE drawer FLEXIBLE TYPE object;
+DEFINE FIELD IF NOT EXISTS provenance ON TABLE drawer TYPE object FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS valid_from ON TABLE drawer TYPE datetime;
 -- `option<string>`, not `option<datetime>`: casting a bound `NONE` value to
 -- `<datetime>` errors rather than passing through in SurrealDB 2.x, so an
@@ -57,7 +57,7 @@ DEFINE INDEX IF NOT EXISTS drawer_room_idx ON TABLE drawer FIELDS room;
 -- replacement for it.
 DEFINE ANALYZER IF NOT EXISTS drawer_text TOKENIZERS blank, class FILTERS lowercase, snowball(english);
 DEFINE INDEX IF NOT EXISTS drawer_content_search ON TABLE drawer
-    FIELDS content SEARCH ANALYZER drawer_text BM25 HIGHLIGHTS;
+    FIELDS content FULLTEXT ANALYZER drawer_text BM25 HIGHLIGHTS;
 
 -- Knowledge-graph tables: schema-ready, not schema-wired. No mining or MCP
 -- code populates these yet (see AGENTS notes / architecture doc) — they
@@ -65,7 +65,7 @@ DEFINE INDEX IF NOT EXISTS drawer_content_search ON TABLE drawer
 DEFINE TABLE IF NOT EXISTS entity SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS name ON TABLE entity TYPE string;
 DEFINE FIELD IF NOT EXISTS kind ON TABLE entity TYPE string;
-DEFINE FIELD IF NOT EXISTS properties ON TABLE entity FLEXIBLE TYPE object;
+DEFINE FIELD IF NOT EXISTS properties ON TABLE entity TYPE object FLEXIBLE;
 
 DEFINE TABLE IF NOT EXISTS relates_to TYPE RELATION IN entity OUT entity SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS predicate ON TABLE relates_to TYPE string;
@@ -79,7 +79,7 @@ DEFINE FIELD IF NOT EXISTS valid_to ON TABLE relates_to TYPE option<string>;
 -- silently persist); `kind`/`progress`/`checkpoint` stay loosely-typed
 -- objects because their shape is handler-defined, not scheduler-defined.
 DEFINE TABLE IF NOT EXISTS job SCHEMAFULL;
-DEFINE FIELD IF NOT EXISTS kind ON TABLE job FLEXIBLE TYPE object;
+DEFINE FIELD IF NOT EXISTS kind ON TABLE job TYPE object FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS status ON TABLE job TYPE string
     ASSERT $value IN ["queued", "running", "paused", "completed", "failed", "cancelled"];
 DEFINE FIELD IF NOT EXISTS priority ON TABLE job TYPE int;
@@ -89,10 +89,10 @@ DEFINE FIELD IF NOT EXISTS created_at ON TABLE job TYPE datetime;
 DEFINE FIELD IF NOT EXISTS started_at ON TABLE job TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS completed_at ON TABLE job TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS requested_by ON TABLE job TYPE string;
-DEFINE FIELD IF NOT EXISTS progress ON TABLE job FLEXIBLE TYPE object;
+DEFINE FIELD IF NOT EXISTS progress ON TABLE job TYPE object FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS attempt ON TABLE job TYPE int;
 DEFINE FIELD IF NOT EXISTS max_attempts ON TABLE job TYPE int;
-DEFINE FIELD IF NOT EXISTS checkpoint ON TABLE job FLEXIBLE TYPE object;
+DEFINE FIELD IF NOT EXISTS checkpoint ON TABLE job TYPE object FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS error ON TABLE job TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS lease_owner ON TABLE job TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS lease_expires_at ON TABLE job TYPE option<string>;
