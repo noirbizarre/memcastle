@@ -7,6 +7,25 @@
 - A C/C++ toolchain and `cmake` (RocksDB, the embedded storage engine, is
   compiled from source on first build — this takes several minutes; later
   builds are incremental and fast).
+- Optional, to skip that first-build compile entirely: install RocksDB and
+  Snappy's shared libraries and headers via your package manager (Debian/
+  Ubuntu: `apt install librocksdb-dev libsnappy-dev`; Arch:
+  `pacman -S rocksdb snappy`; macOS: `brew install rocksdb snappy`), then
+  point the build at them instead of building the vendored copies:
+
+  ```sh
+  export ROCKSDB_LIB_DIR=/usr/lib
+  export SNAPPY_LIB_DIR=/usr/lib
+  cargo build
+  ```
+
+  Adjust the path to wherever your package manager installs `librocksdb.so`/
+  `libsnappy.so`. Add `ROCKSDB_STATIC=1`/`SNAPPY_STATIC=1` to link statically
+  against those system libs instead, or unset both (or set
+  `ROCKSDB_COMPILE=1`) to force the vendored build back on. This is a local
+  convenience only — CI and release builds (`publish-release.yaml`) always
+  use the vendored, statically-linked copies, so published binaries never
+  depend on a particular system lib version.
 
 ## Everyday tasks
 
