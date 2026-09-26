@@ -115,7 +115,7 @@ tokio-util = "0.7.19"
 # derive, `types` module reshuffle) weeks before this was written and its
 # latest patch failed its own docs.rs build — 2.6.x is the mature, widely
 # documented API.
-surrealdb = { version = "2.6.5", features = ["kv-rocksdb", "protocol-ws"] }
+surrealdb = { version = "3.2.4", features = ["kv-rocksdb", "protocol-ws"] }
 
 # HTTP API + MCP-over-HTTP share one axum router.
 axum = "0.8.9"
@@ -147,7 +147,7 @@ futures = "0.3.34"
 # feature above (Cargo merges features across dependency kinds), so tests can
 # also exercise real on-disk persistence via the main dependency's engine.
 [dev-dependencies.surrealdb]
-version = "2.6.5"
+version = "3.2.4"
 features = ["kv-mem"]
 
 [target."cfg(unix)".dependencies]
