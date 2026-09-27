@@ -81,13 +81,20 @@ impl AppServices {
         })
     }
 
-    /// Lexical search over drawer content.
+    /// Lexical search over drawer content, optionally scoped to one wing
+    /// and/or room by name.
     ///
     /// # Errors
     ///
     /// Returns an error if the store query fails.
-    pub async fn search(&self, query: &str, limit: u32) -> Result<Vec<SearchHit>> {
-        crate::search::lexical_search(&self.store, query, limit).await
+    pub async fn search(
+        &self,
+        query: &str,
+        limit: u32,
+        wing: Option<&str>,
+        room: Option<&str>,
+    ) -> Result<Vec<SearchHit>> {
+        crate::search::lexical_search(&self.store, query, limit, wing, room).await
     }
 
     /// Submit a mining job for `path`, returning immediately with the

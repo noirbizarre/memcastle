@@ -292,4 +292,236 @@ mod tests {
             "list_jobs(None) should return every job, got {all:?}"
         );
     }
+
+    /// A minimal drawer fixture for search tests — only `room` and
+    /// `content` vary between callers; everything else is filler a
+    /// full-text search test doesn't care about.
+    fn test_drawer(room: crate::domain::RoomId, content: &str) -> crate::domain::Drawer {
+        crate::domain::Drawer {
+            id: crate::domain::DrawerId::new(),
+            room,
+            content: content.to_string(),
+            content_hash: "hash".into(),
+            source: crate::domain::Source {
+                kind: crate::domain::SourceKind::Manual,
+                uri: None,
+                agent: Some("test".into()),
+            },
+            tags: vec![],
+            embedding: None,
+            provenance: crate::domain::Provenance {
+                requested_by: "test".into(),
+                job_id: None,
+            },
+            valid_from: chrono::Utc::now(),
+            valid_to: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unscoped_lexical_search_still_matches_every_wing() {
+        let store = memory_store().await;
+        let alpha = store
+            .get_or_create_wing("alpha", None)
+            .await
+            .expect("wing alpha");
+        let alpha_room = store
+            .get_or_create_room(alpha.id, "notes", None)
+            .await
+            .expect("room alpha");
+        let beta = store
+            .get_or_create_wing("beta", None)
+            .await
+            .expect("wing beta");
+        let beta_room = store
+            .get_or_create_room(beta.id, "notes", None)
+            .await
+            .expect("room beta");
+
+        store
+            .create_drawer(&test_drawer(
+                alpha_room.id,
+                "the castle remembers everything",
+            ))
+            .await
+            .expect("create alpha drawer");
+        store
+            .create_drawer(&test_drawer(
+                beta_room.id,
+                "the castle remembers everything too",
+            ))
+            .await
+            .expect("create beta drawer");
+
+        let hits = store
+            .lexical_search("castle", 10, None, None)
+            .await
+            .expect("search");
+        assert_eq!(
+            hits.len(),
+            2,
+            "unscoped search should still return every matching drawer, got {hits:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn lexical_search_scoped_to_a_wing_only_returns_that_wings_drawers() {
+        let store = memory_store().await;
+        let alpha = store
+            .get_or_create_wing("alpha", None)
+            .await
+            .expect("wing alpha");
+        let alpha_room = store
+            .get_or_create_room(alpha.id, "notes", None)
+            .await
+            .expect("room alpha");
+        let beta = store
+            .get_or_create_wing("beta", None)
+            .await
+            .expect("wing beta");
+        let beta_room = store
+            .get_or_create_room(beta.id, "notes", None)
+            .await
+            .expect("room beta");
+
+        let alpha_drawer = test_drawer(alpha_room.id, "the castle remembers everything");
+        store
+            .create_drawer(&alpha_drawer)
+            .await
+            .expect("create alpha drawer");
+        store
+            .create_drawer(&test_drawer(
+                beta_room.id,
+                "the castle remembers everything too",
+            ))
+            .await
+            .expect("create beta drawer");
+
+        let hits = store
+            .lexical_search("castle", 10, Some("alpha"), None)
+            .await
+            .expect("wing-scoped search");
+        assert_eq!(
+            hits.len(),
+            1,
+            "wing-scoped search should only return alpha's drawer, got {hits:?}"
+        );
+        assert_eq!(hits[0].drawer.id, alpha_drawer.id);
+    }
+
+    #[tokio::test]
+    async fn lexical_search_scoped_to_a_room_only_returns_that_rooms_drawers() {
+        let store = memory_store().await;
+        let wing = store.get_or_create_wing("alpha", None).await.expect("wing");
+        let general = store
+            .get_or_create_room(wing.id, "general", None)
+            .await
+            .expect("room general");
+        let notes = store
+            .get_or_create_room(wing.id, "notes", None)
+            .await
+            .expect("room notes");
+
+        store
+            .create_drawer(&test_drawer(general.id, "the castle remembers everything"))
+            .await
+            .expect("create general drawer");
+        let notes_drawer = test_drawer(notes.id, "the castle remembers everything too");
+        store
+            .create_drawer(&notes_drawer)
+            .await
+            .expect("create notes drawer");
+
+        let hits = store
+            .lexical_search("castle", 10, None, Some("notes"))
+            .await
+            .expect("room-scoped search");
+        assert_eq!(
+            hits.len(),
+            1,
+            "room-scoped search should only return the notes drawer, got {hits:?}"
+        );
+        assert_eq!(hits[0].drawer.id, notes_drawer.id);
+    }
+
+    // The issue's explicit regression-test ask: prove the scope is a
+    // SurrealQL predicate the database applies before `LIMIT`, not a
+    // filter this method applies in Rust to an already-limited page. A
+    // post-filter implementation would pass every other test above (small
+    // fixtures, no `LIMIT` pressure) but fail this one.
+    #[tokio::test]
+    async fn wing_scope_is_applied_by_surrealdb_before_the_result_limit() {
+        let store = memory_store().await;
+        let loud = store
+            .get_or_create_wing("loud", None)
+            .await
+            .expect("wing loud");
+        let loud_room = store
+            .get_or_create_room(loud.id, "notes", None)
+            .await
+            .expect("room loud");
+        let quiet = store
+            .get_or_create_wing("quiet", None)
+            .await
+            .expect("wing quiet");
+        let quiet_room = store
+            .get_or_create_room(quiet.id, "notes", None)
+            .await
+            .expect("room quiet");
+
+        // Repeated term -> a much higher BM25 score than a single mention,
+        // so an unscoped, capped query is dominated by "loud"'s drawers.
+        for i in 0..3 {
+            store
+                .create_drawer(&test_drawer(
+                    loud_room.id,
+                    &format!("castle castle castle castle castle #{i}"),
+                ))
+                .await
+                .expect("create loud drawer");
+        }
+        let mut quiet_ids = Vec::new();
+        for i in 0..2 {
+            let drawer = test_drawer(quiet_room.id, &format!("castle #{i}"));
+            store
+                .create_drawer(&drawer)
+                .await
+                .expect("create quiet drawer");
+            quiet_ids.push(drawer.id);
+        }
+
+        // Sanity check: with no scope and a limit smaller than the total
+        // match count, the top hits are "loud"'s -- proving the score gap
+        // is real, not an artifact of insertion order.
+        let unscoped = store
+            .lexical_search("castle", 2, None, None)
+            .await
+            .expect("unscoped search");
+        assert_eq!(unscoped.len(), 2);
+        assert!(
+            unscoped.iter().all(|hit| hit.drawer.room == loud_room.id),
+            "expected the top 2 unscoped hits to be \"loud\"'s higher-scoring drawers, got {unscoped:?}"
+        );
+
+        // The actual regression check: scoping to "quiet" with the same
+        // small limit must still return "quiet"'s drawers. If the scope
+        // were a Rust-side post-filter over an already-limited,
+        // already-fetched unscoped page, this would come back empty -- the
+        // top 2 rows fetched would already be "loud"'s.
+        let scoped = store
+            .lexical_search("castle", 2, Some("quiet"), None)
+            .await
+            .expect("wing-scoped search");
+        assert_eq!(
+            scoped.len(),
+            2,
+            "expected both \"quiet\" drawers despite the limit, got {scoped:?}"
+        );
+        assert!(
+            scoped.iter().all(|hit| quiet_ids.contains(&hit.drawer.id)),
+            "expected only \"quiet\"'s drawers, got {scoped:?}"
+        );
+    }
 }

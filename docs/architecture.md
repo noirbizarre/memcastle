@@ -95,10 +95,14 @@ is deliberate future work, not an oversight.
 ### Search
 
 Lexical (BM25 full-text) search over `drawer.content` is the "basic working
-search path" this bootstrap establishes (`search::lexical_search`).
-Semantic/vector search, metadata/wing/room/temporal filtering, graph-aware
-retrieval, and hybrid ranking are later phases layered on the same table —
-see [Non-goals](#non-goals-for-this-bootstrap).
+search path" this bootstrap establishes (`search::lexical_search`), and it
+can be scoped to one wing and/or room by name — the scope is expressed as
+SurrealQL predicates (nested subqueries resolving the name to room ids), so
+SurrealDB applies the filter as part of query execution rather than
+MemCastle fetching candidates and filtering them in Rust. Semantic/vector
+search, temporal filtering, graph-aware retrieval, and hybrid ranking are
+later phases layered on the same table — see
+[Non-goals](#non-goals-for-this-bootstrap).
 
 ## Jobs: a durable queue, not an in-memory one
 

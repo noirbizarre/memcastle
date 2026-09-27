@@ -139,7 +139,14 @@ async fn cmd_restart(config: &Config) -> Result<()> {
 }
 
 async fn cmd_search(config: &Config, args: SearchArgs) -> Result<()> {
-    let hits = client(config).search(&args.query, args.limit).await?;
+    let hits = client(config)
+        .search(
+            &args.query,
+            args.limit,
+            args.wing.as_deref(),
+            args.room.as_deref(),
+        )
+        .await?;
     print_json(&hits);
     Ok(())
 }
