@@ -19,7 +19,7 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-use crate::domain::{Job, JobEvent, JobId, JobKind, JobStatus, Priority};
+use crate::domain::{Job, JobEvent, JobId, JobKind, Priority};
 use crate::error::Result;
 use crate::store::SurrealStore;
 
@@ -190,16 +190,7 @@ impl Scheduler {
             .get_job(id)
             .await?
             .ok_or(crate::Error::JobNotFound { id: id.to_string() })?;
-        if job.status != JobStatus::Failed {
-            return Err(crate::domain::TransitionError {
-                id: job.id,
-                from: job.status,
-                event: JobEvent::RecoverToQueued,
-            }
-            .into());
-        }
-        job.status = JobStatus::Queued;
-        job.error = None;
+        job.apply(JobEvent::Retry)?;
         self.store.save_job(&job).await?;
         Ok(())
     }

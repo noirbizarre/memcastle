@@ -61,7 +61,7 @@ pub enum Error {
     #[diagnostic(
         code(memcastle::jobs::invalid_transition),
         help(
-            "valid transitions: queued->running, running->paused, paused->queued, running->completed, running->failed, queued|paused|running->cancelled"
+            "valid transitions: queued->running, running->paused, paused->queued, running->completed, running->failed, failed->queued (retry), queued|paused|running->cancelled"
         )
     )]
     InvalidJobTransition {

@@ -86,6 +86,11 @@ pub enum JobEvent {
     Fail,
     /// A caller (or crash recovery) is withdrawing the job.
     Cancel,
+    /// A caller has asked for a `Failed` job to run again. Distinct from
+    /// `Resume` even though both land on `Queued`: `Retry` additionally
+    /// clears `error` (see `Job::apply`), which `Resume` must never do
+    /// since a `Paused` job was never in an error state to begin with.
+    Retry,
     /// Crash recovery is re-queuing a job that was `Running` when the
     /// daemon last stopped, because its attempt budget is not exhausted.
     RecoverToQueued,
@@ -238,7 +243,7 @@ impl Job {
     /// Returns [`TransitionError`] if `event` is not legal from the current
     /// status.
     pub fn apply(&mut self, event: JobEvent) -> Result<(), TransitionError> {
-        use JobEvent::{Cancel, Claim, Complete, Fail, Pause, RecoverToQueued, Resume};
+        use JobEvent::{Cancel, Claim, Complete, Fail, Pause, RecoverToQueued, Resume, Retry};
         use JobStatus::{Cancelled, Completed, Failed, Paused, Queued, Running};
 
         let next = match (self.status, event) {
@@ -249,6 +254,7 @@ impl Job {
             (Running, Fail) => Failed,
             (Queued, Cancel) | (Paused, Cancel) | (Running, Cancel) => Cancelled,
             (Running, RecoverToQueued) => Queued,
+            (Failed, Retry) => Queued,
             (from, event) => {
                 return Err(TransitionError {
                     id: self.id,
@@ -264,6 +270,14 @@ impl Job {
         }
         if matches!(next, Completed | Failed | Cancelled) {
             self.completed_at = Some(now);
+        }
+        if event == Retry {
+            // Retry's whole point is a clean second attempt; a stale
+            // terminal error must not survive the transition back to
+            // Queued. Centralized here (not left to the caller) for the
+            // same reason `completed_at` is set here rather than by every
+            // caller of `Complete`/`Fail`/`Cancel`: one place to get right.
+            self.error = None;
         }
         self.status = next;
         Ok(())
@@ -339,6 +353,56 @@ mod tests {
         job.apply(JobEvent::Claim).unwrap();
         job.apply(JobEvent::RecoverToQueued).unwrap();
         assert_eq!(job.status, JobStatus::Queued);
+    }
+
+    #[test]
+    fn a_failed_job_can_be_retried_to_queued() {
+        let mut job = demo_job();
+        job.apply(JobEvent::Claim).unwrap();
+        job.error = Some("boom".to_string());
+        job.checkpoint = serde_json::json!({ "next_step": 2 });
+        job.apply(JobEvent::Fail).unwrap();
+        assert_eq!(job.status, JobStatus::Failed);
+
+        job.apply(JobEvent::Retry).unwrap();
+        assert_eq!(job.status, JobStatus::Queued);
+        assert_eq!(job.error, None, "retry must clear the terminal error");
+        assert_eq!(
+            job.checkpoint,
+            serde_json::json!({ "next_step": 2 }),
+            "retry must preserve checkpoint so work already done isn't redone"
+        );
+    }
+
+    #[test]
+    fn retrying_a_job_that_was_never_run_is_rejected() {
+        let mut job = demo_job();
+        let err = job.apply(JobEvent::Retry).unwrap_err();
+        assert_eq!(err.from, JobStatus::Queued);
+        assert_eq!(
+            job.status,
+            JobStatus::Queued,
+            "rejected transition must not mutate state"
+        );
+    }
+
+    #[test]
+    fn retrying_a_running_job_is_rejected() {
+        let mut job = demo_job();
+        job.apply(JobEvent::Claim).unwrap();
+        let err = job.apply(JobEvent::Retry).unwrap_err();
+        assert_eq!(err.from, JobStatus::Running);
+        assert_eq!(job.status, JobStatus::Running);
+    }
+
+    #[test]
+    fn retrying_a_completed_job_is_rejected() {
+        let mut job = demo_job();
+        job.apply(JobEvent::Claim).unwrap();
+        job.apply(JobEvent::Complete).unwrap();
+        let err = job.apply(JobEvent::Retry).unwrap_err();
+        assert_eq!(err.from, JobStatus::Completed);
+        assert_eq!(job.status, JobStatus::Completed);
     }
 
     #[test]
