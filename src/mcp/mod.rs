@@ -42,6 +42,11 @@ struct SearchArgs {
     /// Maximum number of results to return.
     #[serde(default = "default_search_limit")]
     limit: u32,
+    /// Restrict results to drawers filed (transitively, via their room)
+    /// under this wing name.
+    wing: Option<String>,
+    /// Restrict results to drawers filed directly under this room name.
+    room: Option<String>,
 }
 
 fn default_search_limit() -> u32 {
@@ -87,7 +92,16 @@ impl McpTools {
         &self,
         Parameters(args): Parameters<SearchArgs>,
     ) -> Result<CallToolResult, McpError> {
-        match self.app.search(&args.query, args.limit).await {
+        match self
+            .app
+            .search(
+                &args.query,
+                args.limit,
+                args.wing.as_deref(),
+                args.room.as_deref(),
+            )
+            .await
+        {
             Ok(hits) => {
                 let text = serde_json::to_string_pretty(&hits).unwrap_or_default();
                 Ok(CallToolResult::success(vec![ContentBlock::text(text)]))

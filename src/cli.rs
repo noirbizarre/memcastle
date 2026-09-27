@@ -73,6 +73,12 @@ pub struct SearchArgs {
     /// Maximum number of results.
     #[arg(long, default_value_t = 10)]
     pub limit: u32,
+    /// Restrict results to drawers filed (transitively) under this wing.
+    #[arg(long)]
+    pub wing: Option<String>,
+    /// Restrict results to drawers filed directly under this room.
+    #[arg(long)]
+    pub room: Option<String>,
 }
 
 /// Arguments for `memcastle mine`.

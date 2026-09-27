@@ -58,6 +58,10 @@ struct SearchParams {
     q: String,
     #[serde(default = "default_search_limit")]
     limit: u32,
+    /// Restrict results to one wing by name (see `AppServices::search`).
+    wing: Option<String>,
+    /// Restrict results to one room by name.
+    room: Option<String>,
 }
 
 fn default_search_limit() -> u32 {
@@ -68,7 +72,17 @@ async fn search(
     State(state): State<ApiState>,
     Query(params): Query<SearchParams>,
 ) -> Result<impl IntoResponse, ApiError> {
-    Ok(Json(state.app.search(&params.q, params.limit).await?))
+    Ok(Json(
+        state
+            .app
+            .search(
+                &params.q,
+                params.limit,
+                params.wing.as_deref(),
+                params.room.as_deref(),
+            )
+            .await?,
+    ))
 }
 
 #[derive(Debug, Deserialize)]

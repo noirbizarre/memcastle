@@ -90,15 +90,46 @@ impl SurrealStore {
     /// Lexical (BM25 full-text) search over drawer content — the "basic
     /// working search path" this bootstrap establishes. Semantic and hybrid
     /// ranking are later phases layered on top of the same `drawer` table.
-    pub async fn lexical_search(&self, query: &str, limit: u32) -> Result<Vec<SearchHit>> {
+    ///
+    /// `wing`/`room` optionally scope results by name. `drawer` has no
+    /// `wing` column (only `room`; `room.wing` is one hop up — see
+    /// `store::wings`'s module doc on why every FK here is a plain string,
+    /// not a record link), so the wing scope resolves matching room ids via
+    /// a nested subquery rather than a direct column comparison. Both
+    /// scopes are expressed as `($param = NULL OR ...)` predicates — the
+    /// same "optional filter" idiom as `list_jobs` (see its comment) — so
+    /// SurrealDB applies them before `ORDER BY`/`LIMIT`, instead of this
+    /// method fetching an unscoped page and filtering it in Rust, which
+    /// would let an out-of-scope but higher-scoring hit crowd a requested
+    /// scope's matches out of a capped result set.
+    pub async fn lexical_search(
+        &self,
+        query: &str,
+        limit: u32,
+        wing: Option<&str>,
+        room: Option<&str>,
+    ) -> Result<Vec<SearchHit>> {
         let sql = format!(
             "SELECT {DRAWER_COLUMNS}, search::score(1) AS score FROM drawer \
-             WHERE content @1@ $query ORDER BY score DESC LIMIT $limit"
+             WHERE content @1@ $query \
+               AND ($wing = NULL OR room IN ( \
+                     SELECT VALUE record::id(id) FROM room WHERE wing IN ( \
+                       SELECT VALUE record::id(id) FROM wing WHERE name = $wing))) \
+               AND ($room = NULL OR room IN ( \
+                     SELECT VALUE record::id(id) FROM room WHERE name = $room)) \
+             ORDER BY score DESC LIMIT $limit"
         );
         let mut response = self
             .db
             .query(sql)
             .bind(("query", query.to_string()))
+            // Bound through `bindable` (`serde_json::Value`), not `.bind()`
+            // directly: binding `Option::None` the native way produces
+            // SurrealDB's `NONE` (absence), which `$wing = NULL` never
+            // matches — see `store::mod`'s regression test on `list_jobs`
+            // for the exact failure mode this sidesteps.
+            .bind(("wing", super::bindable(&wing)?))
+            .bind(("room", super::bindable(&room)?))
             .bind(("limit", limit))
             .await?;
         super::take_rows(&mut response, 0)

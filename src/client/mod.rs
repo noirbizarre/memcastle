@@ -85,18 +85,33 @@ impl DaemonClient {
             .await
     }
 
-    /// Lexical search over drawer content.
+    /// Lexical search over drawer content, optionally scoped to one wing
+    /// and/or room by name.
     ///
     /// # Errors
     ///
     /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
-    pub async fn search(&self, query: &str, limit: u32) -> Result<Vec<SearchHit>> {
-        self.send(
-            self.http
-                .get(format!("{}/api/search", self.base_url))
-                .query(&[("q", query), ("limit", &limit.to_string())]),
-        )
-        .await
+    pub async fn search(
+        &self,
+        query: &str,
+        limit: u32,
+        wing: Option<&str>,
+        room: Option<&str>,
+    ) -> Result<Vec<SearchHit>> {
+        let mut request = self
+            .http
+            .get(format!("{}/api/search", self.base_url))
+            .query(&[("q", query), ("limit", &limit.to_string())]);
+        // Only append when set, same reasoning as `list_jobs` below: an
+        // absent query param, not an empty-string one, is what the server
+        // side treats as "no filter".
+        if let Some(wing) = wing {
+            request = request.query(&[("wing", wing)]);
+        }
+        if let Some(room) = room {
+            request = request.query(&[("room", room)]);
+        }
+        self.send(request).await
     }
 
     /// Submit a mining job.
