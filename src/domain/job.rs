@@ -103,6 +103,64 @@ pub struct TransitionError {
     pub event: JobEvent,
 }
 
+/// A job's scheduling priority — coarse buckets rather than an arbitrary
+/// integer, so callers can't invent incomparable numeric scales.
+///
+/// Declared ascending so the derived `Ord` gives `Critical` the highest
+/// rank without a manual impl. Serializes as its underlying `i32`, not the
+/// variant name (`#[serde(into/try_from = "i32")]`) — the store's
+/// `job.priority` column is `TYPE int` and takes no migration, so the wire
+/// shape has to match exactly what it already writes today.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(into = "i32", try_from = "i32")]
+pub enum Priority {
+    /// Routine background work (mining). Runs only once nothing else is queued.
+    Background,
+    /// Below-normal work with no urgency.
+    Low,
+    /// The default for anything without a stronger opinion.
+    Normal,
+    /// Above-normal work that should generally preempt background jobs.
+    High,
+    /// Time-sensitive work that must preempt everything else (e.g. an
+    /// emergency checkpoint before a crash).
+    Critical,
+}
+
+impl From<Priority> for i32 {
+    fn from(priority: Priority) -> Self {
+        match priority {
+            Priority::Critical => 100,
+            Priority::High => 75,
+            Priority::Normal => 50,
+            Priority::Low => 25,
+            Priority::Background => 0,
+        }
+    }
+}
+
+/// A raw priority value read back from storage that doesn't match one of
+/// [`Priority`]'s fixed levels — surfaces a corrupted `job.priority` column
+/// instead of silently coercing it to some default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{0} is not a valid job priority")]
+pub struct InvalidPriority(pub i32);
+
+impl TryFrom<i32> for Priority {
+    type Error = InvalidPriority;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            100 => Ok(Self::Critical),
+            75 => Ok(Self::High),
+            50 => Ok(Self::Normal),
+            25 => Ok(Self::Low),
+            0 => Ok(Self::Background),
+            other => Err(InvalidPriority(other)),
+        }
+    }
+}
+
 /// A durable unit of work.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Job {
@@ -113,7 +171,7 @@ pub struct Job {
     /// Current lifecycle status.
     pub status: JobStatus,
     /// Higher runs first, among otherwise-equal jobs.
-    pub priority: i32,
+    pub priority: Priority,
     /// When the job was submitted.
     pub created_at: DateTime<Utc>,
     /// When a worker first claimed it.
@@ -142,13 +200,13 @@ pub struct Job {
 impl Job {
     /// Construct a freshly submitted, `Queued` job.
     #[must_use]
-    pub fn new(kind: JobKind, requested_by: impl Into<String>) -> Self {
+    pub fn new(kind: JobKind, priority: Priority, requested_by: impl Into<String>) -> Self {
         let now = Utc::now();
         Self {
             id: JobId::new(),
             kind,
             status: JobStatus::Queued,
-            priority: 0,
+            priority,
             created_at: now,
             started_at: None,
             completed_at: None,
@@ -217,7 +275,7 @@ mod tests {
     use super::*;
 
     fn demo_job() -> Job {
-        Job::new(JobKind::Demo { steps: 3 }, "test")
+        Job::new(JobKind::Demo { steps: 3 }, Priority::Normal, "test")
     }
 
     #[test]
@@ -281,5 +339,33 @@ mod tests {
         job.apply(JobEvent::Claim).unwrap();
         job.apply(JobEvent::RecoverToQueued).unwrap();
         assert_eq!(job.status, JobStatus::Queued);
+    }
+
+    #[test]
+    fn priority_round_trips_through_its_i32_mapping() {
+        for priority in [
+            Priority::Critical,
+            Priority::High,
+            Priority::Normal,
+            Priority::Low,
+            Priority::Background,
+        ] {
+            let value = i32::from(priority);
+            assert_eq!(Priority::try_from(value), Ok(priority));
+        }
+    }
+
+    #[test]
+    fn priority_ordering_is_critical_high_normal_low_background() {
+        assert!(Priority::Critical > Priority::High);
+        assert!(Priority::High > Priority::Normal);
+        assert!(Priority::Normal > Priority::Low);
+        assert!(Priority::Low > Priority::Background);
+    }
+
+    #[test]
+    fn an_out_of_range_priority_value_is_rejected() {
+        let err = Priority::try_from(42).unwrap_err();
+        assert_eq!(err, InvalidPriority(42));
     }
 }
