@@ -134,4 +134,33 @@ impl SurrealStore {
             .await?;
         super::take_rows(&mut response, 0)
     }
+
+    /// List `agent`'s diary entries filed under `room`, newest first,
+    /// capped at `limit`. Unlike `list_drawers` (unfiltered), diary reads
+    /// are always scoped to one identity — the whole point of issue #13's
+    /// design is that two identities sharing a wing/room never see each
+    /// other's entries — so `agent` is a required equality filter, not an
+    /// optional scope like `lexical_search`'s wing/room. Being a plain
+    /// `&str` (not `Option<&str>`), it binds directly rather than through
+    /// `bindable`'s `$x = NULL` idiom.
+    pub async fn list_diary_drawers(
+        &self,
+        room: RoomId,
+        agent: &str,
+        limit: u32,
+    ) -> Result<Vec<Drawer>> {
+        let sql = format!(
+            "SELECT {DRAWER_COLUMNS} FROM drawer \
+             WHERE room = $room AND source.agent = $agent \
+             ORDER BY created_at DESC LIMIT $limit"
+        );
+        let mut response = self
+            .db
+            .query(sql)
+            .bind(("room", room.to_string()))
+            .bind(("agent", agent.to_string()))
+            .bind(("limit", limit))
+            .await?;
+        super::take_rows(&mut response, 0)
+    }
 }

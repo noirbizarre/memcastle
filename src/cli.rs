@@ -47,6 +47,9 @@ pub enum Command {
     /// Submit a checkpoint job: persist an already-classified batch of
     /// memory writes.
     Checkpoint(CheckpointArgs),
+    /// Read or write diary entries scoped to an agent identity.
+    #[command(subcommand)]
+    Diary(DiaryCommand),
     /// Inspect and control jobs.
     #[command(subcommand)]
     Jobs(JobsCommand),
@@ -106,6 +109,36 @@ pub struct CheckpointArgs {
     /// reserved for save-before-crash situations, not routine checkpoints.
     #[arg(long)]
     pub emergency: bool,
+}
+
+/// `memcastle diary` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum DiaryCommand {
+    /// Write a new diary entry.
+    Write {
+        /// The identity to scope this entry to — keep this consistent
+        /// across writes/reads (see `AppServices::diary_write`'s doc
+        /// comment).
+        #[arg(long)]
+        agent_identity: String,
+        /// The wing to file this entry under, in its fixed `"diary"` room.
+        #[arg(long)]
+        wing: String,
+        /// The entry's content.
+        content: String,
+    },
+    /// Read back an identity's most recent diary entries in a wing.
+    Read {
+        /// The identity whose diary entries to read back.
+        #[arg(long)]
+        agent_identity: String,
+        /// The wing to read this identity's entries from.
+        #[arg(long)]
+        wing: String,
+        /// Maximum number of entries to return, newest first.
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+    },
 }
 
 /// `memcastle jobs` subcommands.

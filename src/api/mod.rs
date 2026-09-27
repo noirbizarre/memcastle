@@ -35,6 +35,7 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
         .route("/api/health", get(health))
         .route("/api/status", get(status))
         .route("/api/search", get(search))
+        .route("/api/diary", get(diary_read).post(diary_write))
         .route("/api/jobs", get(list_jobs).post(submit_job))
         .route("/api/jobs/{id}", get(get_job))
         .route("/api/jobs/{id}/pause", post(pause_job))
@@ -81,6 +82,52 @@ async fn search(
                 params.wing.as_deref(),
                 params.room.as_deref(),
             )
+            .await?,
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct DiaryWriteBody {
+    /// The identity to scope this entry to — see `AppServices::diary_write`.
+    agent_identity: String,
+    /// The wing to file this entry under (fixed `"diary"` room within it).
+    wing: String,
+    /// The entry's content.
+    content: String,
+}
+
+async fn diary_write(
+    State(state): State<ApiState>,
+    Json(body): Json<DiaryWriteBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .app
+            .diary_write(&body.agent_identity, &body.wing, body.content)
+            .await?,
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct DiaryReadParams {
+    agent_identity: String,
+    wing: String,
+    #[serde(default = "default_diary_limit")]
+    limit: u32,
+}
+
+fn default_diary_limit() -> u32 {
+    20
+}
+
+async fn diary_read(
+    State(state): State<ApiState>,
+    Query(params): Query<DiaryReadParams>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .app
+            .diary_read(&params.agent_identity, &params.wing, params.limit)
             .await?,
     ))
 }

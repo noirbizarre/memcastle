@@ -541,6 +541,90 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_diary_drawers_only_returns_the_matching_agents_entries() {
+        let store = memory_store().await;
+        let wing = store.get_or_create_wing("diary", None).await.expect("wing");
+        let room = store
+            .get_or_create_room(wing.id, "diary", None)
+            .await
+            .expect("room");
+
+        let mut alice_drawer = test_drawer(room.id, "alice's entry");
+        alice_drawer.source.agent = Some("alice".to_string());
+        store
+            .create_drawer(&alice_drawer)
+            .await
+            .expect("create alice drawer");
+
+        let mut bob_drawer = test_drawer(room.id, "bob's entry");
+        bob_drawer.source.agent = Some("bob".to_string());
+        store
+            .create_drawer(&bob_drawer)
+            .await
+            .expect("create bob drawer");
+
+        let alice_entries = store
+            .list_diary_drawers(room.id, "alice", 10)
+            .await
+            .expect("list alice's entries");
+        assert_eq!(
+            alice_entries.len(),
+            1,
+            "bob's entry must not leak into alice's diary read, got {alice_entries:?}"
+        );
+        assert_eq!(alice_entries[0].id, alice_drawer.id);
+
+        let bob_entries = store
+            .list_diary_drawers(room.id, "bob", 10)
+            .await
+            .expect("list bob's entries");
+        assert_eq!(bob_entries.len(), 1);
+        assert_eq!(bob_entries[0].id, bob_drawer.id);
+    }
+
+    #[tokio::test]
+    async fn list_diary_drawers_orders_newest_first_and_respects_the_limit() {
+        let store = memory_store().await;
+        let wing = store.get_or_create_wing("diary", None).await.expect("wing");
+        let room = store
+            .get_or_create_room(wing.id, "diary", None)
+            .await
+            .expect("room");
+
+        // Explicit, strictly increasing `created_at` values rather than
+        // `Utc::now()` in a loop: this proves the `ORDER BY created_at
+        // DESC` behaviour deterministically instead of racing wall-clock
+        // resolution across fast successive writes.
+        let base = chrono::Utc::now();
+        let mut ids = Vec::new();
+        for i in 0..3i64 {
+            let mut drawer = test_drawer(room.id, &format!("entry {i}"));
+            drawer.source.agent = Some("agent".to_string());
+            drawer.created_at = base + chrono::Duration::seconds(i);
+            ids.push(drawer.id);
+            store.create_drawer(&drawer).await.expect("create drawer");
+        }
+
+        let entries = store
+            .list_diary_drawers(room.id, "agent", 2)
+            .await
+            .expect("list");
+        assert_eq!(
+            entries.len(),
+            2,
+            "limit must cap the result, got {entries:?}"
+        );
+        assert_eq!(
+            entries[0].id, ids[2],
+            "the newest entry must come first, got {entries:?}"
+        );
+        assert_eq!(
+            entries[1].id, ids[1],
+            "the second-newest entry must come second, got {entries:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn creating_an_entity_twice_with_the_same_name_and_kind_is_idempotent() {
         let store = memory_store().await;
         let first = store

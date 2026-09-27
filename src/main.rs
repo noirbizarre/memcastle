@@ -15,7 +15,7 @@ use miette::MietteHandlerOpts;
 
 mod cli;
 
-use cli::{CheckpointArgs, Cli, Command, JobsCommand, MineArgs, SearchArgs};
+use cli::{CheckpointArgs, Cli, Command, DiaryCommand, JobsCommand, MineArgs, SearchArgs};
 use memcastle::client::DaemonClient;
 use memcastle::config::Config;
 use memcastle::domain::JobId;
@@ -84,6 +84,7 @@ async fn run(args: Cli) -> Result<()> {
         Command::Search(args) => cmd_search(&config, args).await,
         Command::Mine(args) => cmd_mine(&config, args).await,
         Command::Checkpoint(args) => cmd_checkpoint(&config, args).await,
+        Command::Diary(cmd) => cmd_diary(&config, cmd).await,
         Command::Jobs(jobs) => cmd_jobs(&config, jobs).await,
         Command::Wings | Command::Rooms | Command::Drawers | Command::Maintenance => {
             Err(Error::config(
@@ -182,6 +183,29 @@ async fn cmd_checkpoint(config: &Config, args: CheckpointArgs) -> Result<()> {
         .map_err(|source| Error::config(format!("invalid checkpoint payload: {source}")))?;
     let job = client(config).checkpoint(payload, args.emergency).await?;
     print_json(&job);
+    Ok(())
+}
+
+async fn cmd_diary(config: &Config, command: DiaryCommand) -> Result<()> {
+    let daemon = client(config);
+    match command {
+        DiaryCommand::Write {
+            agent_identity,
+            wing,
+            content,
+        } => {
+            let drawer = daemon.diary_write(&agent_identity, &wing, content).await?;
+            print_json(&drawer);
+        }
+        DiaryCommand::Read {
+            agent_identity,
+            wing,
+            limit,
+        } => {
+            let entries = daemon.diary_read(&agent_identity, &wing, limit).await?;
+            print_json(&entries);
+        }
+    }
     Ok(())
 }
 
