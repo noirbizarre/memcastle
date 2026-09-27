@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 
 use crate::app::StatusReport;
-use crate::domain::{CheckpointPayload, Job, JobId, JobStatus};
+use crate::domain::{CheckpointPayload, Drawer, Job, JobId, JobStatus};
 use crate::error::{Error, Result};
 use crate::server::lifecycle;
 use crate::store::SearchHit;
@@ -112,6 +112,50 @@ impl DaemonClient {
             request = request.query(&[("room", room)]);
         }
         self.send(request).await
+    }
+
+    /// Write a diary entry for `agent_identity`, filed under `wing`'s fixed
+    /// `"diary"` room — see `AppServices::diary_write`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
+    pub async fn diary_write(
+        &self,
+        agent_identity: &str,
+        wing: &str,
+        content: String,
+    ) -> Result<Drawer> {
+        self.send(
+            self.http.post(format!("{}/api/diary", self.base_url)).json(
+                &json!({ "agent_identity": agent_identity, "wing": wing, "content": content }),
+            ),
+        )
+        .await
+    }
+
+    /// Read back `agent_identity`'s most recent diary entries in `wing`,
+    /// newest first — see `AppServices::diary_read`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
+    pub async fn diary_read(
+        &self,
+        agent_identity: &str,
+        wing: &str,
+        limit: u32,
+    ) -> Result<Vec<Drawer>> {
+        self.send(
+            self.http
+                .get(format!("{}/api/diary", self.base_url))
+                .query(&[
+                    ("agent_identity", agent_identity),
+                    ("wing", wing),
+                    ("limit", &limit.to_string()),
+                ]),
+        )
+        .await
     }
 
     /// Submit a mining job.

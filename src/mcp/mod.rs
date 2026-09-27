@@ -74,6 +74,34 @@ struct CheckpointArgs {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct DiaryWriteArgs {
+    /// The identity to scope this diary entry to — keep this consistent
+    /// across writes/reads (see `AppServices::diary_write`'s doc comment):
+    /// MemCastle stores/retrieves by this string faithfully, but never
+    /// normalizes or verifies it itself.
+    agent_identity: String,
+    /// The wing to file this entry under, in its fixed `"diary"` room.
+    wing: String,
+    /// The diary entry's content.
+    content: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct DiaryReadArgs {
+    /// The identity whose diary entries to read back.
+    agent_identity: String,
+    /// The wing to read this identity's entries from.
+    wing: String,
+    /// Maximum number of entries to return, newest first.
+    #[serde(default = "default_diary_limit")]
+    limit: u32,
+}
+
+fn default_diary_limit() -> u32 {
+    20
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct MineArgs {
     /// The absolute path to a directory to mine.
     path: String,
@@ -187,6 +215,50 @@ impl McpTools {
         }
     }
 
+    #[tool(
+        description = "Write a diary entry for an agent identity, filed in a wing's fixed diary room"
+    )]
+    async fn memcastle_diary_write(
+        &self,
+        Parameters(args): Parameters<DiaryWriteArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        match self
+            .app
+            .diary_write(&args.agent_identity, &args.wing, args.content)
+            .await
+        {
+            Ok(drawer) => {
+                let text = serde_json::to_string_pretty(&drawer).unwrap_or_default();
+                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+            }
+            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                error.to_string(),
+            )])),
+        }
+    }
+
+    #[tool(
+        description = "Read back an agent identity's most recent diary entries in a wing, newest first"
+    )]
+    async fn memcastle_diary_read(
+        &self,
+        Parameters(args): Parameters<DiaryReadArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        match self
+            .app
+            .diary_read(&args.agent_identity, &args.wing, args.limit)
+            .await
+        {
+            Ok(entries) => {
+                let text = serde_json::to_string_pretty(&entries).unwrap_or_default();
+                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+            }
+            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                error.to_string(),
+            )])),
+        }
+    }
+
     #[tool(description = "List jobs known to the daemon")]
     async fn memcastle_jobs_list(&self) -> Result<CallToolResult, McpError> {
         match self.app.list_jobs(None).await {
@@ -208,7 +280,8 @@ impl ServerHandler for McpTools {
             .with_server_info(Implementation::from_build_env())
             .with_instructions(
                 "MemCastle: a shared memory palace daemon. Tools: memcastle_status, \
-                 memcastle_search, memcastle_mine, memcastle_checkpoint, memcastle_jobs_list."
+                 memcastle_search, memcastle_mine, memcastle_checkpoint, \
+                 memcastle_diary_write, memcastle_diary_read, memcastle_jobs_list."
                     .to_string(),
             )
     }

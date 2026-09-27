@@ -11,8 +11,12 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
-use crate::domain::{CheckpointPayload, Job, JobId, JobKind, JobStatus, Priority};
+use crate::domain::{
+    CheckpointPayload, Drawer, DrawerId, Job, JobId, JobKind, JobStatus, Priority, Provenance,
+    Source, SourceKind,
+};
 use crate::error::Result;
 use crate::jobs::Scheduler;
 use crate::store::{SearchHit, SurrealStore};
@@ -231,5 +235,150 @@ impl AppServices {
     /// Returns an error if the job doesn't exist or isn't failed.
     pub async fn retry_job(&self, id: JobId) -> Result<()> {
         self.scheduler.retry(id).await
+    }
+
+    /// Persist a diary entry for `agent_identity`, filed as a drawer under
+    /// `wing`'s fixed `"diary"` room (the same convention
+    /// `CheckpointDestination::Diary` already reserves — see
+    /// `domain::checkpoint`). Diary writes are small and synchronous, not
+    /// job-queued: MemCastle already has one daemon/one writer, so nothing
+    /// forces this through the scheduler the way checkpoint/mining are
+    /// (see issue #13 / `PLAN.md`'s design note).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the store write fails.
+    pub async fn diary_write(
+        &self,
+        agent_identity: &str,
+        wing: &str,
+        content: String,
+    ) -> Result<Drawer> {
+        let wing_record = self.store.get_or_create_wing(wing, None).await?;
+        let room = self
+            .store
+            .get_or_create_room(wing_record.id, "diary", None)
+            .await?;
+
+        let now = Utc::now();
+        let mut hasher = Sha256::new();
+        hasher.update(content.as_bytes());
+        let content_hash = hex_encode(&hasher.finalize());
+
+        let drawer = Drawer {
+            id: DrawerId::new(),
+            room: room.id,
+            content,
+            content_hash,
+            source: Source {
+                kind: SourceKind::Manual,
+                uri: None,
+                agent: Some(agent_identity.to_string()),
+            },
+            tags: vec![],
+            embedding: None,
+            provenance: Provenance {
+                requested_by: agent_identity.to_string(),
+                job_id: None,
+            },
+            valid_from: now,
+            valid_to: None,
+            created_at: now,
+            updated_at: now,
+        };
+        self.store.create_drawer(&drawer).await?;
+        Ok(drawer)
+    }
+
+    /// Read back `agent_identity`'s most recent diary entries in `wing`,
+    /// newest first. The identity string is the caller's responsibility to
+    /// keep consistent across writes/reads — MemCastle just stores/
+    /// retrieves by it faithfully (see issue #13).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the store query fails.
+    pub async fn diary_read(
+        &self,
+        agent_identity: &str,
+        wing: &str,
+        limit: u32,
+    ) -> Result<Vec<Drawer>> {
+        let wing_record = self.store.get_or_create_wing(wing, None).await?;
+        let room = self
+            .store
+            .get_or_create_room(wing_record.id, "diary", None)
+            .await?;
+        self.store
+            .list_diary_drawers(room.id, agent_identity, limit)
+            .await
+    }
+}
+
+/// Lowercase hex — see `mining`/`checkpoint`'s identical helper for why this
+/// is a few lines of its own rather than a shared dependency.
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_app() -> AppServices {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let scheduler = Arc::new(Scheduler::new(store.clone(), 1));
+        AppServices::new(store, scheduler)
+    }
+
+    #[tokio::test]
+    async fn a_diary_entry_written_can_be_read_back_scoped_by_agent_and_wing() {
+        let app = test_app().await;
+        let written = app
+            .diary_write("agent-a", "project-x", "went well today".to_string())
+            .await
+            .expect("write");
+
+        let entries = app
+            .diary_read("agent-a", "project-x", 10)
+            .await
+            .expect("read");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, written.id);
+        assert_eq!(entries[0].content, "went well today");
+        assert_eq!(entries[0].source.agent.as_deref(), Some("agent-a"));
+    }
+
+    #[tokio::test]
+    async fn two_agent_identities_in_the_same_wing_do_not_leak_into_each_others_diary_read() {
+        let app = test_app().await;
+        app.diary_write("agent-a", "shared-wing", "a's entry".to_string())
+            .await
+            .expect("write a");
+        app.diary_write("agent-b", "shared-wing", "b's entry".to_string())
+            .await
+            .expect("write b");
+
+        let a_entries = app
+            .diary_read("agent-a", "shared-wing", 10)
+            .await
+            .expect("read a");
+        assert_eq!(
+            a_entries.len(),
+            1,
+            "agent-b's entry must not leak into agent-a's diary read, got {a_entries:?}"
+        );
+        assert_eq!(a_entries[0].content, "a's entry");
+
+        let b_entries = app
+            .diary_read("agent-b", "shared-wing", 10)
+            .await
+            .expect("read b");
+        assert_eq!(
+            b_entries.len(),
+            1,
+            "agent-a's entry must not leak into agent-b's diary read, got {b_entries:?}"
+        );
+        assert_eq!(b_entries[0].content, "b's entry");
     }
 }
