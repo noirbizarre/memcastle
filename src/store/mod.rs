@@ -624,6 +624,159 @@ mod tests {
         );
     }
 
+    /// A drawer fixture whose `provenance.job_id` points at `job_id` —
+    /// simulates what a checkpoint (or mining) job leaves behind, without
+    /// running the real handler (see `checkpoint::mod`'s own tests, and
+    /// `app::mod`'s `seed_checkpoint_drawer`, for the end-to-end version).
+    fn test_drawer_from_job(
+        room: crate::domain::RoomId,
+        content: &str,
+        job_id: crate::domain::JobId,
+    ) -> crate::domain::Drawer {
+        let mut drawer = test_drawer(room, content);
+        drawer.provenance.job_id = Some(job_id);
+        drawer
+    }
+
+    #[tokio::test]
+    async fn list_checkpoint_originated_drawers_only_returns_drawers_from_checkpoint_jobs() {
+        let store = memory_store().await;
+        let wing = store
+            .get_or_create_wing("project-x", None)
+            .await
+            .expect("wing");
+        let room = store
+            .get_or_create_room(wing.id, "notes", None)
+            .await
+            .expect("room");
+
+        let checkpoint_job = crate::domain::Job::new(
+            crate::domain::JobKind::Checkpoint {
+                payload: crate::domain::CheckpointPayload { items: vec![] },
+            },
+            crate::domain::Priority::High,
+            "test",
+        );
+        store
+            .save_job(&checkpoint_job)
+            .await
+            .expect("save checkpoint job");
+
+        let mine_job = crate::domain::Job::new(
+            crate::domain::JobKind::Mine {
+                path: "/tmp".into(),
+                wing: None,
+            },
+            crate::domain::Priority::Background,
+            "test",
+        );
+        store.save_job(&mine_job).await.expect("save mine job");
+
+        let checkpoint_drawer =
+            test_drawer_from_job(room.id, "a checkpointed highlight", checkpoint_job.id);
+        store
+            .create_drawer(&checkpoint_drawer)
+            .await
+            .expect("create checkpoint drawer");
+
+        let mined_drawer = test_drawer_from_job(room.id, "a mined note", mine_job.id);
+        store
+            .create_drawer(&mined_drawer)
+            .await
+            .expect("create mined drawer");
+
+        let manual_drawer = test_drawer(room.id, "a manual note, no job at all");
+        store
+            .create_drawer(&manual_drawer)
+            .await
+            .expect("create manual drawer");
+
+        let highlights = store
+            .list_checkpoint_originated_drawers(None, 10)
+            .await
+            .expect("list checkpoint-originated");
+        assert_eq!(
+            highlights.len(),
+            1,
+            "only the checkpoint job's drawer should come back, got {highlights:?}"
+        );
+        assert_eq!(highlights[0].id, checkpoint_drawer.id);
+    }
+
+    // Same regression class as `wing_scope_is_applied_by_surrealdb_before_
+    // the_result_limit`, applied to `list_checkpoint_originated_drawers`:
+    // the "quiet" wing's drawers are older than "loud"'s here, so a
+    // Rust-side post-filter (fetch the newest `limit` rows unscoped, then
+    // drop the ones outside the requested wing) would fetch "loud"'s two
+    // newest drawers and filter them all away, returning nothing — despite
+    // "quiet" genuinely having two matching drawers.
+    #[tokio::test]
+    async fn checkpoint_originated_wing_scope_is_applied_by_surrealdb_before_the_result_limit() {
+        let store = memory_store().await;
+        let loud = store
+            .get_or_create_wing("loud", None)
+            .await
+            .expect("wing loud");
+        let loud_room = store
+            .get_or_create_room(loud.id, "notes", None)
+            .await
+            .expect("room loud");
+        let quiet = store
+            .get_or_create_wing("quiet", None)
+            .await
+            .expect("wing quiet");
+        let quiet_room = store
+            .get_or_create_room(quiet.id, "notes", None)
+            .await
+            .expect("room quiet");
+
+        let job = crate::domain::Job::new(
+            crate::domain::JobKind::Checkpoint {
+                payload: crate::domain::CheckpointPayload { items: vec![] },
+            },
+            crate::domain::Priority::High,
+            "test",
+        );
+        store.save_job(&job).await.expect("save job");
+
+        // Older, fewer: "quiet"'s two drawers, created first.
+        let mut quiet_ids = Vec::new();
+        for i in 0..2 {
+            let drawer =
+                test_drawer_from_job(quiet_room.id, &format!("quiet highlight #{i}"), job.id);
+            store
+                .create_drawer(&drawer)
+                .await
+                .expect("create quiet drawer");
+            quiet_ids.push(drawer.id);
+        }
+        // Newer, more numerous: "loud"'s three drawers, created after.
+        for i in 0..3 {
+            store
+                .create_drawer(&test_drawer_from_job(
+                    loud_room.id,
+                    &format!("loud highlight #{i}"),
+                    job.id,
+                ))
+                .await
+                .expect("create loud drawer");
+        }
+
+        let scoped = store
+            .list_checkpoint_originated_drawers(Some("quiet"), 2)
+            .await
+            .expect("scoped list");
+        assert_eq!(
+            scoped.len(),
+            2,
+            "expected both \"quiet\" drawers despite the limit, got {scoped:?}"
+        );
+        assert!(
+            scoped.iter().all(|d| quiet_ids.contains(&d.id)),
+            "expected only \"quiet\"'s drawers, got {scoped:?}"
+        );
+    }
+
     #[tokio::test]
     async fn creating_an_entity_twice_with_the_same_name_and_kind_is_idempotent() {
         let store = memory_store().await;

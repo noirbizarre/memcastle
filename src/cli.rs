@@ -42,6 +42,15 @@ pub enum Command {
     Restart,
     /// Search palace drawer content.
     Search(SearchArgs),
+    /// Retrieve palace content matching a query, returned verbatim — the
+    /// recall-oriented counterpart to `search` (see
+    /// `AppServices::recall`'s doc comment for why both exist).
+    Recall(RecallArgs),
+    /// Build an agent identity's session-start context: its most recent
+    /// diary entry (when a wing is given) plus recent checkpoint-originated
+    /// highlights, bounded by a deterministic item/byte budget.
+    #[command(alias = "wake_up")]
+    WakeUp(WakeUpArgs),
     /// Submit a mining job for a directory.
     Mine(MineArgs),
     /// Submit a checkpoint job: persist an already-classified batch of
@@ -85,6 +94,41 @@ pub struct SearchArgs {
     /// Restrict results to drawers filed directly under this room.
     #[arg(long)]
     pub room: Option<String>,
+}
+
+/// Arguments for `memcastle recall`.
+#[derive(Debug, Args)]
+pub struct RecallArgs {
+    /// The recall query.
+    pub query: String,
+    /// Maximum number of results.
+    #[arg(long, default_value_t = 10)]
+    pub limit: u32,
+    /// Restrict results to drawers filed (transitively) under this wing.
+    #[arg(long)]
+    pub wing: Option<String>,
+}
+
+/// Arguments for `memcastle wake-up`.
+#[derive(Debug, Args)]
+pub struct WakeUpArgs {
+    /// The identity to build session-start context for.
+    #[arg(long)]
+    pub agent_identity: String,
+    /// Restrict the diary lookup and recent highlights to this wing.
+    /// Omitting this skips the diary lookup entirely (see
+    /// `AppServices::wake_up`'s doc comment) but still returns unscoped
+    /// recent highlights.
+    #[arg(long)]
+    pub wing: Option<String>,
+    /// Maximum number of recent-highlight drawers to include. Defaults to
+    /// `WakeUpBudget::default()`'s value when omitted.
+    #[arg(long)]
+    pub max_items: Option<usize>,
+    /// Maximum total content bytes across recent highlights. Defaults to
+    /// `WakeUpBudget::default()`'s value when omitted.
+    #[arg(long)]
+    pub max_bytes: Option<usize>,
 }
 
 /// Arguments for `memcastle mine`.

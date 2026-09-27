@@ -20,7 +20,7 @@ use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, Stream
 use rmcp::{ErrorData as McpError, ServerHandler, schemars, tool, tool_handler, tool_router};
 use tokio_util::sync::CancellationToken;
 
-use crate::app::AppServices;
+use crate::app::{AppServices, WakeUpBudget};
 use crate::domain::CheckpointPayload;
 
 /// The MCP tool surface. Cheap to clone (holds only `AppServices`, itself
@@ -52,6 +52,35 @@ struct SearchArgs {
 
 fn default_search_limit() -> u32 {
     10
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct RecallArgs {
+    /// The recall query.
+    query: String,
+    /// Maximum number of results to return.
+    #[serde(default = "default_search_limit")]
+    limit: u32,
+    /// Restrict results to drawers filed (transitively, via their room)
+    /// under this wing name.
+    wing: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct WakeUpArgs {
+    /// The identity to build session-start context for.
+    agent_identity: String,
+    /// Restrict the diary lookup and recent highlights to this wing.
+    /// `None` skips the diary lookup entirely (see
+    /// `AppServices::wake_up`'s doc comment) but still returns unscoped
+    /// recent highlights.
+    wing: Option<String>,
+    /// Maximum number of recent-highlight drawers to include. Falls back
+    /// to `WakeUpBudget::default()` when omitted.
+    max_items: Option<usize>,
+    /// Maximum total content bytes across recent highlights. Falls back
+    /// to `WakeUpBudget::default()` when omitted.
+    max_bytes: Option<usize>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -152,6 +181,59 @@ impl McpTools {
         {
             Ok(hits) => {
                 let text = serde_json::to_string_pretty(&hits).unwrap_or_default();
+                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+            }
+            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                error.to_string(),
+            )])),
+        }
+    }
+
+    #[tool(
+        description = "Retrieve palace content matching a query, returned verbatim — the \
+                        recall-oriented counterpart to memcastle_search (see \
+                        AppServices::recall's doc comment for why both exist)"
+    )]
+    async fn memcastle_recall(
+        &self,
+        Parameters(args): Parameters<RecallArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        match self
+            .app
+            .recall(&args.query, args.wing.as_deref(), args.limit)
+            .await
+        {
+            Ok(hits) => {
+                let text = serde_json::to_string_pretty(&hits).unwrap_or_default();
+                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+            }
+            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                error.to_string(),
+            )])),
+        }
+    }
+
+    #[tool(
+        description = "Build an agent identity's session-start context: its most recent diary \
+                        entry (when a wing is given) plus recent checkpoint-originated \
+                        highlights, bounded by a deterministic item/byte budget"
+    )]
+    async fn memcastle_wake_up(
+        &self,
+        Parameters(args): Parameters<WakeUpArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let default_budget = WakeUpBudget::default();
+        let budget = WakeUpBudget {
+            max_items: args.max_items.unwrap_or(default_budget.max_items),
+            max_bytes: args.max_bytes.unwrap_or(default_budget.max_bytes),
+        };
+        match self
+            .app
+            .wake_up(&args.agent_identity, args.wing.as_deref(), budget)
+            .await
+        {
+            Ok(context) => {
+                let text = serde_json::to_string_pretty(&context).unwrap_or_default();
                 Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
             }
             Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
@@ -280,8 +362,9 @@ impl ServerHandler for McpTools {
             .with_server_info(Implementation::from_build_env())
             .with_instructions(
                 "MemCastle: a shared memory palace daemon. Tools: memcastle_status, \
-                 memcastle_search, memcastle_mine, memcastle_checkpoint, \
-                 memcastle_diary_write, memcastle_diary_read, memcastle_jobs_list."
+                 memcastle_search, memcastle_recall, memcastle_wake_up, memcastle_mine, \
+                 memcastle_checkpoint, memcastle_diary_write, memcastle_diary_read, \
+                 memcastle_jobs_list."
                     .to_string(),
             )
     }

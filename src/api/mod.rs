@@ -16,7 +16,7 @@ use axum::routing::{get, post};
 use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 
-use crate::app::AppServices;
+use crate::app::{AppServices, WakeUpBudget};
 use crate::domain::{JobId, JobKind, JobStatus};
 
 pub use error::ApiError;
@@ -35,6 +35,8 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
         .route("/api/health", get(health))
         .route("/api/status", get(status))
         .route("/api/search", get(search))
+        .route("/api/recall", get(recall))
+        .route("/api/wake-up", get(wake_up))
         .route("/api/diary", get(diary_read).post(diary_write))
         .route("/api/jobs", get(list_jobs).post(submit_job))
         .route("/api/jobs/{id}", get(get_job))
@@ -82,6 +84,54 @@ async fn search(
                 params.wing.as_deref(),
                 params.room.as_deref(),
             )
+            .await?,
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct RecallParams {
+    q: String,
+    #[serde(default = "default_search_limit")]
+    limit: u32,
+    /// Restrict results to one wing by name (see `AppServices::recall`).
+    wing: Option<String>,
+}
+
+async fn recall(
+    State(state): State<ApiState>,
+    Query(params): Query<RecallParams>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .app
+            .recall(&params.q, params.wing.as_deref(), params.limit)
+            .await?,
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct WakeUpParams {
+    agent_identity: String,
+    wing: Option<String>,
+    /// Falls back to `WakeUpBudget::default()`'s fields when absent — see
+    /// that impl for the exact numbers.
+    max_items: Option<usize>,
+    max_bytes: Option<usize>,
+}
+
+async fn wake_up(
+    State(state): State<ApiState>,
+    Query(params): Query<WakeUpParams>,
+) -> Result<impl IntoResponse, ApiError> {
+    let default_budget = WakeUpBudget::default();
+    let budget = WakeUpBudget {
+        max_items: params.max_items.unwrap_or(default_budget.max_items),
+        max_bytes: params.max_bytes.unwrap_or(default_budget.max_bytes),
+    };
+    Ok(Json(
+        state
+            .app
+            .wake_up(&params.agent_identity, params.wing.as_deref(), budget)
             .await?,
     ))
 }
