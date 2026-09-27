@@ -12,7 +12,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{Job, JobId, JobKind, JobStatus, Priority};
+use crate::domain::{CheckpointPayload, Job, JobId, JobKind, JobStatus, Priority};
 use crate::error::Result;
 use crate::jobs::Scheduler;
 use crate::store::{SearchHit, SurrealStore};
@@ -130,6 +130,51 @@ impl AppServices {
     pub async fn submit_demo(&self, steps: u32, requested_by: impl Into<String>) -> Result<Job> {
         self.scheduler
             .submit(JobKind::Demo { steps }, Priority::Normal, requested_by)
+            .await
+    }
+
+    /// Shared submission path for both checkpoint priorities — `checkpoint`
+    /// and `emergency_checkpoint` differ only in which `Priority` they
+    /// pass, since there is exactly one `JobKind::Checkpoint` variant (see
+    /// its doc comment).
+    async fn submit_checkpoint(
+        &self,
+        payload: CheckpointPayload,
+        priority: Priority,
+        requested_by: impl Into<String>,
+    ) -> Result<Job> {
+        self.scheduler
+            .submit(JobKind::Checkpoint { payload }, priority, requested_by)
+            .await
+    }
+
+    /// Submit a checkpoint job at [`Priority::High`] — above background
+    /// mining, below an emergency checkpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the job cannot be persisted.
+    pub async fn checkpoint(
+        &self,
+        payload: CheckpointPayload,
+        requested_by: impl Into<String>,
+    ) -> Result<Job> {
+        self.submit_checkpoint(payload, Priority::High, requested_by)
+            .await
+    }
+
+    /// Submit an emergency checkpoint at [`Priority::Critical`] — preempts
+    /// every other queued job, for save-before-crash situations.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the job cannot be persisted.
+    pub async fn emergency_checkpoint(
+        &self,
+        payload: CheckpointPayload,
+        requested_by: impl Into<String>,
+    ) -> Result<Job> {
+        self.submit_checkpoint(payload, Priority::Critical, requested_by)
             .await
     }
 

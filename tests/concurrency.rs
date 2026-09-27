@@ -91,3 +91,128 @@ async fn wait_for_all_jobs_completed(
     }
     panic!("not every job reached Completed within 30s");
 }
+
+#[tokio::test]
+async fn a_critical_checkpoint_is_claimed_before_a_queued_background_mine_job() {
+    use memcastle::domain::{Job, JobStatus};
+
+    // A single worker slot makes claim order fully observable: while it's
+    // held, both jobs below sit `Queued` at the same time, so which one
+    // gets claimed next is decided purely by `priority`, not by "there
+    // happened to be a free slot for both".
+    let daemon = TestDaemon::start_with(1).await;
+    let client = reqwest::Client::new();
+
+    // Occupy the sole slot for a little while (8 steps * 150ms ~= 1.2s —
+    // see `jobs::demo`'s `STEP_DELAY`), long enough to reliably submit and
+    // observe both jobs below as `Queued` before it frees up.
+    let occupier: Job = client
+        .post(format!("{}/api/jobs", daemon.base_url))
+        .json(&serde_json::json!({ "type": "demo", "steps": 8, "requested_by": "test" }))
+        .send()
+        .await
+        .expect("submit occupier")
+        .json()
+        .await
+        .expect("json");
+    wait_for_job_status(&client, &daemon.base_url, occupier.id, JobStatus::Running).await;
+
+    // Background priority (the default for `mine`), submitted first.
+    let fixture = tempfile::tempdir().expect("fixture tempdir");
+    std::fs::write(fixture.path().join("note.txt"), "irrelevant content")
+        .expect("write fixture file");
+    let mine: Job = client
+        .post(format!("{}/api/jobs", daemon.base_url))
+        .json(&serde_json::json!({
+            "type": "mine",
+            "path": fixture.path(),
+            "wing": null,
+            "requested_by": "test",
+        }))
+        .send()
+        .await
+        .expect("submit mine")
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(
+        get_job(&client, &daemon.base_url, mine.id).await.status,
+        JobStatus::Queued,
+        "the mine job must still be queued behind the occupier"
+    );
+
+    // Critical priority (`emergency: true`), submitted second.
+    let checkpoint: Job = client
+        .post(format!("{}/api/jobs", daemon.base_url))
+        .json(&serde_json::json!({
+            "type": "checkpoint",
+            "payload": {
+                "items": [{
+                    "destination": "general",
+                    "content": "an emergency checkpoint",
+                    "tags": [],
+                    "source": { "kind": "manual", "uri": null, "agent": "test" },
+                    "fact": null,
+                }],
+            },
+            "requested_by": "test",
+            "emergency": true,
+        }))
+        .send()
+        .await
+        .expect("submit checkpoint")
+        .json()
+        .await
+        .expect("json");
+
+    // Once the occupier frees the slot, the checkpoint (Critical, priority
+    // 100) must be claimed and complete before the mine job (Background,
+    // priority 0) even though mine was submitted first — proving
+    // `claim_next_job`'s `ORDER BY priority DESC` decides this, not
+    // submission order.
+    wait_for_job_status(
+        &client,
+        &daemon.base_url,
+        checkpoint.id,
+        JobStatus::Completed,
+    )
+    .await;
+    assert_ne!(
+        get_job(&client, &daemon.base_url, mine.id).await.status,
+        JobStatus::Completed,
+        "the background mine job must not have completed before the critical checkpoint did"
+    );
+
+    daemon.shutdown().await;
+}
+
+async fn get_job(
+    client: &reqwest::Client,
+    base_url: &str,
+    id: memcastle::domain::JobId,
+) -> memcastle::domain::Job {
+    client
+        .get(format!("{base_url}/api/jobs/{id}"))
+        .send()
+        .await
+        .expect("request")
+        .json()
+        .await
+        .expect("json")
+}
+
+async fn wait_for_job_status(
+    client: &reqwest::Client,
+    base_url: &str,
+    id: memcastle::domain::JobId,
+    status: memcastle::domain::JobStatus,
+) -> memcastle::domain::Job {
+    for _ in 0..300 {
+        let job = get_job(client, base_url, id).await;
+        if job.status == status {
+            return job;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("job {id} did not reach {status:?} within 30s");
+}

@@ -6,12 +6,14 @@
 //! dependencies is what lets `store`'s backend change without a domain
 //! rewrite.
 
+mod checkpoint;
 mod drawer;
 mod entity;
 mod ids;
 mod job;
 mod palace;
 
+pub use checkpoint::{CheckpointDestination, CheckpointItem, CheckpointPayload, FactMutation};
 pub use drawer::{Drawer, Provenance, Source, SourceKind};
 pub use entity::{Entity, NewRelationship, Relationship, normalize_label};
 pub use ids::{DrawerId, EntityId, JobId, PalaceId, RelationshipId, RoomId, WingId};

@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::JobId;
+use super::{CheckpointPayload, JobId};
 
 /// A job's place in its lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,6 +53,15 @@ pub enum JobKind {
         path: PathBuf,
         /// The wing to file mined drawers under (defaults to the directory name).
         wing: Option<String>,
+    },
+    /// Persist an already-classified batch of checkpoint items — durable,
+    /// resumable writes only; classification into destination buckets
+    /// happens client-side, in the calling integration (see
+    /// `domain::checkpoint`'s module doc). Distinct from [`Job::checkpoint`]
+    /// below despite the shared name — see that field's doc comment.
+    Checkpoint {
+        /// The items to write, in order.
+        payload: CheckpointPayload,
     },
 }
 
@@ -192,7 +201,13 @@ pub struct Job {
     /// The attempt budget — beyond this, a crash-recovered `Running` job
     /// goes to `Failed` instead of back to `Queued`.
     pub max_attempts: u32,
-    /// Opaque, handler-defined resumption state.
+    /// Opaque, handler-defined resumption state (e.g. `{"next_index": 3}`).
+    ///
+    /// Naming collision, not a typo: this is unrelated to
+    /// [`JobKind::Checkpoint`]/`domain::CheckpointPayload`, which is a
+    /// specific job *kind* (persisting classified memory writes), not the
+    /// generic resume-state every job kind — including a `Checkpoint` job
+    /// itself — carries here.
     pub checkpoint: Value,
     /// The terminal error, when `status == Failed`.
     pub error: Option<String>,

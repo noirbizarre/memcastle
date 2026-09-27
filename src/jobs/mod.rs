@@ -243,6 +243,9 @@ impl Scheduler {
             JobKind::Mine { path, wing } => {
                 crate::mining::run(&self.store, &ctx, &mut job, &path, wing.as_deref()).await
             }
+            JobKind::Checkpoint { payload } => {
+                crate::checkpoint::run(&self.store, &ctx, &mut job, &payload).await
+            }
         };
 
         self.controls.remove(&job.id);
