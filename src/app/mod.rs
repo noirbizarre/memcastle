@@ -12,7 +12,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{Job, JobId, JobKind, JobStatus};
+use crate::domain::{Job, JobId, JobKind, JobStatus, Priority};
 use crate::error::Result;
 use crate::jobs::Scheduler;
 use crate::store::{SearchHit, SurrealStore};
@@ -93,6 +93,9 @@ impl AppServices {
     /// Submit a mining job for `path`, returning immediately with the
     /// job's id — the CLI/MCP/HTTP caller never runs the mine itself.
     ///
+    /// Mining is background work: it always runs at [`Priority::Background`]
+    /// so it never delays checkpoint/audit/repair jobs.
+    ///
     /// # Errors
     ///
     /// Returns an error if the job cannot be persisted.
@@ -103,18 +106,23 @@ impl AppServices {
         requested_by: impl Into<String>,
     ) -> Result<Job> {
         self.scheduler
-            .submit(JobKind::Mine { path, wing }, requested_by)
+            .submit(
+                JobKind::Mine { path, wing },
+                Priority::Background,
+                requested_by,
+            )
             .await
     }
 
-    /// Submit a synthetic demo job (see `domain::job::JobKind::Demo`).
+    /// Submit a synthetic demo job (see `domain::job::JobKind::Demo`) at
+    /// [`Priority::Normal`].
     ///
     /// # Errors
     ///
     /// Returns an error if the job cannot be persisted.
     pub async fn submit_demo(&self, steps: u32, requested_by: impl Into<String>) -> Result<Job> {
         self.scheduler
-            .submit(JobKind::Demo { steps }, requested_by)
+            .submit(JobKind::Demo { steps }, Priority::Normal, requested_by)
             .await
     }
 

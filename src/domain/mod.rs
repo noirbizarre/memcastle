@@ -15,5 +15,7 @@ mod palace;
 pub use drawer::{Drawer, Provenance, Source, SourceKind};
 pub use entity::{Entity, Relationship};
 pub use ids::{DrawerId, EntityId, JobId, PalaceId, RoomId, WingId};
-pub use job::{Job, JobEvent, JobKind, JobProgress, JobStatus, TransitionError};
+pub use job::{
+    InvalidPriority, Job, JobEvent, JobKind, JobProgress, JobStatus, Priority, TransitionError,
+};
 pub use palace::{Palace, Room, Wing};

@@ -40,7 +40,7 @@ impl SurrealStore {
             .bind(("id", job.id.to_string()))
             .bind(("kind", super::bindable(&job.kind)?))
             .bind(("status", super::bindable(&job.status)?))
-            .bind(("priority", job.priority))
+            .bind(("priority", i32::from(job.priority)))
             .bind(("created_at", job.created_at.to_rfc3339()))
             .bind(("started_at", job.started_at.map(|dt| dt.to_rfc3339())))
             .bind(("completed_at", job.completed_at.map(|dt| dt.to_rfc3339())))

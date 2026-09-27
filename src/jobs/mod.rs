@@ -19,7 +19,7 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-use crate::domain::{Job, JobEvent, JobId, JobKind, JobStatus};
+use crate::domain::{Job, JobEvent, JobId, JobKind, JobStatus, Priority};
 use crate::error::Result;
 use crate::store::SurrealStore;
 
@@ -107,8 +107,13 @@ impl Scheduler {
     /// # Errors
     ///
     /// Returns an error if the job cannot be persisted.
-    pub async fn submit(&self, kind: JobKind, requested_by: impl Into<String>) -> Result<Job> {
-        let job = Job::new(kind, requested_by);
+    pub async fn submit(
+        &self,
+        kind: JobKind,
+        priority: Priority,
+        requested_by: impl Into<String>,
+    ) -> Result<Job> {
+        let job = Job::new(kind, priority, requested_by);
         self.store.save_job(&job).await?;
         Ok(job)
     }

@@ -240,7 +240,11 @@ mod tests {
     #[tokio::test]
     async fn a_job_can_be_saved_claimed_and_completed() {
         let store = memory_store().await;
-        let mut job = crate::domain::Job::new(crate::domain::JobKind::Demo { steps: 1 }, "test");
+        let mut job = crate::domain::Job::new(
+            crate::domain::JobKind::Demo { steps: 1 },
+            crate::domain::Priority::Normal,
+            "test",
+        );
         store.save_job(&job).await.expect("save queued");
 
         let fetched = store.get_job(job.id).await.expect("get").expect("present");
@@ -271,7 +275,11 @@ mod tests {
     #[tokio::test]
     async fn listing_jobs_with_no_status_filter_returns_every_job() {
         let store = memory_store().await;
-        let job = crate::domain::Job::new(crate::domain::JobKind::Demo { steps: 1 }, "test");
+        let job = crate::domain::Job::new(
+            crate::domain::JobKind::Demo { steps: 1 },
+            crate::domain::Priority::Normal,
+            "test",
+        );
         store.save_job(&job).await.expect("save");
 
         let all = store.list_jobs(None).await.expect("list all");
