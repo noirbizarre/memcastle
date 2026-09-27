@@ -13,8 +13,8 @@ mod job;
 mod palace;
 
 pub use drawer::{Drawer, Provenance, Source, SourceKind};
-pub use entity::{Entity, Relationship};
-pub use ids::{DrawerId, EntityId, JobId, PalaceId, RoomId, WingId};
+pub use entity::{Entity, NewRelationship, Relationship, normalize_label};
+pub use ids::{DrawerId, EntityId, JobId, PalaceId, RelationshipId, RoomId, WingId};
 pub use job::{
     InvalidPriority, Job, JobEvent, JobKind, JobProgress, JobStatus, Priority, TransitionError,
 };

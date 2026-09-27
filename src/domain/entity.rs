@@ -1,15 +1,16 @@
 //! Temporal knowledge-graph types.
 //!
-//! Schema-ready, not schema-wired: the SurrealDB tables and graph edge these
-//! map to exist from the first migration (see `store::schema`), but no
-//! mining or MCP code populates them yet. Defining the shape now is what
-//! lets a later extraction pass land without a storage migration.
+//! Schema-ready and, as of `store::entities`, schema-wired: the SurrealDB
+//! tables and graph edge these map to exist from the first migration (see
+//! `store::migrations`), and `store::entities` reads and writes them. What
+//! is still missing is a populator — no mining or MCP code creates these
+//! yet (that's #40's deliberate future work, not an oversight).
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::EntityId;
+use super::{EntityId, RelationshipId};
 
 /// A named thing the palace has opinions about (a person, a project, a term).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +33,11 @@ pub struct Entity {
 /// seeing the original claim.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Relationship {
+    /// Unique identifier — needed so `supersede`/`invalidate` can target one
+    /// specific edge rather than "the edge between these two entities" (an
+    /// entity pair can have more than one predicate, and the same predicate
+    /// more than once across time).
+    pub id: RelationshipId,
     /// The subject of the relationship.
     pub from: EntityId,
     /// The object of the relationship.
@@ -45,4 +51,57 @@ pub struct Relationship {
     pub valid_from: DateTime<Utc>,
     /// When this fact stopped being true, if it has been superseded.
     pub valid_to: Option<DateTime<Utc>>,
+}
+
+/// Everything needed to describe a new fact, for
+/// [`SurrealStore::supersede_relationship`](crate::store::SurrealStore::supersede_relationship) —
+/// no `id` (the store assigns one) and no temporal fields (the store always
+/// opens a fresh, currently-valid edge).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewRelationship {
+    /// The subject of the relationship.
+    pub from: EntityId,
+    /// The object of the relationship.
+    pub to: EntityId,
+    /// The relationship's label — see [`Relationship::predicate`].
+    pub predicate: String,
+    /// Confidence in `[0, 1]`.
+    pub confidence: f32,
+}
+
+/// Trim and lowercase a knowledge-graph label (`Entity::kind`,
+/// `Relationship::predicate`) so `"Person"` and `"person"` don't silently
+/// become two different graph values.
+///
+/// This is the "cheap guard" #11 asks for, not a closed vocabulary — a real
+/// fixed set of kinds/predicates is mining's job once #40 wires up
+/// extraction (see the `kg_normalize` lesson referenced on
+/// [`Relationship::predicate`]). Returns `None` for an empty (post-trim)
+/// label, which callers should reject rather than silently store.
+#[must_use]
+pub fn normalize_label(raw: &str) -> Option<String> {
+    let normalized = raw.trim().to_lowercase();
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_label;
+
+    #[test]
+    fn differently_cased_labels_normalize_to_the_same_value() {
+        assert_eq!(normalize_label("Person"), normalize_label("person"));
+        assert_eq!(normalize_label("PERSON").as_deref(), Some("person"));
+    }
+
+    #[test]
+    fn surrounding_whitespace_is_trimmed() {
+        assert_eq!(normalize_label("  project  ").as_deref(), Some("project"));
+    }
+
+    #[test]
+    fn an_empty_or_whitespace_only_label_is_rejected() {
+        assert_eq!(normalize_label(""), None);
+        assert_eq!(normalize_label("   "), None);
+    }
 }
