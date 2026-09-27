@@ -15,7 +15,7 @@ use miette::MietteHandlerOpts;
 
 mod cli;
 
-use cli::{Cli, Command, JobsCommand, MineArgs, SearchArgs};
+use cli::{CheckpointArgs, Cli, Command, JobsCommand, MineArgs, SearchArgs};
 use memcastle::client::DaemonClient;
 use memcastle::config::Config;
 use memcastle::domain::JobId;
@@ -83,6 +83,7 @@ async fn run(args: Cli) -> Result<()> {
         Command::Restart => cmd_restart(&config).await,
         Command::Search(args) => cmd_search(&config, args).await,
         Command::Mine(args) => cmd_mine(&config, args).await,
+        Command::Checkpoint(args) => cmd_checkpoint(&config, args).await,
         Command::Jobs(jobs) => cmd_jobs(&config, jobs).await,
         Command::Wings | Command::Rooms | Command::Drawers | Command::Maintenance => {
             Err(Error::config(
@@ -153,6 +154,33 @@ async fn cmd_search(config: &Config, args: SearchArgs) -> Result<()> {
 
 async fn cmd_mine(config: &Config, args: MineArgs) -> Result<()> {
     let job = client(config).submit_mine(args.path, args.wing).await?;
+    print_json(&job);
+    Ok(())
+}
+
+async fn cmd_checkpoint(config: &Config, args: CheckpointArgs) -> Result<()> {
+    let raw = match &args.payload {
+        Some(path) => std::fs::read_to_string(path)
+            .map_err(|source| Error::io(path.display().to_string(), source))?,
+        None => {
+            // No file given: read the payload from stdin, so `memcastle
+            // checkpoint` composes with a pipe (`echo '{...}' | memcastle
+            // checkpoint`) the same way `--payload -` would on tools that
+            // support it.
+            use std::io::Read;
+            let mut buf = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buf)
+                .map_err(|source| Error::io("<stdin>", source))?;
+            buf
+        }
+    };
+    // Parsed client-side, before ever contacting the daemon: a malformed
+    // payload should fail fast with a clear local error, not round-trip to
+    // the API just to bounce back as a generic 400.
+    let payload: memcastle::domain::CheckpointPayload = serde_json::from_str(&raw)
+        .map_err(|source| Error::config(format!("invalid checkpoint payload: {source}")))?;
+    let job = client(config).checkpoint(payload, args.emergency).await?;
     print_json(&job);
     Ok(())
 }

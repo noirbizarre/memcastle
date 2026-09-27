@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 
 use crate::app::StatusReport;
-use crate::domain::{Job, JobId, JobStatus};
+use crate::domain::{CheckpointPayload, Job, JobId, JobStatus};
 use crate::error::{Error, Result};
 use crate::server::lifecycle;
 use crate::store::SearchHit;
@@ -140,6 +140,22 @@ impl DaemonClient {
             self.http
                 .post(format!("{}/api/jobs", self.base_url))
                 .json(&json!({ "type": "demo", "steps": steps, "requested_by": "cli" })),
+        )
+        .await
+    }
+
+    /// Submit a checkpoint job. `emergency` selects `Priority::Critical`
+    /// instead of the default `Priority::High` — see
+    /// `AppServices::emergency_checkpoint`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
+    pub async fn checkpoint(&self, payload: CheckpointPayload, emergency: bool) -> Result<Job> {
+        self.send(
+            self.http.post(format!("{}/api/jobs", self.base_url)).json(
+                &json!({ "type": "checkpoint", "payload": payload, "requested_by": "cli", "emergency": emergency }),
+            ),
         )
         .await
     }

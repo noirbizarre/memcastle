@@ -104,6 +104,12 @@ struct SubmitJobBody {
     kind: JobKind,
     #[serde(default = "default_requested_by")]
     requested_by: String,
+    /// Only meaningful for `kind: Checkpoint` — escalates to
+    /// `Priority::Critical` instead of the default `Priority::High`. A
+    /// boolean rather than an exposed `Priority` field, so a caller can
+    /// only pick between the two levels this job kind actually sanctions.
+    #[serde(default)]
+    emergency: bool,
 }
 
 fn default_requested_by() -> String {
@@ -119,6 +125,16 @@ async fn submit_job(
             state.app.submit_mine(path, wing, body.requested_by).await?
         }
         JobKind::Demo { steps } => state.app.submit_demo(steps, body.requested_by).await?,
+        JobKind::Checkpoint { payload } => {
+            if body.emergency {
+                state
+                    .app
+                    .emergency_checkpoint(payload, body.requested_by)
+                    .await?
+            } else {
+                state.app.checkpoint(payload, body.requested_by).await?
+            }
+        }
     };
     Ok(Json(job))
 }

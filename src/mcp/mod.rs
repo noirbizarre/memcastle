@@ -21,6 +21,7 @@ use rmcp::{ErrorData as McpError, ServerHandler, schemars, tool, tool_handler, t
 use tokio_util::sync::CancellationToken;
 
 use crate::app::AppServices;
+use crate::domain::CheckpointPayload;
 
 /// The MCP tool surface. Cheap to clone (holds only `AppServices`, itself
 /// cheap to clone, and the macro-generated router).
@@ -51,6 +52,25 @@ struct SearchArgs {
 
 fn default_search_limit() -> u32 {
     10
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct CheckpointArgs {
+    /// The checkpoint payload, matching `domain::CheckpointPayload`'s JSON
+    /// shape exactly: `{"items": [{"destination":
+    /// "preference"|"project"|"diary"|"general", "wing": string|null,
+    /// "content": string, "tags": [string], "source": {"kind":
+    /// "file"|"manual", "uri": string|null, "agent": string|null}, "fact":
+    /// null|{"op": "add"|"supersede"|"invalidate", ...}}]}`. Kept as a raw
+    /// object here rather than a fully-typed schema — the shape is already
+    /// enforced by `CheckpointPayload`'s own deserialization, and this
+    /// avoids threading `schemars::JsonSchema` through every
+    /// knowledge-graph domain type for one argument.
+    payload: serde_json::Value,
+    /// Escalate to `Priority::Critical`, preempting all other queued work —
+    /// reserved for save-before-crash situations, not routine checkpoints.
+    #[serde(default)]
+    emergency: bool,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -133,6 +153,40 @@ impl McpTools {
         }
     }
 
+    #[tool(
+        description = "Persist a pre-classified checkpoint payload (see the `payload` \
+                        argument's own description for its exact JSON shape); set \
+                        emergency=true to preempt all other queued work"
+    )]
+    async fn memcastle_checkpoint(
+        &self,
+        Parameters(args): Parameters<CheckpointArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let payload: CheckpointPayload = match serde_json::from_value(args.payload) {
+            Ok(payload) => payload,
+            Err(error) => {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(
+                    error.to_string(),
+                )]));
+            }
+        };
+        let requested_by = "mcp".to_string();
+        let result = if args.emergency {
+            self.app.emergency_checkpoint(payload, requested_by).await
+        } else {
+            self.app.checkpoint(payload, requested_by).await
+        };
+        match result {
+            Ok(job) => {
+                let text = serde_json::to_string_pretty(&job).unwrap_or_default();
+                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+            }
+            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                error.to_string(),
+            )])),
+        }
+    }
+
     #[tool(description = "List jobs known to the daemon")]
     async fn memcastle_jobs_list(&self) -> Result<CallToolResult, McpError> {
         match self.app.list_jobs(None).await {
@@ -154,7 +208,7 @@ impl ServerHandler for McpTools {
             .with_server_info(Implementation::from_build_env())
             .with_instructions(
                 "MemCastle: a shared memory palace daemon. Tools: memcastle_status, \
-                 memcastle_search, memcastle_mine, memcastle_jobs_list."
+                 memcastle_search, memcastle_mine, memcastle_checkpoint, memcastle_jobs_list."
                     .to_string(),
             )
     }

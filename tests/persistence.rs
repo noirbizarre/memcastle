@@ -77,6 +77,68 @@ async fn drawers_survive_a_daemon_restart_against_the_same_palace() {
     }
 }
 
+#[tokio::test]
+async fn checkpoint_drawers_survive_a_daemon_restart_against_the_same_palace() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let palace = dir.path().join("palace");
+
+    let bin = cargo_bin("memcastle");
+    let client = reqwest::Client::new();
+
+    // Round 1: a fresh daemon runs a checkpoint job, then is asked to stop.
+    {
+        let (mut child, info) = spawn_daemon_and_wait(&bin, &palace).await;
+        let base = format!("http://{}", info.bind_addr);
+
+        client
+            .post(format!("{base}/api/jobs"))
+            .json(&serde_json::json!({
+                "type": "checkpoint",
+                "payload": {
+                    "items": [{
+                        "destination": "general",
+                        "content": "a checkpoint written before the restart",
+                        "tags": [],
+                        "source": { "kind": "manual", "uri": null, "agent": "test" },
+                        "fact": null,
+                    }],
+                },
+                "requested_by": "test",
+            }))
+            .send()
+            .await
+            .expect("submit checkpoint job")
+            .error_for_status()
+            .expect("checkpoint job accepted");
+
+        wait_for_all_jobs_completed(&client, &base).await;
+        stop_daemon(&bin, &palace, &mut child).await;
+    }
+
+    // Round 2: a brand-new process, same palace directory — the drawer the
+    // first process checkpointed must still be there and still searchable.
+    {
+        let (mut child, info) = spawn_daemon_and_wait(&bin, &palace).await;
+        let base = format!("http://{}", info.bind_addr);
+
+        let hits: Vec<serde_json::Value> = client
+            .get(format!("{base}/api/search"))
+            .query(&[("q", "checkpoint written before"), ("limit", "10")])
+            .send()
+            .await
+            .expect("search request")
+            .json()
+            .await
+            .expect("search response is json");
+        assert!(
+            !hits.is_empty(),
+            "expected the drawer checkpointed before the restart to still be searchable"
+        );
+
+        stop_daemon(&bin, &palace, &mut child).await;
+    }
+}
+
 /// Spawn `memcastle serve` against `palace` and wait for it to register —
 /// i.e. for its listener to actually be up, not just the OS process to
 /// exist.

@@ -167,17 +167,31 @@ impl SurrealStore {
 }
 
 #[cfg(test)]
+impl SurrealStore {
+    /// A migrated, in-memory (`kv-mem`) store for other modules' unit
+    /// tests — e.g. `checkpoint::tests` — that need a real `SurrealStore`
+    /// without a tempdir-backed `SurrealKV` path. `pub(crate)` and
+    /// `cfg(test)`-gated: only test code anywhere in this crate should ever
+    /// construct a bare in-memory store this way, never a real interface.
+    pub(crate) async fn connect_memory_for_tests() -> Self {
+        let db = any::connect("memory").await.expect("connect");
+        db.use_ns("test").use_db("test").await.expect("use ns/db");
+        let store = Self { db };
+        store.migrate().await.expect("migrate");
+        store
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     async fn memory_store() -> SurrealStore {
         // `engine::any` dispatches the literal string `"memory"` to the
-        // `kv-mem` engine — no scheme prefix, unlike `surrealkv:`.
-        let db = any::connect("memory").await.expect("connect");
-        db.use_ns("test").use_db("test").await.expect("use ns/db");
-        let store = SurrealStore { db };
-        store.migrate().await.expect("migrate");
-        store
+        // `kv-mem` engine — no scheme prefix, unlike `surrealkv:`. Delegates
+        // to `connect_memory_for_tests` so this module and every other
+        // module's unit tests share one implementation.
+        SurrealStore::connect_memory_for_tests().await
     }
 
     #[tokio::test]

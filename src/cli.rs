@@ -44,6 +44,9 @@ pub enum Command {
     Search(SearchArgs),
     /// Submit a mining job for a directory.
     Mine(MineArgs),
+    /// Submit a checkpoint job: persist an already-classified batch of
+    /// memory writes.
+    Checkpoint(CheckpointArgs),
     /// Inspect and control jobs.
     #[command(subcommand)]
     Jobs(JobsCommand),
@@ -89,6 +92,20 @@ pub struct MineArgs {
     /// The wing to file mined drawers under. Defaults to the directory name.
     #[arg(long)]
     pub wing: Option<String>,
+}
+
+/// Arguments for `memcastle checkpoint`.
+#[derive(Debug, Args)]
+pub struct CheckpointArgs {
+    /// Path to a JSON file holding the checkpoint payload
+    /// (`{"items": [...]}`, matching `domain::CheckpointPayload`). Reads
+    /// from stdin if omitted.
+    #[arg(long)]
+    pub payload: Option<PathBuf>,
+    /// Escalate to `Priority::Critical`, preempting all other queued work —
+    /// reserved for save-before-crash situations, not routine checkpoints.
+    #[arg(long)]
+    pub emergency: bool,
 }
 
 /// `memcastle jobs` subcommands.
