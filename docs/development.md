@@ -4,9 +4,10 @@
 
 - The toolchain pinned in `rust-toolchain.toml`, installed via `mise` — run
   `mise install` once.
-- A C/C++ toolchain and `cmake` (RocksDB, the embedded storage engine, is
-  compiled from source on first build — this takes several minutes; later
-  builds are incremental and fast).
+
+That's it — SurrealKV, the embedded storage engine, is pure Rust, so unlike
+the RocksDB backend this project used before #47, there's no C/C++
+toolchain or `cmake` prerequisite to compile it.
 
 ## Everyday tasks
 
@@ -47,7 +48,7 @@ of settings and their environment-variable overrides.
 - **Unit tests** live next to the code they test (`domain::job`'s state
   machine, `config`'s validation, `store`'s migrations/persistence — the
   storage tests use SurrealDB's in-memory engine for speed, plus one test
-  against a real RocksDB directory to prove data survives a reconnect).
+  against a real SurrealKV directory to prove data survives a reconnect).
 - **Integration tests** (`tests/`) start a real daemon in-process against a
   tempdir palace and an OS-assigned port:
   - `tests/server.rs` — health, status, graceful shutdown.

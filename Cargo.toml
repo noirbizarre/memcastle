@@ -108,17 +108,19 @@ uuid = { version = "1.26.1", features = ["v4", "serde"] }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "time", "process", "sync"] }
 tokio-util = "0.7.19"
 
-# Storage. `kv-rocksdb` is the embedded engine; `protocol-ws` is the remote
-# one — both go through the single `engine::any` connection type so the rest
-# of the codebase never branches on which one is active. 3.x reworked the
-# serde/type surface: `bind`/`take` now require the driver's own
-# `SurrealValue` trait, not `serde::Deserialize` — `serde_json::Value` does
-# implement it, hence the JSON round-trip in `store::mod`'s
-# `bindable`/`take_rows` helpers rather than a `SurrealValue` derive on every
-# domain type. 3.2.4 shipped with a `surrealdb-core` version range that
-# resolves to a same-week internal crate split it doesn't build against;
-# 3.3.0 is the first release back in sync with it.
-surrealdb = { version = "3.3.0", features = ["kv-rocksdb", "protocol-ws"] }
+# Storage. `kv-surrealkv` is the embedded engine — pure Rust, so the default
+# build pulls no native C++ dependency or `cmake` step (see #47; the prior
+# `kv-rocksdb` did both). `protocol-ws` is the remote one — both go through
+# the single `engine::any` connection type so the rest of the codebase never
+# branches on which one is active. 3.x reworked the serde/type surface:
+# `bind`/`take` now require the driver's own `SurrealValue` trait, not
+# `serde::Deserialize` — `serde_json::Value` does implement it, hence the
+# JSON round-trip in `store::mod`'s `bindable`/`take_rows` helpers rather
+# than a `SurrealValue` derive on every domain type. 3.2.4 shipped with a
+# `surrealdb-core` version range that resolves to a same-week internal
+# crate split it doesn't build against; 3.3.0 is the first release back in
+# sync with it.
+surrealdb = { version = "3.3.0", features = ["kv-surrealkv", "protocol-ws"] }
 
 # HTTP API + MCP-over-HTTP share one axum router.
 axum = "0.8.9"
@@ -146,7 +148,7 @@ pretty_assertions = "1"
 # clients) — not a real dependency, so it stays out of `[dependencies]`.
 futures = "0.3.34"
 
-# `kv-mem` for fast in-memory storage tests; unions with the `kv-rocksdb`
+# `kv-mem` for fast in-memory storage tests; unions with the `kv-surrealkv`
 # feature above (Cargo merges features across dependency kinds), so tests can
 # also exercise real on-disk persistence via the main dependency's engine.
 [dev-dependencies.surrealdb]

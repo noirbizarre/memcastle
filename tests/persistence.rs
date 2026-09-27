@@ -1,5 +1,5 @@
 //! Proves data survives a daemon restart — at the process boundary, on
-//! purpose: SurrealDB's embedded RocksDB engine does not release its file
+//! purpose: SurrealDB's embedded SurrealKV engine does not release its file
 //! lock when a `Surreal` handle merely drops within the same process (see
 //! `store::tests`'s comment), so this spawns two genuinely separate
 //! `memcastle serve` processes against the same palace directory, which is
@@ -96,7 +96,7 @@ async fn spawn_daemon_and_wait(bin: &Path, palace: &Path) -> (Child, RuntimeInfo
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         // If the test panics before explicitly stopping the daemon, don't
-        // leak a process holding the palace's RocksDB lock forever.
+        // leak a process holding the palace's SurrealKV lock forever.
         .kill_on_drop(true)
         .spawn()
         .expect("spawn `memcastle serve`");
