@@ -126,7 +126,13 @@ jobs:
         # `windows-latest` than on Linux/macOS — matching the "~4x slower" this
         # project already lives with per `.github/codecov.yml`. The runner is
         # destroyed at the end of the job, so there is nothing to re-enable.
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
+        run: |
+          Set-MpPreference -DisableRealtimeMonitoring $true
+          # Belt-and-suspenders: Tamper Protection or a platform update
+          # could silently no-op the line above (already observed on the
+          # windows-11-arm runner image, per actions/runner-images#14326).
+          # Logging this turns a silent regression into a visible one.
+          Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled, IsTamperProtected, AntivirusEnabled | Format-List
 
       - name: Run tests (with coverage)
         run: |
