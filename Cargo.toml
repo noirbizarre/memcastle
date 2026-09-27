@@ -157,3 +157,19 @@ features = ["kv-mem"]
 
 [target."cfg(unix)".dependencies]
 libc = "0.2.189"
+
+[profile.dev]
+# Full DWARF/PDB debug info (type + variable info for interactive
+# debuggers) costs real compile/link time — especially PDB generation on
+# Windows — and this project doesn't lean on interactive debugging as a
+# workflow. Line tables alone still give RUST_BACKTRACE=full's file:line
+# backtraces.
+debug = "line-tables-only"
+
+[profile.test]
+# cargo test/nextest use this profile, not dev — mirror the same
+# trade-off so CI's llvm-cov-instrumented build gets the same win.
+# Coverage mapping (-C instrument-coverage) is embedded in its own LLVM
+# data section, independent of debuginfo level, so this doesn't affect
+# coverage accuracy (see rustc's instrument-coverage docs).
+debug = "line-tables-only"
