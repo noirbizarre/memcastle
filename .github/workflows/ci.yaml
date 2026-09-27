@@ -118,39 +118,6 @@ jobs:
         # destroyed at the end of the job, so there is nothing to re-enable.
         run: Set-MpPreference -DisableRealtimeMonitoring $true
 
-      - name: Cache vcpkg-built RocksDB/Snappy (Windows)
-        if: matrix.os.flag == 'windows'
-        uses: actions/cache@v4
-        with:
-          path: C:\vcpkg\installed
-          # vcpkg skips rebuilding a port already present here with a
-          # matching version/triplet — bump this suffix if the pin below
-          # (port, feature, or triplet) ever changes.
-          key: vcpkg-installed-rocksdb-snappy-x64-windows-static-md-v1
-
-      - name: Provide RocksDB/Snappy via vcpkg (Windows)
-        if: matrix.os.flag == 'windows'
-        shell: pwsh
-        # RocksDB compiles ~40 .cc files through many discrete cl.exe
-        # invocations, each paying real per-process overhead on Windows —
-        # the single largest reason this leg is slower than Linux/macOS
-        # (Defender, disabled above, is the other). windows-latest ships
-        # vcpkg preinstalled, so pointing the crate's build.rs at a prebuilt
-        # RocksDB/Snappy skips that step entirely, mirroring the
-        # ROCKSDB_LIB_DIR/SNAPPY_LIB_DIR shortcut documented for local
-        # development in docs/development.md.
-        run: |
-          vcpkg install rocksdb[snappy]:x64-windows-static-md
-          $installed = "C:\vcpkg\installed\x64-windows-static-md"
-          # static-md: static libs, dynamic CRT — matches the default
-          # (non +crt-static) x86_64-pc-windows-msvc target built here;
-          # only publish-release.yaml opts into a static CRT.
-          "ROCKSDB_LIB_DIR=$installed\lib" >> $env:GITHUB_ENV
-          "ROCKSDB_INCLUDE_DIR=$installed\include" >> $env:GITHUB_ENV
-          "ROCKSDB_STATIC=1" >> $env:GITHUB_ENV
-          "SNAPPY_LIB_DIR=$installed\lib" >> $env:GITHUB_ENV
-          "SNAPPY_STATIC=1" >> $env:GITHUB_ENV
-
       - name: Run tests (with coverage)
         run: |
           cargo llvm-cov nextest --profile ci
