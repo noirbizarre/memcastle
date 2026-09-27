@@ -15,7 +15,11 @@ use miette::MietteHandlerOpts;
 
 mod cli;
 
-use cli::{CheckpointArgs, Cli, Command, DiaryCommand, JobsCommand, MineArgs, SearchArgs};
+use cli::{
+    CheckpointArgs, Cli, Command, DiaryCommand, JobsCommand, MineArgs, RecallArgs, SearchArgs,
+    WakeUpArgs,
+};
+use memcastle::app::WakeUpBudget;
 use memcastle::client::DaemonClient;
 use memcastle::config::Config;
 use memcastle::domain::JobId;
@@ -82,6 +86,8 @@ async fn run(args: Cli) -> Result<()> {
         Command::Stop => cmd_stop(&config).await,
         Command::Restart => cmd_restart(&config).await,
         Command::Search(args) => cmd_search(&config, args).await,
+        Command::Recall(args) => cmd_recall(&config, args).await,
+        Command::WakeUp(args) => cmd_wake_up(&config, args).await,
         Command::Mine(args) => cmd_mine(&config, args).await,
         Command::Checkpoint(args) => cmd_checkpoint(&config, args).await,
         Command::Diary(cmd) => cmd_diary(&config, cmd).await,
@@ -150,6 +156,27 @@ async fn cmd_search(config: &Config, args: SearchArgs) -> Result<()> {
         )
         .await?;
     print_json(&hits);
+    Ok(())
+}
+
+async fn cmd_recall(config: &Config, args: RecallArgs) -> Result<()> {
+    let hits = client(config)
+        .recall(&args.query, args.wing.as_deref(), args.limit)
+        .await?;
+    print_json(&hits);
+    Ok(())
+}
+
+async fn cmd_wake_up(config: &Config, args: WakeUpArgs) -> Result<()> {
+    let default_budget = WakeUpBudget::default();
+    let budget = WakeUpBudget {
+        max_items: args.max_items.unwrap_or(default_budget.max_items),
+        max_bytes: args.max_bytes.unwrap_or(default_budget.max_bytes),
+    };
+    let context = client(config)
+        .wake_up(&args.agent_identity, args.wing.as_deref(), budget)
+        .await?;
+    print_json(&context);
     Ok(())
 }
 

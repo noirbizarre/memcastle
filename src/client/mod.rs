@@ -11,7 +11,7 @@ use std::path::Path;
 use serde::de::DeserializeOwned;
 use serde_json::json;
 
-use crate::app::StatusReport;
+use crate::app::{StatusReport, WakeUpBudget, WakeUpContext};
 use crate::domain::{CheckpointPayload, Drawer, Job, JobId, JobStatus};
 use crate::error::{Error, Result};
 use crate::server::lifecycle;
@@ -110,6 +110,57 @@ impl DaemonClient {
         }
         if let Some(room) = room {
             request = request.query(&[("room", room)]);
+        }
+        self.send(request).await
+    }
+
+    /// Retrieve palace content matching `query`, returned verbatim — the
+    /// recall-oriented counterpart to `search` — see `AppServices::recall`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
+    pub async fn recall(
+        &self,
+        query: &str,
+        wing: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<SearchHit>> {
+        let mut request = self
+            .http
+            .get(format!("{}/api/recall", self.base_url))
+            .query(&[("q", query), ("limit", &limit.to_string())]);
+        // Only append when set — same reasoning as `search`'s identical
+        // pattern: an absent query param, not an empty-string one, is what
+        // the server side treats as "no filter".
+        if let Some(wing) = wing {
+            request = request.query(&[("wing", wing)]);
+        }
+        self.send(request).await
+    }
+
+    /// Build `agent_identity`'s session-start context — see
+    /// `AppServices::wake_up`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
+    pub async fn wake_up(
+        &self,
+        agent_identity: &str,
+        wing: Option<&str>,
+        budget: WakeUpBudget,
+    ) -> Result<WakeUpContext> {
+        let mut request = self
+            .http
+            .get(format!("{}/api/wake-up", self.base_url))
+            .query(&[("agent_identity", agent_identity)])
+            .query(&[
+                ("max_items", budget.max_items.to_string()),
+                ("max_bytes", budget.max_bytes.to_string()),
+            ]);
+        if let Some(wing) = wing {
+            request = request.query(&[("wing", wing)]);
         }
         self.send(request).await
     }

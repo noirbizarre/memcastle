@@ -163,4 +163,40 @@ impl SurrealStore {
             .await?;
         super::take_rows(&mut response, 0)
     }
+
+    /// List up to `limit` of the most recent drawers written by a
+    /// `JobKind::Checkpoint` job, optionally scoped to one wing by name —
+    /// the store-level primitive behind `AppServices::wake_up`'s
+    /// `recent_highlights`. "Checkpoint-originated" is identified via
+    /// `provenance.job_id` referencing a job whose `kind.type` is
+    /// `"checkpoint"` (see `AppServices::wake_up`'s doc comment for why
+    /// this is chosen over a new tag convention: `checkpoint::run`
+    /// already sets `provenance.job_id` on every drawer it writes, so
+    /// this needs no new write path, only this read-side query). Same
+    /// "scope pushed into SurrealQL before `ORDER BY`/`LIMIT`" idiom as
+    /// `lexical_search` — see that method's doc comment for why fetching
+    /// unscoped and filtering in Rust would be wrong here too.
+    pub async fn list_checkpoint_originated_drawers(
+        &self,
+        wing: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Drawer>> {
+        let sql = format!(
+            "SELECT {DRAWER_COLUMNS} FROM drawer \
+             WHERE provenance.job_id != NULL \
+               AND provenance.job_id IN ( \
+                     SELECT VALUE record::id(id) FROM job WHERE kind.type = 'checkpoint') \
+               AND ($wing = NULL OR room IN ( \
+                     SELECT VALUE record::id(id) FROM room WHERE wing IN ( \
+                       SELECT VALUE record::id(id) FROM wing WHERE name = $wing))) \
+             ORDER BY created_at DESC LIMIT $limit"
+        );
+        let mut response = self
+            .db
+            .query(sql)
+            .bind(("wing", super::bindable(&wing)?))
+            .bind(("limit", limit))
+            .await?;
+        super::take_rows(&mut response, 0)
+    }
 }
