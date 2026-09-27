@@ -49,9 +49,6 @@ jobs:
           toolchain: ${{ steps.msrv.outputs.version }}
       - uses: Swatinem/rust-cache@v2
 
-      # This job is Linux-only, so mold always applies (see ci.yaml).
-      - uses: rui314/setup-mold@v1
-
       - uses: mozilla-actions/sccache-action@v0.0.11
 
       # `check`, not `test`: dev-dependencies routinely require a newer

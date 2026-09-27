@@ -30,12 +30,6 @@ env:
   # Back sccache with GitHub's own Actions cache instead of a separate
   # cloud bucket and its credentials.
   SCCACHE_GHA_ENABLED: "true"
-  # lld-link ships with windows-latest (via VS's bundled LLVM/Clang
-  # component) and links noticeably faster than the default link.exe;
-  # nextest builds one binary per test target, so this applies dozens of
-  # times per run. Scoped to this one target triple via the
-  # CARGO_TARGET_<triple>_LINKER var, so it's a no-op on Linux/macOS.
-  CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: lld-link
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -54,10 +48,6 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-
-      # mold links faster than GNU ld, and clippy still has to link every
-      # test/example target it type-checks.
-      - uses: rui314/setup-mold@v1
 
       - uses: mozilla-actions/sccache-action@v0.0.11
 
@@ -97,12 +87,6 @@ jobs:
         with:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
-
-      # mold is Linux-only (it doesn't support the Windows/macOS linkers),
-      # so it only ever applies to this one leg of the matrix.
-      - name: Install mold (faster Linux linker)
-        if: matrix.os.flag == 'linux'
-        uses: rui314/setup-mold@v1
 
       - uses: mozilla-actions/sccache-action@v0.0.11
 
