@@ -13,7 +13,7 @@
 //! `Surreal::query`/`bind`/`take` — the smallest, most stable part of the
 //! API — instead of type-coercion behaviour between chrono and the driver's
 //! own serde bridge that would otherwise have to be discovered by trial and
-//! (expensive, RocksDB-relinking) error.
+//! error.
 
 mod drawers;
 mod jobs;
@@ -71,7 +71,7 @@ const MIGRATIONS: &[&str] = &[include_str!("migrations/0001_init.surql")];
 /// Where the palace's data actually lives.
 #[derive(Debug, Clone)]
 pub enum Backend {
-    /// A local RocksDB directory — the default developer experience.
+    /// A local SurrealKV directory — the default developer experience.
     Embedded {
         /// The directory SurrealDB should own. Created if missing.
         path: PathBuf,
@@ -95,10 +95,10 @@ impl Backend {
     /// The endpoint string `engine::any::connect` dispatches on.
     fn endpoint(&self) -> String {
         match self {
-            // Single slash: `rocksdb:` is the scheme, what follows is the
-            // path verbatim (`rocksdb://` would make the first path segment
-            // look like a host).
-            Self::Embedded { path } => format!("rocksdb:{}", path.display()),
+            // Single colon, no slashes: `surrealkv:` is the scheme, what
+            // follows is the path verbatim (`surrealkv://` would make the
+            // first path segment look like a host).
+            Self::Embedded { path } => format!("surrealkv:{}", path.display()),
             Self::Remote { url, .. } => url.clone(),
         }
     }
@@ -171,7 +171,7 @@ mod tests {
 
     async fn memory_store() -> SurrealStore {
         // `engine::any` dispatches the literal string `"memory"` to the
-        // `kv-mem` engine — no scheme prefix, unlike `rocksdb:`.
+        // `kv-mem` engine — no scheme prefix, unlike `surrealkv:`.
         let db = any::connect("memory").await.expect("connect");
         db.use_ns("test").use_db("test").await.expect("use ns/db");
         let store = SurrealStore { db };
@@ -186,15 +186,18 @@ mod tests {
         store.migrate().await.expect("second migrate");
     }
 
-    // "Reopen the same RocksDB path in the same process" is deliberately
-    // NOT exercised here: SurrealDB's embedded engine does not release the
-    // OS-level RocksDB lock when a `Surreal` handle drops within the same
-    // process (confirmed empirically — it does not clear even after several
-    // seconds of retrying), so a unit test doing that would be testing a
-    // driver quirk, not `SurrealStore`. The real "does data survive a
-    // restart" guarantee is proven at the process boundary instead, in
-    // `tests/persistence.rs`, which spawns two genuinely separate
-    // `memcastle serve` processes against the same palace directory.
+    // "Reopen the same SurrealKV path in the same process" is deliberately
+    // NOT exercised here: SurrealDB's embedded engine does not release its
+    // on-disk lock file when a `Surreal` handle drops within the same
+    // process (confirmed empirically — a second `connect` against the same
+    // path fails immediately with "Database at <path>/LOCK is already
+    // locked by another process"; unlike the prior RocksDB backend, which
+    // hung/silently retried instead of erroring, SurrealKV at least fails
+    // fast), so a unit test doing that would be testing a driver quirk, not
+    // `SurrealStore`. The real "does data survive a restart" guarantee is
+    // proven at the process boundary instead, in `tests/persistence.rs`,
+    // which spawns two genuinely separate `memcastle serve` processes
+    // against the same palace directory.
     #[tokio::test]
     async fn a_drawer_can_be_created_and_listed_under_its_room() {
         let dir = tempfile::tempdir().expect("tempdir");

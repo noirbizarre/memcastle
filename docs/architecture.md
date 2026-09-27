@@ -58,18 +58,22 @@ into `store` or `jobs` directly — a `prek` hook greps for that.
 
 `store::SurrealStore` wraps a single `Surreal<Any>` connection
 (`surrealdb::engine::any`), which dispatches on a connection string's scheme
-at runtime: `rocksdb:<path>` for the embedded default, or a `ws://`/`wss://`
+at runtime: `surrealkv:<path>` for the embedded default, or a `ws://`/`wss://`
 URL for a remotely hosted instance. The rest of the codebase never branches
 on which backend is active — `config::StoreConfig` picks one, `Backend`
-carries it, `SurrealStore::connect` is the only place that cares.
+carries it, `SurrealStore::connect` is the only place that cares. SurrealKV
+(pure Rust) is the only embedded backend Phase 1 compiles — see
+`docs/adr/001-surrealkv-embedded-storage-engine.md`.
 
 Every read and write is hand-written SurrealQL (`db.query(...).bind(...)`)
 rather than the SDK's typed `create`/`select` helpers: datetimes cross the
 boundary as RFC3339 strings with explicit `<datetime>`/`<string>` casts, and
 a record's own `id` is always projected out via `record::id(id)`. That
 trades some verbosity for depending on only the smallest, most stable part
-of the driver's API — deliberate, given how expensive iterating against a
-RocksDB-linked crate is (a full rebuild is 10+ minutes).
+of the driver's API — its typed surface (`bind`/`take`'s `SurrealValue`
+requirement, the `Datetime`/`RecordId` wrapper types) has already changed
+shape across SDK majors once, and re-deriving it on every domain type would
+make the next such change a much bigger diff than a hand-written query is.
 
 ### Domain model
 

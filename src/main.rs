@@ -27,14 +27,15 @@ use memcastle::{Error, Result};
 /// main thread. Windows defaults that to 1 MiB (Unix: 8 MiB), and a debug
 /// build of `memcastle serve` reliably overflows it during startup:
 /// SurrealDB 3.x split what was one crate into a dozen thin layers
-/// (`surrealdb` -> `surrealdb-engine-local` -> `surrealdb-kvs` ->
-/// `surrealdb-kvs-rocksdb` -> ...), and an uninlined debug build pays for
-/// every one of those layers in stack frames on the way down. Spawning a
-/// thread with a generous, explicit stack size — and configuring the same
-/// for the runtime's worker threads, since a `tokio::spawn`'d task (the
-/// scheduler's dispatch loop, a running job) can hit the same call chain —
-/// sidesteps the platform default entirely rather than trying to outsmart
-/// exactly how deep it needs to be.
+/// (`surrealdb` -> `surrealdb-engine-local` -> `surrealdb-core` ->
+/// `surrealdb-kvs-any` -> `surrealdb-kvs-surrealkv` -> ...), and an
+/// uninlined debug build pays for every one of those layers in stack
+/// frames on the way down. Spawning a thread with a generous, explicit
+/// stack size — and configuring the same for the runtime's worker
+/// threads, since a `tokio::spawn`'d task (the scheduler's dispatch loop,
+/// a running job) can hit the same call chain — sidesteps the platform
+/// default entirely rather than trying to outsmart exactly how deep it
+/// needs to be.
 fn main() -> ExitCode {
     const STACK_SIZE: usize = 16 * 1024 * 1024;
     std::thread::Builder::new()

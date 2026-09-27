@@ -9,7 +9,7 @@ to expose MCP.** One daemon serves one palace; `memcastle serve`/`daemon` is
 the only command that does real work locally — every other subcommand
 (`status`, `search`, `mine`, `jobs ...`) is a thin HTTP client to that
 daemon, so a web dashboard could do everything the CLI does by calling the
-same API. Storage is unified in SurrealDB (embedded RocksDB for local dev,
+same API. Storage is unified in SurrealDB (embedded SurrealKV for local dev,
 remote for server deployments) — never a second datastore, never a separate
 vector index file to fall out of sync. See `docs/architecture.md` for the
 full rationale, including what this deliberately does *not* do yet.
@@ -30,7 +30,7 @@ checks is a comment, and it will be violated.
    mechanism** — a job's state survives a daemon restart. Enforced by
    `jobs::Scheduler::recover` and its exercise in `tests/server.rs`.
 4. **One daemon per palace, one writer** — `store` is only ever constructed
-   by `server::run`; nothing else opens the embedded RocksDB path directly.
+   by `server::run`; nothing else opens the embedded SurrealKV path directly.
    Enforced by the same architecture-guard hook as (1).
 
 ## Layout

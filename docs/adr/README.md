@@ -21,4 +21,5 @@ by editing the old one. The history is the value.
 
 ## Index
 
-<!-- - [ADR-001](001-....md) — ... -->
+- [ADR-001](001-surrealkv-embedded-storage-engine.md) — SurrealKV as the
+  only embedded storage engine in Phase 1

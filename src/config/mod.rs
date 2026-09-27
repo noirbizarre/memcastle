@@ -39,7 +39,7 @@ impl Default for PalaceConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum StoreConfig {
-    /// Embedded RocksDB under `palace.path` — the default developer setup.
+    /// Embedded SurrealKV under `palace.path` — the default developer setup.
     #[default]
     Embedded,
     /// A remotely hosted SurrealDB instance.
