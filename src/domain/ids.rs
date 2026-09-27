@@ -93,3 +93,7 @@ define_id!(
     /// Identifies an [`Entity`](super::Entity).
     EntityId
 );
+define_id!(
+    /// Identifies a [`Relationship`](super::Relationship).
+    RelationshipId
+);

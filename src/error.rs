@@ -56,6 +56,18 @@ pub enum Error {
         message: String,
     },
 
+    /// A knowledge-graph label (`Entity::kind` / `Relationship::predicate`)
+    /// was empty or whitespace-only after normalization.
+    #[error("{field} must not be empty")]
+    #[diagnostic(
+        code(memcastle::store::empty_label),
+        help("give the entity/relationship a short, descriptive label")
+    )]
+    EmptyLabel {
+        /// Which field was rejected (`"kind"` or `"predicate"`).
+        field: String,
+    },
+
     /// A job transition was rejected by the state machine.
     #[error("job {id} cannot go from {from:?} to {event:?}")]
     #[diagnostic(

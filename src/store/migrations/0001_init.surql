@@ -1,5 +1,5 @@
--- Migration 0001: palace hierarchy, the search index, the (unwired) knowledge
--- graph, and the durable job queue.
+-- Migration 0001: palace hierarchy, the search index, the knowledge graph,
+-- and the durable job queue.
 --
 -- `IF NOT EXISTS` on every DEFINE makes this file idempotent, so
 -- `Store::connect` can safely re-run it every startup instead of needing a
@@ -59,13 +59,16 @@ DEFINE ANALYZER IF NOT EXISTS drawer_text TOKENIZERS blank, class FILTERS lowerc
 DEFINE INDEX IF NOT EXISTS drawer_content_search ON TABLE drawer
     FIELDS content FULLTEXT ANALYZER drawer_text BM25 HIGHLIGHTS;
 
--- Knowledge-graph tables: schema-ready, not schema-wired. No mining or MCP
--- code populates these yet (see AGENTS notes / architecture doc) — they
--- exist so a later extraction pass is a code change, not a migration.
+-- Knowledge-graph tables, wired by `store::entities` (create/supersede/
+-- invalidate/list relationships). Mining/MCP still don't populate them —
+-- real extraction is #40's deliberate future work, not an oversight.
 DEFINE TABLE IF NOT EXISTS entity SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS name ON TABLE entity TYPE string;
 DEFINE FIELD IF NOT EXISTS kind ON TABLE entity TYPE string;
 DEFINE FIELD IF NOT EXISTS properties ON TABLE entity TYPE object FLEXIBLE;
+-- One (name, kind) pair per entity: mirrors `wing_palace_name` above so
+-- `create_entity`'s get-or-create is race-safe, not just "usually fine".
+DEFINE INDEX IF NOT EXISTS entity_name_kind ON TABLE entity FIELDS name, kind UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS relates_to TYPE RELATION IN entity OUT entity SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS predicate ON TABLE relates_to TYPE string;
