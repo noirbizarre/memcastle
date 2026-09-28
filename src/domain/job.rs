@@ -31,6 +31,30 @@ pub enum JobStatus {
     Cancelled,
 }
 
+/// Where a mining job reads its source material from — the seam Phase 5
+/// slots a non-filesystem reader (e.g. a Pi/OpenCode session-transcript
+/// reader) behind. `JobKind::Mine`'s shape (`source`, `wing`) never changes
+/// when a variant is added here, so neither `jobs::execute`'s dispatch nor
+/// the wire format's `"type": "mine"` tag needs to change either — adding a
+/// source kind means adding a variant here and a matching arm in
+/// `mining::run`, nothing more.
+///
+/// `#[serde(untagged)]`, combined with `#[serde(flatten)]` on the field that
+/// holds this in `JobKind::Mine`, is what keeps the on-the-wire shape
+/// exactly `{"type": "mine", "path": ..., "wing": ...}` — the same JSON
+/// every existing caller (CLI, MCP, HTTP, the persistence/server
+/// integration tests) already sends, with zero migration needed for the one
+/// source kind that exists today.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum MiningSource {
+    /// Walk a directory on disk, one drawer per file — today's only source.
+    Directory {
+        /// The directory to walk.
+        path: PathBuf,
+    },
+}
+
 /// What kind of work a job performs, and its parameters.
 ///
 /// `serde(tag = "type")` gives each variant a stable, greppable name in
@@ -47,10 +71,12 @@ pub enum JobKind {
         /// How many discrete steps to simulate.
         steps: u32,
     },
-    /// Mine a directory on disk into drawers.
+    /// Mine a source into drawers — see [`MiningSource`] for what "a
+    /// source" can be.
     Mine {
-        /// The directory to walk.
-        path: PathBuf,
+        /// Where to read from.
+        #[serde(flatten)]
+        source: MiningSource,
         /// The wing to file mined drawers under (defaults to the directory name).
         wing: Option<String>,
     },
@@ -485,5 +511,35 @@ mod tests {
     fn an_out_of_range_priority_value_is_rejected() {
         let err = Priority::try_from(42).unwrap_err();
         assert_eq!(err, InvalidPriority(42));
+    }
+
+    #[test]
+    fn mine_job_kind_serializes_to_the_same_wire_shape_as_before_the_source_seam() {
+        let kind = JobKind::Mine {
+            source: MiningSource::Directory {
+                path: "/tmp/fixture".into(),
+            },
+            wing: Some("docs".to_string()),
+        };
+
+        // `MiningSource` must stay invisible on the wire: existing callers
+        // (CLI, MCP, HTTP, the persistence/server integration tests) all
+        // send a flat `path`/`wing` pair, not a nested `source` object.
+        let json = serde_json::to_value(&kind).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"type": "mine", "path": "/tmp/fixture", "wing": "docs"})
+        );
+
+        // And that exact flat shape must still deserialize back, since it's
+        // what every existing caller already has on the wire today.
+        let round_tripped: JobKind = serde_json::from_value(json).unwrap();
+        assert!(matches!(
+            round_tripped,
+            JobKind::Mine {
+                source: MiningSource::Directory { .. },
+                wing: Some(ref w)
+            } if w == "docs"
+        ));
     }
 }

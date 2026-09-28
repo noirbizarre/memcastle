@@ -1,4 +1,4 @@
-//! The mining engine: turns a directory on disk into drawers.
+//! The mining engine: turns a mining source into drawers.
 //!
 //! Intentionally the simplest thing that is still real mining, not a stub:
 //! one drawer per file, verbatim (no chunking, no entity extraction, no
@@ -7,7 +7,14 @@
 //! *pipeline* — job submission -> scheduler -> checkpointed execution ->
 //! durable writes -> lexical search over the result — is genuinely
 //! end-to-end, so later chunking/extraction phases slot into
-//! [`run`]'s per-file loop rather than requiring a rewrite of it.
+//! [`mine_directory`]'s per-file loop rather than requiring a rewrite of it.
+//!
+//! [`run`] is the seam Phase 5 slots a non-filesystem reader behind: it
+//! dispatches on `domain::MiningSource`, today's only variant
+//! (`Directory`) routing to [`mine_directory`] below. Adding a source kind
+//! means adding a `MiningSource` variant (`domain::job`) and a matching arm
+//! here — `jobs::execute`'s dispatch, which just forwards `JobKind::Mine`'s
+//! fields through unchanged, never needs to change.
 
 use std::path::{Path, PathBuf};
 
@@ -16,7 +23,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use crate::domain::Job;
-use crate::domain::{Drawer, DrawerId, Provenance, Source, SourceKind};
+use crate::domain::{Drawer, DrawerId, MiningSource, Provenance, Source, SourceKind};
 use crate::error::Result;
 use crate::jobs::{JobContext, JobOutcome};
 use crate::store::SurrealStore;
@@ -45,6 +52,24 @@ const MAX_FILE_BYTES: u64 = 256 * 1024;
 /// visible progress is worse than one that stops early with a clear count).
 const MAX_FILES: usize = 2_000;
 
+/// Mine `source` into `wing`, checking in with `ctx` between units of work
+/// so the job can be paused, resumed, or cancelled.
+///
+/// # Errors
+///
+/// Returns an error if `source` cannot be read, or if a store write fails.
+pub async fn run(
+    store: &SurrealStore,
+    ctx: &JobContext,
+    job: &mut Job,
+    source: &MiningSource,
+    wing: Option<&str>,
+) -> Result<JobOutcome> {
+    match source {
+        MiningSource::Directory { path } => mine_directory(store, ctx, job, path, wing).await,
+    }
+}
+
 /// Mine `path` into `wing` (or a wing named after `path`'s final component),
 /// one drawer per file, checking in with `ctx` between files so the job can
 /// be paused, resumed, or cancelled.
@@ -52,7 +77,7 @@ const MAX_FILES: usize = 2_000;
 /// # Errors
 ///
 /// Returns an error if `path` cannot be walked, or if a store write fails.
-pub async fn run(
+async fn mine_directory(
     store: &SurrealStore,
     ctx: &JobContext,
     job: &mut Job,

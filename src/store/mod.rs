@@ -664,7 +664,9 @@ mod tests {
 
         let mine_job = crate::domain::Job::new(
             crate::domain::JobKind::Mine {
-                path: "/tmp".into(),
+                source: crate::domain::MiningSource::Directory {
+                    path: "/tmp".into(),
+                },
                 wing: None,
             },
             crate::domain::Priority::Background,
