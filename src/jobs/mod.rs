@@ -249,6 +249,10 @@ impl Scheduler {
             JobKind::Audit { scope } => {
                 crate::audit::run(&self.store, &ctx, &mut job, scope.as_deref()).await
             }
+            JobKind::Repair {
+                dry_run,
+                based_on_job,
+            } => crate::repair::run(&self.store, &ctx, &mut job, dry_run, based_on_job).await,
         };
 
         self.controls.remove(&job.id);

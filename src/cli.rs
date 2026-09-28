@@ -58,6 +58,10 @@ pub enum Command {
     Checkpoint(CheckpointArgs),
     /// Submit an audit job: a read-only palace consistency report.
     Audit(AuditArgs),
+    /// Submit a repair job: a narrow, dry-run-first set of destructive
+    /// palace-consistency fixes (see `memcastle::repair`'s module doc for
+    /// exactly what it does).
+    Repair(RepairArgs),
     /// Read or write diary entries scoped to an agent identity.
     #[command(subcommand)]
     Diary(DiaryCommand),
@@ -165,6 +169,24 @@ pub struct AuditArgs {
     /// palace-wide regardless of this (see `memcastle::audit`'s module doc).
     #[arg(long)]
     pub scope: Option<String>,
+}
+
+/// Arguments for `memcastle repair`.
+#[derive(Debug, Args)]
+pub struct RepairArgs {
+    /// Actually perform the planned actions. Without this flag, repair
+    /// always runs in dry-run mode: it reports what it would do without
+    /// mutating anything (see `memcastle::repair`'s module doc).
+    #[arg(long, conflicts_with = "dry_run")]
+    pub apply: bool,
+    /// Explicit dry run — already the default without `--apply`; only
+    /// useful to make a script's intent unambiguous.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Restrict repair actions to what a specific prior `memcastle audit`
+    /// job (its job id) found, rather than scanning the whole palace fresh.
+    #[arg(long)]
+    pub based_on_job: Option<String>,
 }
 
 /// `memcastle diary` subcommands.

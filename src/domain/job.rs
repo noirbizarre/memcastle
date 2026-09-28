@@ -74,6 +74,24 @@ pub enum JobKind {
         /// comment for why a partial consistency scan would be misleading.
         scope: Option<String>,
     },
+    /// A narrow, dry-run-first set of destructive palace-consistency
+    /// fixes — see `crate::repair`'s module doc for exactly what it does
+    /// (only orphan-drawer removal) and why it's scoped down from the
+    /// issue that requested it (a second "fail stuck jobs" action turned
+    /// out to be redundant with `jobs::Scheduler::recover`).
+    Repair {
+        /// When `true` (the default at every CLI/API entry point), only
+        /// record what would be done in the report — never mutate
+        /// anything. `false` performs exactly the actions a prior dry run
+        /// would have reported, no more.
+        dry_run: bool,
+        /// Restrict actions to what a specific prior [`JobKind::Audit`]
+        /// job found, rather than a fresh palace-wide scan alone. Only
+        /// ever narrows the live scan's findings — see
+        /// `crate::repair::run`'s doc comment for why a destructive repair
+        /// never trusts a stored report on its own.
+        based_on_job: Option<JobId>,
+    },
 }
 
 /// A snapshot of how far along a job is.

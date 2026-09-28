@@ -130,7 +130,7 @@ operations — `status`, job listing/control (`list_jobs`, `pause_job`,
 `resume_job`, `cancel_job`, `retry_job`), and job submission
 (`submit_mine`, `submit_demo`) — are not session-scoped memory operations
 and are never gated by mode: a disabled session can still see daemon/job
-state and submit background work. `Audit`/`Repair` (planned) fall on the
+state and submit background work. `Audit`/`Repair` fall on the
 administrative side of this line too, unless a future issue explicitly
 reclassifies one of them.
 
@@ -194,10 +194,10 @@ paused or crash-recovered job knows where to continue from, and every job
 kind has one (defaulted to `{}`). `Job.result`, added for `JobKind::Audit`, is
 a separate field: the final, once-set output of a job whose whole point is to
 produce a report rather than a resume position. Most job kinds never set it;
-`Audit` (and, per that issue's design decision, the future `Repair`) does, on
-completion. Keeping these as two fields — rather than overloading
-`checkpoint` for both purposes — means "where do I read a job's progress
-from" and "where do I read what it found" never share one ambiguous field.
+`Audit` and `Repair` do, on completion. Keeping these as two fields — rather
+than overloading `checkpoint` for both purposes — means "where do I read a
+job's progress from" and "where do I read what it found" never share one
+ambiguous field.
 
 **`JobKind::Audit`** (`src/audit`) is a read-only palace consistency report,
 scoped to what's structurally possible given the single-SurrealDB design
@@ -211,6 +211,19 @@ there is no lease TTL yet to call any of them "stale"), and drawers with no
 never a defect). Unlike `mining`/`checkpoint`, it does not chunk its work
 with a per-unit checkpoint: a full scan is cheap and idempotent, so there is
 no meaningful partial state to resume from.
+
+**`JobKind::Repair`** (`src/repair`) turns a subset of `Audit`'s findings
+into an actual fix: dry-run-first (`dry_run = true` is the default at every
+CLI/API entry point, and only ever records planned actions in the report
+without mutating anything), and deliberately narrower than the issue that
+requested it — only orphan-drawer removal shipped. A second candidate
+action, failing jobs stuck beyond an attempt-budget heuristic, turned out to
+be redundant with what `Scheduler::recover` already does at every daemon
+startup and was dropped rather than implemented for symmetry's sake (see
+`src/repair/mod.rs`'s module doc for the full reasoning). `based_on_job`
+narrows a repair run to what a specific prior audit job found, but never
+replaces a fresh live scan — a destructive operation must never act on a
+report that might have gone stale since it was generated.
 
 ## The daemon lifecycle
 

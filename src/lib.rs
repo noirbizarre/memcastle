@@ -30,6 +30,7 @@ pub mod error;
 pub mod jobs;
 pub mod mcp;
 pub mod mining;
+pub mod repair;
 pub mod search;
 pub mod server;
 pub mod store;

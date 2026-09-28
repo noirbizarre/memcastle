@@ -299,6 +299,36 @@ impl AppServices {
             .await
     }
 
+    /// Submit a repair job — see `crate::repair`'s module doc for exactly
+    /// what this does (only orphan-drawer removal) and why a second action
+    /// named in that issue was dropped as redundant with
+    /// `jobs::Scheduler::recover`.
+    ///
+    /// Runs at [`Priority::Normal`], same as `submit_audit`. **Not** gated
+    /// by [`MemoryMode`] — administrative, same reasoning as
+    /// `submit_audit`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the job cannot be persisted.
+    pub async fn submit_repair(
+        &self,
+        dry_run: bool,
+        based_on_job: Option<JobId>,
+        requested_by: impl Into<String>,
+    ) -> Result<Job> {
+        self.scheduler
+            .submit(
+                JobKind::Repair {
+                    dry_run,
+                    based_on_job,
+                },
+                Priority::Normal,
+                requested_by,
+            )
+            .await
+    }
+
     /// List jobs, optionally filtered to one status.
     ///
     /// # Errors

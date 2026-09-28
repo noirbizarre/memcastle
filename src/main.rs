@@ -17,7 +17,7 @@ mod cli;
 
 use cli::{
     AuditArgs, CheckpointArgs, Cli, Command, DiaryCommand, JobsCommand, MineArgs, RecallArgs,
-    SearchArgs, WakeUpArgs,
+    RepairArgs, SearchArgs, WakeUpArgs,
 };
 use memcastle::app::WakeUpBudget;
 use memcastle::client::DaemonClient;
@@ -91,6 +91,7 @@ async fn run(args: Cli) -> Result<()> {
         Command::Mine(args) => cmd_mine(&config, args).await,
         Command::Checkpoint(args) => cmd_checkpoint(&config, args).await,
         Command::Audit(args) => cmd_audit(&config, args).await,
+        Command::Repair(args) => cmd_repair(&config, args).await,
         Command::Diary(cmd) => cmd_diary(&config, cmd).await,
         Command::Jobs(jobs) => cmd_jobs(&config, jobs).await,
         Command::Wings | Command::Rooms | Command::Drawers | Command::Maintenance => {
@@ -216,6 +217,17 @@ async fn cmd_checkpoint(config: &Config, args: CheckpointArgs) -> Result<()> {
 
 async fn cmd_audit(config: &Config, args: AuditArgs) -> Result<()> {
     let job = client(config).submit_audit(args.scope).await?;
+    print_json(&job);
+    Ok(())
+}
+
+async fn cmd_repair(config: &Config, args: RepairArgs) -> Result<()> {
+    // Parsed client-side, before ever contacting the daemon — same
+    // reasoning as `parse_job_id`'s other call sites in `cmd_jobs`.
+    let based_on_job = args.based_on_job.as_deref().map(parse_job_id).transpose()?;
+    let job = client(config)
+        .submit_repair(!args.apply, based_on_job)
+        .await?;
     print_json(&job);
     Ok(())
 }
