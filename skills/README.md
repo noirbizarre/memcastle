@@ -37,6 +37,11 @@ skills/
                              versus a general checkpoint item.
 ```
 
+## Non-goals
+
+No skill registry, package manager, or build step — a skill is plain text (or
+a small bundle of text + examples), nothing more.
+
 ## Status
 
 No skill content exists yet. Authoring `search-before-answer` and
