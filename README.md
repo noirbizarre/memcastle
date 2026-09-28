@@ -22,13 +22,12 @@
 
 ---
 
-Running several AI coding agents (OpenCode, Claude Code, Cursor, ...) side by
-side usually means each one gets its own, disconnected memory — or none at
-all. MemCastle is a single daemon per project ("palace") that all of them
-talk to over MCP or HTTP, so a mining run, a search, or a saved decision from
-one agent is immediately visible to every other agent and to the CLI, backed
-by one SurrealDB store instead of a pile of SQLite files and a separate
-vector index to keep in sync.
+Running several AI coding agents (OpenCode, Claude Code, Cursor, ...) side by side
+usually means each one gets its own, disconnected memory — or none at all.
+MemCastle is a single daemon per project ("palace") that all of them talk to over MCP or HTTP,
+so a mining run, a search, or a saved decision from one agent
+is immediately visible to every other agent and to the CLI,
+backed by one SurrealDB store instead of a pile of SQLite files and a separate vector index to keep in sync.
 
 ```bash
 memcastle serve &          # one daemon per palace
@@ -50,8 +49,7 @@ brew install noirbizarre/homebrew-tap/memcastle
 paru -S memcastle-bin  # or your AUR helper of choice
 ```
 
-Or download a binary for your platform from the
-[latest release](https://github.com/noirbizarre/memcastle/releases/latest).
+Or download a binary for your platform from the [latest release](https://github.com/noirbizarre/memcastle/releases/latest).
 
 ## Usage
 
