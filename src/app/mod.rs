@@ -274,6 +274,31 @@ impl AppServices {
             .await
     }
 
+    /// Submit a read-only palace consistency audit, optionally narrowing its
+    /// embedding-count fields to one wing by name (see `crate::audit`'s
+    /// module doc for exactly what it checks).
+    ///
+    /// Runs at [`Priority::Normal`] — above background mining, below a
+    /// checkpoint's `High`/`Critical` (see `submit_mine`'s doc comment,
+    /// which already anticipates this). **Not** gated by [`MemoryMode`]:
+    /// like `submit_mine`/`submit_demo`, this is an administrative/
+    /// daemon-level operation, not a session-scoped memory read — see
+    /// `domain::MemoryMode`'s module doc, which already lists Audit as
+    /// administrative pending a future reclassification.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the job cannot be persisted.
+    pub async fn submit_audit(
+        &self,
+        scope: Option<String>,
+        requested_by: impl Into<String>,
+    ) -> Result<Job> {
+        self.scheduler
+            .submit(JobKind::Audit { scope }, Priority::Normal, requested_by)
+            .await
+    }
+
     /// List jobs, optionally filtered to one status.
     ///
     /// # Errors

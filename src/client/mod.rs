@@ -223,6 +223,21 @@ impl DaemonClient {
         .await
     }
 
+    /// Submit a read-only palace consistency audit — see
+    /// `AppServices::submit_audit`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
+    pub async fn submit_audit(&self, scope: Option<String>) -> Result<Job> {
+        self.send(
+            self.http
+                .post(format!("{}/api/jobs", self.base_url))
+                .json(&json!({ "type": "audit", "scope": scope, "requested_by": "cli" })),
+        )
+        .await
+    }
+
     /// Submit a synthetic demo job (see `domain::job::JobKind::Demo`) —
     /// useful for exercising the scheduler end-to-end without a real
     /// directory to mine.

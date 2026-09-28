@@ -16,8 +16,8 @@ use miette::MietteHandlerOpts;
 mod cli;
 
 use cli::{
-    CheckpointArgs, Cli, Command, DiaryCommand, JobsCommand, MineArgs, RecallArgs, SearchArgs,
-    WakeUpArgs,
+    AuditArgs, CheckpointArgs, Cli, Command, DiaryCommand, JobsCommand, MineArgs, RecallArgs,
+    SearchArgs, WakeUpArgs,
 };
 use memcastle::app::WakeUpBudget;
 use memcastle::client::DaemonClient;
@@ -90,6 +90,7 @@ async fn run(args: Cli) -> Result<()> {
         Command::WakeUp(args) => cmd_wake_up(&config, args).await,
         Command::Mine(args) => cmd_mine(&config, args).await,
         Command::Checkpoint(args) => cmd_checkpoint(&config, args).await,
+        Command::Audit(args) => cmd_audit(&config, args).await,
         Command::Diary(cmd) => cmd_diary(&config, cmd).await,
         Command::Jobs(jobs) => cmd_jobs(&config, jobs).await,
         Command::Wings | Command::Rooms | Command::Drawers | Command::Maintenance => {
@@ -209,6 +210,12 @@ async fn cmd_checkpoint(config: &Config, args: CheckpointArgs) -> Result<()> {
     let payload: memcastle::domain::CheckpointPayload = serde_json::from_str(&raw)
         .map_err(|source| Error::config(format!("invalid checkpoint payload: {source}")))?;
     let job = client(config).checkpoint(payload, args.emergency).await?;
+    print_json(&job);
+    Ok(())
+}
+
+async fn cmd_audit(config: &Config, args: AuditArgs) -> Result<()> {
+    let job = client(config).submit_audit(args.scope).await?;
     print_json(&job);
     Ok(())
 }

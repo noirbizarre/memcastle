@@ -188,6 +188,30 @@ that checkpoint and continues from there, not from zero.
 job left `Running` by an unclean shutdown is re-queued if its attempt budget
 allows, or marked `Failed` otherwise — never silently forgotten.
 
+**`checkpoint` vs `result`.** `Job.checkpoint` is handler-defined *resume*
+state (`mining`/`checkpoint`'s per-item `{"next_index": n}`) — it exists so a
+paused or crash-recovered job knows where to continue from, and every job
+kind has one (defaulted to `{}`). `Job.result`, added for `JobKind::Audit`, is
+a separate field: the final, once-set output of a job whose whole point is to
+produce a report rather than a resume position. Most job kinds never set it;
+`Audit` (and, per that issue's design decision, the future `Repair`) does, on
+completion. Keeping these as two fields — rather than overloading
+`checkpoint` for both purposes — means "where do I read a job's progress
+from" and "where do I read what it found" never share one ambiguous field.
+
+**`JobKind::Audit`** (`src/audit`) is a read-only palace consistency report,
+scoped to what's structurally possible given the single-SurrealDB design
+described above — not a port of `pi-palace`'s `/palace-audit` feature list,
+most of which addresses a split-store desync failure mode that doesn't exist
+here. It checks for orphan drawers (a `room` reference that no longer
+resolves), dangling `provenance.job_id` references, `Failed` jobs that have
+exhausted their attempt budget, a plain `Running`-job count (informational —
+there is no lease TTL yet to call any of them "stale"), and drawers with no
+`embedding` (informational — semantic search doesn't exist yet, so this is
+never a defect). Unlike `mining`/`checkpoint`, it does not chunk its work
+with a per-unit checkpoint: a full scan is cheap and idempotent, so there is
+no meaningful partial state to resume from.
+
 ## The daemon lifecycle
 
 `memcastle serve`/`daemon` runs in the **foreground** (matching the

@@ -246,6 +246,9 @@ impl Scheduler {
             JobKind::Checkpoint { payload } => {
                 crate::checkpoint::run(&self.store, &ctx, &mut job, &payload).await
             }
+            JobKind::Audit { scope } => {
+                crate::audit::run(&self.store, &ctx, &mut job, scope.as_deref()).await
+            }
         };
 
         self.controls.remove(&job.id);

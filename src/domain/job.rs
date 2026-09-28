@@ -63,6 +63,17 @@ pub enum JobKind {
         /// The items to write, in order.
         payload: CheckpointPayload,
     },
+    /// A read-only palace consistency report (see `crate::audit`'s module
+    /// doc for exactly what it checks and why — only what's structurally
+    /// possible in a single-SurrealDB design, not a port of `pi-palace`'s
+    /// `/palace-audit` feature list).
+    Audit {
+        /// Restrict the report's in-scope drawer counts to one wing by
+        /// name. Orphan-drawer and dangling-provenance findings are always
+        /// palace-wide regardless of this — see `crate::audit::run`'s doc
+        /// comment for why a partial consistency scan would be misleading.
+        scope: Option<String>,
+    },
 }
 
 /// A snapshot of how far along a job is.
@@ -209,6 +220,15 @@ pub struct Job {
     /// generic resume-state every job kind — including a `Checkpoint` job
     /// itself — carries here.
     pub checkpoint: Value,
+    /// The final output of a job whose whole point is to produce a report —
+    /// currently only [`JobKind::Audit`] (and, per that issue's design
+    /// decision, the future `Repair`). Deliberately a separate field from
+    /// [`Self::checkpoint`], not a reuse of it: `checkpoint` is documented
+    /// as handler-defined *resume* state, and stuffing a final report in
+    /// there would be exactly the "abuse of a field's stated purpose" this
+    /// split avoids. `None` for every job kind that has no report to give
+    /// (`Demo`/`Mine`/`Checkpoint` never set this).
+    pub result: Option<Value>,
     /// The terminal error, when `status == Failed`.
     pub error: Option<String>,
     /// The scheduler instance currently holding this job, if `Running`.
@@ -241,6 +261,7 @@ impl Job {
             // what lets a handler's own `DEFINE FIELD checkpoint.foo` ever
             // be added later without an `option` wrapper in the way).
             checkpoint: serde_json::json!({}),
+            result: None,
             error: None,
             lease_owner: None,
             lease_expires_at: None,

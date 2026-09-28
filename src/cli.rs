@@ -56,6 +56,8 @@ pub enum Command {
     /// Submit a checkpoint job: persist an already-classified batch of
     /// memory writes.
     Checkpoint(CheckpointArgs),
+    /// Submit an audit job: a read-only palace consistency report.
+    Audit(AuditArgs),
     /// Read or write diary entries scoped to an agent identity.
     #[command(subcommand)]
     Diary(DiaryCommand),
@@ -153,6 +155,16 @@ pub struct CheckpointArgs {
     /// reserved for save-before-crash situations, not routine checkpoints.
     #[arg(long)]
     pub emergency: bool,
+}
+
+/// Arguments for `memcastle audit`.
+#[derive(Debug, Args)]
+pub struct AuditArgs {
+    /// Restrict the report's embedding-count fields to one wing by name.
+    /// Orphan-drawer and dangling-provenance findings are always
+    /// palace-wide regardless of this (see `memcastle::audit`'s module doc).
+    #[arg(long)]
+    pub scope: Option<String>,
 }
 
 /// `memcastle diary` subcommands.

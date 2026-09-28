@@ -73,6 +73,19 @@ impl SurrealStore {
         super::take_rows(&mut response, 0)
     }
 
+    /// List every drawer in the palace, across every room, newest first.
+    ///
+    /// Deliberately unscoped — unlike every other drawer read in this file,
+    /// which takes a `room`/`wing` filter — because `audit::run` needs a
+    /// palace-wide view regardless of its own optional wing scope: orphan
+    /// and dangling-provenance detection would silently miss real findings
+    /// outside whatever scope was requested (see that module's doc comment).
+    pub async fn list_all_drawers(&self) -> Result<Vec<Drawer>> {
+        let sql = format!("SELECT {DRAWER_COLUMNS} FROM drawer ORDER BY created_at DESC");
+        let mut response = self.db.query(sql).await?;
+        super::take_rows(&mut response, 0)
+    }
+
     /// The total number of drawers in the palace, for status reporting.
     pub async fn count_drawers(&self) -> Result<u64> {
         #[derive(Deserialize)]
