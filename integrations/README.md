@@ -42,6 +42,12 @@ this is not forced into Rust, and there is no shared plugin runtime or package
 manager across them. A MemCastle release can still ship the complete
 integration ecosystem from this one repository.
 
+## Non-goals
+
+No plugin marketplace, no dynamic plugin runtime, no package manager across
+ecosystems — this is plain directories with markdown and each ecosystem's own
+native tooling, nothing more.
+
 ## Status
 
 No integration code exists yet. Tracked as GitHub issues under the
