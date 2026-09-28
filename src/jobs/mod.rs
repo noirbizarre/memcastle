@@ -240,8 +240,8 @@ impl Scheduler {
 
         let outcome = match job.kind.clone() {
             JobKind::Demo { steps } => demo::run(&self.store, &ctx, &mut job, steps).await,
-            JobKind::Mine { path, wing } => {
-                crate::mining::run(&self.store, &ctx, &mut job, &path, wing.as_deref()).await
+            JobKind::Mine { source, wing } => {
+                crate::mining::run(&self.store, &ctx, &mut job, &source, wing.as_deref()).await
             }
             JobKind::Checkpoint { payload } => {
                 crate::checkpoint::run(&self.store, &ctx, &mut job, &payload).await

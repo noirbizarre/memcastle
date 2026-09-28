@@ -18,7 +18,7 @@ use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 
 use crate::app::{AppServices, WakeUpBudget};
-use crate::domain::{JobId, JobKind, JobStatus};
+use crate::domain::{JobId, JobKind, JobStatus, MiningSource};
 
 pub use error::ApiError;
 pub use mode::ModeHeader;
@@ -230,7 +230,8 @@ async fn submit_job(
     Json(body): Json<SubmitJobBody>,
 ) -> Result<impl IntoResponse, ApiError> {
     let job = match body.kind {
-        JobKind::Mine { path, wing } => {
+        JobKind::Mine { source, wing } => {
+            let MiningSource::Directory { path } = source;
             // Not gated by `mode` — mining is not in this issue's scope
             // (see `MemoryMode`'s doc comment on daemon vs memory ops).
             state.app.submit_mine(path, wing, body.requested_by).await?

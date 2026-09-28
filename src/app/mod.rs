@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::domain::{
-    CheckpointPayload, Drawer, DrawerId, Job, JobId, JobKind, JobStatus, MemoryMode, Priority,
-    Provenance, Source, SourceKind,
+    CheckpointPayload, Drawer, DrawerId, Job, JobId, JobKind, JobStatus, MemoryMode, MiningSource,
+    Priority, Provenance, Source, SourceKind,
 };
 use crate::error::{Error, Result};
 use crate::jobs::Scheduler;
@@ -201,7 +201,10 @@ impl AppServices {
     ) -> Result<Job> {
         self.scheduler
             .submit(
-                JobKind::Mine { path, wing },
+                JobKind::Mine {
+                    source: MiningSource::Directory { path },
+                    wing,
+                },
                 Priority::Background,
                 requested_by,
             )
