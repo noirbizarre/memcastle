@@ -17,7 +17,7 @@ use super::SurrealStore;
 /// for why datetimes are cast to strings and `id` through `record::id()`.
 const JOB_COLUMNS: &str = "record::id(id) AS id, kind, status, priority, \
      <string>created_at AS created_at, started_at, completed_at, requested_by, progress, \
-     attempt, max_attempts, checkpoint, error, lease_owner, lease_expires_at";
+     attempt, max_attempts, checkpoint, result, error, lease_owner, lease_expires_at";
 
 impl SurrealStore {
     /// Insert a new job, or overwrite an existing one at the same id.
@@ -34,8 +34,8 @@ impl SurrealStore {
                  created_at = <datetime>$created_at, started_at = $started_at, \
                  completed_at = $completed_at, requested_by = $requested_by, \
                  progress = $progress, attempt = $attempt, max_attempts = $max_attempts, \
-                 checkpoint = $checkpoint, error = $error, lease_owner = $lease_owner, \
-                 lease_expires_at = $lease_expires_at",
+                 checkpoint = $checkpoint, result = $result, error = $error, \
+                 lease_owner = $lease_owner, lease_expires_at = $lease_expires_at",
             )
             .bind(("id", job.id.to_string()))
             .bind(("kind", super::bindable(&job.kind)?))
@@ -49,6 +49,7 @@ impl SurrealStore {
             .bind(("attempt", job.attempt))
             .bind(("max_attempts", job.max_attempts))
             .bind(("checkpoint", job.checkpoint.clone()))
+            .bind(("result", job.result.clone()))
             .bind(("error", job.error.clone()))
             .bind(("lease_owner", job.lease_owner.clone()))
             .bind((

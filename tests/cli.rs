@@ -13,6 +13,7 @@ fn help_lists_the_top_level_commands() {
         .success()
         .stdout(contains("serve"))
         .stdout(contains("mine"))
+        .stdout(contains("audit"))
         .stdout(contains("jobs"))
         .stdout(contains("recall"))
         .stdout(contains("wake-up"));

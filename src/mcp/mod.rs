@@ -155,6 +155,14 @@ struct MineArgs {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct AuditArgs {
+    /// Restrict the report's embedding-count fields to one wing by name.
+    /// Orphan-drawer and dangling-provenance findings are always
+    /// palace-wide regardless of this (see `memcastle::audit`'s module doc).
+    scope: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct SetModeArgs {
     /// This session's memory mode from now on: `"full"` (default — reads
     /// and writes both proceed), `"read_only"` (reads proceed, writes
@@ -392,6 +400,27 @@ impl McpTools {
     }
 
     #[tool(
+        description = "Submit a read-only palace consistency audit; returns the job id \
+                        immediately — poll memcastle_jobs_list or GET /api/jobs/{id} for the \
+                        report, which lands in the job's `result` field once completed"
+    )]
+    async fn memcastle_audit(
+        &self,
+        Parameters(args): Parameters<AuditArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let requested_by = "mcp".to_string();
+        match self.app.submit_audit(args.scope, requested_by).await {
+            Ok(job) => {
+                let text = serde_json::to_string_pretty(&job).unwrap_or_default();
+                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+            }
+            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                error.to_string(),
+            )])),
+        }
+    }
+
+    #[tool(
         description = "Write a diary entry for an agent identity, filed in a wing's fixed diary room"
     )]
     async fn memcastle_diary_write(
@@ -461,10 +490,10 @@ impl ServerHandler for McpTools {
             .with_instructions(
                 "MemCastle: a shared memory palace daemon. Tools: memcastle_status, \
                  memcastle_search, memcastle_recall, memcastle_wake_up, memcastle_mine, \
-                 memcastle_checkpoint, memcastle_diary_write, memcastle_diary_read, \
-                 memcastle_jobs_list, memcastle_set_mode. Call memcastle_set_mode once at \
-                 session start to switch this session to read_only or disabled memory mode \
-                 (defaults to full)."
+                 memcastle_checkpoint, memcastle_audit, memcastle_diary_write, \
+                 memcastle_diary_read, memcastle_jobs_list, memcastle_set_mode. Call \
+                 memcastle_set_mode once at session start to switch this session to read_only \
+                 or disabled memory mode (defaults to full)."
                     .to_string(),
             )
     }

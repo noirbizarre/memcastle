@@ -21,6 +21,7 @@
 
 pub mod api;
 pub mod app;
+pub mod audit;
 pub mod checkpoint;
 pub mod client;
 pub mod config;

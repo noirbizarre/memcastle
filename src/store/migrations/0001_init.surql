@@ -96,6 +96,12 @@ DEFINE FIELD IF NOT EXISTS progress ON TABLE job TYPE object FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS attempt ON TABLE job TYPE int;
 DEFINE FIELD IF NOT EXISTS max_attempts ON TABLE job TYPE int;
 DEFINE FIELD IF NOT EXISTS checkpoint ON TABLE job TYPE object FLEXIBLE;
+-- A report-producing job's final output (currently only `Audit`, see
+-- `domain::job::Job::result`'s doc comment for why this is a separate field
+-- from `checkpoint` rather than a reuse of it). `option<object>`, not
+-- `object`: unlike `checkpoint` (always present, defaulted to `{}`), most
+-- job kinds never set this at all.
+DEFINE FIELD IF NOT EXISTS result ON TABLE job TYPE option<object> FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS error ON TABLE job TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS lease_owner ON TABLE job TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS lease_expires_at ON TABLE job TYPE option<string>;

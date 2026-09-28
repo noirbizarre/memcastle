@@ -249,6 +249,11 @@ async fn submit_job(
                     .await?
             }
         }
+        JobKind::Audit { scope } => {
+            // Not gated by `mode` — same reasoning as `Mine` above (see
+            // `AppServices::submit_audit`'s doc comment).
+            state.app.submit_audit(scope, body.requested_by).await?
+        }
     };
     Ok(Json(job))
 }
