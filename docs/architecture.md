@@ -4,10 +4,8 @@
 
 > MemCastle is a long-running memory server, not a CLI process that happens to expose MCP.
 
-There is one MemCastle daemon per palace.
-Multiple AI coding-agent instances —
-several OpenCode sessions, Claude Code, Cursor, a future web dashboard —
-connect to that *same* daemon,
+There is one MemCastle daemon per palace. Multiple AI coding-agent instances —
+several OpenCode sessions, Claude Code, Cursor, a future web dashboard — connect to that *same* daemon,
 so they share exactly the same memory palace, mining queue, database state, and search index.
 
 ```text
@@ -20,14 +18,12 @@ CLI ──────────────┘
 
 This is a deliberate departure from the reference implementations
 ([MemPalace](https://github.com/MemPalace/mempalace), [mempalace-rs](https://github.com/jxoesneon/mempalace-rs)),
-which run one-process-per-CLI-invocation:
-every `mine`/`search`/MCP call independently loads config,
+which run one-process-per-CLI-invocation: every `mine`/`search`/MCP call independently loads config,
 opens its own SQLite connections, and reloads an embedding model from scratch.
 `mempalace-rs` in particular pairs SQLite (metadata) with a separate `usearch` HNSW index,
 kept in sync only by best-effort,
 which is the root cause of an entire "watchdog / auto-repair / re-embed everything" subsystem in that codebase.
-MemCastle avoids that failure category by construction:
-one store, one writer process, no second index file to desync.
+MemCastle avoids that failure category by construction: one store, one writer process, no second index file to desync.
 
 ## Layers
 
@@ -59,8 +55,7 @@ which dispatches on a connection string's scheme at runtime:
 The rest of the codebase never branches on which backend is active —
 `config::StoreConfig` picks one, `Backend` carries it, `SurrealStore::connect` is the only place that cares.
 SurrealKV (pure Rust) is the only embedded backend Phase 1 compiles —
-see `docs/adr/001-surrealkv-embedded-storage-engine.md`.
-Server-side storage is out of scope for Phase 1 entirely —
+see `docs/adr/001-surrealkv-embedded-storage-engine.md`. Server-side storage is out of scope for Phase 1 entirely —
 no RocksDB build variant is kept around speculatively for a server deployment model that doesn't exist yet;
 that choice is deferred until it does.
 
@@ -78,8 +73,7 @@ and re-deriving it on every domain type would make the next such change a much b
 Today, schema setup is one file, `store/migrations/0001_init.surql`,
 applied unconditionally on every `SurrealStore::connect`:
 every `DEFINE` in it is `IF NOT EXISTS`, so re-running it after the first connect is a no-op.
-There is no version-tracking table and no `memcastle migrate` command yet —
-sufficient for Phase 1
+There is no version-tracking table and no `memcastle migrate` command yet — sufficient for Phase 1
 because nothing shipped so far has needed a destructive or reshaping change to an already-released schema.
 
 The target design (not yet built — tracked as issue #44) is one `MigrationRunner`
@@ -106,14 +100,12 @@ A `Drawer`'s `content` is immutable once written;
 provenance (`source`, `provenance.requested_by`, `provenance.job_id`), tags, an optional `embedding`,
 and a `valid_from`/`valid_to` pair travel alongside it.
 `domain::entity` (`Entity`, `Relationship`) defines a bi-temporal knowledge-graph shape,
-and `store::entities` is schema-**wired**:
-create/supersede/invalidate/list-relationships operations exist
+and `store::entities` is schema-**wired**: create/supersede/invalidate/list-relationships operations exist
 and are exercised today by `checkpoint::run`'s optional `fact` mutation.
 `relates_to` (`store/migrations/0001_init.surql`) is a genuine SurrealDB-native graph edge table —
 `TYPE RELATION IN entity OUT entity`, mutated and traversed with `RELATE`/graph-traversal SurrealQL —
 unlike every other domain relationship in this codebase (wing→palace, room→wing, drawer→room),
-which is a plain foreign-key column on a regular table.
-The only missing piece is a *populator*:
+which is a plain foreign-key column on a regular table. The only missing piece is a *populator*:
 no mining code extracts entities/relationships from mined content yet —
 that is issue #40's deliberate future work, not an oversight.
 
@@ -125,15 +117,13 @@ the scope is expressed as SurrealQL predicates (nested subqueries resolving the 
 so SurrealDB applies the filter as part of query execution
 rather than MemCastle fetching candidates and filtering them in Rust.
 Semantic/vector search, temporal filtering, graph-aware retrieval, and hybrid ranking
-are later phases layered on the same table —
-see [Non-goals](#non-goals-for-this-bootstrap).
+are later phases layered on the same table — see [Non-goals](#non-goals-for-this-bootstrap).
 
 ## Memory mode: per-session, never daemon-global
 
 `domain::MemoryMode` (`Full`/`ReadOnly`/`Disabled`) is how memory gets explicitly disabled for one client
 without stopping the daemon or affecting any other client sharing it (PLAN.md principles 8-9).
-It is *never* a process-wide setting —
-there is no `MEMCASTLE_ENABLED=false` daemon flag —
+It is *never* a process-wide setting — there is no `MEMCASTLE_ENABLED=false` daemon flag —
 because the daemon already serves many agents at once;
 disabling memory for one of them must not touch the others' in-flight jobs or reads.
 
@@ -143,13 +133,11 @@ disabling memory for one of them must not touch the others' in-flight jobs or re
 | `ReadOnly`  | ok                                               | rejected (`Error::ModeForbidden`)                             |
 | `Disabled`  | rejected (`Error::ModeForbidden`)                | rejected (`Error::ModeForbidden`)                             |
 
-`Disabled` is symmetric on purpose:
-reads are rejected with the same typed error as writes, never a silent `Ok(empty)` —
+`Disabled` is symmetric on purpose: reads are rejected with the same typed error as writes, never a silent `Ok(empty)` —
 an empty result would be indistinguishable from "genuinely found nothing,"
 which would leak an ambiguous signal into a session that is supposed to behave as if MemCastle doesn't exist.
 
-Only those seven operations are gated.
-Administrative/daemon-level operations —
+Only those seven operations are gated. Administrative/daemon-level operations —
 `status`, job listing/control (`list_jobs`, `pause_job`, `resume_job`, `cancel_job`, `retry_job`),
 and job submission (`submit_mine`, `submit_demo`) —
 are not session-scoped memory operations and are never gated by mode:
@@ -164,8 +152,7 @@ Enforcement is centralized in `app::AppServices` (`require_read`/`require_write`
   via a small `axum::extract::FromRequestParts` extractor (`api::ModeHeader`),
   defaulting to `Full` when the header is absent so existing clients are unaffected.
   An unparsable value is a 400, never silently downgraded to `Full`.
-- **MCP** has no per-request header in the tool-call model,
-  so mode is negotiated once per session:
+- **MCP** has no per-request header in the tool-call model, so mode is negotiated once per session:
   a `memcastle_set_mode` tool call is cached in an `Arc<DashMap<session id, MemoryMode>>` inside `McpTools`,
   keyed by the `mcp-session-id` header rmcp's streamable-HTTP transport already assigns.
   Every other tool looks up this map before delegating to `AppServices`,
@@ -178,16 +165,13 @@ See `docs/adr/002-memory-mode-session-scoping.md` for the full rationale and rej
 - `AppServices::recall` is `search` under a recall-oriented name (task brief §14's vocabulary) —
   the same scoped `lexical_search` underneath, never paraphrasing or truncating a `Drawer.content`.
   It exists as a name to hang a future recall-specific reranking off, not a reason to duplicate logic today;
-  MemCastle itself does not enforce a search-before-answer protocol —
-  that discipline is an integration/skill's job.
+  MemCastle itself does not enforce a search-before-answer protocol — that discipline is an integration/skill's job.
 - `AppServices::wake_up` builds a deterministic session-start context:
   the agent's most recent diary entry (when a `wing` is given)
   plus up to `WakeUpBudget::max_items` most recent checkpoint-originated drawers,
-  trimmed to `max_bytes` by whole drawers only —
-  never mid-content, preserving the same verbatim guarantee as `recall`.
+  trimmed to `max_bytes` by whole drawers only — never mid-content, preserving the same verbatim guarantee as `recall`.
   Deliberately simple for V1 (task brief §13: "do not prematurely implement an elaborate token optimizer") —
-  this is only L0/L1 of the task brief's layered retrieval model;
-  project-specific and deeper retrieval are future work.
+  this is only L0/L1 of the task brief's layered retrieval model; project-specific and deeper retrieval are future work.
 - `AppServices::diary_write`/`diary_read` persist/read an agent's journal entries
   as drawers filed under a fixed per-wing `"diary"` room,
   keyed by a caller-supplied `agent_identity` string that MemCastle stores and retrieves faithfully but never validates.
@@ -199,10 +183,8 @@ All four are gated by `MemoryMode` exactly like `search` — see the mode table 
 
 > The queue state is durable; the in-memory scheduler is only the execution mechanism.
 
-`domain::Job` is a plain record
-(`id`, `kind`, `status`, `priority`, timestamps, `progress`, `attempt`/`max_attempts`,
-`checkpoint`, `error`, lease fields)
-persisted in SurrealDB.
+`domain::Job` is a plain record (`id`, `kind`, `status`, `priority`, timestamps, `progress`, `attempt`/`max_attempts`,
+`checkpoint`, `error`, lease fields) persisted in SurrealDB.
 Its status only ever changes through `Job::apply(event)`, an explicit, exhaustively-matched transition table:
 
 ```text
@@ -215,8 +197,7 @@ queued | paused | running -> cancelled
 running  -> queued     (crash recovery, attempt budget permitting)
 ```
 
-**Priority.** `Job.priority` is `domain::Priority`,
-a five-level enum (`Background < Low < Normal < High < Critical`) —
+**Priority.** `Job.priority` is `domain::Priority`, a five-level enum (`Background < Low < Normal < High < Critical`) —
 coarse buckets rather than an arbitrary integer, so callers can't invent incomparable numeric scales.
 It serializes to/from the store's existing `job.priority` (`TYPE int`) column via fixed values
 (`Critical`=100, `High`=75, `Normal`=50, `Low`=25, `Background`=0, with deliberate headroom between levels),
@@ -225,22 +206,18 @@ A value read back that doesn't match one of the five is a surfaced `InvalidPrior
 never silently coerced to a default.
 `jobs::Scheduler::claim_next_job` claims the oldest, highest-priority `Queued` job first,
 backed by the composite index `job_status_idx ON job FIELDS status, priority, created_at`.
-Default priorities per submission path:
-`Mine` → `Background` (so mining never delays anything else), `Demo` → `Normal`,
+Default priorities per submission path: `Mine` → `Background` (so mining never delays anything else), `Demo` → `Normal`,
 `Audit`/`Repair` → `Normal`, `Checkpoint` → `High`, `Checkpoint` (emergency) → `Critical`.
 
-`jobs::Scheduler` is a single sequential dispatcher loop
-(`store.claim_next_job`, an atomic claim-and-transition)
+`jobs::Scheduler` is a single sequential dispatcher loop (`store.claim_next_job`, an atomic claim-and-transition)
 that spawns bounded worker tasks (a `tokio::sync::Semaphore`) to execute claimed jobs.
-Because exactly one scheduler owns the queue per daemon —
-the same "one daemon per palace" invariant as storage —
+Because exactly one scheduler owns the queue per daemon — the same "one daemon per palace" invariant as storage —
 the sequential claim loop needs no distributed lock to be safe.
 
 **Pause and cancel are cooperative, never a process kill.**
 A handler (`jobs::demo`, `mining::run`) is written as a loop over discrete units of work (steps, files)
 that checks `JobContext::should_pause`/`is_cancelled` between units,
-persists a `checkpoint` before stopping, and returns —
-the scheduler transitions its status afterward.
+persists a `checkpoint` before stopping, and returns — the scheduler transitions its status afterward.
 Resuming a paused job re-reads that checkpoint and continues from there, not from zero.
 
 **Crash recovery** (`Scheduler::recover`, run once at daemon startup):
@@ -250,20 +227,17 @@ or marked `Failed` otherwise — never silently forgotten.
 **`checkpoint` vs `result`.** `Job.checkpoint` is handler-defined *resume* state
 (`mining`/`checkpoint`'s per-item `{"next_index": n}`) —
 it exists so a paused or crash-recovered job knows where to continue from,
-and every job kind has one (defaulted to `{}`).
-`Job.result`, added for `JobKind::Audit`, is a separate field:
+and every job kind has one (defaulted to `{}`). `Job.result`, added for `JobKind::Audit`, is a separate field:
 the final, once-set output of a job whose whole point is to produce a report rather than a resume position.
 Most job kinds never set it; `Audit` and `Repair` do, on completion.
 Keeping these as two fields — rather than overloading `checkpoint` for both purposes —
-means "where do I read a job's progress from"
-and "where do I read what it found" never share one ambiguous field.
+means "where do I read a job's progress from" and "where do I read what it found" never share one ambiguous field.
 
 **`JobKind::Checkpoint`** (`src/checkpoint`) persists an already-classified batch of checkpoint items as durable drawers,
 classified into destination buckets client-side, in the calling integration, not by MemCastle.
 It structurally mirrors `mining::run`:
 per-item cooperative pause/cancel, checkpointing `{"next_index": n}` after each item.
-Every item gets a drawer written first, always,
-and *additionally* applies its `fact` mutation
+Every item gets a drawer written first, always, and *additionally* applies its `fact` mutation
 (a knowledge-graph relationship, via `store::entities`) when one is present —
 a checkpoint item is never only a graph mutation with no drawer to audit it.
 Unlike `jobs::demo`, there is deliberately no artificial per-item delay:
@@ -275,8 +249,7 @@ See `docs/adr/003-checkpoint-as-a-durable-job.md` for why this runs as a job at 
 scoped to what's structurally possible given the single-SurrealDB design described above —
 not a port of `pi-palace`'s `/palace-audit` feature list,
 most of which addresses a split-store desync failure mode that doesn't exist here.
-It checks for orphan drawers (a `room` reference that no longer resolves),
-dangling `provenance.job_id` references,
+It checks for orphan drawers (a `room` reference that no longer resolves), dangling `provenance.job_id` references,
 `Failed` jobs that have exhausted their attempt budget,
 a plain `Running`-job count (informational — there is no lease TTL yet to call any of them "stale"),
 and drawers with no `embedding` (informational — semantic search doesn't exist yet, so this is never a defect).
@@ -286,14 +259,12 @@ a full scan is cheap and idempotent, so there is no meaningful partial state to 
 **`JobKind::Repair`** (`src/repair`) turns a subset of `Audit`'s findings into an actual fix:
 dry-run-first (`dry_run = true` is the default at every CLI/API entry point,
 and only ever records planned actions in the report without mutating anything),
-and deliberately narrower than the issue that requested it —
-only orphan-drawer removal shipped.
+and deliberately narrower than the issue that requested it — only orphan-drawer removal shipped.
 A second candidate action, failing jobs stuck beyond an attempt-budget heuristic,
 turned out to be redundant with what `Scheduler::recover` already does at every daemon startup
 and was dropped rather than implemented for symmetry's sake
 (see `src/repair/mod.rs`'s module doc for the full reasoning).
-`based_on_job` narrows a repair run to what a specific prior audit job found,
-but never replaces a fresh live scan —
+`based_on_job` narrows a repair run to what a specific prior audit job found, but never replaces a fresh live scan —
 a destructive operation must never act on a report that might have gone stale since it was generated.
 
 ## The daemon lifecycle
@@ -302,8 +273,7 @@ a destructive operation must never act on a report that might have gone stale si
 (matching the `mempalace-server.service` systemd-unit pattern from the reference implementations) —
 backgrounding is a supervisor's job (systemd, Docker, your shell), not this binary's.
 On startup it: loads config, connects and migrates storage, recovers interrupted jobs,
-starts the scheduler, binds the HTTP listener (serving both the REST API and MCP),
-and writes a small registry file.
+starts the scheduler, binds the HTTP listener (serving both the REST API and MCP), and writes a small registry file.
 On SIGINT/SIGTERM or `POST /api/shutdown`, it stops accepting new jobs, lets the scheduler's dispatch loop drain, and exits.
 
 The registry file (`~/.memcastle/run/<hash of the canonical palace path>/daemon.json`)
@@ -314,13 +284,10 @@ a stale file from a crashed daemon is simply overwritten by the next one that st
 
 ## MCP: another interface on the daemon, not a special process
 
-`mcp::McpTools` implements `rmcp::ServerHandler`
-and is mounted at `/mcp` on the *same* axum router as the REST API,
-via `rmcp`'s streamable-HTTP server transport.
-This is deliberately HTTP-only for the bootstrap:
+`mcp::McpTools` implements `rmcp::ServerHandler` and is mounted at `/mcp` on the *same* axum router as the REST API,
+via `rmcp`'s streamable-HTTP server transport. This is deliberately HTTP-only for the bootstrap:
 it is natively multi-client (the actual goal — N agents sharing one daemon),
-and most MCP clients already support a URL-based transport directly,
-so no bridging process is required to get there.
+and most MCP clients already support a URL-based transport directly, so no bridging process is required to get there.
 A stdio bridge for clients that only support spawning a local subprocess is real,
 but explicitly deferred, future work (see below) —
 tool logic itself never touches a transport type, so adding one is additive when it's needed.

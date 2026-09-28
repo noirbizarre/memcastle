@@ -6,17 +6,14 @@ Accepted
 
 ## Context
 
-`pi-palace`, the reference implementation this project departs from,
-routes every write through its daemon's job queue
+`pi-palace`, the reference implementation this project departs from, routes every write through its daemon's job queue
 specifically to dodge a multi-process file-lock race between independent CLI invocations.
 MemCastle already has one process, one writer, one daemon per palace —
 that race doesn't exist here, so "goes through a job" can't be justified by lock-avoidance alone;
 each write path has to earn a place in the queue on its own terms.
 
-Two durable-write paths exist in Phase 1:
-checkpoint (persisting an already-classified batch of memory items,
-sometimes under time pressure right before a crash)
-and diary (an agent journaling one free-text entry).
+Two durable-write paths exist in Phase 1: checkpoint (persisting an already-classified batch of memory items,
+sometimes under time pressure right before a crash) and diary (an agent journaling one free-text entry).
 
 ## Decision
 
@@ -34,8 +31,7 @@ and diary (an agent journaling one free-text entry).
   persisting `{"next_index": n}` after each item
   so a paused or crash-recovered checkpoint job resumes from where it left off, not from zero.
 - **Deliberately no artificial per-item delay** (unlike `jobs::demo`'s `STEP_DELAY`):
-  synthetic latency here would work against the very feature —
-  saving state before a crash —
+  synthetic latency here would work against the very feature — saving state before a crash —
   that motivates emergency checkpoints existing.
   Resumability is instead proven deterministically in tests by calling `run` twice against a forced pause,
   rather than racing wall-clock time against a live scheduler.
@@ -52,8 +48,7 @@ the sync-vs-job split is only about scheduler necessity, never about bypassing c
   rejected because the reason `pi-palace` needs that (multi-process lock contention)
   doesn't exist in MemCastle's single-daemon/single-writer design;
   adding queue latency and job bookkeeping to one small write would be pure cost.
-- Making checkpoint a synchronous direct call like diary —
-  rejected because it would give up priority preemption
+- Making checkpoint a synchronous direct call like diary — rejected because it would give up priority preemption
   (no way for an emergency checkpoint to jump ahead of queued mining work)
   and crash-resumability (an interrupted checkpoint batch would have no persisted resume point).
 

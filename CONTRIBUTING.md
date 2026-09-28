@@ -11,8 +11,7 @@ prek install          # the Git hooks
 mise run ci           # everything CI runs
 ```
 
-Rust itself is not managed by mise:
-`rust-toolchain.toml` pins the channel, and rustup installs it.
+Rust itself is not managed by mise: `rust-toolchain.toml` pins the channel, and rustup installs it.
 CI uses `dtolnay/rust-toolchain` because it needs per-job components and cross-compilation targets.
 
 ## Tasks
@@ -37,12 +36,10 @@ CI uses `dtolnay/rust-toolchain` because it needs per-job components and cross-c
 | `mise run tpl:update` | Bring the rendered template ref up to date |
 | `mise run tpl:diff` | Show what merging the template would change |
 
-`mise <task>` is a shorthand for `mise run <task>`,
-but a builtin subcommand of the same name wins it silently —
+`mise <task>` is a shorthand for `mise run <task>`, but a builtin subcommand of the same name wins it silently —
 which is why the format task is `format` and not `fmt` (`mise fmt` formats `mise.toml`),
 and why running the binary is `mise cli` and not `mise run` (`mise run` runs a task).
-Prefer the explicit `mise run <task>` in scripts:
-mise can claim a new name in any release.
+Prefer the explicit `mise run <task>` in scripts: mise can claim a new name in any release.
 
 ## Commits
 
@@ -52,17 +49,14 @@ so the message is part of the release, not paperwork around it.
 
 ## Releases
 
-Releases are run by [gh-ship](https://github.com/noirbizarre/gh-ship).
-**Never bump a version or push a tag by hand.**
+Releases are run by [gh-ship](https://github.com/noirbizarre/gh-ship). **Never bump a version or push a tag by hand.**
 
 1. A push to `main` triggers 🚢 Ship, which runs `gh ship prepare`.
 2. `prepare` dispatches 🚀 Prepare Release,
    which asks git-cliff for the next version, writes `CHANGELOG.md`, bumps `Cargo.toml`, commits,
    and uploads a `ship.release.json` artifact describing what would ship.
-3. gh-ship opens (or updates) the Release PR from `release/next`.
-   Review it.
-4. Merging it triggers 🚢 Ship again, which runs `gh ship release`:
-   it tags the merge commit, creates a draft release,
+3. gh-ship opens (or updates) the Release PR from `release/next`. Review it.
+4. Merging it triggers 🚢 Ship again, which runs `gh ship release`: it tags the merge commit, creates a draft release,
    dispatches 📦 Publish Release to attach the binaries, then makes the release public.
 
 Nothing to release is the normal case for step 1, and costs one workflow run reporting `changed: false`.
@@ -93,16 +87,12 @@ mise run tpl:diff      # read what merging it would change
 git tpl merge          # take it
 ```
 
-`tpl:update` is safe to run at any time:
-it only advances the rendered ref.
-Nothing reaches your branch until the merge.
+`tpl:update` is safe to run at any time: it only advances the rendered ref. Nothing reaches your branch until the merge.
 
-Requires git-tpl on your PATH (`cargo install git-tpl`).
-It is not declared in `mise.toml`'s `[tools]` on purpose —
+Requires git-tpl on your PATH (`cargo install git-tpl`). It is not declared in `mise.toml`'s `[tools]` on purpose —
 it vendors libgit2, so a global entry would make every CI job compile a tool no CI job runs.
 
 Files carrying template-owned content — `mise.toml`, `prek.toml`, `Cargo.toml` —
-end with a `# --- project-specific ---` marker.
-Add below it;
+end with a `# --- project-specific ---` marker. Add below it;
 Git's 3-way merge then preserves your additions across updates.
 A fix that belongs to every project belongs in the template, not here.

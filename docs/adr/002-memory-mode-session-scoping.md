@@ -10,8 +10,7 @@ One MemCastle daemon serves many agent sessions simultaneously (PLAN.md principl
 Memory must be explicitly disableable per session (principle 8),
 and a disabled session must behave as if MemCastle doesn't exist (principle 9) — task brief §22.
 
-Two client transports need this enforced differently:
-HTTP can carry a value on every request;
+Two client transports need this enforced differently: HTTP can carry a value on every request;
 MCP's tool-call model has no per-call slot for it, only a persistent session id.
 
 Two failure modes had to be designed against:
@@ -22,13 +21,11 @@ that is indistinguishable from a genuinely empty result.
 ## Decision
 
 `domain::MemoryMode` is a closed three-value enum (`Full`/`ReadOnly`/`Disabled`),
-not a per-capability flag set (task brief §21 explicitly deferred).
-Enforcement lives in exactly one place —
+not a per-capability flag set (task brief §21 explicitly deferred). Enforcement lives in exactly one place —
 `app::AppServices::require_read`/`require_write`, checked before any store contact
 by the seven memory-content operations (`search`/`recall`/`wake_up`/`diary_read` for reads;
 `checkpoint`/`emergency_checkpoint`/`diary_write` for writes).
-`api` and `mcp` only ever *extract* a `MemoryMode` and pass it down;
-neither independently decides what's allowed.
+`api` and `mcp` only ever *extract* a `MemoryMode` and pass it down; neither independently decides what's allowed.
 
 Administrative/daemon-level operations (`status`, job listing/control, `submit_mine`, `submit_demo`,
 and — provisionally — `Audit`/`Repair`) are never gated:
@@ -49,16 +46,14 @@ reads are rejected with the same typed `Error::ModeForbidden` as writes, never a
 
 ## Alternatives rejected
 
-- A daemon-global `MEMCASTLE_ENABLED=false` flag —
-  the task brief rules this out explicitly:
+- A daemon-global `MEMCASTLE_ENABLED=false` flag — the task brief rules this out explicitly:
   the daemon keeps running, only the opting-out client stops using memory;
   every other client's in-flight jobs/reads are unaffected (`tests/concurrency.rs` asserts this).
 - Per-capability mode flags (separate toggles for search vs. checkpoint vs. diary) —
   out of scope for V1, a simplicity call, not a discovered constraint.
 - An empty `Ok` result for `Disabled` reads instead of an error —
   rejected because it's indistinguishable from "genuinely found nothing,"
-  which would defeat the context-isolation guarantee
-  that no MemCastle-derived content may reach a disabled session.
+  which would defeat the context-isolation guarantee that no MemCastle-derived content may reach a disabled session.
 - Silently downgrading an unparsable `X-MemCastle-Mode` header to `Full` —
   rejected as a safety regression disguised as permissiveness.
 - Gating administrative operations (`status`, job control, `Audit`/`Repair`) by mode —
@@ -68,8 +63,7 @@ reads are rejected with the same typed `Error::ModeForbidden` as writes, never a
 ## Consequences
 
 - The MCP session-mode cache is purely in-process (never written to `SurrealStore`)
-  and does not survive a daemon restart — unlike the durable job queue.
-  In practice this is likely moot:
+  and does not survive a daemon restart — unlike the durable job queue. In practice this is likely moot:
   rmcp's `LocalSessionManager` session ids are themselves in-memory and process-local,
   so a reconnecting client gets a new session id and the same Full-by-default cold start a first-time caller gets,
   rather than a stale-mode bug —

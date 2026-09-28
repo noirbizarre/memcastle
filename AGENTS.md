@@ -5,8 +5,7 @@ Notes for anyone — human or otherwise — changing this repository.
 ## What this project is
 
 MemCastle is **a long-running memory server, not a CLI process that happens to expose MCP.**
-One daemon serves one palace;
-`memcastle serve`/`daemon` is the only command that does real work locally —
+One daemon serves one palace; `memcastle serve`/`daemon` is the only command that does real work locally —
 every other subcommand (`status`, `search`, `mine`, `jobs ...`) is a thin HTTP client to that daemon,
 so a web dashboard could do everything the CLI does by calling the same API.
 Storage is unified in SurrealDB (embedded SurrealKV for local dev, remote for server deployments) —
@@ -15,23 +14,19 @@ See `docs/architecture.md` for the full rationale, including what this deliberat
 
 ## Non-negotiable invariants
 
-Each of these should be enforced by a hook or a test.
-An invariant nothing checks is a comment, and it will be violated.
+Each of these should be enforced by a hook or a test. An invariant nothing checks is a comment, and it will be violated.
 
 1. **The CLI has no business logic MCP/HTTP can't reuse** —
    every subcommand except `serve`/`daemon` only calls `client::DaemonClient`, never `store` or `jobs` directly.
    Enforced by the `prek` architecture-guard hook (grep for `crate::store` outside `store`/`app`/`server`)
    and by `tests/cli.rs`.
-2. **Job status only changes through `domain::Job::apply`** —
-   no other code assigns `job.status` directly.
+2. **Job status only changes through `domain::Job::apply`** — no other code assigns `job.status` directly.
    Enforced by `domain::job`'s unit tests (every transition, including the rejected ones).
 3. **The job queue is durable, the scheduler is only the execution mechanism** —
    a job's state survives a daemon restart.
    Enforced by `jobs::Scheduler::recover` and its exercise in `tests/server.rs`.
-4. **One daemon per palace, one writer** —
-   `store` is only ever constructed by `server::run`;
-   nothing else opens the embedded SurrealKV path directly.
-   Enforced by the same architecture-guard hook as (1).
+4. **One daemon per palace, one writer** — `store` is only ever constructed by `server::run`;
+   nothing else opens the embedded SurrealKV path directly. Enforced by the same architecture-guard hook as (1).
 
 ## Layout
 
@@ -54,45 +49,34 @@ src/
 └── client/     the CLI's HTTP client for a running daemon
 ```
 
-Dependencies point inward:
-`cli / mcp / api -> app -> domain (+ store/jobs/search traits) -> store`.
-Nothing in `domain` knows SurrealDB exists;
-nothing in `cli`/`mcp`/`api` knows `store` exists.
+Dependencies point inward: `cli / mcp / api -> app -> domain (+ store/jobs/search traits) -> store`.
+Nothing in `domain` knows SurrealDB exists; nothing in `cli`/`mcp`/`api` knows `store` exists.
 
 ## Style
 
-**Every non-obvious line carries a comment saying why.**
-Not what — the code says what.
-Ideally naming the failure it prevents.
-A comment that restates the code is worse than none.
+**Every non-obvious line carries a comment saying why.** Not what — the code says what.
+Ideally naming the failure it prevents. A comment that restates the code is worse than none.
 
-**Errors are typed and actionable.**
-`thiserror` for the library, `miette` at the binary edge.
+**Errors are typed and actionable.** `thiserror` for the library, `miette` at the binary edge.
 A diagnostic must carry the two things the user does not already know:
-what specifically failed, and what to do about it.
-Diagnostic codes are `memcastle::<module>::<kind>`,
-and a code is a public identifier users grep for —
-renaming one is a breaking change.
+what specifically failed, and what to do about it. Diagnostic codes are `memcastle::<module>::<kind>`,
+and a code is a public identifier users grep for — renaming one is a breaking change.
 
-**Test names are sentences.**
-`an_unchanged_input_produces_no_output`, not `test_run_2`.
+**Test names are sentences.** `an_unchanged_input_produces_no_output`, not `test_run_2`.
 The name should say what would be broken if it failed.
 
-**Markdown prose uses semantic linefeeds.**
-One sentence per line; only wrap inside a sentence, at a clause boundary,
+**Markdown prose uses semantic linefeeds.** One sentence per line; only wrap inside a sentence, at a clause boundary,
 when it would otherwise exceed the 120-column limit `.markdownlint-cli2.yaml` enforces.
 This keeps a diff scoped to the sentence that actually changed.
 
 ## Commits
 
 Conventional Commits, enforced by commitlint on `commit-msg`.
-The type becomes a changelog heading, so choose it as if someone will read it in release notes —
-because they will.
+The type becomes a changelog heading, so choose it as if someone will read it in release notes — because they will.
 
 ## Releases
 
-Driven by gh-ship.
-Never bump a version or push a tag by hand:
+Driven by gh-ship. Never bump a version or push a tag by hand:
 `cliff.toml` derives the version from the commit history, `prepare-release` applies it,
 and `.github/ship.yml` is the contract between them.
 See CONTRIBUTING.md.
@@ -103,16 +87,13 @@ See CONTRIBUTING.md.
 mise run ci
 ```
 
-Formatting, Clippy, spelling, workflow and Markdown linting, tests and the documentation build.
-Same as CI.
+Formatting, Clippy, spelling, workflow and Markdown linting, tests and the documentation build. Same as CI.
 
 ## This repository is generated from a template
 
 The toolchain, hooks, CI and release workflows come from [rust.tpl](https://github.com/noirbizarre/rust.tpl)
 and are updated with `git tpl update`.
-Files carrying template-owned content end with a `# --- project-specific ---` marker:
-add below it, never above.
+Files carrying template-owned content end with a `# --- project-specific ---` marker: add below it, never above.
 
-Changing template-owned content here fixes it in one repository.
-Changing it in the template fixes it in all of them —
+Changing template-owned content here fixes it in one repository. Changing it in the template fixes it in all of them —
 prefer that.
