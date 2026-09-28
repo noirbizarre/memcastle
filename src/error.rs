@@ -93,6 +93,22 @@ pub enum Error {
         id: String,
     },
 
+    /// A `JobKind::Repair`'s `based_on_job` didn't resolve to a completed
+    /// `JobKind::Audit` job — a caller-facing mistake (wrong id, a job of
+    /// the wrong kind, an audit that hasn't finished yet), not a storage
+    /// failure. See `crate::repair::run`'s doc comment.
+    #[error("based_on_job {id}: {message}")]
+    #[diagnostic(
+        code(memcastle::repair::invalid_based_on_job),
+        help("based_on_job must be the id of a completed `memcastle audit` job")
+    )]
+    InvalidBasedOnJob {
+        /// The id that was given.
+        id: String,
+        /// What was wrong with it.
+        message: String,
+    },
+
     /// A request to a running daemon failed.
     #[error("request to the daemon failed: {message}")]
     #[diagnostic(

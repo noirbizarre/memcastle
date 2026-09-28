@@ -254,6 +254,17 @@ async fn submit_job(
             // `AppServices::submit_audit`'s doc comment).
             state.app.submit_audit(scope, body.requested_by).await?
         }
+        JobKind::Repair {
+            dry_run,
+            based_on_job,
+        } => {
+            // Not gated by `mode` — same reasoning as `Audit` above (see
+            // `AppServices::submit_repair`'s doc comment).
+            state
+                .app
+                .submit_repair(dry_run, based_on_job, body.requested_by)
+                .await?
+        }
     };
     Ok(Json(job))
 }

@@ -6,7 +6,7 @@
 
 use serde::Deserialize;
 
-use crate::domain::{Drawer, RoomId};
+use crate::domain::{Drawer, DrawerId, RoomId};
 use crate::error::Result;
 
 use super::SurrealStore;
@@ -60,6 +60,23 @@ impl SurrealStore {
             // rejected `SET` (e.g. a schema mismatch) would otherwise fail
             // silently and leave `create_drawer` reporting success for a
             // drawer that was never written. See `store::mod`'s doc comment.
+            .check()?;
+        Ok(())
+    }
+
+    /// Permanently delete a drawer — the only deletion this store
+    /// supports (see this module's doc comment: every other drawer write
+    /// is a fresh `CREATE`, never an update or a delete). Introduced for
+    /// `crate::repair::run`'s "remove orphan drawer" action: an orphan (a
+    /// drawer whose `room` no longer resolves) has nothing left to
+    /// preserve history for.
+    pub async fn delete_drawer(&self, id: DrawerId) -> Result<()> {
+        self.db
+            .query("DELETE type::record('drawer', $id)")
+            .bind(("id", id.to_string()))
+            .await?
+            // Same reasoning as `create_drawer`'s `.check()?` — a rejected
+            // `DELETE` must not silently report success.
             .check()?;
         Ok(())
     }

@@ -135,6 +135,33 @@ pub async fn run(
     Ok(JobOutcome::Completed)
 }
 
+/// Find every drawer whose `room` no longer resolves to any `room` record —
+/// the same check [`build_report`] folds into its single palace-wide pass,
+/// factored out here so `crate::repair::run` can reuse it without
+/// duplicating the room-resolution logic. `crate::repair` always calls this
+/// fresh rather than trusting a stored [`AuditReport`]: state may have
+/// changed since any given report was generated, and a destructive repair
+/// must never act on a stale snapshot.
+pub(crate) async fn find_orphan_drawers(store: &SurrealStore) -> Result<Vec<OrphanDrawer>> {
+    let wings = store.list_wings().await?;
+    let mut known_rooms: HashSet<RoomId> = HashSet::new();
+    for wing in &wings {
+        for room in store.list_rooms(wing.id).await? {
+            known_rooms.insert(room.id);
+        }
+    }
+
+    let drawers = store.list_all_drawers().await?;
+    Ok(drawers
+        .into_iter()
+        .filter(|drawer| !known_rooms.contains(&drawer.room))
+        .map(|drawer| OrphanDrawer {
+            drawer_id: drawer.id,
+            room: drawer.room,
+        })
+        .collect())
+}
+
 /// Build the report: one pass over wings/rooms (to know which rooms
 /// currently exist), one over jobs (to know which job ids currently exist
 /// and to count stuck/running jobs), and one over every drawer (to find

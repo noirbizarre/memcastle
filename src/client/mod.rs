@@ -238,6 +238,19 @@ impl DaemonClient {
         .await
     }
 
+    /// Submit a repair job — see `AppServices::submit_repair` and
+    /// `memcastle::repair`'s module doc.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
+    pub async fn submit_repair(&self, dry_run: bool, based_on_job: Option<JobId>) -> Result<Job> {
+        self.send(self.http.post(format!("{}/api/jobs", self.base_url)).json(
+            &json!({ "type": "repair", "dry_run": dry_run, "based_on_job": based_on_job, "requested_by": "cli" }),
+        ))
+        .await
+    }
+
     /// Submit a synthetic demo job (see `domain::job::JobKind::Demo`) —
     /// useful for exercising the scheduler end-to-end without a real
     /// directory to mine.
