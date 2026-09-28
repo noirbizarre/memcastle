@@ -11,6 +11,7 @@ mod drawer;
 mod entity;
 mod ids;
 mod job;
+mod memory_mode;
 mod palace;
 
 pub use checkpoint::{CheckpointDestination, CheckpointItem, CheckpointPayload, FactMutation};
@@ -20,4 +21,5 @@ pub use ids::{DrawerId, EntityId, JobId, PalaceId, RelationshipId, RoomId, WingI
 pub use job::{
     InvalidPriority, Job, JobEvent, JobKind, JobProgress, JobStatus, Priority, TransitionError,
 };
+pub use memory_mode::MemoryMode;
 pub use palace::{Palace, Room, Wing};

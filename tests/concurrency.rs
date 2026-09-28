@@ -186,6 +186,77 @@ async fn a_critical_checkpoint_is_claimed_before_a_queued_background_mine_job() 
     daemon.shutdown().await;
 }
 
+#[tokio::test]
+async fn a_disabled_clients_mode_does_not_affect_another_clients_in_flight_job() {
+    use memcastle::domain::{Job, JobStatus};
+
+    // Client A occupies the sole worker slot with a multi-step demo job —
+    // long enough to reliably observe it `Running` while client B's
+    // disabled-mode requests land against the very same daemon.
+    let daemon = TestDaemon::start_with(1).await;
+    let client = reqwest::Client::new();
+
+    let occupier: Job = client
+        .post(format!("{}/api/jobs", daemon.base_url))
+        .json(&serde_json::json!({ "type": "demo", "steps": 8, "requested_by": "client-a" }))
+        .send()
+        .await
+        .expect("submit occupier")
+        .json()
+        .await
+        .expect("json");
+    wait_for_job_status(&client, &daemon.base_url, occupier.id, JobStatus::Running).await;
+
+    // Client B, in `Disabled` mode, hits every gated endpoint while A's job
+    // is running — all must be rejected, and none may touch the store.
+    for url in [
+        format!("{}/api/search?q=x", daemon.base_url),
+        format!("{}/api/recall?q=x", daemon.base_url),
+        format!("{}/api/wake-up?agent_identity=client-b", daemon.base_url),
+        format!(
+            "{}/api/diary?agent_identity=client-b&wing=w",
+            daemon.base_url
+        ),
+    ] {
+        let response = client
+            .get(&url)
+            .header("X-MemCastle-Mode", "disabled")
+            .send()
+            .await
+            .expect("request");
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::FORBIDDEN,
+            "GET {url} must be rejected for client B's disabled session"
+        );
+    }
+    let diary_write = client
+        .post(format!("{}/api/diary", daemon.base_url))
+        .header("X-MemCastle-Mode", "disabled")
+        .json(&serde_json::json!({
+            "agent_identity": "client-b",
+            "wing": "w",
+            "content": "must never be written",
+        }))
+        .send()
+        .await
+        .expect("request");
+    assert_eq!(diary_write.status(), reqwest::StatusCode::FORBIDDEN);
+
+    // Client A's occupier must still complete normally — client B's
+    // disabled mode is per-session and must never reach the scheduler or
+    // any other client's job.
+    let completed =
+        wait_for_job_status(&client, &daemon.base_url, occupier.id, JobStatus::Completed).await;
+    assert_eq!(
+        completed.status,
+        JobStatus::Completed,
+        "client A's job must complete regardless of client B's disabled mode"
+    );
+
+    daemon.shutdown().await;
+}
+
 async fn get_job(
     client: &reqwest::Client,
     base_url: &str,

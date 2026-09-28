@@ -14,10 +14,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::domain::{
-    CheckpointPayload, Drawer, DrawerId, Job, JobId, JobKind, JobStatus, Priority, Provenance,
-    Source, SourceKind,
+    CheckpointPayload, Drawer, DrawerId, Job, JobId, JobKind, JobStatus, MemoryMode, Priority,
+    Provenance, Source, SourceKind,
 };
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::jobs::Scheduler;
 use crate::store::{SearchHit, SurrealStore};
 
@@ -39,6 +39,11 @@ pub struct StatusReport {
     pub jobs_running: u64,
     /// Jobs currently `Paused`.
     pub jobs_paused: u64,
+    /// The effective [`MemoryMode`] for the request/session that asked for
+    /// this report — purely observational, `status` itself is never gated
+    /// (see `MemoryMode`'s doc comment on daemon vs memory operations): a
+    /// disabled session can still see "MemCastle: disabled" here.
+    pub mode: MemoryMode,
 }
 
 /// Bounds `AppServices::wake_up`'s output — deterministic and testable, no
@@ -106,12 +111,14 @@ impl AppServices {
         }
     }
 
-    /// Summarise current daemon health.
+    /// Summarise current daemon health. `mode` is stamped into the report
+    /// purely for observability (`status` is a daemon-level operation, not
+    /// a memory operation — see `MemoryMode`'s doc comment) — never gated.
     ///
     /// # Errors
     ///
     /// Returns an error if the store cannot be read.
-    pub async fn status(&self) -> Result<StatusReport> {
+    pub async fn status(&self, mode: MemoryMode) -> Result<StatusReport> {
         let palace = self.store.ensure_palace("default").await?;
         let drawer_count = self.store.count_drawers().await?;
         let queued = self.store.list_jobs(Some(JobStatus::Queued)).await?.len() as u64;
@@ -125,7 +132,37 @@ impl AppServices {
             jobs_queued: queued,
             jobs_running: running,
             jobs_paused: paused,
+            mode,
         })
+    }
+
+    /// Reject a read (`search`/`recall`/`wake_up`/`diary_read`) that
+    /// `mode` doesn't permit, before any store contact — the single place
+    /// all read-gated methods check `MemoryMode` (see that type's doc
+    /// comment for the matrix).
+    fn require_read(mode: MemoryMode, operation: &'static str) -> Result<()> {
+        if mode.allows_read() {
+            Ok(())
+        } else {
+            Err(Error::ModeForbidden {
+                operation: operation.to_string(),
+                mode,
+            })
+        }
+    }
+
+    /// Reject a write (`checkpoint`/`emergency_checkpoint`/`diary_write`)
+    /// that `mode` doesn't permit, before any store contact — the write
+    /// counterpart of [`Self::require_read`].
+    fn require_write(mode: MemoryMode, operation: &'static str) -> Result<()> {
+        if mode.allows_write() {
+            Ok(())
+        } else {
+            Err(Error::ModeForbidden {
+                operation: operation.to_string(),
+                mode,
+            })
+        }
     }
 
     /// Lexical search over drawer content, optionally scoped to one wing
@@ -133,14 +170,17 @@ impl AppServices {
     ///
     /// # Errors
     ///
-    /// Returns an error if the store query fails.
+    /// Returns an error if the store query fails, or [`Error::ModeForbidden`]
+    /// if `mode` doesn't permit reads (`Disabled`).
     pub async fn search(
         &self,
         query: &str,
         limit: u32,
         wing: Option<&str>,
         room: Option<&str>,
+        mode: MemoryMode,
     ) -> Result<Vec<SearchHit>> {
+        Self::require_read(mode, "search")?;
         crate::search::lexical_search(&self.store, query, limit, wing, room).await
     }
 
@@ -183,13 +223,16 @@ impl AppServices {
     /// Shared submission path for both checkpoint priorities — `checkpoint`
     /// and `emergency_checkpoint` differ only in which `Priority` they
     /// pass, since there is exactly one `JobKind::Checkpoint` variant (see
-    /// its doc comment).
+    /// its doc comment). Also the single place that gates both public
+    /// checkpoint methods on `mode`, so neither duplicates the check.
     async fn submit_checkpoint(
         &self,
         payload: CheckpointPayload,
         priority: Priority,
         requested_by: impl Into<String>,
+        mode: MemoryMode,
     ) -> Result<Job> {
+        Self::require_write(mode, "checkpoint")?;
         self.scheduler
             .submit(JobKind::Checkpoint { payload }, priority, requested_by)
             .await
@@ -200,13 +243,16 @@ impl AppServices {
     ///
     /// # Errors
     ///
-    /// Returns an error if the job cannot be persisted.
+    /// Returns an error if the job cannot be persisted, or
+    /// [`Error::ModeForbidden`] if `mode` doesn't permit writes
+    /// (`ReadOnly`/`Disabled`).
     pub async fn checkpoint(
         &self,
         payload: CheckpointPayload,
         requested_by: impl Into<String>,
+        mode: MemoryMode,
     ) -> Result<Job> {
-        self.submit_checkpoint(payload, Priority::High, requested_by)
+        self.submit_checkpoint(payload, Priority::High, requested_by, mode)
             .await
     }
 
@@ -215,13 +261,16 @@ impl AppServices {
     ///
     /// # Errors
     ///
-    /// Returns an error if the job cannot be persisted.
+    /// Returns an error if the job cannot be persisted, or
+    /// [`Error::ModeForbidden`] if `mode` doesn't permit writes
+    /// (`ReadOnly`/`Disabled`).
     pub async fn emergency_checkpoint(
         &self,
         payload: CheckpointPayload,
         requested_by: impl Into<String>,
+        mode: MemoryMode,
     ) -> Result<Job> {
-        self.submit_checkpoint(payload, Priority::Critical, requested_by)
+        self.submit_checkpoint(payload, Priority::Critical, requested_by, mode)
             .await
     }
 
@@ -290,13 +339,16 @@ impl AppServices {
     ///
     /// # Errors
     ///
-    /// Returns an error if the store write fails.
+    /// Returns an error if the store write fails, or [`Error::ModeForbidden`]
+    /// if `mode` doesn't permit writes (`ReadOnly`/`Disabled`).
     pub async fn diary_write(
         &self,
         agent_identity: &str,
         wing: &str,
         content: String,
+        mode: MemoryMode,
     ) -> Result<Drawer> {
+        Self::require_write(mode, "diary_write")?;
         let wing_record = self.store.get_or_create_wing(wing, None).await?;
         let room = self
             .store
@@ -340,13 +392,16 @@ impl AppServices {
     ///
     /// # Errors
     ///
-    /// Returns an error if the store query fails.
+    /// Returns an error if the store query fails, or [`Error::ModeForbidden`]
+    /// if `mode` doesn't permit reads (`Disabled`).
     pub async fn diary_read(
         &self,
         agent_identity: &str,
         wing: &str,
         limit: u32,
+        mode: MemoryMode,
     ) -> Result<Vec<Drawer>> {
+        Self::require_read(mode, "diary_read")?;
         let wing_record = self.store.get_or_create_wing(wing, None).await?;
         let room = self
             .store
@@ -371,16 +426,23 @@ impl AppServices {
     /// paraphrases or truncates: every `SearchHit::drawer.content` returned
     /// is exactly what was stored.
     ///
+    /// Deliberately does not re-check `mode` itself — it delegates entirely
+    /// to [`Self::search`], which is the one place that gate lives, so
+    /// there is exactly one `MemoryMode` match to audit for this path, not
+    /// two copies that could drift apart.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the store query fails.
+    /// Returns an error if the store query fails, or [`Error::ModeForbidden`]
+    /// if `mode` doesn't permit reads (`Disabled`).
     pub async fn recall(
         &self,
         query: &str,
         wing: Option<&str>,
         limit: u32,
+        mode: MemoryMode,
     ) -> Result<Vec<SearchHit>> {
-        self.search(query, limit, wing, None).await
+        self.search(query, limit, wing, None, mode).await
     }
 
     /// Build an agent's session-start context: its most recent diary entry
@@ -400,18 +462,27 @@ impl AppServices {
     /// — only `recent_highlights` supports an unscoped ("every wing")
     /// lookup.
     ///
+    /// Gates on `mode` up front (before any store contact), then passes it
+    /// straight through to the internal [`Self::diary_read`] call — that
+    /// call re-checking the same `mode` is redundant but harmless, not a
+    /// second copy of the policy (see `recall`'s doc comment for the same
+    /// reasoning).
+    ///
     /// # Errors
     ///
-    /// Returns an error if the store query fails.
+    /// Returns an error if the store query fails, or [`Error::ModeForbidden`]
+    /// if `mode` doesn't permit reads (`Disabled`).
     pub async fn wake_up(
         &self,
         agent_identity: &str,
         wing: Option<&str>,
         budget: WakeUpBudget,
+        mode: MemoryMode,
     ) -> Result<WakeUpContext> {
+        Self::require_read(mode, "wake_up")?;
         let diary = match wing {
             Some(wing) => self
-                .diary_read(agent_identity, wing, 1)
+                .diary_read(agent_identity, wing, 1, mode)
                 .await?
                 .into_iter()
                 .next(),
@@ -513,12 +584,17 @@ mod tests {
     async fn a_diary_entry_written_can_be_read_back_scoped_by_agent_and_wing() {
         let app = test_app().await;
         let written = app
-            .diary_write("agent-a", "project-x", "went well today".to_string())
+            .diary_write(
+                "agent-a",
+                "project-x",
+                "went well today".to_string(),
+                MemoryMode::Full,
+            )
             .await
             .expect("write");
 
         let entries = app
-            .diary_read("agent-a", "project-x", 10)
+            .diary_read("agent-a", "project-x", 10, MemoryMode::Full)
             .await
             .expect("read");
         assert_eq!(entries.len(), 1);
@@ -530,15 +606,25 @@ mod tests {
     #[tokio::test]
     async fn two_agent_identities_in_the_same_wing_do_not_leak_into_each_others_diary_read() {
         let app = test_app().await;
-        app.diary_write("agent-a", "shared-wing", "a's entry".to_string())
-            .await
-            .expect("write a");
-        app.diary_write("agent-b", "shared-wing", "b's entry".to_string())
-            .await
-            .expect("write b");
+        app.diary_write(
+            "agent-a",
+            "shared-wing",
+            "a's entry".to_string(),
+            MemoryMode::Full,
+        )
+        .await
+        .expect("write a");
+        app.diary_write(
+            "agent-b",
+            "shared-wing",
+            "b's entry".to_string(),
+            MemoryMode::Full,
+        )
+        .await
+        .expect("write b");
 
         let a_entries = app
-            .diary_read("agent-a", "shared-wing", 10)
+            .diary_read("agent-a", "shared-wing", 10, MemoryMode::Full)
             .await
             .expect("read a");
         assert_eq!(
@@ -549,7 +635,7 @@ mod tests {
         assert_eq!(a_entries[0].content, "a's entry");
 
         let b_entries = app
-            .diary_read("agent-b", "shared-wing", 10)
+            .diary_read("agent-b", "shared-wing", 10, MemoryMode::Full)
             .await
             .expect("read b");
         assert_eq!(
@@ -567,12 +653,13 @@ mod tests {
             "agent-a",
             "project-x",
             "line one\nline two, verbatim — no paraphrasing".to_string(),
+            MemoryMode::Full,
         )
         .await
         .expect("write");
 
         let hits = app
-            .recall("verbatim", Some("project-x"), 10)
+            .recall("verbatim", Some("project-x"), 10, MemoryMode::Full)
             .await
             .expect("recall");
         assert_eq!(hits.len(), 1);
@@ -595,7 +682,7 @@ mod tests {
             max_bytes: 30,
         };
         let context = app
-            .wake_up("agent-a", Some("project-x"), budget)
+            .wake_up("agent-a", Some("project-x"), budget, MemoryMode::Full)
             .await
             .expect("wake up");
 
@@ -620,18 +707,23 @@ mod tests {
     #[tokio::test]
     async fn wake_up_is_deterministic_given_a_fixed_database_state() {
         let (app, store) = test_app_with_store().await;
-        app.diary_write("agent-a", "project-x", "day one".to_string())
-            .await
-            .expect("diary write");
+        app.diary_write(
+            "agent-a",
+            "project-x",
+            "day one".to_string(),
+            MemoryMode::Full,
+        )
+        .await
+        .expect("diary write");
         seed_checkpoint_drawer(&store, "project-x", "an important highlight").await;
 
         let budget = WakeUpBudget::default();
         let first = app
-            .wake_up("agent-a", Some("project-x"), budget)
+            .wake_up("agent-a", Some("project-x"), budget, MemoryMode::Full)
             .await
             .expect("wake up 1");
         let second = app
-            .wake_up("agent-a", Some("project-x"), budget)
+            .wake_up("agent-a", Some("project-x"), budget, MemoryMode::Full)
             .await
             .expect("wake up 2");
 
@@ -648,13 +740,18 @@ mod tests {
     #[tokio::test]
     async fn wake_up_skips_the_diary_when_no_wing_is_given() {
         let (app, store) = test_app_with_store().await;
-        app.diary_write("agent-a", "project-x", "should not appear".to_string())
-            .await
-            .expect("diary write");
+        app.diary_write(
+            "agent-a",
+            "project-x",
+            "should not appear".to_string(),
+            MemoryMode::Full,
+        )
+        .await
+        .expect("diary write");
         seed_checkpoint_drawer(&store, "project-x", "a highlight").await;
 
         let context = app
-            .wake_up("agent-a", None, WakeUpBudget::default())
+            .wake_up("agent-a", None, WakeUpBudget::default(), MemoryMode::Full)
             .await
             .expect("wake up");
 
@@ -663,5 +760,209 @@ mod tests {
             "wake_up(wing: None) must skip the diary lookup entirely, got {:?}",
             context.diary
         );
+    }
+
+    fn assert_mode_forbidden(result: &Result<impl std::fmt::Debug>, expected_mode: MemoryMode) {
+        match result {
+            Err(crate::Error::ModeForbidden { mode, .. }) => {
+                assert_eq!(*mode, expected_mode);
+            }
+            other => panic!("expected Error::ModeForbidden, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_disabled_search_is_rejected_without_a_store_query() {
+        let app = test_app().await;
+        let result = app
+            .search("anything", 10, None, None, MemoryMode::Disabled)
+            .await;
+        assert_mode_forbidden(&result, MemoryMode::Disabled);
+    }
+
+    #[tokio::test]
+    async fn recall_in_disabled_mode_is_rejected_the_same_as_search() {
+        let app = test_app().await;
+        let result = app.recall("anything", None, 10, MemoryMode::Disabled).await;
+        assert_mode_forbidden(&result, MemoryMode::Disabled);
+    }
+
+    #[tokio::test]
+    async fn wake_up_in_disabled_mode_is_rejected_without_reading_the_diary_or_highlights() {
+        let app = test_app().await;
+        let result = app
+            .wake_up(
+                "agent-a",
+                Some("project-x"),
+                WakeUpBudget::default(),
+                MemoryMode::Disabled,
+            )
+            .await;
+        assert_mode_forbidden(&result, MemoryMode::Disabled);
+    }
+
+    #[tokio::test]
+    async fn a_disabled_diary_read_is_rejected() {
+        let app = test_app().await;
+        let result = app
+            .diary_read("agent-a", "project-x", 10, MemoryMode::Disabled)
+            .await;
+        assert_mode_forbidden(&result, MemoryMode::Disabled);
+    }
+
+    #[tokio::test]
+    async fn a_disabled_diary_write_is_rejected_and_nothing_is_persisted() {
+        let app = test_app().await;
+        let result = app
+            .diary_write(
+                "agent-a",
+                "project-x",
+                "should never be written".to_string(),
+                MemoryMode::Disabled,
+            )
+            .await;
+        assert_mode_forbidden(&result, MemoryMode::Disabled);
+
+        // Confirm via a `Full`-mode read that nothing was persisted —
+        // the store must never have been touched, not just that the
+        // caller received an error.
+        let entries = app
+            .diary_read("agent-a", "project-x", 10, MemoryMode::Full)
+            .await
+            .expect("read");
+        assert!(
+            entries.is_empty(),
+            "a disabled diary_write must not persist anything, found {entries:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_disabled_checkpoint_submission_is_rejected() {
+        let app = test_app().await;
+        let payload = CheckpointPayload {
+            items: vec![crate::domain::CheckpointItem {
+                destination: crate::domain::CheckpointDestination::General,
+                wing: Some("project-x".to_string()),
+                content: "should never be queued".to_string(),
+                tags: vec![],
+                source: Source {
+                    kind: SourceKind::Manual,
+                    uri: None,
+                    agent: Some("test-agent".to_string()),
+                },
+                fact: None,
+            }],
+        };
+        let result = app.checkpoint(payload, "test", MemoryMode::Disabled).await;
+        assert_mode_forbidden(&result, MemoryMode::Disabled);
+    }
+
+    #[tokio::test]
+    async fn a_read_only_diary_write_is_rejected_but_diary_read_still_works() {
+        let app = test_app().await;
+        app.diary_write(
+            "agent-a",
+            "project-x",
+            "written while full".to_string(),
+            MemoryMode::Full,
+        )
+        .await
+        .expect("full-mode write");
+
+        let write_result = app
+            .diary_write(
+                "agent-a",
+                "project-x",
+                "should be rejected".to_string(),
+                MemoryMode::ReadOnly,
+            )
+            .await;
+        assert_mode_forbidden(&write_result, MemoryMode::ReadOnly);
+
+        let entries = app
+            .diary_read("agent-a", "project-x", 10, MemoryMode::ReadOnly)
+            .await
+            .expect("read-only diary_read must still succeed");
+        assert_eq!(
+            entries.len(),
+            1,
+            "the rejected write must not have been persisted, found {entries:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_read_only_checkpoint_submission_is_rejected() {
+        let app = test_app().await;
+        let payload = CheckpointPayload {
+            items: vec![crate::domain::CheckpointItem {
+                destination: crate::domain::CheckpointDestination::General,
+                wing: Some("project-x".to_string()),
+                content: "should never be queued".to_string(),
+                tags: vec![],
+                source: Source {
+                    kind: SourceKind::Manual,
+                    uri: None,
+                    agent: Some("test-agent".to_string()),
+                },
+                fact: None,
+            }],
+        };
+        let result = app.checkpoint(payload, "test", MemoryMode::ReadOnly).await;
+        assert_mode_forbidden(&result, MemoryMode::ReadOnly);
+    }
+
+    #[tokio::test]
+    async fn a_full_mode_checkpoint_still_succeeds() {
+        let app = test_app().await;
+        let payload = CheckpointPayload {
+            items: vec![crate::domain::CheckpointItem {
+                destination: crate::domain::CheckpointDestination::General,
+                wing: Some("project-x".to_string()),
+                content: "a full-mode checkpoint".to_string(),
+                tags: vec![],
+                source: Source {
+                    kind: SourceKind::Manual,
+                    uri: None,
+                    agent: Some("test-agent".to_string()),
+                },
+                fact: None,
+            }],
+        };
+        app.checkpoint(payload, "test", MemoryMode::Full)
+            .await
+            .expect("full-mode checkpoint must be accepted");
+    }
+
+    #[tokio::test]
+    async fn an_emergency_checkpoint_is_rejected_in_disabled_mode() {
+        let app = test_app().await;
+        let payload = CheckpointPayload {
+            items: vec![crate::domain::CheckpointItem {
+                destination: crate::domain::CheckpointDestination::General,
+                wing: Some("project-x".to_string()),
+                content: "should never be queued".to_string(),
+                tags: vec![],
+                source: Source {
+                    kind: SourceKind::Manual,
+                    uri: None,
+                    agent: Some("test-agent".to_string()),
+                },
+                fact: None,
+            }],
+        };
+        let result = app
+            .emergency_checkpoint(payload, "test", MemoryMode::Disabled)
+            .await;
+        assert_mode_forbidden(&result, MemoryMode::Disabled);
+    }
+
+    #[tokio::test]
+    async fn status_reports_the_mode_it_was_given_without_being_gated_by_it() {
+        let app = test_app().await;
+        let report = app
+            .status(MemoryMode::Disabled)
+            .await
+            .expect("status must never be gated by mode");
+        assert_eq!(report.mode, MemoryMode::Disabled);
     }
 }

@@ -6,6 +6,7 @@
 //! `memcastle serve` to shut down gracefully (see `server::lifecycle`).
 
 mod error;
+mod mode;
 
 use std::str::FromStr;
 
@@ -20,6 +21,7 @@ use crate::app::{AppServices, WakeUpBudget};
 use crate::domain::{JobId, JobKind, JobStatus};
 
 pub use error::ApiError;
+pub use mode::ModeHeader;
 
 #[derive(Clone)]
 struct ApiState {
@@ -52,8 +54,11 @@ async fn health() -> impl IntoResponse {
     Json(serde_json::json!({ "status": "ok" }))
 }
 
-async fn status(State(state): State<ApiState>) -> Result<impl IntoResponse, ApiError> {
-    Ok(Json(state.app.status().await?))
+async fn status(
+    State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(state.app.status(mode).await?))
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,6 +79,7 @@ fn default_search_limit() -> u32 {
 async fn search(
     State(state): State<ApiState>,
     Query(params): Query<SearchParams>,
+    ModeHeader(mode): ModeHeader,
 ) -> Result<impl IntoResponse, ApiError> {
     Ok(Json(
         state
@@ -83,6 +89,7 @@ async fn search(
                 params.limit,
                 params.wing.as_deref(),
                 params.room.as_deref(),
+                mode,
             )
             .await?,
     ))
@@ -100,11 +107,12 @@ struct RecallParams {
 async fn recall(
     State(state): State<ApiState>,
     Query(params): Query<RecallParams>,
+    ModeHeader(mode): ModeHeader,
 ) -> Result<impl IntoResponse, ApiError> {
     Ok(Json(
         state
             .app
-            .recall(&params.q, params.wing.as_deref(), params.limit)
+            .recall(&params.q, params.wing.as_deref(), params.limit, mode)
             .await?,
     ))
 }
@@ -122,6 +130,7 @@ struct WakeUpParams {
 async fn wake_up(
     State(state): State<ApiState>,
     Query(params): Query<WakeUpParams>,
+    ModeHeader(mode): ModeHeader,
 ) -> Result<impl IntoResponse, ApiError> {
     let default_budget = WakeUpBudget::default();
     let budget = WakeUpBudget {
@@ -131,7 +140,7 @@ async fn wake_up(
     Ok(Json(
         state
             .app
-            .wake_up(&params.agent_identity, params.wing.as_deref(), budget)
+            .wake_up(&params.agent_identity, params.wing.as_deref(), budget, mode)
             .await?,
     ))
 }
@@ -148,12 +157,13 @@ struct DiaryWriteBody {
 
 async fn diary_write(
     State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
     Json(body): Json<DiaryWriteBody>,
 ) -> Result<impl IntoResponse, ApiError> {
     Ok(Json(
         state
             .app
-            .diary_write(&body.agent_identity, &body.wing, body.content)
+            .diary_write(&body.agent_identity, &body.wing, body.content, mode)
             .await?,
     ))
 }
@@ -173,11 +183,12 @@ fn default_diary_limit() -> u32 {
 async fn diary_read(
     State(state): State<ApiState>,
     Query(params): Query<DiaryReadParams>,
+    ModeHeader(mode): ModeHeader,
 ) -> Result<impl IntoResponse, ApiError> {
     Ok(Json(
         state
             .app
-            .diary_read(&params.agent_identity, &params.wing, params.limit)
+            .diary_read(&params.agent_identity, &params.wing, params.limit, mode)
             .await?,
     ))
 }
@@ -215,10 +226,13 @@ fn default_requested_by() -> String {
 
 async fn submit_job(
     State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
     Json(body): Json<SubmitJobBody>,
 ) -> Result<impl IntoResponse, ApiError> {
     let job = match body.kind {
         JobKind::Mine { path, wing } => {
+            // Not gated by `mode` — mining is not in this issue's scope
+            // (see `MemoryMode`'s doc comment on daemon vs memory ops).
             state.app.submit_mine(path, wing, body.requested_by).await?
         }
         JobKind::Demo { steps } => state.app.submit_demo(steps, body.requested_by).await?,
@@ -226,10 +240,13 @@ async fn submit_job(
             if body.emergency {
                 state
                     .app
-                    .emergency_checkpoint(payload, body.requested_by)
+                    .emergency_checkpoint(payload, body.requested_by, mode)
                     .await?
             } else {
-                state.app.checkpoint(payload, body.requested_by).await?
+                state
+                    .app
+                    .checkpoint(payload, body.requested_by, mode)
+                    .await?
             }
         }
     };

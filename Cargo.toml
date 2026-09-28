@@ -155,6 +155,15 @@ futures = "0.3.34"
 version = "3.3.0"
 features = ["kv-mem"]
 
+# Only `tests/mcp_memory_mode.rs` needs a real MCP *client* (to prove memory
+# mode is negotiated per MCP session, not per connection or globally) —
+# unions with the main dependency's `server`/`schemars` features above,
+# same trade-off as `surrealdb` just above.
+[dev-dependencies.rmcp]
+version = "3.4.1"
+default-features = false
+features = ["client", "transport-streamable-http-client-reqwest"]
+
 [target."cfg(unix)".dependencies]
 libc = "0.2.189"
 
