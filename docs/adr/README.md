@@ -23,3 +23,9 @@ by editing the old one. The history is the value.
 
 - [ADR-001](001-surrealkv-embedded-storage-engine.md) — SurrealKV as the
   only embedded storage engine in Phase 1
+- [ADR-002](002-memory-mode-session-scoping.md) — memory mode is
+  per-session/per-request, never daemon-global
+- [ADR-003](003-checkpoint-as-a-durable-job.md) — checkpoint is a durable
+  job; diary writes are a direct call
+- [ADR-004](004-versioned-database-migrations.md) — versioned MemCastle
+  data migrations, decoupled from the SurrealDB engine and storage backend
