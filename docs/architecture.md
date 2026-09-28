@@ -104,6 +104,52 @@ search, temporal filtering, graph-aware retrieval, and hybrid ranking are
 later phases layered on the same table — see
 [Non-goals](#non-goals-for-this-bootstrap).
 
+## Memory mode: per-session, never daemon-global
+
+`domain::MemoryMode` (`Full`/`ReadOnly`/`Disabled`) is how memory gets
+explicitly disabled for one client without stopping the daemon or affecting
+any other client sharing it (PLAN.md principles 8-9). It is *never* a
+process-wide setting — there is no `MEMCASTLE_ENABLED=false` daemon flag —
+because the daemon already serves many agents at once; disabling memory for
+one of them must not touch the others' in-flight jobs or reads.
+
+| mode        | read (`search`/`recall`/`wake_up`/`diary_read`) | write (`checkpoint`/`emergency_checkpoint`/`diary_write`) |
+|-------------|--------------------------------------------------|-------------------------------------------------------------|
+| `Full`      | ok                                               | ok                                                            |
+| `ReadOnly`  | ok                                               | rejected (`Error::ModeForbidden`)                             |
+| `Disabled`  | rejected (`Error::ModeForbidden`)                | rejected (`Error::ModeForbidden`)                             |
+
+`Disabled` is symmetric on purpose: reads are rejected with the same typed
+error as writes, never a silent `Ok(empty)` — an empty result would be
+indistinguishable from "genuinely found nothing," which would leak an
+ambiguous signal into a session that is supposed to behave as if MemCastle
+doesn't exist.
+
+Only those seven operations are gated. Administrative/daemon-level
+operations — `status`, job listing/control (`list_jobs`, `pause_job`,
+`resume_job`, `cancel_job`, `retry_job`), and job submission
+(`submit_mine`, `submit_demo`) — are not session-scoped memory operations
+and are never gated by mode: a disabled session can still see daemon/job
+state and submit background work. `Audit`/`Repair` (planned) fall on the
+administrative side of this line too, unless a future issue explicitly
+reclassifies one of them.
+
+Enforcement is centralized in `app::AppServices` (`require_read`/
+`require_write`, checked before any store contact) — `api` and `mcp` only
+*extract* a `MemoryMode` and pass it down, never independently deciding
+what's allowed:
+
+- **HTTP** reads an `X-MemCastle-Mode` header once per request via a small
+  `axum::extract::FromRequestParts` extractor (`api::ModeHeader`), defaulting
+  to `Full` when the header is absent so existing clients are unaffected. An
+  unparsable value is a 400, never silently downgraded to `Full`.
+- **MCP** has no per-request header in the tool-call model, so mode is
+  negotiated once per session: a `memcastle_set_mode` tool call is cached in
+  an `Arc<DashMap<session id, MemoryMode>>` inside `McpTools`, keyed by the
+  `mcp-session-id` header rmcp's streamable-HTTP transport already assigns.
+  Every other tool looks up this map before delegating to `AppServices`,
+  defaulting to `Full` for a session that never called `memcastle_set_mode`.
+
 ## Jobs: a durable queue, not an in-memory one
 
 > The queue state is durable; the in-memory scheduler is only the execution

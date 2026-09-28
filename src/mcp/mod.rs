@@ -12,7 +12,12 @@
 //! Every tool calls `AppServices` only — never `store` or `jobs` directly,
 //! same rule as `api` (see that module's doc comment).
 
+use std::sync::Arc;
+
+use axum::http;
+use dashmap::DashMap;
 use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::handler::server::tool::Extension;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
@@ -21,17 +26,28 @@ use rmcp::{ErrorData as McpError, ServerHandler, schemars, tool, tool_handler, t
 use tokio_util::sync::CancellationToken;
 
 use crate::app::{AppServices, WakeUpBudget};
-use crate::domain::CheckpointPayload;
+use crate::domain::{CheckpointPayload, MemoryMode};
 
 /// The MCP tool surface. Cheap to clone (holds only `AppServices`, itself
-/// cheap to clone, and the macro-generated router).
+/// cheap to clone, an `Arc<DashMap<..>>`, and the macro-generated router).
 ///
 /// `tool_router` looks unread to a naive dead-code scan — `#[tool_handler]`
 /// wires it into `call_tool`/`list_tools` through macro-generated code, the
 /// same pattern (and the same warning) as the SDK's own examples.
+///
+/// `modes` caches each MCP session's [`MemoryMode`], keyed by the
+/// `mcp-session-id` HTTP header `StreamableHttpService`/`LocalSessionManager`
+/// assigns per session — the MCP surface has no per-request header the way
+/// HTTP does (see `api::ModeHeader`), so mode is instead negotiated once,
+/// via `memcastle_set_mode`, and looked up by every subsequent tool call on
+/// the same session. A session that never calls `memcastle_set_mode`
+/// defaults to `Full` (`DashMap::get` returning `None`), exactly like a
+/// missing `X-MemCastle-Mode` header does over HTTP. Same `Arc<DashMap<..>>`
+/// pattern `jobs::Scheduler` already uses for `controls`.
 #[derive(Clone)]
 pub struct McpTools {
     app: AppServices,
+    modes: Arc<DashMap<String, MemoryMode>>,
     #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
 }
@@ -138,6 +154,20 @@ struct MineArgs {
     wing: Option<String>,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct SetModeArgs {
+    /// This session's memory mode from now on: `"full"` (default — reads
+    /// and writes both proceed), `"read_only"` (reads proceed, writes
+    /// rejected), or `"disabled"` (neither reads nor writes proceed — see
+    /// `domain::MemoryMode`'s doc comment for the full allow/deny matrix).
+    /// A plain string rather than a typed `MemoryMode` field — deriving
+    /// `schemars::JsonSchema` on that domain enum would mean `domain`
+    /// depending on `schemars` for one MCP-only argument, the same
+    /// trade-off `CheckpointArgs::payload` already makes for
+    /// `CheckpointPayload`.
+    mode: String,
+}
+
 #[tool_router]
 impl McpTools {
     /// Wrap `app` as an MCP tool surface.
@@ -145,15 +175,68 @@ impl McpTools {
     pub fn new(app: AppServices) -> Self {
         Self {
             app,
+            modes: Arc::new(DashMap::new()),
             tool_router: Self::tool_router(),
         }
+    }
+
+    /// Read the `mcp-session-id` header rmcp's streamable-HTTP transport
+    /// sets on every request after the initialize handshake — the only way
+    /// to identify "which session is this" from inside a tool handler (see
+    /// `McpTools::modes`'s doc comment).
+    fn session_id(parts: &http::request::Parts) -> String {
+        parts
+            .headers
+            .get("mcp-session-id")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    /// This request's effective `MemoryMode`: whatever `memcastle_set_mode`
+    /// last cached for its session, or `Full` if it never called that tool.
+    fn mode_for(&self, parts: &http::request::Parts) -> MemoryMode {
+        self.modes
+            .get(&Self::session_id(parts))
+            .map(|mode| *mode)
+            .unwrap_or_default()
+    }
+
+    #[tool(
+        description = "Set this MCP session's memory mode (full/read_only/disabled); call once \
+                        at session start — every other tool call on this session uses whatever \
+                        was set here, defaulting to full until this is called"
+    )]
+    async fn memcastle_set_mode(
+        &self,
+        Parameters(args): Parameters<SetModeArgs>,
+        Extension(parts): Extension<http::request::Parts>,
+    ) -> Result<CallToolResult, McpError> {
+        let mode: MemoryMode =
+            match serde_json::from_value(serde_json::Value::String(args.mode.clone())) {
+                Ok(mode) => mode,
+                Err(_) => {
+                    return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                        "unknown memory mode `{}` (expected full, read_only, or disabled)",
+                        args.mode
+                    ))]));
+                }
+            };
+        self.modes.insert(Self::session_id(&parts), mode);
+        Ok(CallToolResult::success(vec![ContentBlock::text(format!(
+            "memory mode set to {mode:?}"
+        ))]))
     }
 
     #[tool(
         description = "Report daemon health: version, uptime, palace name, drawer and job counts"
     )]
-    async fn memcastle_status(&self) -> Result<CallToolResult, McpError> {
-        match self.app.status().await {
+    async fn memcastle_status(
+        &self,
+        Extension(parts): Extension<http::request::Parts>,
+    ) -> Result<CallToolResult, McpError> {
+        let mode = self.mode_for(&parts);
+        match self.app.status(mode).await {
             Ok(status) => {
                 let text = serde_json::to_string_pretty(&status).unwrap_or_default();
                 Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
@@ -168,7 +251,9 @@ impl McpTools {
     async fn memcastle_search(
         &self,
         Parameters(args): Parameters<SearchArgs>,
+        Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
+        let mode = self.mode_for(&parts);
         match self
             .app
             .search(
@@ -176,6 +261,7 @@ impl McpTools {
                 args.limit,
                 args.wing.as_deref(),
                 args.room.as_deref(),
+                mode,
             )
             .await
         {
@@ -197,10 +283,12 @@ impl McpTools {
     async fn memcastle_recall(
         &self,
         Parameters(args): Parameters<RecallArgs>,
+        Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
+        let mode = self.mode_for(&parts);
         match self
             .app
-            .recall(&args.query, args.wing.as_deref(), args.limit)
+            .recall(&args.query, args.wing.as_deref(), args.limit, mode)
             .await
         {
             Ok(hits) => {
@@ -221,7 +309,9 @@ impl McpTools {
     async fn memcastle_wake_up(
         &self,
         Parameters(args): Parameters<WakeUpArgs>,
+        Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
+        let mode = self.mode_for(&parts);
         let default_budget = WakeUpBudget::default();
         let budget = WakeUpBudget {
             max_items: args.max_items.unwrap_or(default_budget.max_items),
@@ -229,7 +319,7 @@ impl McpTools {
         };
         match self
             .app
-            .wake_up(&args.agent_identity, args.wing.as_deref(), budget)
+            .wake_up(&args.agent_identity, args.wing.as_deref(), budget, mode)
             .await
         {
             Ok(context) => {
@@ -271,7 +361,9 @@ impl McpTools {
     async fn memcastle_checkpoint(
         &self,
         Parameters(args): Parameters<CheckpointArgs>,
+        Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
+        let mode = self.mode_for(&parts);
         let payload: CheckpointPayload = match serde_json::from_value(args.payload) {
             Ok(payload) => payload,
             Err(error) => {
@@ -282,9 +374,11 @@ impl McpTools {
         };
         let requested_by = "mcp".to_string();
         let result = if args.emergency {
-            self.app.emergency_checkpoint(payload, requested_by).await
+            self.app
+                .emergency_checkpoint(payload, requested_by, mode)
+                .await
         } else {
-            self.app.checkpoint(payload, requested_by).await
+            self.app.checkpoint(payload, requested_by, mode).await
         };
         match result {
             Ok(job) => {
@@ -303,10 +397,12 @@ impl McpTools {
     async fn memcastle_diary_write(
         &self,
         Parameters(args): Parameters<DiaryWriteArgs>,
+        Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
+        let mode = self.mode_for(&parts);
         match self
             .app
-            .diary_write(&args.agent_identity, &args.wing, args.content)
+            .diary_write(&args.agent_identity, &args.wing, args.content, mode)
             .await
         {
             Ok(drawer) => {
@@ -325,10 +421,12 @@ impl McpTools {
     async fn memcastle_diary_read(
         &self,
         Parameters(args): Parameters<DiaryReadArgs>,
+        Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
+        let mode = self.mode_for(&parts);
         match self
             .app
-            .diary_read(&args.agent_identity, &args.wing, args.limit)
+            .diary_read(&args.agent_identity, &args.wing, args.limit, mode)
             .await
         {
             Ok(entries) => {
@@ -364,7 +462,9 @@ impl ServerHandler for McpTools {
                 "MemCastle: a shared memory palace daemon. Tools: memcastle_status, \
                  memcastle_search, memcastle_recall, memcastle_wake_up, memcastle_mine, \
                  memcastle_checkpoint, memcastle_diary_write, memcastle_diary_read, \
-                 memcastle_jobs_list."
+                 memcastle_jobs_list, memcastle_set_mode. Call memcastle_set_mode once at \
+                 session start to switch this session to read_only or disabled memory mode \
+                 (defaults to full)."
                     .to_string(),
             )
     }

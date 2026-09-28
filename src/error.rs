@@ -119,6 +119,24 @@ pub enum Error {
         /// What went wrong.
         message: String,
     },
+
+    /// A memory operation was rejected by the calling session/request's
+    /// [`crate::domain::MemoryMode`]: `ReadOnly` rejects writes, `Disabled`
+    /// rejects everything (see that type's doc comment for the full
+    /// allow/deny matrix). Returned before the store is ever touched.
+    #[error("`{operation}` is not permitted in {mode:?} mode")]
+    #[diagnostic(
+        code(memcastle::app::mode_forbidden),
+        help(
+            "switch the session/request to Full mode to allow writes, or to Full/ReadOnly to allow reads"
+        )
+    )]
+    ModeForbidden {
+        /// The operation that was rejected (e.g. `"checkpoint"`, `"diary_write"`).
+        operation: String,
+        /// The mode that forbade it.
+        mode: crate::domain::MemoryMode,
+    },
 }
 
 impl Error {
