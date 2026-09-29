@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 
 use crate::app::{StatusReport, WakeUpBudget, WakeUpContext};
-use crate::domain::{CheckpointPayload, Drawer, Job, JobId, JobStatus};
+use crate::domain::{CheckpointPayload, Drawer, Job, JobId, JobStatus, MemoryMode};
 use crate::error::{Error, Result};
 use crate::search::SearchHit;
 use crate::server::lifecycle;
@@ -39,6 +39,26 @@ impl DaemonClient {
             base_url: format!("http://{bind_addr}"),
             http: reqwest::Client::new(),
         }
+    }
+
+    /// Send `mode` as the `X-MemCastle-Mode` header on every request, so the
+    /// daemon gates this client's calls exactly as it would any other
+    /// session in that mode. Without it a client runs as `Full`.
+    #[must_use]
+    pub fn with_mode(mut self, mode: MemoryMode) -> Self {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::HeaderName::from_static(MemoryMode::HEADER),
+            reqwest::header::HeaderValue::from_static(mode.as_str()),
+        );
+        self.http = reqwest::Client::builder()
+            .default_headers(headers)
+            .build()
+            // Only fails if the TLS backend cannot initialise, which
+            // `reqwest::Client::new()` in `discover` would have panicked on
+            // first.
+            .expect("build the HTTP client");
+        self
     }
 
     async fn send<T: DeserializeOwned>(&self, request: reqwest::RequestBuilder) -> Result<T> {

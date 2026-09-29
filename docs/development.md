@@ -54,9 +54,12 @@ see `config::Config` for the full list of settings and their environment-variabl
     proving the shared store stays consistent (in-process).
   - `tests/memory_mode.rs`, `tests/mcp_memory_mode.rs` — per-request and per-MCP-session memory modes (in-process).
   - `tests/audit.rs`, `tests/repair.rs` — the audit and repair job kinds end to end (in-process).
-  - `tests/persistence.rs` — data and job state survive a daemon restart, including a SIGKILL mid-job (subprocess).
+  - `tests/persistence.rs` — data and job state survive a daemon restart, including a SIGKILL mid-job
+    and a pause or cancel requested just before it, and `memcastle restart --bind` (subprocess).
   - `tests/migrate.rs` — `memcastle migrate` and its `--check`/`--status` modes (subprocess).
   - `tests/cli.rs` — the binary's argument parsing and its behaviour with no daemon reachable (subprocess).
+  - `tests/cli_daemon.rs` — CLI flags that change what the daemon is asked: `--mode`, and relative `mine` paths
+    against an in-process daemon (subprocess client).
 
 Run a subset with nextest's filter syntax, e.g.:
 

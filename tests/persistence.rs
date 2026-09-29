@@ -293,6 +293,68 @@ async fn a_pause_requested_before_a_sigkill_comes_back_paused_after_restart() {
     an_acknowledged_stop_request_survives_a_sigkill("pause", "paused").await;
 }
 
+/// `memcastle restart` must bring the daemon back the way it was asked to,
+/// and only say so once it is serving: a bare `memcastle serve` would drop
+/// `--bind` and come back on the default address.
+#[tokio::test]
+async fn restart_brings_the_daemon_back_on_the_requested_address() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let palace = dir.path().join("palace");
+    let bin = cargo_bin("memcastle");
+
+    let (mut child, first) = spawn_daemon_and_wait(&bin, &palace).await;
+
+    // A port that was free a moment ago; the restarted daemon takes it.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("bind")
+        .local_addr()
+        .expect("addr")
+        .port();
+    let wanted = format!("127.0.0.1:{port}");
+    assert_ne!(first.bind_addr, wanted);
+
+    let output = Command::new(&bin)
+        .args(["restart", "--bind", &wanted])
+        .env("MEMCASTLE_PALACE_PATH", &palace)
+        .output()
+        .await
+        .expect("run `memcastle restart`");
+    assert!(
+        output.status.success(),
+        "restart failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(&wanted),
+        "it must report where it came back: {stdout}"
+    );
+
+    // By the time it returned the daemon was serving, on that address.
+    let second = read_if_live(&palace).expect("the restarted daemon is registered");
+    assert_eq!(second.bind_addr, wanted);
+    let health = reqwest::get(format!("http://{wanted}/api/health"))
+        .await
+        .expect("health request");
+    assert!(health.status().is_success());
+
+    // Tear down the daemon `restart` spawned (the original one is gone).
+    let stopped = Command::new(&bin)
+        .arg("stop")
+        .env("MEMCASTLE_PALACE_PATH", &palace)
+        .status()
+        .await
+        .expect("run `memcastle stop`");
+    assert!(stopped.success());
+    for _ in 0..150 {
+        if read_if_live(&palace).is_none() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let _ = child.wait().await;
+}
+
 async fn wait_for_job(
     client: &reqwest::Client,
     base: &str,

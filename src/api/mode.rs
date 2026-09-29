@@ -17,7 +17,7 @@ use super::error::ApiError;
 /// Header lookup is case-insensitive (`axum`'s `HeaderMap` normalizes
 /// names), so this exact casing is just the canonical spelling to
 /// document, not a requirement on callers.
-const HEADER_NAME: &str = "x-memcastle-mode";
+const HEADER_NAME: &str = MemoryMode::HEADER;
 
 /// The effective [`MemoryMode`] for one HTTP request — `Full` when the
 /// header is absent entirely (existing clients that don't send it must see
@@ -43,16 +43,9 @@ where
         let raw = value
             .to_str()
             .map_err(|_| ApiError::from(Error::invalid_input(HEADER_NAME, "must be ASCII")))?;
-        // Reuses the exact "parse a snake_case wire string through the
-        // type's own Deserialize" trick `api::parse_status` already uses
-        // for `JobStatus` — no bespoke parsing logic for a second enum.
-        let mode =
-            serde_json::from_value(serde_json::Value::String(raw.to_string())).map_err(|_| {
-                ApiError::from(Error::invalid_input(
-                    HEADER_NAME,
-                    format!("unknown memory mode `{raw}` (expected full, read_only or disabled)"),
-                ))
-            })?;
+        let mode = raw.parse().map_err(|message: String| {
+            ApiError::from(Error::invalid_input(HEADER_NAME, message))
+        })?;
         Ok(Self(mode))
     }
 }

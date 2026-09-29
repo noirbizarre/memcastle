@@ -69,6 +69,11 @@ pub enum MemoryMode {
 }
 
 impl MemoryMode {
+    /// The HTTP header a client sets to ask for a non-default mode. One
+    /// constant, shared by the daemon that reads it and the client that
+    /// sends it, so the two cannot drift.
+    pub const HEADER: &'static str = "x-memcastle-mode";
+
     /// The name this mode goes by everywhere it is spelled out: the
     /// `X-MemCastle-Mode` header, `memcastle_set_mode`'s argument, the CLI's
     /// `--mode`, and every message that reports it.

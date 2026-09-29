@@ -13,9 +13,18 @@ use clap::{Args, Parser, Subcommand};
 #[derive(Debug, Parser)]
 #[command(name = "memcastle", version, about, long_about = None)]
 pub struct Cli {
-    /// Increase verbosity. Repeat for more.
+    /// Increase verbosity: `-v` logs memcastle at debug level, `-vv` at
+    /// trace, and either prints the full cause chain of an error.
+    /// `MEMCASTLE_LOG` and `RUST_LOG` take precedence over it.
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     pub verbose: u8,
+
+    /// Run this command in a memory mode — `full` (the default),
+    /// `read_only` or `disabled` — exactly as an agent session in that mode
+    /// would: the daemon rejects what the mode forbids. Useful to check what
+    /// a restricted session can and cannot do.
+    #[arg(long, global = true, env = "MEMCASTLE_MODE")]
+    pub mode: Option<memcastle::domain::MemoryMode>,
 
     /// Path to a config file. Defaults to `~/.memcastle/config.toml` if it exists.
     #[arg(long, global = true, env = "MEMCASTLE_CONFIG")]
@@ -42,9 +51,11 @@ pub enum Command {
     Status,
     /// Ask a running daemon to shut down gracefully.
     Stop,
-    /// Stop the daemon, then start a fresh one (best-effort; for supervised
-    /// deployments, prefer restarting through your process manager).
-    Restart,
+    /// Stop the daemon, then start a fresh one and wait until it is serving
+    /// (best-effort; for supervised deployments, prefer restarting through
+    /// your process manager). `--config` and `--bind` are passed on to the
+    /// new daemon.
+    Restart(ServeArgs),
     /// Search palace drawer content.
     Search(SearchArgs),
     /// Retrieve palace content matching a query, returned verbatim — the
@@ -195,12 +206,8 @@ pub struct RepairArgs {
     /// Actually perform the planned actions. Without this flag, repair
     /// always runs in dry-run mode: it reports what it would do without
     /// mutating anything (see `memcastle::repair`'s module doc).
-    #[arg(long, conflicts_with = "dry_run")]
-    pub apply: bool,
-    /// Explicit dry run — already the default without `--apply`; only
-    /// useful to make a script's intent unambiguous.
     #[arg(long)]
-    pub dry_run: bool,
+    pub apply: bool,
     /// Restrict repair actions to what a specific prior `memcastle audit`
     /// job (its job id) found, rather than scanning the whole palace fresh.
     #[arg(long)]

@@ -17,12 +17,12 @@ mod cli;
 
 use cli::{
     AuditArgs, CheckpointArgs, Cli, Command, DiaryCommand, JobsCommand, MigrateArgs, MineArgs,
-    RecallArgs, RepairArgs, SearchArgs, WakeUpArgs,
+    RecallArgs, RepairArgs, SearchArgs, ServeArgs, WakeUpArgs,
 };
 use memcastle::app::WakeUpBudget;
 use memcastle::client::DaemonClient;
 use memcastle::config::Config;
-use memcastle::domain::JobId;
+use memcastle::domain::{JobId, MemoryMode};
 use memcastle::store::SurrealStore;
 use memcastle::{Error, Result};
 
@@ -68,11 +68,11 @@ async fn async_main() -> ExitCode {
     // the default level) — the failure itself is reported through miette
     // below, not tracing, so nothing is lost by initializing second.
     let config = Config::load(args.config.as_deref());
-    init_tracing(
-        config
-            .as_ref()
-            .map_or_else(|_| "info".to_string(), Config::log_filter),
-    );
+    // A config that failed to load still honours `-v`, on top of the default.
+    init_tracing(match &config {
+        Ok(config) => config.log_filter(args.verbose),
+        Err(_) => Config::default().log_filter(args.verbose),
+    });
 
     let outcome = match config {
         Ok(config) => run(args, config).await,
@@ -88,6 +88,7 @@ async fn async_main() -> ExitCode {
 }
 
 async fn run(args: Cli, mut config: Config) -> Result<()> {
+    let mode = args.mode;
     match args.command {
         Command::Serve(serve_args) => {
             if let Some(bind) = serve_args.bind {
@@ -96,18 +97,20 @@ async fn run(args: Cli, mut config: Config) -> Result<()> {
             memcastle::server::run(config).await
         }
         Command::Migrate(args) => cmd_migrate(&config, args).await,
-        Command::Status => cmd_status(&config).await,
-        Command::Stop => cmd_stop(&config).await,
-        Command::Restart => cmd_restart(&config).await,
-        Command::Search(args) => cmd_search(&config, args).await,
-        Command::Recall(args) => cmd_recall(&config, args).await,
-        Command::WakeUp(args) => cmd_wake_up(&config, args).await,
-        Command::Mine(args) => cmd_mine(&config, args).await,
-        Command::Checkpoint(args) => cmd_checkpoint(&config, args).await,
-        Command::Audit(args) => cmd_audit(&config, args).await,
-        Command::Repair(args) => cmd_repair(&config, args).await,
-        Command::Diary(cmd) => cmd_diary(&config, cmd).await,
-        Command::Jobs(jobs) => cmd_jobs(&config, jobs).await,
+        Command::Status => cmd_status(&config, mode).await,
+        Command::Stop => cmd_stop(&config, mode).await,
+        Command::Restart(restart_args) => {
+            cmd_restart(&config, args.config.as_deref(), mode, restart_args).await
+        }
+        Command::Search(args) => cmd_search(&config, mode, args).await,
+        Command::Recall(args) => cmd_recall(&config, mode, args).await,
+        Command::WakeUp(args) => cmd_wake_up(&config, mode, args).await,
+        Command::Mine(args) => cmd_mine(&config, mode, args).await,
+        Command::Checkpoint(args) => cmd_checkpoint(&config, mode, args).await,
+        Command::Audit(args) => cmd_audit(&config, mode, args).await,
+        Command::Repair(args) => cmd_repair(&config, mode, args).await,
+        Command::Diary(cmd) => cmd_diary(&config, mode, cmd).await,
+        Command::Jobs(jobs) => cmd_jobs(&config, mode, jobs).await,
         Command::Wings => Err(Error::not_implemented("memcastle wings")),
         Command::Rooms => Err(Error::not_implemented("memcastle rooms")),
         Command::Drawers => Err(Error::not_implemented("memcastle drawers")),
@@ -115,8 +118,14 @@ async fn run(args: Cli, mut config: Config) -> Result<()> {
     }
 }
 
-fn client(config: &Config) -> DaemonClient {
-    DaemonClient::discover(&config.palace.path, config.server.bind)
+/// A client for the daemon this palace's config points at, sending `mode`
+/// (from `--mode`/`MEMCASTLE_MODE`) with every request when one was given.
+fn client(config: &Config, mode: Option<MemoryMode>) -> DaemonClient {
+    let daemon = DaemonClient::discover(&config.palace.path, config.server.bind);
+    match mode {
+        Some(mode) => daemon.with_mode(mode),
+        None => daemon,
+    }
 }
 
 /// Print `value` as pretty JSON — or fail loudly. A serialization error used
@@ -128,8 +137,8 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_status(config: &Config) -> Result<()> {
-    let status = client(config).status().await?;
+async fn cmd_status(config: &Config, mode: Option<MemoryMode>) -> Result<()> {
+    let status = client(config, mode).status().await?;
     print_json(&status)?;
     Ok(())
 }
@@ -159,13 +168,27 @@ async fn cmd_migrate(config: &Config, args: MigrateArgs) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_stop(config: &Config) -> Result<()> {
-    print_json(&client(config).shutdown().await?)?;
+async fn cmd_stop(config: &Config, mode: Option<MemoryMode>) -> Result<()> {
+    print_json(&client(config, mode).shutdown().await?)?;
     Ok(())
 }
 
-async fn cmd_restart(config: &Config) -> Result<()> {
-    let daemon = client(config);
+/// Stop the running daemon (if any), start a fresh one with the flags this
+/// command was given, and wait until it is actually serving.
+///
+/// "Actually serving" is the registry file appearing with a live daemon
+/// behind it — the same signal every other command discovers the daemon by —
+/// not the process merely having been spawned: reporting success before that
+/// told users a daemon that had crashed on startup was up. The new daemon
+/// gets the original `--config` and `--bind`, because a bare `memcastle serve`
+/// would silently come back on the default address with the default config.
+async fn cmd_restart(
+    config: &Config,
+    config_path: Option<&std::path::Path>,
+    mode: Option<MemoryMode>,
+    args: ServeArgs,
+) -> Result<()> {
+    let daemon = client(config, mode);
     if daemon.health().await {
         daemon.shutdown().await?;
         // Best-effort: poll until the port frees up, or give up after a few
@@ -179,16 +202,52 @@ async fn cmd_restart(config: &Config) -> Result<()> {
     }
 
     let exe = std::env::current_exe().map_err(|source| Error::io("current executable", source))?;
-    std::process::Command::new(exe)
-        .arg("serve")
+    let mut command = std::process::Command::new(exe);
+    command.arg("serve");
+    if let Some(path) = config_path {
+        command.arg("--config").arg(path);
+    }
+    if let Some(bind) = args.bind {
+        command.arg("--bind").arg(bind.to_string());
+    }
+    // Detached from this terminal: the new daemon outlives this command, and
+    // an inherited stderr would interleave its log with the shell prompt.
+    let mut child = command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .spawn()
         .map_err(|source| Error::io("memcastle serve", source))?;
-    println!("restarted");
-    Ok(())
+
+    // A daemon takes a couple of seconds to open SurrealDB and migrate; a
+    // debug build on a slow disk takes far longer, hence the generous bound.
+    for _ in 0..600 {
+        if let Some(info) = memcastle::server::lifecycle::read_if_live(&config.palace.path) {
+            println!(
+                "restarted: memcastle is serving on http://{}",
+                info.bind_addr
+            );
+            return Ok(());
+        }
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|source| Error::io("memcastle serve", source))?
+        {
+            return Err(Error::server(format!(
+                "the new daemon exited with {status} before it started serving; run \
+                 `memcastle serve` in the foreground to see why"
+            )));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    Err(Error::server(
+        "the new daemon did not start serving within 60 seconds; run `memcastle serve` in the \
+         foreground to see what it is waiting on",
+    ))
 }
 
-async fn cmd_search(config: &Config, args: SearchArgs) -> Result<()> {
-    let hits = client(config)
+async fn cmd_search(config: &Config, mode: Option<MemoryMode>, args: SearchArgs) -> Result<()> {
+    let hits = client(config, mode)
         .search(
             &args.query,
             args.wing.as_deref(),
@@ -200,30 +259,39 @@ async fn cmd_search(config: &Config, args: SearchArgs) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_recall(config: &Config, args: RecallArgs) -> Result<()> {
-    let hits = client(config)
+async fn cmd_recall(config: &Config, mode: Option<MemoryMode>, args: RecallArgs) -> Result<()> {
+    let hits = client(config, mode)
         .recall(&args.query, args.wing.as_deref(), args.limit)
         .await?;
     print_json(&hits)?;
     Ok(())
 }
 
-async fn cmd_wake_up(config: &Config, args: WakeUpArgs) -> Result<()> {
+async fn cmd_wake_up(config: &Config, mode: Option<MemoryMode>, args: WakeUpArgs) -> Result<()> {
     let budget = WakeUpBudget::from_options(args.max_items, args.max_bytes);
-    let context = client(config)
+    let context = client(config, mode)
         .wake_up(&args.agent_identity, args.wing.as_deref(), budget)
         .await?;
     print_json(&context)?;
     Ok(())
 }
 
-async fn cmd_mine(config: &Config, args: MineArgs) -> Result<()> {
-    let job = client(config).submit_mine(args.path, args.wing).await?;
+async fn cmd_mine(config: &Config, mode: Option<MemoryMode>, args: MineArgs) -> Result<()> {
+    // Made absolute here, against *this* shell's working directory: the
+    // daemon would otherwise resolve `./project` against its own, which is
+    // wherever it was started and usually not where the user is standing.
+    let path = std::path::absolute(&args.path)
+        .map_err(|source| Error::io(args.path.display().to_string(), source))?;
+    let job = client(config, mode).submit_mine(path, args.wing).await?;
     print_json(&job)?;
     Ok(())
 }
 
-async fn cmd_checkpoint(config: &Config, args: CheckpointArgs) -> Result<()> {
+async fn cmd_checkpoint(
+    config: &Config,
+    mode: Option<MemoryMode>,
+    args: CheckpointArgs,
+) -> Result<()> {
     let raw = match &args.payload {
         Some(path) => std::fs::read_to_string(path)
             .map_err(|source| Error::io(path.display().to_string(), source))?,
@@ -245,30 +313,32 @@ async fn cmd_checkpoint(config: &Config, args: CheckpointArgs) -> Result<()> {
     // the API just to bounce back as a generic 400.
     let payload: memcastle::domain::CheckpointPayload = serde_json::from_str(&raw)
         .map_err(|source| Error::invalid_input("checkpoint payload", source.to_string()))?;
-    let job = client(config).checkpoint(payload, args.emergency).await?;
+    let job = client(config, mode)
+        .checkpoint(payload, args.emergency)
+        .await?;
     print_json(&job)?;
     Ok(())
 }
 
-async fn cmd_audit(config: &Config, args: AuditArgs) -> Result<()> {
-    let job = client(config).submit_audit(args.scope).await?;
+async fn cmd_audit(config: &Config, mode: Option<MemoryMode>, args: AuditArgs) -> Result<()> {
+    let job = client(config, mode).submit_audit(args.scope).await?;
     print_json(&job)?;
     Ok(())
 }
 
-async fn cmd_repair(config: &Config, args: RepairArgs) -> Result<()> {
+async fn cmd_repair(config: &Config, mode: Option<MemoryMode>, args: RepairArgs) -> Result<()> {
     // Parsed client-side, before ever contacting the daemon — same
     // reasoning as `parse_job_id`'s other call sites in `cmd_jobs`.
     let based_on_job = args.based_on_job.as_deref().map(parse_job_id).transpose()?;
-    let job = client(config)
+    let job = client(config, mode)
         .submit_repair(!args.apply, based_on_job)
         .await?;
     print_json(&job)?;
     Ok(())
 }
 
-async fn cmd_diary(config: &Config, command: DiaryCommand) -> Result<()> {
-    let daemon = client(config);
+async fn cmd_diary(config: &Config, mode: Option<MemoryMode>, command: DiaryCommand) -> Result<()> {
+    let daemon = client(config, mode);
     match command {
         DiaryCommand::Write {
             agent_identity,
@@ -290,8 +360,8 @@ async fn cmd_diary(config: &Config, command: DiaryCommand) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_jobs(config: &Config, command: JobsCommand) -> Result<()> {
-    let daemon = client(config);
+async fn cmd_jobs(config: &Config, mode: Option<MemoryMode>, command: JobsCommand) -> Result<()> {
+    let daemon = client(config, mode);
     match command {
         JobsCommand::List { status } => {
             let status = status.map(|s| parse_status(&s)).transpose()?;

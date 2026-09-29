@@ -248,16 +248,20 @@ impl Config {
     ///
     /// Precedence, highest first: `MEMCASTLE_LOG` (already folded into
     /// `logging.level` by [`Config::load`]'s env overrides), then the
-    /// conventional `RUST_LOG`, then `logging.level` from the config file or
-    /// its default. `RUST_LOG` outranks the file so a one-off
+    /// conventional `RUST_LOG`, then the command line's `-v`/`-vv`
+    /// (`verbosity`), then `logging.level` from the config file or its
+    /// default. `RUST_LOG` outranks the file so a one-off
     /// `RUST_LOG=debug memcastle serve` still works against a config that
-    /// pins a quieter level.
+    /// pins a quieter level, and both environment variables outrank `-v`
+    /// because they are the more specific instruction (they can name a
+    /// target, which `-v` cannot).
     #[must_use]
-    pub fn log_filter(&self) -> String {
+    pub fn log_filter(&self, verbosity: u8) -> String {
         Self::resolve_log_filter(
             &self.logging.level,
             std::env::var_os("MEMCASTLE_LOG").is_some(),
             std::env::var("RUST_LOG").ok(),
+            verbosity,
         )
     }
 
@@ -267,10 +271,20 @@ impl Config {
         configured: &str,
         memcastle_log_is_set: bool,
         rust_log: Option<String>,
+        verbosity: u8,
     ) -> String {
         match rust_log {
-            Some(rust_log) if !memcastle_log_is_set => rust_log,
-            _ => configured.to_string(),
+            Some(rust_log) if !memcastle_log_is_set => return rust_log,
+            _ if memcastle_log_is_set => return configured.to_string(),
+            _ => {}
+        }
+        // `-v` raises memcastle's own level and leaves everything else at
+        // the configured one: `debug` for every crate would drown the
+        // output in SurrealDB and HTTP-stack chatter nobody asked for.
+        match verbosity {
+            0 => configured.to_string(),
+            1 => format!("{configured},memcastle=debug"),
+            _ => format!("{configured},memcastle=trace"),
         }
     }
 
@@ -323,13 +337,13 @@ fn default_config_file() -> PathBuf {
 mod tests {
     #[test]
     fn the_configured_log_level_is_used_when_no_environment_variable_overrides_it() {
-        assert_eq!(Config::resolve_log_filter("debug", false, None), "debug");
+        assert_eq!(Config::resolve_log_filter("debug", false, None, 0), "debug");
     }
 
     #[test]
     fn rust_log_outranks_the_config_file_level() {
         assert_eq!(
-            Config::resolve_log_filter("warn", false, Some("trace".to_string())),
+            Config::resolve_log_filter("warn", false, Some("trace".to_string()), 0),
             "trace"
         );
     }
@@ -338,7 +352,7 @@ mod tests {
     fn memcastle_log_outranks_rust_log() {
         // `MEMCASTLE_LOG` is already folded into the configured level.
         assert_eq!(
-            Config::resolve_log_filter("memcastle=debug", true, Some("trace".to_string())),
+            Config::resolve_log_filter("memcastle=debug", true, Some("trace".to_string()), 2),
             "memcastle=debug"
         );
     }
@@ -416,5 +430,34 @@ mod tests {
     fn a_config_file_that_sets_only_the_drain_timeout_keeps_the_default_lease_ttl() {
         let config: Config = toml::from_str("[jobs]\ndrain_timeout_secs = 5").unwrap();
         assert_eq!(config.jobs.lease_ttl_secs, 30);
+    }
+
+    #[test]
+    fn one_v_raises_memcastles_own_level_to_debug_and_two_to_trace() {
+        assert_eq!(
+            Config::resolve_log_filter("info", false, None, 1),
+            "info,memcastle=debug"
+        );
+        assert_eq!(
+            Config::resolve_log_filter("warn", false, None, 2),
+            "warn,memcastle=trace"
+        );
+    }
+
+    #[test]
+    fn no_v_leaves_the_configured_level_alone() {
+        assert_eq!(Config::resolve_log_filter("warn", false, None, 0), "warn");
+    }
+
+    #[test]
+    fn the_environment_outranks_v_because_it_can_name_a_target() {
+        assert_eq!(
+            Config::resolve_log_filter("info", false, Some("surrealdb=debug".to_string()), 2),
+            "surrealdb=debug"
+        );
+        assert_eq!(
+            Config::resolve_log_filter("memcastle=warn", true, None, 2),
+            "memcastle=warn"
+        );
     }
 }
