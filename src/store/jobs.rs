@@ -77,6 +77,17 @@ impl SurrealStore {
         Ok(())
     }
 
+    /// Save `job` only if the stored record is still in status `expected`.
+    /// Returns `false`, writing nothing, if it has moved on: a worker claimed
+    /// it (or a request already changed it) between the caller's read and this
+    /// write, so the caller's copy is stale and saving it would clobber the
+    /// newer state — for example writing `Cancelled` over a job that is now
+    /// running on a worker.
+    pub async fn save_job_if_status(&self, job: &Job, expected: JobStatus) -> Result<bool> {
+        let guard = Guard::Status(expected);
+        super::retrying_on_conflict(|| self.write_job(job, Some(&guard))).await
+    }
+
     /// Save `job` only if the stored record is still leased to `owner`.
     /// Returns `false`, writing nothing, if it is not — another daemon
     /// reaped this job after the lease lapsed, and this worker's view of it

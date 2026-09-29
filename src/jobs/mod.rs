@@ -50,6 +50,12 @@ pub enum JobOutcome {
 /// next to the job's own execution time.
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
+/// How many times a job-control request re-reads and retries when the job
+/// changes status underneath it. One retry already covers the only realistic
+/// race (a worker claiming the job); the rest is headroom, not a loop anyone
+/// should reach the end of.
+const TRANSITION_ATTEMPTS: usize = 5;
+
 /// How long shutdown waits for in-flight jobs to reach their next unit-of-work
 /// boundary and checkpoint, unless configured otherwise
 /// (`jobs.drain_timeout_secs`). Bounded because a handler stuck in one long
@@ -329,18 +335,25 @@ impl Scheduler {
     /// Returns an error if the job doesn't exist or the transition is
     /// illegal from its current status.
     pub async fn request_cancel(&self, id: JobId) -> Result<()> {
-        let control = self.controls.get(&id).map(|control| control.clone());
-        if let Some(control) = control {
-            // Persist first, signal second — see `request_pause`.
-            if self.store.mark_cancel_requested(id).await? {
-                control.request_cancel();
+        // A bounded loop: the guarded save below only fails when the job
+        // changed status after it was read (typically a worker claimed a queued
+        // job), and the fix is to start over so the now-running job takes the
+        // cooperative path above rather than being cancelled behind its
+        // worker's back.
+        for _ in 0..TRANSITION_ATTEMPTS {
+            let control = self.controls.get(&id).map(|control| control.clone());
+            if let Some(control) = control {
+                // Persist first, signal second — see `request_pause`.
+                if self.store.mark_cancel_requested(id).await? {
+                    control.request_cancel();
+                    return Ok(());
+                }
+            }
+            if self.apply_guarded(id, JobEvent::Cancel).await? {
                 return Ok(());
             }
         }
-        let mut job = self.load_job(id).await?;
-        job.apply(JobEvent::Cancel)?;
-        self.store.save_job(&job).await?;
-        Ok(())
+        Err(Self::contended(id))
     }
 
     /// Move a `Paused` job back to `Queued` so the dispatch loop picks it
@@ -350,10 +363,7 @@ impl Scheduler {
     ///
     /// Returns an error if the job doesn't exist or isn't `Paused`.
     pub async fn resume(&self, id: JobId) -> Result<()> {
-        let mut job = self.load_job(id).await?;
-        job.apply(JobEvent::Resume)?;
-        self.store.save_job(&job).await?;
-        Ok(())
+        self.apply_guarded_until_settled(id, JobEvent::Resume).await
     }
 
     /// Reset a `Failed` job back to `Queued` for another attempt, clearing
@@ -364,10 +374,43 @@ impl Scheduler {
     ///
     /// Returns an error if the job doesn't exist or isn't `Failed`.
     pub async fn retry(&self, id: JobId) -> Result<()> {
+        self.apply_guarded_until_settled(id, JobEvent::Retry).await
+    }
+
+    /// Load `id`, apply `event`, and save the result only if the job is still
+    /// in the status it was read in — so a transition decided from a stale read
+    /// can never overwrite what another writer did in between. Returns whether
+    /// the save happened; `false` means the job changed under us.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the job doesn't exist, `event` is not legal from
+    /// its status, or the store fails.
+    async fn apply_guarded(&self, id: JobId, event: JobEvent) -> Result<bool> {
         let mut job = self.load_job(id).await?;
-        job.apply(JobEvent::Retry)?;
-        self.store.save_job(&job).await?;
-        Ok(())
+        let seen = job.status;
+        job.apply(event)?;
+        self.store.save_job_if_status(&job, seen).await
+    }
+
+    /// [`Self::apply_guarded`], re-reading and retrying when the job changed
+    /// mid-request. The re-read is what turns "it was claimed meanwhile" into
+    /// the state machine's precise rejection instead of a lost update.
+    async fn apply_guarded_until_settled(&self, id: JobId, event: JobEvent) -> Result<()> {
+        for _ in 0..TRANSITION_ATTEMPTS {
+            if self.apply_guarded(id, event).await? {
+                return Ok(());
+            }
+        }
+        Err(Self::contended(id))
+    }
+
+    /// The job kept changing status faster than a request could be applied.
+    /// Practically unreachable; reported rather than looping forever.
+    fn contended(id: JobId) -> crate::Error {
+        crate::Error::server(format!(
+            "job {id} kept changing state while the request was being applied; try again"
+        ))
     }
 
     /// Run the dispatch loop until `shutdown` fires. Claims at most one job
