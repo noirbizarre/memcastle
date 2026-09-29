@@ -1014,6 +1014,60 @@ mod tests {
         assert_mode_forbidden(&result, MemoryMode::Disabled);
     }
 
+    fn one_item_payload(content: &str) -> CheckpointPayload {
+        CheckpointPayload {
+            items: vec![crate::domain::CheckpointItem {
+                destination: crate::domain::CheckpointDestination::General,
+                wing: Some("project-x".to_string()),
+                content: content.to_string(),
+                tags: vec![],
+                source: Source {
+                    kind: SourceKind::Manual,
+                    uri: None,
+                    agent: Some("test-agent".to_string()),
+                },
+                fact: None,
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn a_read_only_emergency_checkpoint_is_rejected_and_queues_nothing() {
+        let app = test_app().await;
+        let result = app
+            .emergency_checkpoint(
+                one_item_payload("never queued"),
+                "test",
+                MemoryMode::ReadOnly,
+            )
+            .await;
+        assert_mode_forbidden(&result, MemoryMode::ReadOnly);
+        assert!(
+            app.list_jobs(None).await.expect("list").is_empty(),
+            "a rejected emergency checkpoint must not leave a job behind"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_full_mode_emergency_checkpoint_is_queued_at_critical_priority() {
+        let app = test_app().await;
+        let job = app
+            .emergency_checkpoint(one_item_payload("save me"), "test", MemoryMode::Full)
+            .await
+            .expect("full-mode emergency checkpoint must be accepted");
+        assert_eq!(job.priority, Priority::Critical);
+    }
+
+    #[tokio::test]
+    async fn a_routine_checkpoint_is_queued_below_critical_priority() {
+        let app = test_app().await;
+        let job = app
+            .checkpoint(one_item_payload("routine"), "test", MemoryMode::Full)
+            .await
+            .expect("full-mode checkpoint must be accepted");
+        assert_eq!(job.priority, Priority::High);
+    }
+
     #[tokio::test]
     async fn status_reports_the_mode_it_was_given_without_being_gated_by_it() {
         let app = test_app().await;
