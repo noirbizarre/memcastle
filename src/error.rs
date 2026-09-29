@@ -206,6 +206,25 @@ pub enum Error {
         message: String,
     },
 
+    /// The daemon answered, but with an error. Carries what the daemon said —
+    /// its diagnostic code, message and help — so the CLI shows the real
+    /// cause instead of collapsing every rejection into "is the daemon
+    /// running?", which is plainly false when it just replied.
+    #[error("the daemon rejected the request ({status}{code}): {message}")]
+    #[diagnostic(code(memcastle::client::remote))]
+    Remote {
+        /// The HTTP status the daemon answered with.
+        status: u16,
+        /// The daemon's own diagnostic code, formatted as `, <code>` (empty
+        /// when the response carried none), ready to splice into the message.
+        code: String,
+        /// The daemon's error message.
+        message: String,
+        /// The daemon's own advice, if it gave any.
+        #[help]
+        help: Option<String>,
+    },
+
     /// No daemon is reachable for this palace.
     #[error("no running memcastle daemon found for this palace")]
     #[diagnostic(
@@ -312,6 +331,21 @@ impl Error {
     pub fn not_implemented(feature: impl Into<String>) -> Self {
         Self::NotImplemented {
             feature: feature.into(),
+        }
+    }
+
+    /// Build an [`Error::Remote`] from a daemon's error response.
+    pub fn remote(
+        status: u16,
+        code: Option<&str>,
+        message: impl Into<String>,
+        help: Option<String>,
+    ) -> Self {
+        Self::Remote {
+            status,
+            code: code.map(|code| format!(", {code}")).unwrap_or_default(),
+            message: message.into(),
+            help,
         }
     }
 
