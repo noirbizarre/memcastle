@@ -17,7 +17,8 @@ use super::SurrealStore;
 /// for why datetimes are cast to strings and `id` through `record::id()`.
 const JOB_COLUMNS: &str = "record::id(id) AS id, kind, status, priority, \
      <string>created_at AS created_at, started_at, completed_at, requested_by, progress, \
-     attempt, max_attempts, checkpoint, result, error, lease_owner, lease_expires_at";
+     attempt, max_attempts, checkpoint, result, error, lease_owner, lease_expires_at, \
+     pause_requested ?? false AS pause_requested, cancel_requested ?? false AS cancel_requested";
 
 impl SurrealStore {
     /// Insert a new job, or overwrite an existing one at the same id.
@@ -35,7 +36,9 @@ impl SurrealStore {
                  completed_at = $completed_at, requested_by = $requested_by, \
                  progress = $progress, attempt = $attempt, max_attempts = $max_attempts, \
                  checkpoint = $checkpoint, result = $result, error = $error, \
-                 lease_owner = $lease_owner, lease_expires_at = $lease_expires_at",
+                 lease_owner = $lease_owner, lease_expires_at = $lease_expires_at, \
+                 pause_requested = IF $status = 'running' { pause_requested ?? false } ELSE { false }, \
+                 cancel_requested = IF $status = 'running' { cancel_requested ?? false } ELSE { false }",
             )
             .bind(("id", job.id.to_string()))
             .bind(("kind", super::bindable(&job.kind)?))
@@ -61,6 +64,40 @@ impl SurrealStore {
             // rejected statement — see `store::mod`'s module doc.
             .check()?;
         Ok(())
+    }
+
+    /// Record, on a job that is still `Running`, that the user asked for it
+    /// to pause — in the store, so the request survives a crash that lands
+    /// before the handler honours it (see [`Job::pause_requested`]).
+    ///
+    /// Returns whether a running job was marked: `false` means it is not (or
+    /// no longer) `Running`, e.g. it finished a moment ago, and the caller
+    /// should treat the request as an ordinary transition instead.
+    pub async fn mark_pause_requested(&self, id: JobId) -> Result<bool> {
+        self.mark_stop_requested(id, "pause_requested").await
+    }
+
+    /// The cancel counterpart of [`Self::mark_pause_requested`].
+    pub async fn mark_cancel_requested(&self, id: JobId) -> Result<bool> {
+        self.mark_stop_requested(id, "cancel_requested").await
+    }
+
+    async fn mark_stop_requested(&self, id: JobId, field: &'static str) -> Result<bool> {
+        // `WHERE status = 'running'` makes the check and the write one
+        // statement: a job that finished in between is left untouched instead
+        // of being tagged with a request nothing will ever clear. `field` is
+        // one of two literals above, never caller input, so formatting it in
+        // is not an injection path.
+        let mut response = self
+            .db
+            .query(format!(
+                "UPDATE type::record('job', $id) SET {field} = true \
+                 WHERE status = 'running' RETURN record::id(id) AS id"
+            ))
+            .bind(("id", id.to_string()))
+            .await?;
+        let rows: Vec<serde_json::Value> = response.take(0)?;
+        Ok(!rows.is_empty())
     }
 
     /// Fetch one job by id.

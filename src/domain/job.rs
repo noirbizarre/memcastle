@@ -291,6 +291,18 @@ pub struct Job {
     /// populates it yet, because crash recovery runs once at startup rather
     /// than by lease expiry. Cleared together with `lease_owner`.
     pub lease_expires_at: Option<DateTime<Utc>>,
+    /// A user asked this `Running` job to pause and no handler has honoured
+    /// it yet. Recorded on the job (not only on the in-memory `JobControl`)
+    /// in the same write that accepts the request, so a crash or restart
+    /// before the handler notices cannot drop it: [`Job::apply`] clears it on
+    /// every transition out of `Running`, and `Scheduler::recover` reads it
+    /// to put a recovered job in `Paused` instead of re-running it.
+    #[serde(default)]
+    pub pause_requested: bool,
+    /// Like [`Self::pause_requested`], for cancellation. Wins over a pending
+    /// pause: the user asked for the job to stop for good.
+    #[serde(default)]
+    pub cancel_requested: bool,
 }
 
 impl Job {
@@ -321,6 +333,8 @@ impl Job {
             error: None,
             lease_owner: None,
             lease_expires_at: None,
+            pause_requested: false,
+            cancel_requested: false,
         }
     }
 
@@ -366,6 +380,11 @@ impl Job {
             // forgot would leave a finished job naming a worker as its owner.
             self.lease_owner = None;
             self.lease_expires_at = None;
+            // A stop request is about the run that just ended. Left set, it
+            // would cancel or pause the *next* run of a re-queued job the
+            // user never asked to stop.
+            self.pause_requested = false;
+            self.cancel_requested = false;
         }
         if matches!(next, Completed | Failed | Cancelled) {
             self.completed_at = Some(now);
@@ -515,6 +534,52 @@ mod tests {
                 "{event:?} must clear the lease expiry"
             );
         }
+    }
+
+    #[test]
+    fn every_transition_out_of_running_clears_pending_stop_requests() {
+        for event in [
+            JobEvent::Pause,
+            JobEvent::Complete,
+            JobEvent::Fail,
+            JobEvent::Cancel,
+            JobEvent::RecoverToQueued,
+        ] {
+            let mut job = demo_job();
+            job.apply(JobEvent::Claim).unwrap();
+            job.pause_requested = true;
+            job.cancel_requested = true;
+
+            job.apply(event).unwrap();
+
+            assert!(
+                !job.pause_requested && !job.cancel_requested,
+                "{event:?} must clear the stop requests of the run it ended"
+            );
+        }
+    }
+
+    #[test]
+    fn a_rejected_transition_keeps_pending_stop_requests() {
+        let mut job = demo_job();
+        job.apply(JobEvent::Claim).unwrap();
+        job.pause_requested = true;
+
+        assert!(job.apply(JobEvent::Retry).is_err());
+
+        assert!(job.pause_requested);
+    }
+
+    #[test]
+    fn a_job_record_written_before_stop_requests_existed_still_deserializes() {
+        let mut value = serde_json::to_value(demo_job()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("pause_requested");
+        object.remove("cancel_requested");
+
+        let job: Job = serde_json::from_value(value).unwrap();
+
+        assert!(!job.pause_requested && !job.cancel_requested);
     }
 
     #[test]

@@ -5,9 +5,11 @@
 //! the in-memory scheduler is only the execution mechanism.** Every status
 //! change goes through [`crate::domain::Job::apply`] and is persisted before
 //! this module considers it real; a crash loses at most the in-flight
-//! `JobControl` handles — and with them any pause or cancel request not yet
-//! honoured — never the job records themselves. [`Scheduler::recover`]
-//! re-queues whatever was `Running`, and the job resumes from its checkpoint.
+//! `JobControl` handles, never the job records themselves. A user's pause or
+//! cancel request is written to the job record before it is acknowledged, so
+//! it survives too: [`Scheduler::recover`] re-queues whatever was `Running`
+//! (resuming from its checkpoint), unless the user had asked it to stop, in
+//! which case it comes back `Paused` or `Cancelled`.
 
 mod control;
 mod demo;
@@ -109,7 +111,17 @@ impl Scheduler {
     pub async fn recover(&self) -> Result<()> {
         let stuck = self.store.list_jobs(Some(JobStatus::Running)).await?;
         for mut job in stuck {
-            if job.attempt < job.max_attempts {
+            // A stop the user asked for before the crash outranks resuming:
+            // re-running a job they cancelled (an applied repair, a big mine)
+            // is the one outcome they explicitly ruled out. Cancel beats
+            // pause. Neither spends attempt budget: the job did not fail.
+            if job.cancel_requested {
+                info!(job_id = %job.id, "recovering a job the user had cancelled");
+                job.apply(JobEvent::Cancel)?;
+            } else if job.pause_requested {
+                info!(job_id = %job.id, "recovering a job the user had paused");
+                job.apply(JobEvent::Pause)?;
+            } else if job.attempt < job.max_attempts {
                 info!(job_id = %job.id, attempt = job.attempt, "recovering interrupted job to queued");
                 job.apply(JobEvent::RecoverToQueued)?;
             } else {
@@ -161,9 +173,19 @@ impl Scheduler {
     /// — "not found" would send the caller looking for a typo in the id
     /// when the real answer is "this job is already finished".
     pub async fn request_pause(&self, id: JobId) -> Result<()> {
-        if let Some(control) = self.controls.get(&id) {
-            control.request_pause();
-            return Ok(());
+        // Cloned out of the map so the `DashMap` shard lock is not held
+        // across the store write below (a worker finishing needs that shard
+        // to remove its own control).
+        let control = self.controls.get(&id).map(|control| control.clone());
+        if let Some(control) = control {
+            // Persist first, signal second: acknowledging a request that only
+            // lives in memory is what let a crash drop it. If the job left
+            // `Running` in the meantime nothing was marked, and the
+            // transition below reports it precisely.
+            if self.store.mark_pause_requested(id).await? {
+                control.request_pause();
+                return Ok(());
+            }
         }
         let mut job = self.load_job(id).await?;
         // Not running: let the state machine produce the precise rejection.
@@ -183,9 +205,13 @@ impl Scheduler {
     /// Returns an error if the job doesn't exist or the transition is
     /// illegal from its current status.
     pub async fn request_cancel(&self, id: JobId) -> Result<()> {
-        if let Some(control) = self.controls.get(&id) {
-            control.request_cancel();
-            return Ok(());
+        let control = self.controls.get(&id).map(|control| control.clone());
+        if let Some(control) = control {
+            // Persist first, signal second — see `request_pause`.
+            if self.store.mark_cancel_requested(id).await? {
+                control.request_cancel();
+                return Ok(());
+            }
         }
         let mut job = self.load_job(id).await?;
         job.apply(JobEvent::Cancel)?;
@@ -608,5 +634,122 @@ mod tests {
         let scheduler = scheduler().await;
         scheduler.recover().await.unwrap();
         assert!(scheduler.store.list_jobs(None).await.unwrap().is_empty());
+    }
+
+    /// Persist a `Running` demo job carrying the stop request a user made
+    /// before a crash, as the API would have recorded it.
+    async fn seed_running_with_request(scheduler: &Scheduler, pause: bool, cancel: bool) -> Job {
+        let job = seed(scheduler, JobStatus::Running, 1).await;
+        if pause {
+            assert!(scheduler.store.mark_pause_requested(job.id).await.unwrap());
+        }
+        if cancel {
+            assert!(scheduler.store.mark_cancel_requested(job.id).await.unwrap());
+        }
+        job
+    }
+
+    #[tokio::test]
+    async fn a_job_cancelled_before_a_crash_is_cancelled_by_recovery_not_rerun() {
+        let scheduler = scheduler().await;
+        let job = seed_running_with_request(&scheduler, false, true).await;
+
+        scheduler.recover().await.unwrap();
+
+        let recovered = reload(&scheduler, &job).await;
+        assert_eq!(recovered.status, JobStatus::Cancelled);
+        assert!(!recovered.cancel_requested, "the request is spent");
+        assert_eq!(recovered.attempt, 1, "a cancel is not a failed attempt");
+    }
+
+    #[tokio::test]
+    async fn a_job_paused_before_a_crash_comes_back_paused_with_its_checkpoint() {
+        let scheduler = scheduler().await;
+        let job = seed_running_with_request(&scheduler, true, false).await;
+
+        scheduler.recover().await.unwrap();
+
+        let recovered = reload(&scheduler, &job).await;
+        assert_eq!(recovered.status, JobStatus::Paused);
+        assert!(!recovered.pause_requested);
+        assert_eq!(recovered.checkpoint, serde_json::json!({ "next_step": 7 }));
+    }
+
+    #[tokio::test]
+    async fn a_cancel_outranks_a_pause_when_both_were_pending_at_the_crash() {
+        let scheduler = scheduler().await;
+        let job = seed_running_with_request(&scheduler, true, true).await;
+
+        scheduler.recover().await.unwrap();
+
+        assert_eq!(reload(&scheduler, &job).await.status, JobStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn a_request_is_persisted_on_the_running_job_before_it_is_acknowledged() {
+        let (scheduler, job, shutdown, handle) = running_scheduler_with_a_job_in_flight().await;
+
+        scheduler.request_cancel(job.id).await.unwrap();
+
+        // Read straight after the call returns: the durable record, not the
+        // in-memory control, is what a crash would leave behind. (The job may
+        // already have honoured it, in which case it is `Cancelled` and the
+        // flag is spent.)
+        let after = reload(&scheduler, &job).await;
+        assert!(
+            after.cancel_requested || after.status == JobStatus::Cancelled,
+            "an acknowledged cancel must be on the record: {after:?}"
+        );
+        shutdown.cancel();
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn saving_a_running_job_does_not_erase_a_request_made_since_it_was_loaded() {
+        let scheduler = scheduler().await;
+        let job = seed(&scheduler, JobStatus::Running, 1).await;
+        // The handler's in-memory copy predates the user's request...
+        let stale = job.clone();
+        assert!(scheduler.store.mark_pause_requested(job.id).await.unwrap());
+
+        // ...and its next checkpoint writes the whole record.
+        scheduler.store.save_job(&stale).await.unwrap();
+
+        assert!(reload(&scheduler, &job).await.pause_requested);
+    }
+
+    #[tokio::test]
+    async fn marking_a_job_that_is_not_running_changes_nothing() {
+        let scheduler = scheduler().await;
+        let queued = seed(&scheduler, JobStatus::Queued, 0).await;
+
+        assert!(
+            !scheduler
+                .store
+                .mark_cancel_requested(queued.id)
+                .await
+                .unwrap()
+        );
+        assert!(!reload(&scheduler, &queued).await.cancel_requested);
+    }
+
+    #[tokio::test]
+    async fn a_user_pause_that_arrives_during_shutdown_still_wins() {
+        let (scheduler, job, shutdown, handle) = running_scheduler_with_a_job_in_flight().await;
+        // Shutdown has begun and interrupted the job, but the handler has not
+        // yet reached its next boundary.
+        scheduler.shutting_down.store(true, Ordering::SeqCst);
+        for control in scheduler.controls.iter() {
+            control.request_interrupt();
+        }
+
+        scheduler.request_pause(job.id).await.unwrap();
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("run must return")
+            .unwrap();
+
+        assert_eq!(reload(&scheduler, &job).await.status, JobStatus::Paused);
     }
 }

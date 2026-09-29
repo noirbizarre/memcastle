@@ -212,6 +212,87 @@ async fn a_job_running_when_the_daemon_is_killed_is_recovered_and_finished_after
     stop_daemon(&bin, &palace, &mut child).await;
 }
 
+/// Invariant #3 for a user's intent, not just the job: a pause or cancel the
+/// daemon acknowledged must survive a SIGKILL that lands before the handler
+/// honoured it. The request is written to the job record before the API
+/// answers, so `Scheduler::recover` finds it on restart.
+///
+/// Passes whether the kill lands before the handler notices the request
+/// (recovery honours the persisted flag) or after (the handler already did);
+/// what it must never do is run the job again.
+async fn an_acknowledged_stop_request_survives_a_sigkill(action: &str, expected_status: &str) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let palace = dir.path().join("palace");
+    let bin = cargo_bin("memcastle");
+    let client = reqwest::Client::new();
+
+    let job_id = {
+        let (mut child, info) = spawn_daemon_and_wait(&bin, &palace).await;
+        let base = format!("http://{}", info.bind_addr);
+        let submitted: serde_json::Value = client
+            .post(format!("{base}/api/jobs"))
+            .json(&serde_json::json!({ "type": "demo", "steps": 400, "requested_by": "test" }))
+            .send()
+            .await
+            .expect("submit demo job")
+            .json()
+            .await
+            .expect("job json");
+        let id = submitted["id"].as_str().expect("job id").to_string();
+        wait_for_job(&client, &base, &id, |job| {
+            job["status"] == "running" && job["progress"]["current"].as_u64().unwrap_or(0) >= 2
+        })
+        .await;
+
+        client
+            .post(format!("{base}/api/jobs/{id}/{action}"))
+            .send()
+            .await
+            .expect("send the request")
+            .error_for_status()
+            .expect("the request is acknowledged");
+        // Straight away: the handler only looks every 150ms.
+        child.kill().await.expect("SIGKILL the daemon");
+        memcastle::server::lifecycle::remove(&palace);
+        id
+    };
+
+    let (mut child, info) = spawn_daemon_and_wait(&bin, &palace).await;
+    let base = format!("http://{}", info.bind_addr);
+    let job = wait_for_job(&client, &base, &job_id, |job| {
+        job["status"] == expected_status
+    })
+    .await;
+    // Give a wrongly re-queued job time to be re-claimed, then check it
+    // really stayed put.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let later: serde_json::Value = client
+        .get(format!("{base}/api/jobs/{job_id}"))
+        .send()
+        .await
+        .expect("get job")
+        .json()
+        .await
+        .expect("job json");
+    assert_eq!(later["status"], expected_status, "{later}");
+    assert_eq!(
+        later["attempt"], job["attempt"],
+        "the job must not have been claimed again: {later}"
+    );
+
+    stop_daemon(&bin, &palace, &mut child).await;
+}
+
+#[tokio::test]
+async fn a_cancel_requested_before_a_sigkill_ends_cancelled_after_restart_not_rerun() {
+    an_acknowledged_stop_request_survives_a_sigkill("cancel", "cancelled").await;
+}
+
+#[tokio::test]
+async fn a_pause_requested_before_a_sigkill_comes_back_paused_after_restart() {
+    an_acknowledged_stop_request_survives_a_sigkill("pause", "paused").await;
+}
+
 async fn wait_for_job(
     client: &reqwest::Client,
     base: &str,

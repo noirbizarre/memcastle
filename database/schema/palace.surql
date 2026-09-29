@@ -108,5 +108,10 @@ DEFINE FIELD IF NOT EXISTS result ON TABLE job TYPE option<object> FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS error ON TABLE job TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS lease_owner ON TABLE job TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS lease_expires_at ON TABLE job TYPE option<string>;
+-- A user's pause/cancel request, persisted with the request so a crash cannot
+-- drop it (`jobs::Scheduler::recover` honours it). `option<bool>`, read back
+-- as `?? false`, so rows written before these existed need no backfill.
+DEFINE FIELD IF NOT EXISTS pause_requested ON TABLE job TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS cancel_requested ON TABLE job TYPE option<bool>;
 -- Backs `claim_next_job`'s "oldest, highest-priority queued job" scan.
 DEFINE INDEX IF NOT EXISTS job_status_idx ON TABLE job FIELDS status, priority, created_at;

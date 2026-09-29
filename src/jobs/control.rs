@@ -33,8 +33,13 @@ pub struct JobControl {
 
 impl JobControl {
     /// Ask the handler to pause at its next opportunity.
+    ///
+    /// A user's pause wins over a shutdown's: if the daemon was already
+    /// interrupting this job, the request is now the user's, so the job ends
+    /// `Paused` rather than being handed back to the queue.
     pub fn request_pause(&self) {
         self.pause_requested.store(true, Ordering::Relaxed);
+        self.interrupted.store(false, Ordering::Relaxed);
     }
 
     /// Ask the handler to stop at its next opportunity.

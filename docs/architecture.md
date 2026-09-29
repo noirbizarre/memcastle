@@ -203,7 +203,7 @@ All four are gated by `MemoryMode` exactly like `search` — see the mode table 
 > The queue state is durable; the in-memory scheduler is only the execution mechanism.
 
 `domain::Job` is a plain record (`id`, `kind`, `status`, `priority`, timestamps, `progress`, `attempt`/`max_attempts`,
-`checkpoint`, `error`, lease fields) persisted in SurrealDB.
+`checkpoint`, `error`, lease fields, and any pending `pause_requested`/`cancel_requested`) persisted in SurrealDB.
 Its status only ever changes through `Job::apply(event)`, an explicit transition table
 (any `(status, event)` pair not listed here is rejected with a `TransitionError`):
 
@@ -254,8 +254,13 @@ and skip a record that already exists, so the replay lands on the same record in
 any job left `Running` by an unclean shutdown is re-queued if its attempt budget allows,
 or marked `Failed` otherwise — never silently forgotten.
 `Queued` jobs need no recovery, and `Paused` jobs are deliberately left paused until someone resumes them.
-Only the in-memory `JobControl` handles are lost in a crash: a pause or cancel request that was still pending
-is lost with them, and the recovered job runs again from its checkpoint.
+A pause or cancel request does not depend on the in-memory `JobControl` surviving:
+`request_pause`/`request_cancel` write `pause_requested`/`cancel_requested` on the `Running` job record
+before the API answers, and `Job::apply` clears them when the job leaves `Running`.
+`recover` honours them, so a job the user cancelled before a crash comes back `Cancelled` (cancel beats pause),
+and one they paused comes back `Paused` — neither runs again, and neither spends attempt budget.
+A user's pause also wins over a shutdown interrupt that is already under way.
+A recovered job with no pending request runs again from its checkpoint.
 
 **`checkpoint` vs `result`.** `Job.checkpoint` is handler-defined *resume* state
 (`mining`/`checkpoint`'s per-item `{"next_index": n}`) —
