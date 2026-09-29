@@ -4,7 +4,7 @@
 //! gated tool call on *that* session rejected, while a second, independent
 //! MCP session against the very same daemon — which never called
 //! `memcastle_set_mode` — keeps its default `Full` behavior. This is the
-//! integration-level proof that `McpTools::modes` is keyed per session, not
+//! integration-level proof that `McpTools`'s mode is scoped to its session, not
 //! a shared/global flag (see `src/mcp/mod.rs`'s doc comment).
 
 mod common;
@@ -335,5 +335,117 @@ async fn the_mcp_job_list_and_mine_tools_follow_the_sessions_mode() {
 
     disabled.cancel().await.expect("close session");
     read_only.cancel().await.expect("close session");
+    daemon.shutdown().await;
+}
+
+/// A session's chosen mode dies with the session: nothing about it lingers in
+/// the daemon for a later session to inherit, however long the daemon lives.
+#[tokio::test]
+async fn a_closed_sessions_mode_does_not_carry_over_to_the_next_session() {
+    let daemon = TestDaemon::start().await;
+
+    let first = connect(&daemon.base_url).await;
+    set_mode(&first, "disabled").await;
+    assert!(
+        call(
+            &first,
+            "memcastle_search",
+            serde_json::json!({ "query": "x" })
+        )
+        .await
+    );
+    first.cancel().await.expect("close session");
+
+    let second = connect(&daemon.base_url).await;
+    assert!(
+        !call(
+            &second,
+            "memcastle_search",
+            serde_json::json!({ "query": "x" })
+        )
+        .await,
+        "a new session must start as full, not as whatever a closed one chose"
+    );
+
+    second.cancel().await.expect("close session");
+    daemon.shutdown().await;
+}
+
+/// The whole point of one error surface: an integration talking MCP gets the
+/// same `code` and `help` a REST caller gets, not just prose.
+#[tokio::test]
+async fn an_mcp_mode_rejection_carries_the_diagnostic_code_and_help() {
+    let daemon = TestDaemon::start().await;
+    let client = connect(&daemon.base_url).await;
+    set_mode(&client, "read_only").await;
+
+    let (failed, text) = call_text(&client, "memcastle_checkpoint", checkpoint_args(false)).await;
+
+    assert!(failed, "a read-only session may not checkpoint");
+    let body: serde_json::Value = serde_json::from_str(&text).expect("the error is JSON");
+    assert_eq!(body["code"], "memcastle::app::mode_forbidden");
+    assert!(body["help"].is_string(), "{body}");
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("checkpoint"),
+        "{body}"
+    );
+
+    client.cancel().await.expect("close session");
+    daemon.shutdown().await;
+}
+
+/// What the job tools are for: an integration that submitted work over MCP
+/// can check on it and stop it, without leaving MCP for REST.
+#[tokio::test]
+async fn an_mcp_client_can_submit_check_on_and_stop_its_own_jobs() {
+    let daemon = TestDaemon::start().await;
+    let client = connect(&daemon.base_url).await;
+
+    // Submit a repair (dry run by default) and read it back by id.
+    let (failed, text) = call_text(&client, "memcastle_repair", serde_json::json!({})).await;
+    assert!(!failed, "{text}");
+    let job: serde_json::Value = serde_json::from_str(&text).expect("job json");
+    let id = job["id"].as_str().expect("job id").to_string();
+    assert_eq!(
+        job["kind"]["dry_run"], true,
+        "a repair must default to a dry run"
+    );
+
+    let (failed, text) = call_text(
+        &client,
+        "memcastle_job_get",
+        serde_json::json!({ "id": id }),
+    )
+    .await;
+    assert!(!failed, "{text}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&text).unwrap()["id"],
+        id
+    );
+
+    // The status filter narrows the list.
+    let (_, text) = call_text(
+        &client,
+        "memcastle_jobs_list",
+        serde_json::json!({ "status": "failed" }),
+    )
+    .await;
+    assert_eq!(text.trim(), "[]");
+
+    // Retrying a job that has not failed is a typed error, not a silent no-op.
+    let (failed, text) = call_text(
+        &client,
+        "memcastle_job_retry",
+        serde_json::json!({ "id": id }),
+    )
+    .await;
+    assert!(failed);
+    let body: serde_json::Value = serde_json::from_str(&text).expect("error json");
+    assert_eq!(body["code"], "memcastle::jobs::invalid_transition");
+
+    client.cancel().await.expect("close session");
     daemon.shutdown().await;
 }

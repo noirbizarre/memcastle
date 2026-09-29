@@ -14,11 +14,13 @@
 //!   longer exists. Should always be empty today — jobs are never deleted —
 //!   kept as a real check anyway so it doesn't silently break if that ever
 //!   changes.
-//! - Stuck failed jobs: `Failed` jobs whose `attempt` has reached
-//!   `max_attempts`, which will never auto-recover via `Scheduler::recover`.
-//! - Running jobs: a plain count, informational only — there is no lease
-//!   TTL yet to judge any of them "stale" (see `domain::Job::lease_expires_at`'s
-//!   doc comment), so this is a cross-check number, not a defect signal.
+//! - Stuck failed jobs: `Failed` jobs whose `recovery_attempts` has reached
+//!   `max_attempts` (the crash-recovery budget), which will never
+//!   auto-recover via `Scheduler::recover`.
+//! - Running jobs: a plain count, informational only. A job's lease
+//!   (`domain::Job::lease_expires_at`) says whether it is live, but this is a
+//!   cross-check number, not a defect signal, and a stale one is the
+//!   scheduler's reaper's business, not the audit's.
 //! - Drawers without an embedding: informational only, never a defect —
 //!   semantic search doesn't exist yet, so an absent embedding is expected,
 //!   not broken.
@@ -26,9 +28,13 @@
 //! Unlike `mining::run`/`checkpoint::run`, this handler does **not** chunk
 //! its work with a per-unit checkpoint: a full palace scan here is cheap
 //! (a handful of `SELECT`s, no external I/O) and idempotent, so there is no
-//! meaningful partial state to resume from — pausing mid-scan would only
-//! save re-running a cheap read, not real work. One `is_cancelled` check up
-//! front is honored; there is nothing to pause into.
+//! meaningful partial state to resume from. It does check for cancel and
+//! pause between wings, after the job scan and every [`CHECK_EVERY`]
+//! drawers, and returns `Paused` (with no result and an untouched
+//! checkpoint) — so a user's pause is honoured, and a daemon shutdown, which
+//! interrupts jobs the same way, does not wait out its drain timeout for an
+//! audit. A resumed audit simply starts over, which is safe because it only
+//! reads.
 //!
 //! The report itself lives in [`crate::domain::Job::result`], not
 //! `Job::checkpoint` — see that field's doc comment for why this issue
@@ -94,6 +100,17 @@ pub struct AuditReport {
     pub generated_at: DateTime<Utc>,
 }
 
+/// How many drawers the scan looks at between checks for cancel or pause: a
+/// palace can hold many thousands, and the check is a pair of atomic loads,
+/// so this only bounds how long a stop request waits.
+const CHECK_EVERY: usize = 500;
+
+/// What an `Audit` job needs, gathered from its [`crate::domain::JobKind`].
+pub struct AuditParams {
+    /// Narrow the embedding-count fields to this wing, by name.
+    pub scope: Option<String>,
+}
+
 /// Run a read-only consistency audit, optionally narrowing the
 /// embedding-count fields to one wing by name.
 ///
@@ -102,19 +119,17 @@ pub struct AuditReport {
 /// Returns an error if the store cannot be read, or if the report fails to
 /// serialize (effectively never — see [`AuditReport`]'s fields, all plain
 /// serializable types).
-pub async fn run(
-    store: &SurrealStore,
-    ctx: &JobContext,
-    job: &mut Job,
-    scope: Option<&str>,
-) -> Result<JobOutcome> {
-    // No per-unit work to chunk (see the module doc) — a single check up
-    // front is the only cooperative-cancel point this handler needs.
-    if ctx.is_cancelled() {
-        return Ok(JobOutcome::Cancelled);
+pub async fn run(ctx: &JobContext, job: &mut Job, params: AuditParams) -> Result<JobOutcome> {
+    let AuditParams { scope } = params;
+    let store = ctx.store();
+    if let Some(stop) = stop_requested(ctx) {
+        return Ok(stop);
     }
 
-    let report = build_report(store, scope, job.id).await?;
+    let report = match build_report(ctx, store, scope.as_deref(), job.id).await? {
+        Scan::Done(report) => report,
+        Scan::Stopped(outcome) => return Ok(outcome),
+    };
 
     job.progress = JobProgress {
         current: 1,
@@ -135,6 +150,24 @@ pub async fn run(
     Ok(JobOutcome::Completed)
 }
 
+/// Whether the job has been asked to stop, and how: cancel outranks pause,
+/// matching every other handler (a cancelled job never resumes).
+fn stop_requested(ctx: &JobContext) -> Option<JobOutcome> {
+    if ctx.is_cancelled() {
+        Some(JobOutcome::Cancelled)
+    } else if ctx.should_pause() {
+        Some(JobOutcome::Paused)
+    } else {
+        None
+    }
+}
+
+/// How a scan ended: with a report, or cut short by a cancel or pause.
+enum Scan {
+    Done(AuditReport),
+    Stopped(JobOutcome),
+}
+
 /// Find every drawer whose `room` no longer resolves to any `room` record —
 /// the same check [`build_report`] folds into its single palace-wide pass,
 /// factored out here so `crate::repair::run` can reuse it without
@@ -151,7 +184,7 @@ pub(crate) async fn find_orphan_drawers(store: &SurrealStore) -> Result<Vec<Orph
         }
     }
 
-    let drawers = store.list_all_drawers().await?;
+    let drawers = store.list_drawers(None).await?;
     Ok(drawers
         .into_iter()
         .filter(|drawer| !known_rooms.contains(&drawer.room))
@@ -167,10 +200,11 @@ pub(crate) async fn find_orphan_drawers(store: &SurrealStore) -> Result<Vec<Orph
 /// and to count stuck/running jobs), and one over every drawer (to find
 /// orphans, dangling provenance, and the scoped embedding count).
 async fn build_report(
+    ctx: &JobContext,
     store: &SurrealStore,
     scope: Option<&str>,
     self_job_id: JobId,
-) -> Result<AuditReport> {
+) -> Result<Scan> {
     let wings = store.list_wings().await?;
 
     // Every currently-valid room id, mapped to its owning wing — shared by
@@ -179,6 +213,9 @@ async fn build_report(
     let mut room_wing: HashMap<RoomId, WingId> = HashMap::new();
     let mut wing_id_by_name: HashMap<&str, WingId> = HashMap::new();
     for wing in &wings {
+        if let Some(stop) = stop_requested(ctx) {
+            return Ok(Scan::Stopped(stop));
+        }
         wing_id_by_name.insert(wing.name.as_str(), wing.id);
         for room in store.list_rooms(wing.id).await? {
             room_wing.insert(room.id, wing.id);
@@ -191,25 +228,36 @@ async fn build_report(
     // unscoped — see the loop below.
     let scope_wing_id = scope.map(|name| wing_id_by_name.get(name).copied());
 
+    if let Some(stop) = stop_requested(ctx) {
+        return Ok(Scan::Stopped(stop));
+    }
     let jobs = store.list_jobs(None).await?;
     let existing_job_ids: HashSet<JobId> = jobs.iter().map(|j| j.id).collect();
     let stuck_failed_jobs = jobs
         .iter()
-        .filter(|j| j.status == JobStatus::Failed && j.attempt >= j.max_attempts)
+        .filter(|j| j.status == JobStatus::Failed && j.recovery_attempts >= j.max_attempts)
         .count() as u64;
     let running_jobs = jobs
         .iter()
         .filter(|j| j.status == JobStatus::Running && j.id != self_job_id)
         .count() as u64;
 
-    let drawers = store.list_all_drawers().await?;
+    if let Some(stop) = stop_requested(ctx) {
+        return Ok(Scan::Stopped(stop));
+    }
+    let drawers = store.list_drawers(None).await?;
 
     let mut orphan_drawers = Vec::new();
     let mut dangling_provenance_drawers = Vec::new();
     let mut total_drawers_in_scope = 0u64;
     let mut drawers_without_embedding = 0u64;
 
-    for drawer in &drawers {
+    for (index, drawer) in drawers.iter().enumerate() {
+        if index % CHECK_EVERY == 0
+            && let Some(stop) = stop_requested(ctx)
+        {
+            return Ok(Scan::Stopped(stop));
+        }
         let wing_of_drawer = room_wing.get(&drawer.room).copied();
 
         if wing_of_drawer.is_none() {
@@ -236,7 +284,7 @@ async fn build_report(
             // that wing's drawers count.
             Some(Some(resolved)) => wing_of_drawer == Some(resolved),
             // A scope was requested but no such wing exists: nothing is
-            // in scope, same as `lexical_search`'s handling of a typo'd
+            // in scope, same as `list_drawers_matching`'s handling of a typo'd
             // wing name — not an error, just an empty result.
             Some(None) => false,
         };
@@ -248,7 +296,7 @@ async fn build_report(
         }
     }
 
-    Ok(AuditReport {
+    Ok(Scan::Done(AuditReport {
         scope: scope.map(str::to_string),
         orphan_drawers,
         dangling_provenance_drawers,
@@ -257,7 +305,7 @@ async fn build_report(
         drawers_without_embedding,
         total_drawers_in_scope,
         generated_at: Utc::now(),
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -292,7 +340,9 @@ mod tests {
         let mut job = audit_job(None);
         let ctx = ctx_for(&store, &job, JobControl::default());
 
-        let outcome = run(&store, &ctx, &mut job, None).await.expect("run");
+        let outcome = run(&ctx, &mut job, AuditParams { scope: None })
+            .await
+            .expect("run");
         assert_eq!(outcome, JobOutcome::Completed);
 
         let report = report_of(&job);
@@ -337,7 +387,9 @@ mod tests {
 
         let mut job = audit_job(None);
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&store, &ctx, &mut job, None).await.expect("run");
+        run(&ctx, &mut job, AuditParams { scope: None })
+            .await
+            .expect("run");
 
         let report = report_of(&job);
         assert_eq!(report.orphan_drawers.len(), 1);
@@ -385,7 +437,9 @@ mod tests {
 
         let mut job = audit_job(None);
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&store, &ctx, &mut job, None).await.expect("run");
+        run(&ctx, &mut job, AuditParams { scope: None })
+            .await
+            .expect("run");
 
         let report = report_of(&job);
         assert!(
@@ -409,19 +463,21 @@ mod tests {
         let mut recoverable = Job::new(JobKind::Demo { steps: 1 }, Priority::Normal, "test");
         recoverable.apply(crate::domain::JobEvent::Claim).unwrap();
         recoverable.apply(crate::domain::JobEvent::Fail).unwrap();
-        assert!(recoverable.attempt < recoverable.max_attempts);
+        assert!(recoverable.recovery_attempts < recoverable.max_attempts);
         store.save_job(&recoverable).await.unwrap();
 
         // A Failed job that has exhausted its attempt budget.
         let mut exhausted = Job::new(JobKind::Demo { steps: 1 }, Priority::Normal, "test");
         exhausted.apply(crate::domain::JobEvent::Claim).unwrap();
-        exhausted.attempt = exhausted.max_attempts;
+        exhausted.recovery_attempts = exhausted.max_attempts;
         exhausted.apply(crate::domain::JobEvent::Fail).unwrap();
         store.save_job(&exhausted).await.unwrap();
 
         let mut job = audit_job(None);
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&store, &ctx, &mut job, None).await.expect("run");
+        run(&ctx, &mut job, AuditParams { scope: None })
+            .await
+            .expect("run");
 
         let report = report_of(&job);
         assert_eq!(report.stuck_failed_jobs, 1);
@@ -436,7 +492,9 @@ mod tests {
 
         let mut job = audit_job(None);
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&store, &ctx, &mut job, None).await.expect("run");
+        run(&ctx, &mut job, AuditParams { scope: None })
+            .await
+            .expect("run");
 
         let report = report_of(&job);
         assert_eq!(report.running_jobs, 1);
@@ -475,9 +533,15 @@ mod tests {
                 "test",
             );
             let ctx = JobContext::new(seed_job.id, JobControl::default(), store.clone());
-            crate::checkpoint::run(store, &ctx, &mut seed_job, &payload)
-                .await
-                .expect("seed checkpoint run");
+            crate::checkpoint::run(
+                &ctx,
+                &mut seed_job,
+                crate::checkpoint::CheckpointParams {
+                    payload: payload.clone(),
+                },
+            )
+            .await
+            .expect("seed checkpoint run");
         }
         seed(&store, "project-x", "in scope").await;
         seed(&store, "project-y", "out of scope").await;
@@ -513,9 +577,15 @@ mod tests {
 
         let mut job = audit_job(Some("project-x".to_string()));
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&store, &ctx, &mut job, Some("project-x"))
-            .await
-            .expect("run");
+        run(
+            &ctx,
+            &mut job,
+            AuditParams {
+                scope: Some("project-x".to_string()),
+            },
+        )
+        .await
+        .expect("run");
 
         let report = report_of(&job);
         assert_eq!(
@@ -533,10 +603,72 @@ mod tests {
         // error and not a silent fallback to unscoped.
         let mut unknown_scope_job = audit_job(Some("no-such-wing".to_string()));
         let ctx = ctx_for(&store, &unknown_scope_job, JobControl::default());
-        run(&store, &ctx, &mut unknown_scope_job, Some("no-such-wing"))
-            .await
-            .expect("run");
+        run(
+            &ctx,
+            &mut unknown_scope_job,
+            AuditParams {
+                scope: Some("no-such-wing".to_string()),
+            },
+        )
+        .await
+        .expect("run");
         let report = report_of(&unknown_scope_job);
         assert_eq!(report.total_drawers_in_scope, 0);
+    }
+
+    #[tokio::test]
+    async fn a_pause_stops_an_audit_with_no_result_and_a_resume_completes_it() {
+        let store = memory_store().await;
+        let control = JobControl::default();
+        control.request_pause();
+        let mut job = audit_job(None);
+        let ctx = ctx_for(&store, &job, control);
+
+        let outcome = run(&ctx, &mut job, AuditParams { scope: None })
+            .await
+            .expect("run");
+
+        assert_eq!(outcome, JobOutcome::Paused, "a pause must not be ignored");
+        assert!(job.result.is_none());
+
+        let ctx = ctx_for(&store, &job, JobControl::default());
+        let outcome = run(&ctx, &mut job, AuditParams { scope: None })
+            .await
+            .expect("resumed run");
+        assert_eq!(outcome, JobOutcome::Completed);
+        assert!(job.result.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_cancel_beats_a_pause_when_both_are_pending() {
+        let store = memory_store().await;
+        let control = JobControl::default();
+        control.request_pause();
+        control.request_cancel();
+        let mut job = audit_job(None);
+        let ctx = ctx_for(&store, &job, control);
+
+        let outcome = run(&ctx, &mut job, AuditParams { scope: None })
+            .await
+            .expect("run");
+
+        assert_eq!(outcome, JobOutcome::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn a_shutdown_interrupt_stops_an_audit_at_once_instead_of_running_out_the_drain() {
+        let store = memory_store().await;
+        let control = JobControl::default();
+        control.request_interrupt();
+        let mut job = audit_job(None);
+        let ctx = ctx_for(&store, &job, control.clone());
+
+        let outcome = run(&ctx, &mut job, AuditParams { scope: None })
+            .await
+            .expect("run");
+
+        // `Scheduler::execute` turns an interrupted `Paused` into a re-queue.
+        assert_eq!(outcome, JobOutcome::Paused);
+        assert!(control.was_interrupted());
     }
 }

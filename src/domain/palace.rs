@@ -8,6 +8,12 @@ use serde::{Deserialize, Serialize};
 
 use super::{PalaceId, RoomId, WingId};
 
+/// The name a palace has before anyone has named it: what the store creates
+/// it under, and what a read-only `status` reports until a write has created
+/// the record — one constant so the name cannot change when the first write
+/// happens.
+pub const DEFAULT_PALACE_NAME: &str = "default";
+
 /// The root of one memory store. One daemon serves exactly one palace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Palace {

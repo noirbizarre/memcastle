@@ -10,6 +10,7 @@
 pub mod lifecycle;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -49,7 +50,15 @@ pub async fn run(config: Config) -> Result<()> {
         );
     }
 
-    let scheduler = Arc::new(Scheduler::new(store.clone(), config.jobs.max_concurrency));
+    let mut scheduler = Scheduler::new(store.clone(), config.jobs.max_concurrency)
+        .with_drain_timeout(Duration::from_secs(config.jobs.drain_timeout_secs))
+        .with_lease_ttl(Duration::from_secs(config.jobs.lease_ttl_secs));
+    if backend.is_shared() {
+        // Another daemon may be running jobs against this same palace: only
+        // reclaim the ones whose lease has actually lapsed.
+        scheduler = scheduler.with_shared_store();
+    }
+    let scheduler = Arc::new(scheduler);
     scheduler.recover().await?;
 
     let shutdown = CancellationToken::new();
@@ -61,7 +70,23 @@ pub async fn run(config: Config) -> Result<()> {
 
     let app = AppServices::new(store, Arc::clone(&scheduler));
     let mcp_service = crate::mcp::service(app.clone(), &shutdown);
-    let router = crate::api::router(app, shutdown.clone()).nest_service("/mcp", mcp_service);
+    // One trace layer over both surfaces: a request line at `debug` on the
+    // way in and a response line (status, latency) on the way out, so "what
+    // did the daemon receive, and what did it answer?" has an answer for MCP
+    // and REST alike. A failed response (5xx) is logged at `error` by the
+    // layer itself; rejections are logged with their diagnostic by
+    // `api::ApiError`, which the layer cannot see.
+    let router = crate::api::router(app, shutdown.clone())
+        .nest_service("/mcp", mcp_service)
+        .layer(
+            tower_http::trace::TraceLayer::new_for_http()
+                .make_span_with(
+                    tower_http::trace::DefaultMakeSpan::new().level(tracing::Level::DEBUG),
+                )
+                .on_response(
+                    tower_http::trace::DefaultOnResponse::new().level(tracing::Level::DEBUG),
+                ),
+        );
 
     let listener = tokio::net::TcpListener::bind(config.server.bind)
         .await

@@ -25,3 +25,11 @@ The history is the value.
 - [ADR-003](003-checkpoint-as-a-durable-job.md) — checkpoint is a durable job; diary writes are a direct call
 - [ADR-004](004-versioned-database-migrations.md) — versioned MemCastle data migrations,
   decoupled from the SurrealDB engine and storage backend
+- [ADR-005](005-timestamp-representation.md) — timestamps are `datetime` when required,
+  canonical RFC 3339 strings when optional
+- [ADR-006](006-job-leases.md) — running jobs are held by a heartbeat lease,
+  not by an assumption of one daemon
+- [ADR-007](007-memory-mode-gate-follows-data-access.md) — the memory-mode gate follows what an operation
+  reads or writes, not its method name
+- [ADR-008](008-replay-safe-job-resume.md) — resuming a job is replay-safe
+- [ADR-009](009-shutdown-drains-jobs.md) — shutdown drains running jobs and hands them back to the queue

@@ -26,15 +26,24 @@ pub struct Source {
     pub kind: SourceKind,
     /// A file path, URI, or other locator, when applicable.
     pub uri: Option<String>,
-    /// The agent that made the write, when known — e.g. a checkpoint item's
-    /// or diary entry's `agent_identity`.
+    /// **Who wrote it**: the agent identity behind the write — a checkpoint
+    /// item's or a diary entry's `agent_identity` — or `None` when no agent
+    /// is involved (mining a directory). One meaning for every writer; the
+    /// channel a write arrived through is [`Provenance::requested_by`]'s job,
+    /// not this field's.
     pub agent: Option<String>,
 }
 
 /// Bookkeeping for *why* a drawer exists, distinct from *what* it contains.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provenance {
-    /// Free-text identifier of who/what asked for this write.
+    /// **Through which channel the write was asked for**: `"cli"`, `"http"`
+    /// or `"mcp"` (whatever the submitting interface says; the HTTP API
+    /// accepts a caller-chosen string). One meaning for every writer — diary
+    /// entries, mining and checkpoint all record the channel here and the
+    /// agent identity in [`Source::agent`], so "who asked" can be queried
+    /// uniformly. `"unknown"` marks a drawer written before this rule, whose
+    /// channel was never recorded (see the `diary-provenance` migration).
     pub requested_by: String,
     /// The job that produced this drawer, if any (manual writes have none).
     pub job_id: Option<JobId>,

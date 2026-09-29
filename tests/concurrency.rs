@@ -170,18 +170,26 @@ async fn a_critical_checkpoint_is_claimed_before_a_queued_background_mine_job() 
     // priority 0) even though mine was submitted first — proving
     // `claim_next_job`'s `ORDER BY priority DESC` decides this, not
     // submission order.
-    wait_for_job_status(
+    let checkpoint = wait_for_job_status(
         &client,
         &daemon.base_url,
         checkpoint.id,
         JobStatus::Completed,
     )
     .await;
-    assert_ne!(
-        get_job(&client, &daemon.base_url, mine.id).await.status,
-        JobStatus::Completed,
-        "the background mine job must not have completed before the critical checkpoint did"
-    );
+    // Compare completion times, not "is mine still incomplete right now":
+    // both jobs are near-instant, so on a loaded machine the poll above can
+    // return after the mine job has also finished, which says nothing about
+    // which one was claimed first.
+    let mine = get_job(&client, &daemon.base_url, mine.id).await;
+    if mine.status == JobStatus::Completed {
+        assert!(
+            checkpoint.completed_at <= mine.completed_at,
+            "the background mine job completed ({:?}) before the critical checkpoint ({:?})",
+            mine.completed_at,
+            checkpoint.completed_at
+        );
+    }
 
     daemon.shutdown().await;
 }

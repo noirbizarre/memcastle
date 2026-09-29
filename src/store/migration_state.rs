@@ -92,7 +92,7 @@ impl SurrealStore {
                 "CREATE migration_state:state SET \
                  version = 0, lock_owner = NONE, lock_expires_at = NONE, updated_at = <datetime>$now",
             )
-            .bind(("now", Utc::now().to_rfc3339()))
+            .bind(("now", super::stored(Utc::now())))
             .await?
             .check()?;
         Ok(())
@@ -136,7 +136,7 @@ impl SurrealStore {
                 "UPDATE migration_state:state SET version = $version, updated_at = <datetime>$now",
             )
             .bind(("version", version))
-            .bind(("now", Utc::now().to_rfc3339()))
+            .bind(("now", super::stored(Utc::now())))
             .await?
             .check()?;
         Ok(())
@@ -172,7 +172,7 @@ impl SurrealStore {
             return Ok(false);
         }
 
-        let expires_at = (now + lease).to_rfc3339();
+        let expires_at = super::stored(now + lease);
         let response = match previous_owner {
             // Currently unheld: `= NONE` must be a literal in the query
             // text, not a bound parameter — see this module's doc comment.

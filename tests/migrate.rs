@@ -26,42 +26,66 @@ fn json_stdout(assert: Assert) -> Value {
 }
 
 #[test]
-fn migrate_against_a_fresh_palace_reports_no_pending_data_migrations() {
+fn migrate_against_a_fresh_palace_applies_every_shipped_data_migration_once() {
     let dir = tempfile::tempdir().expect("tempdir");
     let assert = migrate_cmd(dir.path()).arg("migrate").assert().success();
     let report = json_stdout(assert);
     assert_eq!(report["from_version"], 0);
-    assert_eq!(report["to_version"], 0);
-    assert_eq!(
-        report["applied"],
-        serde_json::json!([]),
-        "no MemCastle data migrations are shipped yet, got {report:?}"
+    let applied = report["applied"].as_array().expect("applied is a list");
+    assert!(
+        !applied.is_empty(),
+        "a fresh palace is behind every shipped migration, got {report:?}"
     );
+    // Versions are sequential from 1, so the watermark is the count applied.
+    assert_eq!(report["to_version"], applied.len());
 }
 
 #[test]
-fn migrate_status_against_a_never_migrated_palace_is_read_only_and_reports_up_to_date() {
+fn migrate_status_against_a_never_migrated_palace_is_read_only_and_lists_what_is_pending() {
     // No prior `memcastle migrate` call: `--status` must still work on a
     // genuinely fresh palace (`migration_version` tolerates the
     // `migration_state` table not existing yet — see
     // `store::migration_state::is_table_not_found`), not error or require
     // migrating first just to ask a question.
     let dir = tempfile::tempdir().expect("tempdir");
-    let assert = migrate_cmd(dir.path())
-        .args(["migrate", "--status"])
-        .assert()
-        .success();
-    let status = json_stdout(assert);
-    assert_eq!(
-        status["current_version"], status["latest_version"],
-        "an up-to-date palace should report equal current/latest versions, got {status:?}"
+    let first = json_stdout(
+        migrate_cmd(dir.path())
+            .args(["migrate", "--status"])
+            .assert()
+            .success(),
     );
-    assert_eq!(status["pending"], serde_json::json!([]));
+    assert_eq!(first["current_version"], 0);
+    assert_eq!(
+        first["pending"]
+            .as_array()
+            .expect("pending is a list")
+            .len(),
+        first["latest_version"]
+            .as_u64()
+            .expect("latest is a number") as usize,
+        "every shipped migration is pending on a fresh palace, got {first:?}"
+    );
+
+    // Asking must not have migrated anything.
+    let second = json_stdout(
+        migrate_cmd(dir.path())
+            .args(["migrate", "--status"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(second, first);
 }
 
 #[test]
-fn migrate_check_on_an_up_to_date_palace_exits_zero_without_mutating() {
+fn migrate_check_fails_while_migrations_are_pending_and_passes_once_they_are_applied() {
     let dir = tempfile::tempdir().expect("tempdir");
+    migrate_cmd(dir.path())
+        .args(["migrate", "--check"])
+        .assert()
+        .failure();
+
+    migrate_cmd(dir.path()).arg("migrate").assert().success();
+
     migrate_cmd(dir.path())
         .args(["migrate", "--check"])
         .assert()

@@ -48,10 +48,12 @@ pub struct StatusReport {
 /// Bounds `AppServices::wake_up`'s output — deterministic and testable, no
 /// LLM-based summarization (task brief §13: this is L0/L1 only). Both
 /// limits apply to `recent_highlights` only: `max_items` caps how many
-/// drawers are fetched at all (pushed into the store query's `LIMIT`);
-/// `max_bytes` then caps their cumulative content length, dropping whole
-/// drawers (never truncating one mid-string) once the running total would
-/// exceed it — see `AppServices::wake_up`'s doc comment. The single `diary`
+/// drawers are fetched at all (pushed into the store query's `LIMIT`, and
+/// clamped to [`MAX_READ_LIMIT`] like every other read);
+/// `max_bytes` then caps their cumulative content length: a whole drawer that
+/// would push the running total over it is left out (never truncated
+/// mid-string) and the older, possibly smaller, ones after it are still
+/// considered — see `AppServices::wake_up`'s doc comment. The single `diary`
 /// entry, already capped at exactly one, is always included regardless of
 /// `max_bytes`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -72,6 +74,13 @@ pub const DEFAULT_SEARCH_LIMIT: u32 = 10;
 /// How many entries `diary_read` returns when the caller does not say —
 /// shared by every interface for the same reason as [`DEFAULT_SEARCH_LIMIT`].
 pub const DEFAULT_DIARY_LIMIT: u32 = 20;
+
+/// The most hits or entries any one read returns, whatever the caller asks
+/// for. Without a ceiling `limit=4294967295` is accepted verbatim and the
+/// query is asked to materialise (and the response to serialize) the whole
+/// palace. Clamped rather than rejected so an over-eager integration still
+/// gets a useful answer instead of a failure it must special-case.
+pub const MAX_READ_LIMIT: u32 = 200;
 
 impl WakeUpBudget {
     /// A budget from optional caller-supplied limits, each falling back to
@@ -112,6 +121,18 @@ pub struct WakeUpContext {
     pub generated_at: DateTime<Utc>,
 }
 
+/// What a job-control request answers: the state the request left the job
+/// heading for. One shape, served identically by REST, MCP and the CLI.
+///
+/// `pause_requested` and `cancel_requested` are *requests*, not outcomes:
+/// stopping is cooperative, so the job may still be running when this comes
+/// back (and, if the daemon dies first, is stopped by recovery instead).
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct JobControlResult {
+    /// `pause_requested`, `resumed`, `cancel_requested` or `retried`.
+    pub status: &'static str,
+}
+
 /// The application services shared by every interface. Cheap to clone
 /// (everything inside is a handle: `SurrealStore` wraps a connection,
 /// `Scheduler` is behind an `Arc`), so it can be axum/rmcp request state
@@ -134,23 +155,40 @@ impl AppServices {
         }
     }
 
+    /// An `AppServices` over a fresh in-memory store and an idle scheduler,
+    /// for the unit tests of the layers above (`mcp` cannot construct a store
+    /// itself: the `store-isolation` hook forbids it).
+    #[cfg(test)]
+    pub(crate) async fn for_tests() -> Self {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let scheduler = Arc::new(Scheduler::new(store.clone(), 1));
+        Self::new(store, scheduler)
+    }
+
     /// Summarise current daemon health. `mode` is stamped into the report
     /// purely for observability (`status` is a daemon-level operation, not
     /// a memory operation — see `MemoryMode`'s doc comment) — never gated.
+    ///
+    /// Strictly read-only: on a brand-new palace nothing has created the
+    /// palace record yet, and looking must not be what creates it, so the
+    /// name falls back to [`crate::domain::DEFAULT_PALACE_NAME`] until a write does.
     ///
     /// # Errors
     ///
     /// Returns an error if the store cannot be read.
     pub async fn status(&self, mode: MemoryMode) -> Result<StatusReport> {
-        let palace = self.store.ensure_palace("default").await?;
+        let palace_name = self.store.get_palace().await?.map_or_else(
+            || crate::domain::DEFAULT_PALACE_NAME.to_string(),
+            |palace| palace.name,
+        );
         let drawer_count = self.store.count_drawers().await?;
-        let queued = self.store.list_jobs(Some(JobStatus::Queued)).await?.len() as u64;
-        let running = self.store.list_jobs(Some(JobStatus::Running)).await?.len() as u64;
-        let paused = self.store.list_jobs(Some(JobStatus::Paused)).await?.len() as u64;
+        let queued = self.store.count_jobs(Some(JobStatus::Queued)).await?;
+        let running = self.store.count_jobs(Some(JobStatus::Running)).await?;
+        let paused = self.store.count_jobs(Some(JobStatus::Paused)).await?;
         Ok(StatusReport {
             version: env!("CARGO_PKG_VERSION").to_string(),
             uptime_secs: (Utc::now() - self.started_at).num_seconds(),
-            palace_name: palace.name,
+            palace_name,
             drawer_count,
             jobs_queued: queued,
             jobs_running: running,
@@ -198,12 +236,13 @@ impl AppServices {
     pub async fn search(
         &self,
         query: &str,
-        limit: u32,
         wing: Option<&str>,
         room: Option<&str>,
+        limit: u32,
         mode: MemoryMode,
     ) -> Result<Vec<SearchHit>> {
         Self::require_read(mode, "search")?;
+        let limit = limit.min(MAX_READ_LIMIT);
         crate::search::lexical_search(&self.store, query, limit, wing, room).await
     }
 
@@ -225,7 +264,7 @@ impl AppServices {
         &self,
         path: PathBuf,
         wing: Option<String>,
-        requested_by: impl Into<String>,
+        requested_by: &str,
         mode: MemoryMode,
     ) -> Result<Job> {
         Self::require_write(mode, "mine")?;
@@ -247,7 +286,7 @@ impl AppServices {
     /// # Errors
     ///
     /// Returns an error if the job cannot be persisted.
-    pub async fn submit_demo(&self, steps: u32, requested_by: impl Into<String>) -> Result<Job> {
+    pub async fn submit_demo(&self, steps: u32, requested_by: &str) -> Result<Job> {
         self.scheduler
             .submit(JobKind::Demo { steps }, Priority::Normal, requested_by)
             .await
@@ -262,10 +301,13 @@ impl AppServices {
         &self,
         payload: CheckpointPayload,
         priority: Priority,
-        requested_by: impl Into<String>,
+        requested_by: &str,
+        operation: &'static str,
         mode: MemoryMode,
     ) -> Result<Job> {
-        Self::require_write(mode, "checkpoint")?;
+        // The caller's own name, so a rejected emergency checkpoint says
+        // `emergency_checkpoint`, not the `checkpoint` it never asked for.
+        Self::require_write(mode, operation)?;
         self.scheduler
             .submit(JobKind::Checkpoint { payload }, priority, requested_by)
             .await
@@ -282,10 +324,10 @@ impl AppServices {
     pub async fn checkpoint(
         &self,
         payload: CheckpointPayload,
-        requested_by: impl Into<String>,
+        requested_by: &str,
         mode: MemoryMode,
     ) -> Result<Job> {
-        self.submit_checkpoint(payload, Priority::High, requested_by, mode)
+        self.submit_checkpoint(payload, Priority::High, requested_by, "checkpoint", mode)
             .await
     }
 
@@ -300,11 +342,17 @@ impl AppServices {
     pub async fn emergency_checkpoint(
         &self,
         payload: CheckpointPayload,
-        requested_by: impl Into<String>,
+        requested_by: &str,
         mode: MemoryMode,
     ) -> Result<Job> {
-        self.submit_checkpoint(payload, Priority::Critical, requested_by, mode)
-            .await
+        self.submit_checkpoint(
+            payload,
+            Priority::Critical,
+            requested_by,
+            "emergency_checkpoint",
+            mode,
+        )
+        .await
     }
 
     /// Submit a read-only palace consistency audit, optionally narrowing its
@@ -322,11 +370,7 @@ impl AppServices {
     /// # Errors
     ///
     /// Returns an error if the job cannot be persisted.
-    pub async fn submit_audit(
-        &self,
-        scope: Option<String>,
-        requested_by: impl Into<String>,
-    ) -> Result<Job> {
+    pub async fn submit_audit(&self, scope: Option<String>, requested_by: &str) -> Result<Job> {
         self.scheduler
             .submit(JobKind::Audit { scope }, Priority::Normal, requested_by)
             .await
@@ -344,18 +388,25 @@ impl AppServices {
     ///
     /// # Errors
     ///
-    /// Returns an error if the job cannot be persisted, or
+    /// Returns an error if the job cannot be persisted,
     /// [`Error::ModeForbidden`] if this is an applied repair and `mode`
-    /// doesn't permit writes.
+    /// doesn't permit writes, or [`Error::InvalidBasedOnJob`] if
+    /// `based_on_job` is not a completed audit job (no job is created).
     pub async fn submit_repair(
         &self,
         dry_run: bool,
         based_on_job: Option<JobId>,
-        requested_by: impl Into<String>,
+        requested_by: &str,
         mode: MemoryMode,
     ) -> Result<Job> {
         if !dry_run {
             Self::require_write(mode, "repair")?;
+        }
+        // Validated here, not only when the handler runs: otherwise a typo'd
+        // id is accepted with a 200 and surfaces as a failed job minutes
+        // later. The handler re-checks (the audit may vanish in between).
+        if let Some(audit_id) = based_on_job {
+            crate::repair::load_audited_orphan_ids(&self.store, audit_id).await?;
         }
         self.scheduler
             .submit(
@@ -382,7 +433,7 @@ impl AppServices {
     /// Returns an error if the store query fails, or
     /// [`Error::ModeForbidden`] if `mode` doesn't permit reads.
     pub async fn list_jobs(&self, status: Option<JobStatus>, mode: MemoryMode) -> Result<Vec<Job>> {
-        Self::require_read(mode, "jobs list")?;
+        Self::require_read(mode, "jobs_list")?;
         self.store.list_jobs(status).await
     }
 
@@ -391,11 +442,17 @@ impl AppServices {
     ///
     /// # Errors
     ///
-    /// Returns an error if the store query fails, or
-    /// [`Error::ModeForbidden`] if `mode` doesn't permit reads.
-    pub async fn get_job(&self, id: JobId, mode: MemoryMode) -> Result<Option<Job>> {
-        Self::require_read(mode, "jobs show")?;
-        self.store.get_job(id).await
+    /// Returns [`Error::JobNotFound`] if no job has that id — every
+    /// interface wants that same error, so it is raised once here instead of
+    /// being rebuilt from an `Option` by each of them — an error if the store
+    /// query fails, or [`Error::ModeForbidden`] if `mode` doesn't permit
+    /// reads.
+    pub async fn get_job(&self, id: JobId, mode: MemoryMode) -> Result<Job> {
+        Self::require_read(mode, "jobs_show")?;
+        self.store
+            .get_job(id)
+            .await?
+            .ok_or_else(|| Error::JobNotFound { id: id.to_string() })
     }
 
     /// Request that a running job pause.
@@ -404,8 +461,11 @@ impl AppServices {
     ///
     /// Returns [`crate::Error::JobNotFound`] if the job doesn't exist, or
     /// [`crate::Error::InvalidJobTransition`] if it isn't running.
-    pub async fn pause_job(&self, id: JobId) -> Result<()> {
-        self.scheduler.request_pause(id).await
+    pub async fn pause_job(&self, id: JobId) -> Result<JobControlResult> {
+        self.scheduler.request_pause(id).await?;
+        Ok(JobControlResult {
+            status: "pause_requested",
+        })
     }
 
     /// Resume a paused job.
@@ -413,8 +473,9 @@ impl AppServices {
     /// # Errors
     ///
     /// Returns an error if the job doesn't exist or isn't paused.
-    pub async fn resume_job(&self, id: JobId) -> Result<()> {
-        self.scheduler.resume(id).await
+    pub async fn resume_job(&self, id: JobId) -> Result<JobControlResult> {
+        self.scheduler.resume(id).await?;
+        Ok(JobControlResult { status: "resumed" })
     }
 
     /// Cancel a queued, paused, or running job.
@@ -423,8 +484,11 @@ impl AppServices {
     ///
     /// Returns an error if the job doesn't exist or can't be cancelled from
     /// its current status.
-    pub async fn cancel_job(&self, id: JobId) -> Result<()> {
-        self.scheduler.request_cancel(id).await
+    pub async fn cancel_job(&self, id: JobId) -> Result<JobControlResult> {
+        self.scheduler.request_cancel(id).await?;
+        Ok(JobControlResult {
+            status: "cancel_requested",
+        })
     }
 
     /// Retry a failed job.
@@ -432,8 +496,9 @@ impl AppServices {
     /// # Errors
     ///
     /// Returns an error if the job doesn't exist or isn't failed.
-    pub async fn retry_job(&self, id: JobId) -> Result<()> {
-        self.scheduler.retry(id).await
+    pub async fn retry_job(&self, id: JobId) -> Result<JobControlResult> {
+        self.scheduler.retry(id).await?;
+        Ok(JobControlResult { status: "retried" })
     }
 
     /// Persist a diary entry for `agent_identity`, filed as a drawer under
@@ -444,6 +509,10 @@ impl AppServices {
     /// forces this through the scheduler the way checkpoint/mining are
     /// (see issue #13 / `PLAN.md`'s design note).
     ///
+    /// `requested_by` is the channel the write came through (`"cli"`,
+    /// `"http"`, `"mcp"`), recorded as `provenance.requested_by`; the agent
+    /// identity goes in `source.agent`. See [`crate::domain::Provenance`].
+    ///
     /// # Errors
     ///
     /// Returns an error if the store write fails, or [`Error::ModeForbidden`]
@@ -453,6 +522,7 @@ impl AppServices {
         agent_identity: &str,
         wing: &str,
         content: String,
+        requested_by: &str,
         mode: MemoryMode,
     ) -> Result<Drawer> {
         Self::require_write(mode, "diary_write")?;
@@ -469,11 +539,16 @@ impl AppServices {
             Source {
                 kind: SourceKind::Manual,
                 uri: None,
+                // Who wrote it: the agent identity, as every writer records it.
                 agent: Some(agent_identity.to_string()),
             },
             vec![],
             Provenance {
-                requested_by: agent_identity.to_string(),
+                // Through which channel it arrived (`cli`, `http`, `mcp`) —
+                // the same meaning mining and checkpoint give this field.
+                // Writing the identity here too is what made "who asked"
+                // unqueryable across writers.
+                requested_by: requested_by.to_string(),
                 job_id: None,
             },
         );
@@ -498,11 +573,16 @@ impl AppServices {
         mode: MemoryMode,
     ) -> Result<Vec<Drawer>> {
         Self::require_read(mode, "diary_read")?;
-        let wing_record = self.store.get_or_create_wing(wing, None).await?;
-        let room = self
-            .store
-            .get_or_create_room(wing_record.id, "diary", None)
-            .await?;
+        let limit = limit.min(MAX_READ_LIMIT);
+        // Read-only lookups: a `ReadOnly` session reading a wing nobody has
+        // written to must not create that wing and its diary room. No wing or
+        // room simply means no entries.
+        let Some(wing_record) = self.store.get_wing(wing).await? else {
+            return Ok(Vec::new());
+        };
+        let Some(room) = self.store.get_room(wing_record.id, "diary").await? else {
+            return Ok(Vec::new());
+        };
         self.store
             .list_diary_drawers(room.id, agent_identity, limit)
             .await
@@ -514,7 +594,7 @@ impl AppServices {
     /// recall-oriented primitive the task brief's vocabulary calls for
     /// (issue #14 / §14 — "MemCastle should expose excellent primitives for
     /// `recall(...)`/`search(...)`"), wired to exactly the same scoped
-    /// `lexical_search` underneath — a future divergence (e.g.
+    /// `list_drawers_matching` underneath — a future divergence (e.g.
     /// recall-specific reranking) has a name to hang off, not a reason to
     /// duplicate logic today. MemCastle does not itself force a
     /// search-before-answer protocol; enforcing that discipline is an
@@ -538,7 +618,7 @@ impl AppServices {
         limit: u32,
         mode: MemoryMode,
     ) -> Result<Vec<SearchHit>> {
-        self.search(query, limit, wing, None, mode).await
+        self.search(query, wing, None, limit, mode).await
     }
 
     /// Build an agent's session-start context: its most recent diary entry
@@ -585,21 +665,30 @@ impl AppServices {
             None => None,
         };
 
+        // Clamped like every other read limit: an `as u32` here wrapped a
+        // huge `max_items` to a small number (2^32 to zero) and silently
+        // returned nothing.
+        let limit = u32::try_from(budget.max_items)
+            .unwrap_or(u32::MAX)
+            .min(MAX_READ_LIMIT);
         let candidates = self
             .store
-            .list_checkpoint_originated_drawers(wing, budget.max_items as u32)
+            .list_checkpoint_originated_drawers(wing, limit)
             .await?;
 
         // Trim to the byte budget by whole drawers, never mid-content: a
-        // drawer that would push the running total over `max_bytes` is
-        // simply left out, not truncated (see `recall`'s verbatim
-        // guarantee, which this must not undermine for `wake_up` either).
+        // drawer that would push the running total over `max_bytes` is left
+        // out, not truncated (see `recall`'s verbatim guarantee, which this
+        // must not undermine for `wake_up` either). Left out *and skipped
+        // past*: stopping at the first one that does not fit would drop every
+        // older highlight after it, however small, when the budget still has
+        // room for them.
         let mut recent_highlights = Vec::new();
         let mut total_bytes = 0usize;
         for drawer in candidates {
-            let next_total = total_bytes + drawer.content.len();
+            let next_total = total_bytes.saturating_add(drawer.content.len());
             if next_total > budget.max_bytes {
-                break;
+                continue;
             }
             total_bytes = next_total;
             recent_highlights.push(drawer);
@@ -665,9 +754,15 @@ mod tests {
             "test",
         );
         let ctx = JobContext::new(job.id, JobControl::default(), store.clone());
-        crate::checkpoint::run(store, &ctx, &mut job, &payload)
-            .await
-            .expect("checkpoint run");
+        crate::checkpoint::run(
+            &ctx,
+            &mut job,
+            crate::checkpoint::CheckpointParams {
+                payload: payload.clone(),
+            },
+        )
+        .await
+        .expect("checkpoint run");
     }
 
     #[tokio::test]
@@ -678,6 +773,7 @@ mod tests {
                 "agent-a",
                 "project-x",
                 "went well today".to_string(),
+                "test",
                 MemoryMode::Full,
             )
             .await
@@ -700,6 +796,7 @@ mod tests {
             "agent-a",
             "shared-wing",
             "a's entry".to_string(),
+            "test",
             MemoryMode::Full,
         )
         .await
@@ -708,6 +805,7 @@ mod tests {
             "agent-b",
             "shared-wing",
             "b's entry".to_string(),
+            "test",
             MemoryMode::Full,
         )
         .await
@@ -743,6 +841,7 @@ mod tests {
             "agent-a",
             "project-x",
             "line one\nline two, verbatim — no paraphrasing".to_string(),
+            "test",
             MemoryMode::Full,
         )
         .await
@@ -801,6 +900,7 @@ mod tests {
             "agent-a",
             "project-x",
             "day one".to_string(),
+            "test",
             MemoryMode::Full,
         )
         .await
@@ -834,6 +934,7 @@ mod tests {
             "agent-a",
             "project-x",
             "should not appear".to_string(),
+            "test",
             MemoryMode::Full,
         )
         .await
@@ -922,11 +1023,12 @@ mod tests {
                 .len(),
             1
         );
-        assert!(
+        assert_eq!(
             app.get_job(submitted.id, MemoryMode::ReadOnly)
                 .await
                 .expect("get")
-                .is_some()
+                .id,
+            submitted.id
         );
     }
 
@@ -972,7 +1074,7 @@ mod tests {
     async fn a_disabled_search_is_rejected_without_a_store_query() {
         let app = test_app().await;
         let result = app
-            .search("anything", 10, None, None, MemoryMode::Disabled)
+            .search("anything", None, None, 10, MemoryMode::Disabled)
             .await;
         assert_mode_forbidden(&result, MemoryMode::Disabled);
     }
@@ -1015,6 +1117,7 @@ mod tests {
                 "agent-a",
                 "project-x",
                 "should never be written".to_string(),
+                "test",
                 MemoryMode::Disabled,
             )
             .await;
@@ -1061,6 +1164,7 @@ mod tests {
             "agent-a",
             "project-x",
             "written while full".to_string(),
+            "test",
             MemoryMode::Full,
         )
         .await
@@ -1071,6 +1175,7 @@ mod tests {
                 "agent-a",
                 "project-x",
                 "should be rejected".to_string(),
+                "test",
                 MemoryMode::ReadOnly,
             )
             .await;
@@ -1218,5 +1323,206 @@ mod tests {
             .await
             .expect("status must never be gated by mode");
         assert_eq!(report.mode, MemoryMode::Disabled);
+    }
+
+    #[tokio::test]
+    async fn a_rejected_emergency_checkpoint_names_the_operation_the_caller_asked_for() {
+        let app = test_app().await;
+        let result = app
+            .emergency_checkpoint(one_item_payload("x"), "test", MemoryMode::ReadOnly)
+            .await;
+        assert!(
+            matches!(&result, Err(Error::ModeForbidden { operation, .. }) if operation == "emergency_checkpoint"),
+            "got {result:?}"
+        );
+        let result = app
+            .checkpoint(one_item_payload("x"), "test", MemoryMode::ReadOnly)
+            .await;
+        assert!(
+            matches!(&result, Err(Error::ModeForbidden { operation, .. }) if operation == "checkpoint"),
+            "got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_absurd_limit_is_clamped_to_the_maximum_instead_of_being_honoured() {
+        let app = test_app().await;
+        let extra = 5;
+        for i in 0..(MAX_READ_LIMIT + extra) {
+            app.diary_write(
+                "agent-a",
+                "wing",
+                format!("entry {i}"),
+                "test",
+                MemoryMode::Full,
+            )
+            .await
+            .expect("diary write");
+        }
+        let entries = app
+            .diary_read("agent-a", "wing", u32::MAX, MemoryMode::Full)
+            .await
+            .expect("diary read");
+        assert_eq!(entries.len(), MAX_READ_LIMIT as usize);
+    }
+
+    #[tokio::test]
+    async fn getting_an_unknown_job_is_a_typed_not_found_error() {
+        let app = test_app().await;
+        let result = app.get_job(JobId::new(), MemoryMode::Full).await;
+        assert!(
+            matches!(result, Err(Error::JobNotFound { .. })),
+            "got {result:?}"
+        );
+    }
+
+    /// What "byte-for-byte unchanged" means for the records these reads used
+    /// to create as a side effect.
+    async fn structure_of(store: &SurrealStore) -> (bool, usize, usize) {
+        let wings = store.list_wings().await.unwrap();
+        let mut rooms = 0;
+        for wing in &wings {
+            rooms += store.list_rooms(wing.id).await.unwrap().len();
+        }
+        (
+            store.get_palace().await.unwrap().is_some(),
+            wings.len(),
+            rooms,
+        )
+    }
+
+    #[tokio::test]
+    async fn read_only_reads_on_an_empty_palace_leave_the_store_unchanged() {
+        let (app, store) = test_app_with_store().await;
+        let before = structure_of(&store).await;
+        assert_eq!(before, (false, 0, 0));
+
+        for mode in [MemoryMode::ReadOnly, MemoryMode::Full] {
+            let diary = app
+                .diary_read("agent-a", "unknown-wing", 5, mode)
+                .await
+                .expect("diary read");
+            assert!(diary.is_empty());
+            let context = app
+                .wake_up(
+                    "agent-a",
+                    Some("unknown-wing"),
+                    WakeUpBudget::default(),
+                    mode,
+                )
+                .await
+                .expect("wake up");
+            assert!(context.diary.is_none() && context.recent_highlights.is_empty());
+            let status = app.status(mode).await.expect("status");
+            assert_eq!(status.palace_name, crate::domain::DEFAULT_PALACE_NAME);
+        }
+
+        assert_eq!(
+            structure_of(&store).await,
+            before,
+            "a read must not create the palace, wing or room it looked for"
+        );
+    }
+
+    #[tokio::test]
+    async fn reading_a_wing_that_exists_but_has_no_diary_room_creates_no_room() {
+        let (app, store) = test_app_with_store().await;
+        store.get_or_create_wing("project-x", None).await.unwrap();
+        let before = structure_of(&store).await;
+
+        let diary = app
+            .diary_read("agent-a", "project-x", 5, MemoryMode::ReadOnly)
+            .await
+            .expect("diary read");
+
+        assert!(diary.is_empty());
+        assert_eq!(structure_of(&store).await, before);
+    }
+
+    #[tokio::test]
+    async fn status_counts_jobs_by_status_without_fetching_them() {
+        let app = test_app().await;
+        app.submit_demo(1, "test").await.expect("submit");
+        app.submit_demo(1, "test").await.expect("submit");
+
+        let status = app.status(MemoryMode::Full).await.expect("status");
+
+        // The test scheduler is never started, so both stay queued.
+        assert_eq!(status.jobs_queued, 2);
+        assert_eq!(status.jobs_running, 0);
+    }
+
+    #[tokio::test]
+    async fn a_diary_entry_records_the_channel_as_requested_by_and_the_agent_as_source() {
+        let app = test_app().await;
+
+        let drawer = app
+            .diary_write(
+                "agent-a",
+                "wing",
+                "note".to_string(),
+                "mcp",
+                MemoryMode::Full,
+            )
+            .await
+            .expect("diary write");
+
+        assert_eq!(drawer.provenance.requested_by, "mcp");
+        assert_eq!(drawer.source.agent.as_deref(), Some("agent-a"));
+    }
+
+    #[tokio::test]
+    async fn an_oversize_highlight_is_skipped_and_the_smaller_older_ones_after_it_are_kept() {
+        let (app, store) = test_app_with_store().await;
+        // Oldest to newest, so newest-first reads: small-new, LARGE, small-old.
+        seed_checkpoint_drawer(&store, "project-x", "small-old").await;
+        seed_checkpoint_drawer(&store, "project-x", &"L".repeat(200)).await;
+        seed_checkpoint_drawer(&store, "project-x", "small-new").await;
+
+        let context = app
+            .wake_up(
+                "agent-a",
+                Some("project-x"),
+                WakeUpBudget {
+                    max_items: 10,
+                    max_bytes: 40,
+                },
+                MemoryMode::Full,
+            )
+            .await
+            .expect("wake up");
+
+        let contents: Vec<&str> = context
+            .recent_highlights
+            .iter()
+            .map(|d| d.content.as_str())
+            .collect();
+        assert_eq!(
+            contents,
+            ["small-new", "small-old"],
+            "the big one is left out, not a reason to drop everything older"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_huge_max_items_is_clamped_instead_of_wrapping_to_nothing() {
+        let (app, store) = test_app_with_store().await;
+        seed_checkpoint_drawer(&store, "project-x", "a highlight").await;
+
+        // 2^32 truncated to zero under an `as u32` cast, and returned nothing.
+        let context = app
+            .wake_up(
+                "agent-a",
+                Some("project-x"),
+                WakeUpBudget {
+                    max_items: 1 << 32,
+                    max_bytes: 8192,
+                },
+                MemoryMode::Full,
+            )
+            .await
+            .expect("wake up");
+
+        assert_eq!(context.recent_highlights.len(), 1);
     }
 }

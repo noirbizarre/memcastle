@@ -6,6 +6,16 @@
 //! (`wings`, `drawers`, `jobs`, `entities`, `migration_state`) as `impl SurrealStore`
 //! blocks; this file only owns connecting and schema sync.
 //!
+//! Method names say what they do: `get_*` reads one record, `list_*` reads
+//! many, `create_*` inserts (replay-safe `_once` forms skip an existing id),
+//! `save_*` upserts a whole record, and `get_or_create_*` reads and inserts
+//! when absent. Callers own ids and timestamps, except inside
+//! `get_or_create_*` — see `domain::ids` for why.
+//!
+//! Timestamps are written only through [`stored`], in one canonical string
+//! form; `docs/adr/005-timestamp-representation.md` records why some columns
+//! are `datetime` and the optional ones `option<string>`.
+//!
 //! Every write and read goes through hand-written SurrealQL with explicit
 //! `<datetime>`/`<string>` casts rather than the SDK's typed `create`/
 //! `select` helpers or its `Datetime`/`RecordId` wrapper types. That costs
@@ -40,6 +50,7 @@ mod drawers;
 mod entities;
 mod jobs;
 mod migration_state;
+mod timestamps;
 mod wings;
 
 use std::path::PathBuf;
@@ -63,7 +74,63 @@ pub use drawers::SearchHit;
 /// (`JobStatus`) and plain collections (`Vec`, `Option`) are unaffected and
 /// don't need this.
 pub(crate) fn bindable<T: serde::Serialize>(value: &T) -> Result<serde_json::Value> {
-    serde_json::to_value(value).map_err(|source| Error::store_malformed(source.to_string()))
+    serde_json::to_value(value)
+        .map_err(|source| Error::serialization("a value bound for storage", source))
+}
+
+/// The one form a timestamp is written to the database in: UTC, nine
+/// fractional digits, a `Z` suffix — `2026-09-29T14:22:47.123456789Z`.
+///
+/// Fixed width and fixed offset, so comparing two stored strings
+/// lexicographically is the same as comparing the instants, which is what
+/// makes the `option<string>` timestamp columns safe to `ORDER BY` or range
+/// over; `DateTime::to_rfc3339`'s variable precision and `+00:00` suffix are
+/// not (`...47.5+00:00` sorts after `...47.25+00:00` lexically only by
+/// accident of digit count). Nanoseconds because that is what `datetime`
+/// columns hold, so nothing is truncated on the way in. Every timestamp write
+/// in this module goes through here — see
+/// `docs/adr/005-timestamp-representation.md`.
+pub(crate) fn stored(at: chrono::DateTime<chrono::Utc>) -> String {
+    at.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+}
+
+/// Whether `error` is SurrealDB reporting a write conflict — two transactions
+/// touching the same record at once — which it documents as safe to retry.
+fn is_write_conflict(error: &Error) -> bool {
+    matches!(
+        error,
+        Error::Store { source }
+            if matches!(
+                source.query_details(),
+                Some(surrealdb::types::QueryError::TransactionConflict)
+            )
+    )
+}
+
+/// Run `operation`, retrying a few times if it loses a write conflict.
+///
+/// A job record has two concurrent writers by design: the worker checkpointing
+/// its progress, and the API recording a user's pause or cancel. SurrealDB
+/// resolves that race by failing one transaction with a retryable conflict;
+/// without a retry the loser surfaced as a failed checkpoint (killing the
+/// job) or a 500 on the user's request.
+pub(crate) async fn retrying_on_conflict<T, F, Fut>(mut operation: F) -> Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    const MAX_RETRIES: u32 = 8;
+    let mut retries = 0;
+    loop {
+        match operation().await {
+            Err(error) if is_write_conflict(&error) && retries < MAX_RETRIES => {
+                retries += 1;
+                // A short, growing pause so the winner can commit.
+                tokio::time::sleep(std::time::Duration::from_millis(u64::from(retries) * 5)).await;
+            }
+            other => return other,
+        }
+    }
 }
 
 /// Deserialize the query results at `index` into `Vec<T>`.
@@ -110,6 +177,15 @@ pub enum Backend {
 }
 
 impl Backend {
+    /// Whether other daemons can connect to the same palace at the same time.
+    /// An embedded palace cannot: SurrealKV's file lock admits one process,
+    /// which is what lets startup recovery treat every `Running` job as a
+    /// dead predecessor's. A remote one can, so recovery must go by lease.
+    #[must_use]
+    pub fn is_shared(&self) -> bool {
+        matches!(self, Self::Remote { .. })
+    }
+
     /// The endpoint string `engine::any::connect` dispatches on.
     fn endpoint(&self) -> String {
         match self {
@@ -275,7 +351,7 @@ mod tests {
         };
         store.create_drawer(&drawer).await.expect("create drawer");
 
-        let drawers = store.list_drawers(room.id).await.expect("list");
+        let drawers = store.list_drawers(Some(room.id)).await.expect("list");
         assert_eq!(drawers.len(), 1);
         assert_eq!(drawers[0].id, drawer.id);
         assert_eq!(drawers[0].content, "hello palace");
@@ -295,7 +371,7 @@ mod tests {
         assert_eq!(fetched.status, crate::domain::JobStatus::Queued);
 
         let claimed = store
-            .claim_next_job("worker-1")
+            .claim_next_job("worker-1", chrono::Duration::seconds(30))
             .await
             .expect("claim")
             .expect("a job was claimed");
@@ -397,7 +473,7 @@ mod tests {
             .expect("create beta drawer");
 
         let hits = store
-            .lexical_search("castle", 10, None, None)
+            .list_drawers_matching("castle", 10, None, None)
             .await
             .expect("search");
         assert_eq!(
@@ -441,7 +517,7 @@ mod tests {
             .expect("create beta drawer");
 
         let hits = store
-            .lexical_search("castle", 10, Some("alpha"), None)
+            .list_drawers_matching("castle", 10, Some("alpha"), None)
             .await
             .expect("wing-scoped search");
         assert_eq!(
@@ -476,7 +552,7 @@ mod tests {
             .expect("create notes drawer");
 
         let hits = store
-            .lexical_search("castle", 10, None, Some("notes"))
+            .list_drawers_matching("castle", 10, None, Some("notes"))
             .await
             .expect("room-scoped search");
         assert_eq!(
@@ -537,7 +613,7 @@ mod tests {
         // match count, the top hits are "loud"'s -- proving the score gap
         // is real, not an artifact of insertion order.
         let unscoped = store
-            .lexical_search("castle", 2, None, None)
+            .list_drawers_matching("castle", 2, None, None)
             .await
             .expect("unscoped search");
         assert_eq!(unscoped.len(), 2);
@@ -552,7 +628,7 @@ mod tests {
         // already-fetched unscoped page, this would come back empty -- the
         // top 2 rows fetched would already be "loud"'s.
         let scoped = store
-            .lexical_search("castle", 2, Some("quiet"), None)
+            .list_drawers_matching("castle", 2, Some("quiet"), None)
             .await
             .expect("wing-scoped search");
         assert_eq!(
@@ -805,163 +881,17 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn creating_an_entity_twice_with_the_same_name_and_kind_is_idempotent() {
-        let store = memory_store().await;
-        let first = store
-            .get_or_create_entity("Ada Lovelace", "person", serde_json::json!({}))
-            .await
-            .expect("create");
-        let second = store
-            .get_or_create_entity("Ada Lovelace", "person", serde_json::json!({}))
-            .await
-            .expect("get-or-create");
-        assert_eq!(first.id, second.id);
-    }
+    #[test]
+    fn stored_timestamps_are_fixed_width_utc_so_lexical_order_is_chronological() {
+        use chrono::{TimeZone, Utc};
+        let earlier = Utc.with_ymd_and_hms(2026, 1, 2, 3, 4, 5).unwrap();
+        // Half a second later: `to_rfc3339` would print `05.5+00:00`, which
+        // sorts *before* a `05+00:00` neighbour by digit count alone.
+        let later = earlier + chrono::Duration::milliseconds(500);
 
-    #[tokio::test]
-    async fn entity_kind_is_normalized_so_casing_does_not_fragment_the_graph() {
-        let store = memory_store().await;
-        let first = store
-            .get_or_create_entity("Ada Lovelace", "Person", serde_json::json!({}))
-            .await
-            .expect("create");
-        let second = store
-            .get_or_create_entity("Ada Lovelace", "person", serde_json::json!({}))
-            .await
-            .expect("get-or-create despite different casing");
-        assert_eq!(first.id, second.id);
-        assert_eq!(second.kind, "person");
-    }
-
-    #[tokio::test]
-    async fn an_empty_kind_or_predicate_is_rejected() {
-        let store = memory_store().await;
-        let entity_err = store
-            .get_or_create_entity("Ada Lovelace", "   ", serde_json::json!({}))
-            .await
-            .expect_err("blank kind must be rejected");
-        assert!(matches!(entity_err, crate::error::Error::EmptyLabel { .. }));
-
-        let alice = store
-            .get_or_create_entity("Alice", "person", serde_json::json!({}))
-            .await
-            .expect("alice");
-        let bob = store
-            .get_or_create_entity("Bob", "person", serde_json::json!({}))
-            .await
-            .expect("bob");
-        let relationship_err = store
-            .create_relationship(alice.id, bob.id, "", 1.0)
-            .await
-            .expect_err("blank predicate must be rejected");
-        assert!(matches!(
-            relationship_err,
-            crate::error::Error::EmptyLabel { .. }
-        ));
-    }
-
-    #[tokio::test]
-    async fn superseding_a_relationship_closes_the_old_edge_and_leaves_history_queryable() {
-        let store = memory_store().await;
-        let alice = store
-            .get_or_create_entity("Alice", "person", serde_json::json!({}))
-            .await
-            .expect("alice");
-        let acme = store
-            .get_or_create_entity("Acme", "organization", serde_json::json!({}))
-            .await
-            .expect("acme");
-
-        let original = store
-            .create_relationship(alice.id, acme.id, "employee_of", 0.9)
-            .await
-            .expect("create relationship");
-
-        let replacement = store
-            .supersede_relationship(
-                original.id,
-                crate::domain::NewRelationship {
-                    from: alice.id,
-                    to: acme.id,
-                    predicate: "former_employee_of".to_string(),
-                    confidence: 0.95,
-                },
-            )
-            .await
-            .expect("supersede");
-        assert_ne!(replacement.id, original.id);
-
-        let current = store
-            .list_relationships(alice.id, false)
-            .await
-            .expect("list current");
-        assert_eq!(
-            current.len(),
-            1,
-            "only the replacement should be current, got {current:?}"
-        );
-        assert_eq!(current[0].id, replacement.id);
-        assert_eq!(current[0].predicate, "former_employee_of");
-
-        let history = store
-            .list_relationships(alice.id, true)
-            .await
-            .expect("list including expired");
-        assert_eq!(
-            history.len(),
-            2,
-            "both the old and new edge should stay queryable, got {history:?}"
-        );
-        let old = history
-            .iter()
-            .find(|r| r.id == original.id)
-            .expect("original edge still present");
-        assert!(
-            old.valid_to.is_some(),
-            "the superseded edge must be closed, got {old:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn invalidating_a_relationship_sets_valid_to_without_creating_a_replacement() {
-        let store = memory_store().await;
-        let alice = store
-            .get_or_create_entity("Alice", "person", serde_json::json!({}))
-            .await
-            .expect("alice");
-        let acme = store
-            .get_or_create_entity("Acme", "organization", serde_json::json!({}))
-            .await
-            .expect("acme");
-        let relationship = store
-            .create_relationship(alice.id, acme.id, "employee_of", 0.9)
-            .await
-            .expect("create relationship");
-
-        store
-            .invalidate_relationship(relationship.id)
-            .await
-            .expect("invalidate");
-
-        let current = store
-            .list_relationships(alice.id, false)
-            .await
-            .expect("list current");
-        assert!(
-            current.is_empty(),
-            "an invalidated relationship must not read back as current, got {current:?}"
-        );
-
-        let history = store
-            .list_relationships(alice.id, true)
-            .await
-            .expect("list including expired");
-        assert_eq!(
-            history.len(),
-            1,
-            "invalidating must not create a replacement edge, got {history:?}"
-        );
-        assert!(history[0].valid_to.is_some());
+        assert_eq!(stored(earlier), "2026-01-02T03:04:05.000000000Z");
+        assert_eq!(stored(later), "2026-01-02T03:04:05.500000000Z");
+        assert!(stored(earlier) < stored(later));
+        assert_eq!(stored(earlier).len(), stored(later).len());
     }
 }

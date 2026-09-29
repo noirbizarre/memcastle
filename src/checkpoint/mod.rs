@@ -24,6 +24,8 @@
 //! module's own tests, by calling [`run`] twice against a forced pause
 //! rather than racing wall-clock time against a live scheduler.
 
+use chrono::Utc;
+
 use crate::domain::{
     CheckpointDestination, CheckpointPayload, Drawer, DrawerId, FactMutation, Job, NewRelationship,
     Provenance, RelationshipId, RoomId,
@@ -32,6 +34,12 @@ use crate::error::Result;
 use crate::jobs::{JobContext, JobOutcome};
 use crate::store::SurrealStore;
 
+/// What a `Checkpoint` job needs, gathered from its [`crate::domain::JobKind`].
+pub struct CheckpointParams {
+    /// The items to write.
+    pub payload: CheckpointPayload,
+}
+
 /// Process `payload`'s items in order, checking in with `ctx` between each
 /// so the job can be paused, resumed, or cancelled.
 ///
@@ -39,12 +47,9 @@ use crate::store::SurrealStore;
 ///
 /// Returns an error if a store write fails, or if a `fact` mutation is
 /// rejected (e.g. an empty predicate — see `crate::Error::EmptyLabel`).
-pub async fn run(
-    store: &SurrealStore,
-    ctx: &JobContext,
-    job: &mut Job,
-    payload: &CheckpointPayload,
-) -> Result<JobOutcome> {
+pub async fn run(ctx: &JobContext, job: &mut Job, params: CheckpointParams) -> Result<JobOutcome> {
+    let CheckpointParams { payload } = params;
+    let store = ctx.store();
     let start = job
         .checkpoint
         .get("next_index")
@@ -136,7 +141,16 @@ async fn apply_fact_mutation(
             confidence,
         } => {
             store
-                .create_relationship_with_id(edge_id, *subject, *object, predicate, *confidence)
+                .create_relationship(
+                    edge_id,
+                    NewRelationship {
+                        from: *subject,
+                        to: *object,
+                        predicate: predicate.clone(),
+                        confidence: *confidence,
+                    },
+                    Utc::now(),
+                )
                 .await?;
         }
         FactMutation::Supersede {
@@ -147,7 +161,7 @@ async fn apply_fact_mutation(
             confidence,
         } => {
             store
-                .supersede_relationship_with_id(
+                .supersede_relationship(
                     *relationship_id,
                     edge_id,
                     NewRelationship {
@@ -156,11 +170,14 @@ async fn apply_fact_mutation(
                         predicate: predicate.clone(),
                         confidence: *confidence,
                     },
+                    Utc::now(),
                 )
                 .await?;
         }
         FactMutation::Invalidate { relationship_id } => {
-            store.invalidate_relationship(*relationship_id).await?;
+            store
+                .invalidate_relationship(*relationship_id, Utc::now())
+                .await?;
         }
     }
     Ok(())
@@ -215,7 +232,15 @@ mod tests {
         );
         let ctx = ctx_for(&store, &job, JobControl::default());
 
-        let outcome = run(&store, &ctx, &mut job, &payload).await.expect("run");
+        let outcome = run(
+            &ctx,
+            &mut job,
+            CheckpointParams {
+                payload: payload.clone(),
+            },
+        )
+        .await
+        .expect("run");
         assert_eq!(outcome, JobOutcome::Completed);
         assert_eq!(job.progress.current, 3);
         assert_eq!(job.checkpoint, json!({ "next_index": 3 }));
@@ -225,7 +250,14 @@ mod tests {
             .get_or_create_room(general.id, "entries", None)
             .await
             .unwrap();
-        assert_eq!(store.list_drawers(general_room.id).await.unwrap().len(), 1);
+        assert_eq!(
+            store
+                .list_drawers(Some(general_room.id))
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
 
         let preferences = store.get_or_create_wing("preferences", None).await.unwrap();
         let preferences_room = store
@@ -233,7 +265,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            store.list_drawers(preferences_room.id).await.unwrap().len(),
+            store
+                .list_drawers(Some(preferences_room.id))
+                .await
+                .unwrap()
+                .len(),
             1
         );
 
@@ -242,7 +278,7 @@ mod tests {
             .get_or_create_room(diary.id, "diary", None)
             .await
             .unwrap();
-        let diary_drawers = store.list_drawers(diary_room.id).await.unwrap();
+        let diary_drawers = store.list_drawers(Some(diary_room.id)).await.unwrap();
         assert_eq!(diary_drawers.len(), 1);
         assert_eq!(diary_drawers[0].source.agent.as_deref(), Some("test-agent"));
     }
@@ -264,7 +300,15 @@ mod tests {
         );
         let ctx = ctx_for(&store, &job, JobControl::default());
 
-        run(&store, &ctx, &mut job, &payload).await.expect("run");
+        run(
+            &ctx,
+            &mut job,
+            CheckpointParams {
+                payload: payload.clone(),
+            },
+        )
+        .await
+        .expect("run");
 
         let default_projects = store.get_or_create_wing("projects", None).await.unwrap();
         let default_room = store
@@ -273,7 +317,7 @@ mod tests {
             .unwrap();
         assert!(
             store
-                .list_drawers(default_room.id)
+                .list_drawers(Some(default_room.id))
                 .await
                 .unwrap()
                 .is_empty(),
@@ -286,7 +330,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            store.list_drawers(project_foo_room.id).await.unwrap().len(),
+            store
+                .list_drawers(Some(project_foo_room.id))
+                .await
+                .unwrap()
+                .len(),
             1,
             "the item must land in the overridden wing instead"
         );
@@ -323,7 +371,15 @@ mod tests {
         );
         let ctx = ctx_for(&store, &job, JobControl::default());
 
-        run(&store, &ctx, &mut job, &payload).await.expect("run");
+        run(
+            &ctx,
+            &mut job,
+            CheckpointParams {
+                payload: payload.clone(),
+            },
+        )
+        .await
+        .expect("run");
 
         let relationships = store.list_relationships(alice.id, false).await.unwrap();
         assert_eq!(relationships.len(), 1);
@@ -343,7 +399,16 @@ mod tests {
             .await
             .expect("acme");
         let relationship = store
-            .create_relationship(alice.id, acme.id, "employee_of", 0.9)
+            .create_relationship(
+                RelationshipId::new(),
+                NewRelationship {
+                    from: alice.id,
+                    to: acme.id,
+                    predicate: "employee_of".to_string(),
+                    confidence: 0.9,
+                },
+                Utc::now(),
+            )
             .await
             .expect("create relationship");
 
@@ -363,7 +428,15 @@ mod tests {
         );
         let ctx = ctx_for(&store, &job, JobControl::default());
 
-        run(&store, &ctx, &mut job, &payload).await.expect("run");
+        run(
+            &ctx,
+            &mut job,
+            CheckpointParams {
+                payload: payload.clone(),
+            },
+        )
+        .await
+        .expect("run");
 
         let current = store.list_relationships(alice.id, false).await.unwrap();
         assert!(
@@ -400,7 +473,15 @@ mod tests {
         control.request_pause();
         let ctx = ctx_for(&store, &job, control);
 
-        let outcome = run(&store, &ctx, &mut job, &payload).await.expect("run");
+        let outcome = run(
+            &ctx,
+            &mut job,
+            CheckpointParams {
+                payload: payload.clone(),
+            },
+        )
+        .await
+        .expect("run");
         assert_eq!(outcome, JobOutcome::Paused);
         assert_eq!(job.checkpoint, json!({ "next_index": 0 }));
 
@@ -410,7 +491,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            store.list_drawers(room.id).await.unwrap().is_empty(),
+            store.list_drawers(Some(room.id)).await.unwrap().is_empty(),
             "no item should have been processed before the pause check fired"
         );
     }
@@ -442,9 +523,15 @@ mod tests {
             items: payload.items[..2].to_vec(),
         };
         let ctx = ctx_for(&store, &job, JobControl::default());
-        let outcome = run(&store, &ctx, &mut job, &first_attempt)
-            .await
-            .expect("first attempt");
+        let outcome = run(
+            &ctx,
+            &mut job,
+            CheckpointParams {
+                payload: first_attempt.clone(),
+            },
+        )
+        .await
+        .expect("first attempt");
         assert_eq!(outcome, JobOutcome::Completed);
         assert_eq!(
             job.checkpoint,
@@ -456,9 +543,15 @@ mod tests {
         // `start` reads the same `next_index: 2` a real restart would read
         // back from the persisted job, so items 0-1 are not redone.
         let ctx = ctx_for(&store, &job, JobControl::default());
-        let outcome = run(&store, &ctx, &mut job, &payload)
-            .await
-            .expect("resumed attempt");
+        let outcome = run(
+            &ctx,
+            &mut job,
+            CheckpointParams {
+                payload: payload.clone(),
+            },
+        )
+        .await
+        .expect("resumed attempt");
         assert_eq!(outcome, JobOutcome::Completed);
 
         let general = store.get_or_create_wing("general", None).await.unwrap();
@@ -466,7 +559,7 @@ mod tests {
             .get_or_create_room(general.id, "entries", None)
             .await
             .unwrap();
-        let drawers = store.list_drawers(room.id).await.unwrap();
+        let drawers = store.list_drawers(Some(room.id)).await.unwrap();
         assert_eq!(
             drawers.len(),
             payload.items.len(),
@@ -508,20 +601,32 @@ mod tests {
         job.apply(crate::domain::JobEvent::Claim).unwrap();
 
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&store, &ctx, &mut job, &payload)
-            .await
-            .expect("first attempt");
+        run(
+            &ctx,
+            &mut job,
+            CheckpointParams {
+                payload: payload.clone(),
+            },
+        )
+        .await
+        .expect("first attempt");
 
         // Crash: everything was written, but the saved checkpoint is from
         // before any of it.
         job.checkpoint = json!({});
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&store, &ctx, &mut job, &payload)
-            .await
-            .expect("replayed attempt");
+        run(
+            &ctx,
+            &mut job,
+            CheckpointParams {
+                payload: payload.clone(),
+            },
+        )
+        .await
+        .expect("replayed attempt");
 
         assert_eq!(
-            store.list_all_drawers().await.unwrap().len(),
+            store.list_drawers(None).await.unwrap().len(),
             payload.items.len(),
             "a replayed item must not be stored twice"
         );
@@ -548,7 +653,16 @@ mod tests {
             .await
             .unwrap();
         let old = store
-            .create_relationship(a.id, b.id, "knows", 0.5)
+            .create_relationship(
+                RelationshipId::new(),
+                NewRelationship {
+                    from: a.id,
+                    to: b.id,
+                    predicate: "knows".to_string(),
+                    confidence: 0.5,
+                },
+                Utc::now(),
+            )
             .await
             .unwrap();
         let mut superseding = item(CheckpointDestination::General, "now they are friends");
@@ -574,13 +688,75 @@ mod tests {
         for _ in 0..2 {
             job.checkpoint = json!({});
             let ctx = ctx_for(&store, &job, JobControl::default());
-            run(&store, &ctx, &mut job, &payload)
-                .await
-                .expect("attempt");
+            run(
+                &ctx,
+                &mut job,
+                CheckpointParams {
+                    payload: payload.clone(),
+                },
+            )
+            .await
+            .expect("attempt");
         }
 
         let current = store.list_relationships(a.id, false).await.unwrap();
         assert_eq!(current.len(), 1, "exactly one current edge: {current:?}");
         assert_eq!(current[0].predicate, "friends");
+    }
+
+    /// `{"next_index": N}` is persisted in job records already on disk, so a
+    /// handler refactor must keep reading exactly that shape.
+    #[tokio::test]
+    async fn a_checkpoint_persisted_in_the_current_format_resumes_past_the_finished_items() {
+        let store = memory_store().await;
+        let payload = CheckpointPayload {
+            items: vec![
+                item(CheckpointDestination::General, "already written"),
+                item(CheckpointDestination::General, "already written too"),
+                item(CheckpointDestination::General, "still to do"),
+            ],
+        };
+        let mut job = Job::new(
+            JobKind::Checkpoint {
+                payload: payload.clone(),
+            },
+            Priority::High,
+            "test",
+        );
+        job.checkpoint = json!({ "next_index": 2 });
+        let ctx = ctx_for(&store, &job, JobControl::default());
+
+        run(&ctx, &mut job, CheckpointParams { payload })
+            .await
+            .expect("run");
+
+        let drawers = store.list_drawers(None).await.unwrap();
+        assert_eq!(drawers.len(), 1, "only the unfinished item may be written");
+        assert_eq!(drawers[0].content, "still to do");
+    }
+
+    #[tokio::test]
+    async fn a_checkpointed_drawer_records_the_channel_as_requested_by_and_the_item_agent_as_source()
+     {
+        let store = memory_store().await;
+        let payload = CheckpointPayload {
+            items: vec![item(CheckpointDestination::General, "a note")],
+        };
+        let mut job = Job::new(
+            JobKind::Checkpoint {
+                payload: payload.clone(),
+            },
+            Priority::High,
+            "http",
+        );
+        let ctx = ctx_for(&store, &job, JobControl::default());
+
+        run(&ctx, &mut job, CheckpointParams { payload })
+            .await
+            .expect("run");
+
+        let drawers = store.list_drawers(None).await.unwrap();
+        assert_eq!(drawers[0].provenance.requested_by, "http");
+        assert_eq!(drawers[0].source.agent.as_deref(), Some("test-agent"));
     }
 }

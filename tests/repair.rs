@@ -118,3 +118,105 @@ async fn a_fresh_palaces_applied_repair_completes_with_no_actions_taken() {
 
     daemon.shutdown().await;
 }
+
+/// Submit a repair over HTTP, returning the raw response so a test can
+/// assert on the status and error body.
+async fn submit_repair_based_on(
+    client: &reqwest::Client,
+    base_url: &str,
+    based_on_job: memcastle::domain::JobId,
+) -> reqwest::Response {
+    client
+        .post(format!("{base_url}/api/jobs"))
+        .json(&serde_json::json!({
+            "type": "repair",
+            "dry_run": true,
+            "based_on_job": based_on_job,
+            "requested_by": "test",
+        }))
+        .send()
+        .await
+        .expect("request")
+}
+
+async fn job_count(client: &reqwest::Client, base_url: &str) -> usize {
+    let jobs: Vec<Job> = client
+        .get(format!("{base_url}/api/jobs"))
+        .send()
+        .await
+        .expect("request")
+        .json()
+        .await
+        .expect("json");
+    jobs.len()
+}
+
+#[tokio::test]
+async fn a_repair_based_on_an_unknown_job_is_rejected_at_submission_and_creates_no_job() {
+    let daemon = TestDaemon::start().await;
+    let client = reqwest::Client::new();
+
+    let response =
+        submit_repair_based_on(&client, &daemon.base_url, memcastle::domain::JobId::new()).await;
+
+    assert_eq!(response.status(), 400);
+    let body: serde_json::Value = response.json().await.expect("json");
+    assert_eq!(body["code"], "memcastle::repair::invalid_based_on_job");
+    assert_eq!(
+        job_count(&client, &daemon.base_url).await,
+        0,
+        "a rejected submission must not leave a job behind"
+    );
+
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_repair_based_on_a_job_that_is_not_an_audit_is_rejected_at_submission() {
+    let daemon = TestDaemon::start().await;
+    let client = reqwest::Client::new();
+    let demo: Job = client
+        .post(format!("{}/api/jobs", daemon.base_url))
+        .json(&serde_json::json!({ "type": "demo", "steps": 1, "requested_by": "test" }))
+        .send()
+        .await
+        .expect("request")
+        .json()
+        .await
+        .expect("json");
+
+    let response = submit_repair_based_on(&client, &daemon.base_url, demo.id).await;
+
+    assert_eq!(response.status(), 400);
+    let body: serde_json::Value = response.json().await.expect("json");
+    assert_eq!(body["code"], "memcastle::repair::invalid_based_on_job");
+    assert_eq!(
+        job_count(&client, &daemon.base_url).await,
+        1,
+        "only the demo job may exist"
+    );
+
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_repair_based_on_a_completed_audit_is_accepted() {
+    let daemon = TestDaemon::start().await;
+    let client = reqwest::Client::new();
+    let audit: Job = client
+        .post(format!("{}/api/jobs", daemon.base_url))
+        .json(&serde_json::json!({ "type": "audit", "requested_by": "test" }))
+        .send()
+        .await
+        .expect("request")
+        .json()
+        .await
+        .expect("json");
+    wait_for_job_status(&client, &daemon.base_url, audit.id, JobStatus::Completed).await;
+
+    let response = submit_repair_based_on(&client, &daemon.base_url, audit.id).await;
+
+    assert!(response.status().is_success(), "{}", response.status());
+
+    daemon.shutdown().await;
+}

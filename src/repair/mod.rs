@@ -11,11 +11,11 @@
 //! - **Fail jobs stuck beyond a stale-lease/attempt-budget heuristic** —
 //!   deliberately **dropped as redundant**, not merely deferred:
 //!   `jobs::Scheduler::recover` already runs at every daemon startup and
-//!   fails any crash-recovered `Running` job whose `attempt` has reached
-//!   `max_attempts` (see that function's doc comment). There is no lease
-//!   TTL yet (`domain::Job::lease_expires_at` is unpopulated — see
-//!   `crate::audit`'s module doc), so there is no live signal this handler
-//!   could use to find *additional* stuck jobs while the daemon stays up.
+//!   fails any crash-recovered `Running` job whose `recovery_attempts` has
+//!   reached `max_attempts` (see that function's doc comment), and its
+//!   periodic reaper does the same for any job whose lease has lapsed
+//!   (`domain::Job::lease_expires_at`), so this handler has no *additional*
+//!   stuck jobs to find while the daemon stays up.
 //!   The population `AuditReport::stuck_failed_jobs` counts is already
 //!   `Failed`, not `Running` — a repair action to "fail" it again would be
 //!   a no-op; the only real way out of that state is the existing,
@@ -36,15 +36,16 @@
 //! matter what the (by then stale) report said.
 //!
 //! A cancel request is honoured before each delete of an applied repair
-//! (the codebase's only destructive loop); a pause request is not honoured
-//! at all — see `crate::audit`'s note that these handlers run to completion
-//! — so `POST /api/jobs/{id}/pause` on an audit or repair only *requests*
-//! a pause, which such a job ignores.
+//! (the codebase's only destructive loop), and so is a pause: the handler
+//! stops between deletes and returns `Paused`. That is also how a daemon
+//! shutdown interrupts it, so shutdown does not have to wait out its drain
+//! timeout for a repair that could have stopped at once.
 //!
 //! Like `crate::audit`, this handler does not chunk its work with a
-//! per-unit checkpoint — see that module's doc comment for why a palace
-//! scan (plus, here, a handful of deletes) doesn't need resumable partial
-//! state.
+//! per-unit checkpoint — see that module's doc comment. A paused (or
+//! interrupted) repair therefore resumes from scratch, which is safe: the
+//! resumed run recomputes the live orphan set, so drawers the first run
+//! already deleted are simply no longer there, and deleting is idempotent.
 
 use std::collections::HashSet;
 
@@ -52,7 +53,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::audit::OrphanDrawer;
-use crate::domain::{DrawerId, Job, JobId, JobKind, JobProgress};
+use crate::domain::{DrawerId, Job, JobId, JobKind, JobProgress, JobStatus};
 use crate::error::{Error, Result};
 use crate::jobs::{JobContext, JobOutcome};
 use crate::store::{SurrealStore, bindable};
@@ -84,6 +85,14 @@ pub struct RepairReport {
     pub generated_at: DateTime<Utc>,
 }
 
+/// What a `Repair` job needs, gathered from its [`crate::domain::JobKind`].
+pub struct RepairParams {
+    /// Report what would be removed without removing it.
+    pub dry_run: bool,
+    /// Narrow the repair to what this completed audit also found.
+    pub based_on_job: Option<JobId>,
+}
+
 /// Run a repair: plan (and, unless `dry_run`, apply) the orphan-drawer
 /// removals currently found in the palace, optionally narrowed to what a
 /// prior audit job also found.
@@ -94,17 +103,14 @@ pub struct RepairReport {
 /// `based_on_job` doesn't resolve to any job, or if it resolves to a job
 /// that isn't a completed [`crate::domain::JobKind::Audit`] (see
 /// [`Error::InvalidBasedOnJob`]).
-pub async fn run(
-    store: &SurrealStore,
-    ctx: &JobContext,
-    job: &mut Job,
-    dry_run: bool,
-    based_on_job: Option<JobId>,
-) -> Result<JobOutcome> {
-    // No per-unit work to chunk (see the module doc) — a single check up
-    // front is the only cooperative-cancel point this handler needs.
-    if ctx.is_cancelled() {
-        return Ok(JobOutcome::Cancelled);
+pub async fn run(ctx: &JobContext, job: &mut Job, params: RepairParams) -> Result<JobOutcome> {
+    let RepairParams {
+        dry_run,
+        based_on_job,
+    } = params;
+    let store = ctx.store();
+    if let Some(stop) = stop_requested(ctx) {
+        return Ok(stop);
     }
 
     // Always the current, live orphan set — never the possibly-stale
@@ -117,7 +123,21 @@ pub async fn run(
         orphans.retain(|orphan| audited_ids.contains(&orphan.drawer_id));
     }
 
-    let (actions, cancelled) = plan_or_apply(store, ctx, orphans, dry_run).await?;
+    let (actions, halted) = plan_or_apply(store, ctx, orphans, dry_run).await?;
+    if halted == Some(JobOutcome::Paused) {
+        // No result and no checkpoint: the resumed run rescans, so a partial
+        // report would only describe a run that is about to be redone.
+        job.progress = JobProgress {
+            current: 0,
+            total: Some(1),
+            message: Some(format!(
+                "paused after {} orphan drawer(s); will rescan on resume",
+                actions.len()
+            )),
+        };
+        return Ok(JobOutcome::Paused);
+    }
+    let cancelled = halted == Some(JobOutcome::Cancelled);
 
     job.progress = JobProgress {
         current: 1,
@@ -153,32 +173,46 @@ pub async fn run(
     })
 }
 
+/// Whether the job has been asked to stop, and how: cancel outranks pause,
+/// matching every other handler (a cancelled job never resumes).
+fn stop_requested(ctx: &JobContext) -> Option<JobOutcome> {
+    if ctx.is_cancelled() {
+        Some(JobOutcome::Cancelled)
+    } else if ctx.should_pause() {
+        Some(JobOutcome::Paused)
+    } else {
+        None
+    }
+}
+
 /// Plan (dry run) or apply the removal of each orphan, returning the actions
-/// taken and whether a cancel stopped the loop early.
+/// taken and, if the loop stopped early, why (`Cancelled` or `Paused`).
 ///
-/// The cancel check sits before *each* delete, not just at the top of
-/// [`run`]: this is the one destructive loop in the codebase, and a cancel a
-/// user sends mid-repair must stop further deletions rather than be honoured
-/// only after the last one. Pause is deliberately not honoured — a
-/// half-applied repair has no checkpoint worth resuming from, since the next
-/// run recomputes the live orphan set.
+/// The stop check sits before *each* item, not just at the top of [`run`]:
+/// this is the one destructive loop in the codebase, and a cancel a user
+/// sends mid-repair must stop further deletions rather than be honoured only
+/// after the last one. A pause (or a shutdown interrupt) stops it the same
+/// way; the next run recomputes the live orphan set, so nothing needs
+/// checkpointing.
 async fn plan_or_apply(
     store: &SurrealStore,
     ctx: &JobContext,
     orphans: Vec<crate::audit::OrphanDrawer>,
     dry_run: bool,
-) -> Result<(Vec<RepairAction>, bool)> {
+) -> Result<(Vec<RepairAction>, Option<JobOutcome>)> {
     let mut actions = Vec::with_capacity(orphans.len());
     for orphan in orphans {
+        // A dry run deletes nothing and does no I/O per item, so there is
+        // nothing to protect and no time to save by stopping it early.
         if !dry_run {
-            if ctx.is_cancelled() {
-                return Ok((actions, true));
+            if let Some(stop) = stop_requested(ctx) {
+                return Ok((actions, Some(stop)));
             }
             store.delete_drawer(orphan.drawer_id).await?;
         }
         actions.push(RepairAction::RemoveOrphanDrawer(orphan));
     }
-    Ok((actions, false))
+    Ok((actions, None))
 }
 
 /// Load the drawer ids a prior audit job flagged as orphans.
@@ -186,15 +220,21 @@ async fn plan_or_apply(
 /// Errors are caller-facing mistakes (a typo'd id, a `Mine`/`Demo` job's id
 /// passed by accident, an audit that's still running), not storage
 /// failures — see [`Error::InvalidBasedOnJob`].
-async fn load_audited_orphan_ids(
+///
+/// `pub(crate)` because `AppServices::submit_repair` runs the very same
+/// validation at submission, so a bad `based_on_job` is refused before a job
+/// exists; the handler repeats it as defence in depth, since the audit can
+/// vanish or change between submission and run.
+pub(crate) async fn load_audited_orphan_ids(
     store: &SurrealStore,
     audit_id: JobId,
 ) -> Result<HashSet<DrawerId>> {
     let audit_job = store
         .get_job(audit_id)
         .await?
-        .ok_or_else(|| Error::JobNotFound {
+        .ok_or_else(|| Error::InvalidBasedOnJob {
             id: audit_id.to_string(),
+            message: "no job has this id".to_string(),
         })?;
     if !matches!(audit_job.kind, JobKind::Audit { .. }) {
         return Err(Error::InvalidBasedOnJob {
@@ -202,12 +242,26 @@ async fn load_audited_orphan_ids(
             message: "must reference an audit job, not another job kind".to_string(),
         });
     }
+    // A `Failed`/`Cancelled` audit may still carry a partial `result`; only a
+    // finished one is a complete report to narrow a destructive repair by.
+    if audit_job.status != JobStatus::Completed {
+        return Err(Error::InvalidBasedOnJob {
+            id: audit_id.to_string(),
+            message: format!(
+                "the referenced audit is {:?}, not Completed",
+                audit_job.status
+            ),
+        });
+    }
     let result = audit_job.result.ok_or_else(|| Error::InvalidBasedOnJob {
         id: audit_id.to_string(),
         message: "the referenced audit has no result yet — it may not have completed".to_string(),
     })?;
-    let report: crate::audit::AuditReport = serde_json::from_value(result)
-        .map_err(|source| Error::store_malformed(source.to_string()))?;
+    let report: crate::audit::AuditReport =
+        serde_json::from_value(result).map_err(|source| Error::InvalidBasedOnJob {
+            id: audit_id.to_string(),
+            message: format!("its result is not a readable audit report: {source}"),
+        })?;
     Ok(report
         .orphan_drawers
         .into_iter()
@@ -291,9 +345,13 @@ mod tests {
         let job = repair_job(false, None);
         let ctx = ctx_for(&store, &job, control);
 
-        let (actions, cancelled) = plan_or_apply(&store, &ctx, orphans, false).await.unwrap();
+        let (actions, halted) = plan_or_apply(&store, &ctx, orphans, false).await.unwrap();
 
-        assert!(cancelled, "the loop must report that it was cut short");
+        assert_eq!(
+            halted,
+            Some(JobOutcome::Cancelled),
+            "the loop must say it was cut short"
+        );
         assert!(
             actions.is_empty(),
             "nothing may be reported as done that was not"
@@ -313,9 +371,9 @@ mod tests {
         control.request_cancel();
         let ctx = ctx_for(&store, &repair_job(true, None), control);
 
-        let (actions, cancelled) = plan_or_apply(&store, &ctx, orphans, true).await.unwrap();
+        let (actions, halted) = plan_or_apply(&store, &ctx, orphans, true).await.unwrap();
 
-        assert!(!cancelled);
+        assert_eq!(halted, None);
         assert_eq!(actions.len(), 1);
     }
 
@@ -326,9 +384,16 @@ mod tests {
         for dry_run in [true, false] {
             let mut job = repair_job(dry_run, None);
             let ctx = ctx_for(&store, &job, JobControl::default());
-            let outcome = run(&store, &ctx, &mut job, dry_run, None)
-                .await
-                .expect("run");
+            let outcome = run(
+                &ctx,
+                &mut job,
+                RepairParams {
+                    dry_run,
+                    based_on_job: None,
+                },
+            )
+            .await
+            .expect("run");
             assert_eq!(outcome, JobOutcome::Completed);
 
             let report = report_of(&job);
@@ -346,7 +411,16 @@ mod tests {
 
         let mut job = repair_job(true, None);
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&store, &ctx, &mut job, true, None).await.expect("run");
+        run(
+            &ctx,
+            &mut job,
+            RepairParams {
+                dry_run: true,
+                based_on_job: None,
+            },
+        )
+        .await
+        .expect("run");
 
         let report = report_of(&job);
         assert_eq!(report.actions.len(), 1);
@@ -354,7 +428,7 @@ mod tests {
         assert_eq!(orphan.drawer_id, drawer_id);
         assert_eq!(orphan.room, room);
 
-        let remaining = store.list_all_drawers().await.expect("list drawers");
+        let remaining = store.list_drawers(None).await.expect("list drawers");
         assert!(
             remaining.iter().any(|d| d.id == drawer_id),
             "dry_run must never delete anything"
@@ -370,12 +444,21 @@ mod tests {
 
         let mut job = repair_job(false, None);
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&store, &ctx, &mut job, false, None).await.expect("run");
+        run(
+            &ctx,
+            &mut job,
+            RepairParams {
+                dry_run: false,
+                based_on_job: None,
+            },
+        )
+        .await
+        .expect("run");
 
         let report = report_of(&job);
         assert_eq!(report.actions.len(), 1);
 
-        let remaining = store.list_all_drawers().await.expect("list drawers");
+        let remaining = store.list_drawers(None).await.expect("list drawers");
         assert!(
             !remaining.iter().any(|d| d.id == drawer_id),
             "apply must actually delete the orphan drawer"
@@ -383,9 +466,13 @@ mod tests {
 
         let mut audit_job = Job::new(JobKind::Audit { scope: None }, Priority::Normal, "test");
         let audit_ctx = ctx_for(&store, &audit_job, JobControl::default());
-        crate::audit::run(&store, &audit_ctx, &mut audit_job, None)
-            .await
-            .expect("audit run");
+        crate::audit::run(
+            &audit_ctx,
+            &mut audit_job,
+            crate::audit::AuditParams { scope: None },
+        )
+        .await
+        .expect("audit run");
         let audit_report: crate::audit::AuditReport =
             serde_json::from_value(audit_job.result.expect("audit must set a result"))
                 .expect("audit result must deserialize");
@@ -404,13 +491,20 @@ mod tests {
 
         let mut audit_job = Job::new(JobKind::Audit { scope: None }, Priority::Normal, "test");
         let audit_ctx = ctx_for(&store, &audit_job, JobControl::default());
-        crate::audit::run(&store, &audit_ctx, &mut audit_job, None)
-            .await
-            .expect("audit run");
-        // `audit::run` only mutates its in-memory `Job`; persisting it is
-        // normally `Scheduler::execute`'s job after the handler returns —
-        // `load_audited_orphan_ids` reads it back via `store.get_job`, so
-        // the fixture must persist it itself here.
+        crate::audit::run(
+            &audit_ctx,
+            &mut audit_job,
+            crate::audit::AuditParams { scope: None },
+        )
+        .await
+        .expect("audit run");
+        // `audit::run` only mutates its in-memory `Job`; finishing and
+        // persisting it is normally `Scheduler::execute`'s job after the
+        // handler returns — `load_audited_orphan_ids` reads it back via
+        // `store.get_job` and requires it `Completed`, so the fixture must do
+        // both itself here.
+        audit_job.apply(crate::domain::JobEvent::Claim).unwrap();
+        audit_job.apply(crate::domain::JobEvent::Complete).unwrap();
         store.save_job(&audit_job).await.expect("save audit job");
 
         // Orphan B appears only after the audit ran — a live scan would
@@ -419,9 +513,16 @@ mod tests {
 
         let mut job = repair_job(true, Some(audit_job.id));
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&store, &ctx, &mut job, true, Some(audit_job.id))
-            .await
-            .expect("run");
+        run(
+            &ctx,
+            &mut job,
+            RepairParams {
+                dry_run: true,
+                based_on_job: Some(audit_job.id),
+            },
+        )
+        .await
+        .expect("run");
 
         let report = report_of(&job);
         assert_eq!(
@@ -444,10 +545,20 @@ mod tests {
 
         let mut job = repair_job(true, Some(never_saved));
         let ctx = ctx_for(&store, &job, JobControl::default());
-        let error = run(&store, &ctx, &mut job, true, Some(never_saved))
-            .await
-            .expect_err("must reject an id that doesn't resolve");
-        assert!(matches!(error, Error::JobNotFound { .. }));
+        let error = run(
+            &ctx,
+            &mut job,
+            RepairParams {
+                dry_run: true,
+                based_on_job: Some(never_saved),
+            },
+        )
+        .await
+        .expect_err("must reject an id that doesn't resolve");
+        assert!(
+            matches!(error, Error::InvalidBasedOnJob { .. }),
+            "an unknown based_on_job is the documented InvalidBasedOnJob, got {error:?}"
+        );
     }
 
     #[tokio::test]
@@ -458,9 +569,75 @@ mod tests {
 
         let mut job = repair_job(true, Some(demo_job.id));
         let ctx = ctx_for(&store, &job, JobControl::default());
-        let error = run(&store, &ctx, &mut job, true, Some(demo_job.id))
-            .await
-            .expect_err("must reject a non-audit job kind");
+        let error = run(
+            &ctx,
+            &mut job,
+            RepairParams {
+                dry_run: true,
+                based_on_job: Some(demo_job.id),
+            },
+        )
+        .await
+        .expect_err("must reject a non-audit job kind");
         assert!(matches!(error, Error::InvalidBasedOnJob { .. }));
+    }
+
+    #[tokio::test]
+    async fn a_based_on_job_that_has_not_completed_is_rejected() {
+        let store = memory_store().await;
+        let mut audit_job = Job::new(JobKind::Audit { scope: None }, Priority::Normal, "test");
+        // A result is present, but the audit was cancelled: not a report to
+        // trust for a destructive repair.
+        audit_job.apply(crate::domain::JobEvent::Cancel).unwrap();
+        audit_job.result = Some(serde_json::json!({}));
+        store.save_job(&audit_job).await.expect("save audit job");
+
+        let error = load_audited_orphan_ids(&store, audit_job.id)
+            .await
+            .expect_err("must reject an audit that did not complete");
+        assert!(
+            matches!(error, Error::InvalidBasedOnJob { .. }),
+            "{error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_pause_stops_an_applied_repair_before_it_deletes_and_a_resume_finishes_it() {
+        let store = memory_store().await;
+        let (drawer, _) = create_orphan_drawer(&store).await;
+
+        let control = JobControl::default();
+        control.request_pause();
+        let mut job = repair_job(false, None);
+        let ctx = ctx_for(&store, &job, control);
+        let outcome = run(
+            &ctx,
+            &mut job,
+            RepairParams {
+                dry_run: false,
+                based_on_job: None,
+            },
+        )
+        .await
+        .expect("run");
+
+        assert_eq!(outcome, JobOutcome::Paused, "a pause must not be ignored");
+        assert!(job.result.is_none(), "a paused repair has no report yet");
+        assert!(store.drawer_exists(drawer).await.unwrap());
+
+        // Resume: a fresh control, the same job — it rescans and completes.
+        let ctx = ctx_for(&store, &job, JobControl::default());
+        let outcome = run(
+            &ctx,
+            &mut job,
+            RepairParams {
+                dry_run: false,
+                based_on_job: None,
+            },
+        )
+        .await
+        .expect("resumed run");
+        assert_eq!(outcome, JobOutcome::Completed);
+        assert!(!store.drawer_exists(drawer).await.unwrap());
     }
 }

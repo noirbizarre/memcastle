@@ -86,9 +86,9 @@ async fn search(
             .app
             .search(
                 &params.q,
-                params.limit,
                 params.wing.as_deref(),
                 params.room.as_deref(),
+                params.limit,
                 mode,
             )
             .await?,
@@ -149,6 +149,11 @@ struct DiaryWriteBody {
     wing: String,
     /// The entry's content.
     content: String,
+    /// The channel this write came through, recorded as
+    /// `provenance.requested_by` — `"http"` unless a caller says otherwise
+    /// (the CLI sends `"cli"`).
+    #[serde(default = "default_requested_by")]
+    requested_by: String,
 }
 
 async fn diary_write(
@@ -159,7 +164,13 @@ async fn diary_write(
     Ok(Json(
         state
             .app
-            .diary_write(&body.agent_identity, &body.wing, body.content, mode)
+            .diary_write(
+                &body.agent_identity,
+                &body.wing,
+                body.content,
+                &body.requested_by,
+                mode,
+            )
             .await?,
     ))
 }
@@ -232,27 +243,27 @@ async fn submit_job(
             // Gated as a write inside `submit_mine`: mining files drawers.
             state
                 .app
-                .submit_mine(path, wing, body.requested_by, mode)
+                .submit_mine(path, wing, &body.requested_by, mode)
                 .await?
         }
-        JobKind::Demo { steps } => state.app.submit_demo(steps, body.requested_by).await?,
+        JobKind::Demo { steps } => state.app.submit_demo(steps, &body.requested_by).await?,
         JobKind::Checkpoint { payload } => {
             if body.emergency {
                 state
                     .app
-                    .emergency_checkpoint(payload, body.requested_by, mode)
+                    .emergency_checkpoint(payload, &body.requested_by, mode)
                     .await?
             } else {
                 state
                     .app
-                    .checkpoint(payload, body.requested_by, mode)
+                    .checkpoint(payload, &body.requested_by, mode)
                     .await?
             }
         }
         JobKind::Audit { scope } => {
             // Not gated by `mode` — same reasoning as `Mine` above (see
             // `AppServices::submit_audit`'s doc comment).
-            state.app.submit_audit(scope, body.requested_by).await?
+            state.app.submit_audit(scope, &body.requested_by).await?
         }
         JobKind::Repair {
             dry_run,
@@ -262,7 +273,7 @@ async fn submit_job(
             // as a write inside `submit_repair` (see its doc comment).
             state
                 .app
-                .submit_repair(dry_run, based_on_job, body.requested_by, mode)
+                .submit_repair(dry_run, based_on_job, &body.requested_by, mode)
                 .await?
         }
     };
@@ -275,47 +286,42 @@ async fn get_job(
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
     let id = parse_job_id(&id)?;
-    match state.app.get_job(id, mode).await? {
-        Some(job) => Ok(Json(job)),
-        None => Err(ApiError::from(crate::Error::JobNotFound {
-            id: id.to_string(),
-        })),
-    }
+    Ok(Json(state.app.get_job(id, mode).await?))
 }
 
 async fn pause_job(
     State(state): State<ApiState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    state.app.pause_job(parse_job_id(&id)?).await?;
-    // "requested", not "paused": pausing is cooperative, and audit/repair
-    // never check for it (see `repair`'s module doc), so the job may simply
-    // run to completion.
-    Ok(Json(serde_json::json!({ "status": "pause_requested" })))
+    let result = state.app.pause_job(parse_job_id(&id)?).await?;
+    // "requested", not "paused": pausing is cooperative, so the job stops
+    // at its next check (every handler has one, audit and repair included)
+    // rather than at the instant of the request.
+    Ok(Json(result))
 }
 
 async fn resume_job(
     State(state): State<ApiState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    state.app.resume_job(parse_job_id(&id)?).await?;
-    Ok(Json(serde_json::json!({ "status": "resumed" })))
+    let result = state.app.resume_job(parse_job_id(&id)?).await?;
+    Ok(Json(result))
 }
 
 async fn cancel_job(
     State(state): State<ApiState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    state.app.cancel_job(parse_job_id(&id)?).await?;
-    Ok(Json(serde_json::json!({ "status": "cancel_requested" })))
+    let result = state.app.cancel_job(parse_job_id(&id)?).await?;
+    Ok(Json(result))
 }
 
 async fn retry_job(
     State(state): State<ApiState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    state.app.retry_job(parse_job_id(&id)?).await?;
-    Ok(Json(serde_json::json!({ "status": "retried" })))
+    let result = state.app.retry_job(parse_job_id(&id)?).await?;
+    Ok(Json(result))
 }
 
 async fn shutdown_now(State(state): State<ApiState>) -> impl IntoResponse {
@@ -328,10 +334,6 @@ fn parse_job_id(raw: &str) -> Result<JobId, ApiError> {
 }
 
 fn parse_status(raw: &str) -> Result<JobStatus, ApiError> {
-    serde_json::from_value(serde_json::Value::String(raw.to_string())).map_err(|_| {
-        ApiError::from(crate::Error::invalid_input(
-            "status",
-            format!("unknown job status `{raw}`"),
-        ))
-    })
+    raw.parse()
+        .map_err(|message: String| ApiError::from(crate::Error::invalid_input("status", message)))
 }

@@ -8,7 +8,6 @@ use serde_json::json;
 
 use crate::domain::{Job, JobProgress};
 use crate::error::Result;
-use crate::store::SurrealStore;
 
 use super::{JobContext, JobOutcome};
 
@@ -17,12 +16,14 @@ use super::{JobContext, JobOutcome};
 /// test suite.
 const STEP_DELAY: Duration = Duration::from_millis(150);
 
-pub(super) async fn run(
-    _store: &SurrealStore,
-    ctx: &JobContext,
-    job: &mut Job,
-    steps: u32,
-) -> Result<JobOutcome> {
+/// What a `Demo` job needs, gathered from its [`crate::domain::JobKind`].
+pub struct DemoParams {
+    /// How many simulated steps to take.
+    pub steps: u32,
+}
+
+pub(super) async fn run(ctx: &JobContext, job: &mut Job, params: DemoParams) -> Result<JobOutcome> {
+    let DemoParams { steps } = params;
     // Resume from wherever the last checkpoint left off, rather than
     // restarting at zero — this is what makes `Paused -> Queued -> Running`
     // a real resumption instead of a silent do-over.
@@ -59,4 +60,34 @@ pub(super) async fn run(
     }
 
     Ok(JobOutcome::Completed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{JobKind, Priority};
+    use crate::jobs::JobControl;
+    use crate::store::SurrealStore;
+
+    /// `{"next_step": N}` is persisted in job records already on disk, and
+    /// is deliberately not `next_index` like the other handlers' key.
+    #[tokio::test]
+    async fn a_checkpoint_persisted_in_the_current_format_resumes_past_the_finished_steps() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let mut job = Job::new(JobKind::Demo { steps: 3 }, Priority::Normal, "test");
+        job.checkpoint = json!({ "next_step": 2 });
+        let ctx = JobContext::new(job.id, JobControl::default(), store);
+
+        let outcome = run(&ctx, &mut job, DemoParams { steps: 3 })
+            .await
+            .expect("run");
+
+        assert_eq!(outcome, JobOutcome::Completed);
+        assert_eq!(job.progress.current, 3);
+        assert_eq!(
+            job.progress.message.as_deref(),
+            Some("completed step 3/3"),
+            "steps 1 and 2 were already done, so only step 3 may run"
+        );
+    }
 }

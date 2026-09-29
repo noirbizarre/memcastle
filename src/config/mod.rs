@@ -97,10 +97,31 @@ impl Default for ServerConfig {
 }
 
 /// Job scheduler settings.
+///
+/// `#[serde(default)]` so a config file that sets only some of these (say just
+/// `max_concurrency`) keeps working when a new setting is added, instead of
+/// failing to parse for a key it has never heard of.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct JobsConfig {
     /// Maximum number of jobs executing concurrently.
     pub max_concurrency: usize,
+    /// How long shutdown waits, in seconds, for running jobs to reach their
+    /// next unit-of-work boundary, checkpoint and hand themselves back to the
+    /// queue. A job still running after this is left `Running` and re-queued
+    /// by crash recovery on the next start, losing only the work since its
+    /// last checkpoint. Raise it if your jobs have long units of work and
+    /// you would rather wait than redo them; lower it if a supervisor kills
+    /// the daemon sooner than this anyway.
+    pub drain_timeout_secs: u64,
+    /// How long, in seconds, a running job's lease lasts without a heartbeat.
+    /// The daemon renews it every third of this. It matters when several
+    /// daemons share one remote palace: a daemon that stalls or is cut off
+    /// for longer than this loses its jobs to another. Raise it if your
+    /// network or host pauses longer than that without being dead; lower it
+    /// to fail over faster. Irrelevant, beyond the heartbeat cost, to an
+    /// embedded palace, which only one daemon can open.
+    pub lease_ttl_secs: u64,
 }
 
 impl Default for JobsConfig {
@@ -110,6 +131,14 @@ impl Default for JobsConfig {
             // `num_cpus::get()` — mining is I/O- as much as CPU-bound in
             // this bootstrap, and an extra dependency isn't worth it yet.
             max_concurrency: 4,
+            // Long enough for every handler's unit of work (a file, a
+            // checkpoint item, an audit chunk) to finish, short enough that
+            // a stuck job cannot hold up a service manager's stop timeout.
+            drain_timeout_secs: 10,
+            // Long enough to ride out a garbage-collection pause or a
+            // dropped packet or two, short enough that a dead daemon's jobs
+            // move within the minute.
+            lease_ttl_secs: 30,
         }
     }
 }
@@ -203,22 +232,36 @@ impl Config {
         {
             self.jobs.max_concurrency = n;
         }
+        if let Ok(n) = std::env::var("MEMCASTLE_JOBS_DRAIN_TIMEOUT_SECS")
+            && let Ok(n) = n.parse()
+        {
+            self.jobs.drain_timeout_secs = n;
+        }
+        if let Ok(n) = std::env::var("MEMCASTLE_JOBS_LEASE_TTL_SECS")
+            && let Ok(n) = n.parse()
+        {
+            self.jobs.lease_ttl_secs = n;
+        }
     }
 
     /// The `tracing` filter directive this run should log with.
     ///
     /// Precedence, highest first: `MEMCASTLE_LOG` (already folded into
     /// `logging.level` by [`Config::load`]'s env overrides), then the
-    /// conventional `RUST_LOG`, then `logging.level` from the config file or
-    /// its default. `RUST_LOG` outranks the file so a one-off
+    /// conventional `RUST_LOG`, then the command line's `-v`/`-vv`
+    /// (`verbosity`), then `logging.level` from the config file or its
+    /// default. `RUST_LOG` outranks the file so a one-off
     /// `RUST_LOG=debug memcastle serve` still works against a config that
-    /// pins a quieter level.
+    /// pins a quieter level, and both environment variables outrank `-v`
+    /// because they are the more specific instruction (they can name a
+    /// target, which `-v` cannot).
     #[must_use]
-    pub fn log_filter(&self) -> String {
+    pub fn log_filter(&self, verbosity: u8) -> String {
         Self::resolve_log_filter(
             &self.logging.level,
             std::env::var_os("MEMCASTLE_LOG").is_some(),
             std::env::var("RUST_LOG").ok(),
+            verbosity,
         )
     }
 
@@ -228,10 +271,20 @@ impl Config {
         configured: &str,
         memcastle_log_is_set: bool,
         rust_log: Option<String>,
+        verbosity: u8,
     ) -> String {
         match rust_log {
-            Some(rust_log) if !memcastle_log_is_set => rust_log,
-            _ => configured.to_string(),
+            Some(rust_log) if !memcastle_log_is_set => return rust_log,
+            _ if memcastle_log_is_set => return configured.to_string(),
+            _ => {}
+        }
+        // `-v` raises memcastle's own level and leaves everything else at
+        // the configured one: `debug` for every crate would drown the
+        // output in SurrealDB and HTTP-stack chatter nobody asked for.
+        match verbosity {
+            0 => configured.to_string(),
+            1 => format!("{configured},memcastle=debug"),
+            _ => format!("{configured},memcastle=trace"),
         }
     }
 
@@ -243,6 +296,22 @@ impl Config {
     pub fn validate(&self) -> Result<()> {
         if self.jobs.max_concurrency == 0 {
             return Err(Error::config("jobs.max_concurrency must be at least 1"));
+        }
+        // Zero would skip the drain entirely, abandoning every in-flight job
+        // to crash recovery on each clean shutdown; a day is far past any
+        // supervisor's patience and is almost certainly a units mistake.
+        if !(1..=86_400).contains(&self.jobs.drain_timeout_secs) {
+            return Err(Error::config(
+                "jobs.drain_timeout_secs must be between 1 and 86400 seconds",
+            ));
+        }
+        // The heartbeat renews every third of the lease; under three seconds
+        // that is sub-second, which is noise on a network store, and a day is
+        // a units mistake that would leave a dead daemon's jobs stuck.
+        if !(3..=86_400).contains(&self.jobs.lease_ttl_secs) {
+            return Err(Error::config(
+                "jobs.lease_ttl_secs must be between 3 and 86400 seconds",
+            ));
         }
         Ok(())
     }
@@ -268,13 +337,13 @@ fn default_config_file() -> PathBuf {
 mod tests {
     #[test]
     fn the_configured_log_level_is_used_when_no_environment_variable_overrides_it() {
-        assert_eq!(Config::resolve_log_filter("debug", false, None), "debug");
+        assert_eq!(Config::resolve_log_filter("debug", false, None, 0), "debug");
     }
 
     #[test]
     fn rust_log_outranks_the_config_file_level() {
         assert_eq!(
-            Config::resolve_log_filter("warn", false, Some("trace".to_string())),
+            Config::resolve_log_filter("warn", false, Some("trace".to_string()), 0),
             "trace"
         );
     }
@@ -283,7 +352,7 @@ mod tests {
     fn memcastle_log_outranks_rust_log() {
         // `MEMCASTLE_LOG` is already folded into the configured level.
         assert_eq!(
-            Config::resolve_log_filter("memcastle=debug", true, Some("trace".to_string())),
+            Config::resolve_log_filter("memcastle=debug", true, Some("trace".to_string()), 2),
             "memcastle=debug"
         );
     }
@@ -315,5 +384,80 @@ mod tests {
             Backend::Embedded { path } => assert_eq!(path, Path::new("/tmp/palace/db")),
             Backend::Remote { .. } => panic!("expected an embedded backend"),
         }
+    }
+
+    #[test]
+    fn the_drain_timeout_defaults_to_ten_seconds() {
+        assert_eq!(Config::default().jobs.drain_timeout_secs, 10);
+    }
+
+    #[test]
+    fn a_zero_or_absurd_drain_timeout_is_rejected() {
+        for secs in [0, 86_401] {
+            let mut config = Config::default();
+            config.jobs.drain_timeout_secs = secs;
+            assert!(config.validate().is_err(), "{secs}s must be rejected");
+        }
+        let mut config = Config::default();
+        config.jobs.drain_timeout_secs = 30;
+        config.validate().expect("30s is fine");
+    }
+
+    #[test]
+    fn a_config_file_that_sets_only_max_concurrency_keeps_the_default_drain_timeout() {
+        let config: Config = toml::from_str("[jobs]\nmax_concurrency = 2").unwrap();
+        assert_eq!(config.jobs.max_concurrency, 2);
+        assert_eq!(config.jobs.drain_timeout_secs, 10);
+    }
+
+    #[test]
+    fn the_drain_timeout_is_read_from_the_config_file() {
+        let config: Config = toml::from_str("[jobs]\ndrain_timeout_secs = 45").unwrap();
+        assert_eq!(config.jobs.drain_timeout_secs, 45);
+    }
+
+    #[test]
+    fn the_lease_ttl_defaults_to_thirty_seconds_and_rejects_nonsense() {
+        assert_eq!(Config::default().jobs.lease_ttl_secs, 30);
+        for secs in [0, 2, 86_401] {
+            let mut config = Config::default();
+            config.jobs.lease_ttl_secs = secs;
+            assert!(config.validate().is_err(), "{secs}s must be rejected");
+        }
+    }
+
+    #[test]
+    fn a_config_file_that_sets_only_the_drain_timeout_keeps_the_default_lease_ttl() {
+        let config: Config = toml::from_str("[jobs]\ndrain_timeout_secs = 5").unwrap();
+        assert_eq!(config.jobs.lease_ttl_secs, 30);
+    }
+
+    #[test]
+    fn one_v_raises_memcastles_own_level_to_debug_and_two_to_trace() {
+        assert_eq!(
+            Config::resolve_log_filter("info", false, None, 1),
+            "info,memcastle=debug"
+        );
+        assert_eq!(
+            Config::resolve_log_filter("warn", false, None, 2),
+            "warn,memcastle=trace"
+        );
+    }
+
+    #[test]
+    fn no_v_leaves_the_configured_level_alone() {
+        assert_eq!(Config::resolve_log_filter("warn", false, None, 0), "warn");
+    }
+
+    #[test]
+    fn the_environment_outranks_v_because_it_can_name_a_target() {
+        assert_eq!(
+            Config::resolve_log_filter("info", false, Some("surrealdb=debug".to_string()), 2),
+            "surrealdb=debug"
+        );
+        assert_eq!(
+            Config::resolve_log_filter("memcastle=warn", true, None, 2),
+            "memcastle=warn"
+        );
     }
 }

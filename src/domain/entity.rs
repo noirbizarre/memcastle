@@ -85,9 +85,32 @@ pub fn normalize_label(raw: &str) -> Option<String> {
     (!normalized.is_empty()).then_some(normalized)
 }
 
+/// [`normalize_label`], rejecting an empty label with a diagnostic that names
+/// the field instead of silently storing `""`. The check lives here, in the
+/// domain, because "a label must not be empty" is a rule about labels, not
+/// about how the store persists them.
+///
+/// # Errors
+///
+/// Returns [`crate::Error::EmptyLabel`] if `raw` is empty after trimming.
+pub fn require_label(field: &'static str, raw: &str) -> crate::error::Result<String> {
+    normalize_label(raw).ok_or_else(|| crate::Error::EmptyLabel {
+        field: field.to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::normalize_label;
+    use super::{normalize_label, require_label};
+
+    #[test]
+    fn an_empty_label_is_reported_against_the_field_that_held_it() {
+        let error = require_label("predicate", "  ").unwrap_err();
+        assert!(matches!(
+            error,
+            crate::Error::EmptyLabel { field } if field == "predicate"
+        ));
+    }
 
     #[test]
     fn differently_cased_labels_normalize_to_the_same_value() {

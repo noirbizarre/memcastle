@@ -33,8 +33,13 @@ pub struct JobControl {
 
 impl JobControl {
     /// Ask the handler to pause at its next opportunity.
+    ///
+    /// A user's pause wins over a shutdown's: if the daemon was already
+    /// interrupting this job, the request is now the user's, so the job ends
+    /// `Paused` rather than being handed back to the queue.
     pub fn request_pause(&self) {
         self.pause_requested.store(true, Ordering::Relaxed);
+        self.interrupted.store(false, Ordering::Relaxed);
     }
 
     /// Ask the handler to stop at its next opportunity.
@@ -65,6 +70,10 @@ pub struct JobContext {
     job_id: JobId,
     control: JobControl,
     store: SurrealStore,
+    /// The worker whose lease this run executes under, when it has one.
+    /// With it, every write the handler makes is fenced: refused if the
+    /// stored job has been leased to someone else since.
+    lease_owner: Option<String>,
 }
 
 impl JobContext {
@@ -75,13 +84,31 @@ impl JobContext {
             job_id,
             control,
             store,
+            lease_owner: None,
         }
+    }
+
+    /// Fence this context's writes to `worker`'s lease: a checkpoint is
+    /// refused with [`crate::Error::LeaseLost`] if another daemon has taken
+    /// the job over, instead of overwriting the new owner's progress.
+    #[must_use]
+    pub fn with_lease(mut self, worker: impl Into<String>) -> Self {
+        self.lease_owner = Some(worker.into());
+        self
     }
 
     /// The job this context is executing.
     #[must_use]
     pub fn job_id(&self) -> JobId {
         self.job_id
+    }
+
+    /// The store this job runs against — handlers reach it through their
+    /// context rather than taking it as a separate argument, so every handler
+    /// has the same `run(ctx, job, params)` shape.
+    #[must_use]
+    pub fn store(&self) -> &SurrealStore {
+        &self.store
     }
 
     /// Whether a pause has been requested. A handler should check this
@@ -103,7 +130,8 @@ impl JobContext {
     ///
     /// # Errors
     ///
-    /// Returns an error if the store write fails.
+    /// Returns an error if the store write fails, or
+    /// [`crate::Error::LeaseLost`] if this run's lease was taken over.
     pub async fn checkpoint(
         &self,
         job: &mut Job,
@@ -112,7 +140,18 @@ impl JobContext {
     ) -> Result<()> {
         job.progress = progress;
         job.checkpoint = checkpoint;
-        self.store.save_job(job).await
+        match &self.lease_owner {
+            None => self.store.save_job(job).await,
+            Some(owner) => {
+                if self.store.save_job_fenced(job, owner).await? {
+                    Ok(())
+                } else {
+                    Err(crate::Error::LeaseLost {
+                        id: job.id.to_string(),
+                    })
+                }
+            }
+        }
     }
 
     /// Checkpoint an index-based handler (mining, checkpoint): record that
@@ -136,8 +175,10 @@ impl JobContext {
         unit: &str,
     ) -> Result<()> {
         let progress = JobProgress {
-            current: index as u32,
-            total: Some(total as u32),
+            // Saturating rather than wrapping: a count past `u32::MAX` must
+            // read as "enormous", not as a small number.
+            current: u32::try_from(index).unwrap_or(u32::MAX),
+            total: Some(u32::try_from(total).unwrap_or(u32::MAX)),
             message: Some(format!("{verb} {index}/{total} {unit}")),
         };
         self.checkpoint(job, progress, serde_json::json!({ "next_index": index }))

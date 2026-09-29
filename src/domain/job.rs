@@ -31,6 +31,48 @@ pub enum JobStatus {
     Cancelled,
 }
 
+impl JobStatus {
+    /// The name this status goes by on the wire and in the CLI/API filters
+    /// (`?status=running`) — the same word serde uses, without a
+    /// serialization round trip that could fail.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Paused => "paused",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+impl std::str::FromStr for JobStatus {
+    type Err = String;
+
+    /// Parse the names [`JobStatus::as_str`] produces — one parser for the
+    /// REST filter, the CLI's `--status` and MCP's `status` argument, saying
+    /// what is accepted when it is not one of them.
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        [
+            Self::Queued,
+            Self::Running,
+            Self::Paused,
+            Self::Completed,
+            Self::Failed,
+            Self::Cancelled,
+        ]
+        .into_iter()
+        .find(|status| status.as_str() == raw)
+        .ok_or_else(|| {
+            format!(
+                "unknown job status `{raw}` (expected queued, running, paused, completed, failed or cancelled)"
+            )
+        })
+    }
+}
+
 /// Where a mining job reads its source material from — the seam Phase 5
 /// slots a non-filesystem reader (e.g. a Pi/OpenCode session-transcript
 /// reader) behind. `JobKind::Mine`'s shape (`source`, `wing`) never changes
@@ -255,14 +297,29 @@ pub struct Job {
     pub started_at: Option<DateTime<Utc>>,
     /// When it reached a terminal status.
     pub completed_at: Option<DateTime<Utc>>,
-    /// Which interface submitted this (`"cli"`, `"mcp"`, `"http"`).
+    /// The channel that submitted this job: `"cli"`, `"mcp"` or `"http"`.
+    /// The CLI and MCP tools send their own name; over HTTP it is whatever
+    /// the caller put in `requested_by`, defaulting to `"http"`, and is
+    /// recorded verbatim. It becomes `provenance.requested_by` on every
+    /// drawer the job writes.
     pub requested_by: String,
     /// How far along it is.
     pub progress: JobProgress,
-    /// How many times a worker has claimed this job.
+    /// How many times a worker has claimed this job. Informational: it grows
+    /// on every claim — including the one after a user's resume or a
+    /// shutdown re-queue — so it says how often the job *started*, and is
+    /// deliberately not what the failure budget counts.
     pub attempt: u32,
-    /// The attempt budget — beyond this, a crash-recovered `Running` job
-    /// goes to `Failed` instead of back to `Queued`.
+    /// How many times a daemon crash has been recovered from while this job
+    /// was `Running`. This, not [`Self::attempt`], is what
+    /// [`Self::max_attempts`] budgets.
+    #[serde(default)]
+    pub recovery_attempts: u32,
+    /// The crash-recovery budget: once [`Self::recovery_attempts`] reaches
+    /// this, a crash-recovered `Running` job goes to `Failed` instead of back
+    /// to `Queued`. Pauses, resumes, shutdown re-queues and retries do not
+    /// spend it. (Named `max_attempts` because the column predates the
+    /// split; renaming a persisted field is not worth a migration.)
     pub max_attempts: u32,
     /// Opaque, handler-defined resumption state (e.g. `{"next_index": 3}`).
     ///
@@ -278,7 +335,8 @@ pub struct Job {
     /// as handler-defined *resume* state, and stuffing a final report in
     /// there would be exactly the "abuse of a field's stated purpose" this
     /// split avoids. `None` for every job kind that has no report to give
-    /// (`Demo`/`Mine`/`Checkpoint` never set this).
+    /// (`Demo`/`Checkpoint` never set this). `Mine` sets only a small summary:
+    /// the files considered, the limit, and whether the tree was truncated.
     pub result: Option<Value>,
     /// The terminal error, when `status == Failed`.
     pub error: Option<String>,
@@ -287,10 +345,24 @@ pub struct Job {
     /// `Running`, so a paused, finished or crash-recovered job never claims
     /// an owner that no longer holds it.
     pub lease_owner: Option<String>,
-    /// When the current lease would be considered stale. Reserved: nothing
-    /// populates it yet, because crash recovery runs once at startup rather
-    /// than by lease expiry. Cleared together with `lease_owner`.
+    /// When the current lease expires unless renewed. Set on claim
+    /// (`jobs.lease_ttl_secs` ahead) and extended by the owner's heartbeat;
+    /// a `Running` job past this, with no live owner in the daemon that reads
+    /// it, is reaped (see `jobs::Scheduler`). Cleared together with
+    /// `lease_owner`. See `docs/adr/006-job-leases.md`.
     pub lease_expires_at: Option<DateTime<Utc>>,
+    /// A user asked this `Running` job to pause and no handler has honoured
+    /// it yet. Recorded on the job (not only on the in-memory `JobControl`)
+    /// in the same write that accepts the request, so a crash or restart
+    /// before the handler notices cannot drop it: [`Job::apply`] clears it on
+    /// every transition out of `Running`, and `Scheduler::recover` reads it
+    /// to put a recovered job in `Paused` instead of re-running it.
+    #[serde(default)]
+    pub pause_requested: bool,
+    /// Like [`Self::pause_requested`], for cancellation. Wins over a pending
+    /// pause: the user asked for the job to stop for good.
+    #[serde(default)]
+    pub cancel_requested: bool,
 }
 
 impl Job {
@@ -309,6 +381,7 @@ impl Job {
             requested_by: requested_by.into(),
             progress: JobProgress::default(),
             attempt: 0,
+            recovery_attempts: 0,
             max_attempts: 3,
             // An empty object, not `Value::Null`: the store schema requires
             // `checkpoint` to always be an object (handlers read specific
@@ -321,6 +394,8 @@ impl Job {
             error: None,
             lease_owner: None,
             lease_expires_at: None,
+            pause_requested: false,
+            cancel_requested: false,
         }
     }
 
@@ -366,6 +441,11 @@ impl Job {
             // forgot would leave a finished job naming a worker as its owner.
             self.lease_owner = None;
             self.lease_expires_at = None;
+            // A stop request is about the run that just ended. Left set, it
+            // would cancel or pause the *next* run of a re-queued job the
+            // user never asked to stop.
+            self.pause_requested = false;
+            self.cancel_requested = false;
         }
         if matches!(next, Completed | Failed | Cancelled) {
             self.completed_at = Some(now);
@@ -515,6 +595,54 @@ mod tests {
                 "{event:?} must clear the lease expiry"
             );
         }
+    }
+
+    #[test]
+    fn every_transition_out_of_running_clears_pending_stop_requests() {
+        for event in [
+            JobEvent::Pause,
+            JobEvent::Complete,
+            JobEvent::Fail,
+            JobEvent::Cancel,
+            JobEvent::RecoverToQueued,
+        ] {
+            let mut job = demo_job();
+            job.apply(JobEvent::Claim).unwrap();
+            job.pause_requested = true;
+            job.cancel_requested = true;
+
+            job.apply(event).unwrap();
+
+            assert!(
+                !job.pause_requested && !job.cancel_requested,
+                "{event:?} must clear the stop requests of the run it ended"
+            );
+        }
+    }
+
+    #[test]
+    fn a_rejected_transition_keeps_pending_stop_requests() {
+        let mut job = demo_job();
+        job.apply(JobEvent::Claim).unwrap();
+        job.pause_requested = true;
+
+        assert!(job.apply(JobEvent::Retry).is_err());
+
+        assert!(job.pause_requested);
+    }
+
+    #[test]
+    fn a_job_record_written_before_the_newer_fields_existed_still_deserializes() {
+        let mut value = serde_json::to_value(demo_job()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("pause_requested");
+        object.remove("cancel_requested");
+        object.remove("recovery_attempts");
+
+        let job: Job = serde_json::from_value(value).unwrap();
+
+        assert!(!job.pause_requested && !job.cancel_requested);
+        assert_eq!(job.recovery_attempts, 0);
     }
 
     #[test]
@@ -670,5 +798,26 @@ mod tests {
                 wing: Some(ref w)
             } if w == "docs"
         ));
+    }
+
+    #[test]
+    fn a_status_name_is_the_word_serde_uses() {
+        for status in [
+            JobStatus::Queued,
+            JobStatus::Running,
+            JobStatus::Paused,
+            JobStatus::Completed,
+            JobStatus::Failed,
+            JobStatus::Cancelled,
+        ] {
+            assert_eq!(serde_json::to_value(status).unwrap(), status.as_str());
+            assert_eq!(status.as_str().parse::<JobStatus>(), Ok(status));
+        }
+        assert!(
+            "done"
+                .parse::<JobStatus>()
+                .unwrap_err()
+                .contains("completed")
+        );
     }
 }

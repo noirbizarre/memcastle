@@ -137,6 +137,8 @@ surrealkit = { version = "1.0.0-beta.2", default-features = false }
 # HTTP API + MCP-over-HTTP share one axum router.
 axum = "0.8.9"
 tower = "0.5.3"
+# The request-trace layer on the shared router, so REST and MCP are both logged.
+tower-http = { version = "0.6", default-features = false, features = ["trace"] }
 reqwest = { version = "0.13.5", features = ["json", "query"] }
 rmcp = { version = "3.4.1", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
 

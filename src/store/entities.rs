@@ -17,12 +17,12 @@
 //! `NONE` (absent) or `NULL` — the ambiguity this codebase's other comments
 //! flag doesn't matter for a truthiness check the way it does for `= NULL`.
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::domain::{
-    Entity, EntityId, NewRelationship, Relationship, RelationshipId, normalize_label,
+    Entity, EntityId, NewRelationship, Relationship, RelationshipId, require_label,
 };
 use crate::error::{Error, Result};
 
@@ -39,27 +39,19 @@ const RELATIONSHIP_COLUMNS: &str = "record::id(id) AS id, record::id(in) AS from
      record::id(out) AS to, predicate, confidence, \
      <string>valid_from AS valid_from, valid_to";
 
-/// Reject an empty (post-[`normalize_label`]) label with a diagnostic that
-/// names the field, instead of silently storing `""`.
-fn required_label(field: &'static str, raw: &str) -> Result<String> {
-    normalize_label(raw).ok_or(Error::EmptyLabel {
-        field: field.to_string(),
-    })
-}
-
 impl SurrealStore {
     /// Find the entity named `name` of kind `kind`, or create it.
     ///
     /// `kind` is normalized (trimmed, lowercased) before either half of the
     /// get-or-create runs, so `"Person"` and `"person"` resolve to the same
-    /// entity — see [`normalize_label`].
+    /// entity — see [`crate::domain::normalize_label`].
     pub async fn get_or_create_entity(
         &self,
         name: &str,
         kind: &str,
         properties: Value,
     ) -> Result<Entity> {
-        let kind = required_label("kind", kind)?;
+        let kind = require_label("kind", kind)?;
 
         let mut response = self
             .db
@@ -97,42 +89,28 @@ impl SurrealStore {
         Ok(entity)
     }
 
-    /// Create a new, currently-valid relationship (`valid_to: None`) between
-    /// two entities.
-    pub async fn create_relationship(
-        &self,
-        from: EntityId,
-        to: EntityId,
-        predicate: &str,
-        confidence: f32,
-    ) -> Result<Relationship> {
-        self.create_relationship_with_id(RelationshipId::new(), from, to, predicate, confidence)
-            .await
-    }
-
-    /// Like [`Self::create_relationship`], but under a caller-chosen id and
-    /// a no-op if that id already exists — the replay-safe form for a job
-    /// handler that derives the id from (job, item index). See
-    /// [`Self::create_drawer_once`] for why a replay must not duplicate.
+    /// Create a new, currently-valid relationship (`valid_to: None`) under
+    /// the caller-chosen `id`, valid from `valid_from`. A no-op if `id`
+    /// already exists — the replay-safe form for a job handler that derives
+    /// the id from (job, item index). See [`Self::create_drawer_once`] for
+    /// why a replay must not duplicate.
     ///
     /// Returns the relationship as it now stands: the one just written, or
     /// the one an earlier attempt already wrote.
-    pub async fn create_relationship_with_id(
+    pub async fn create_relationship(
         &self,
         id: RelationshipId,
-        from: EntityId,
-        to: EntityId,
-        predicate: &str,
-        confidence: f32,
+        new: NewRelationship,
+        valid_from: DateTime<Utc>,
     ) -> Result<Relationship> {
-        let predicate = required_label("predicate", predicate)?;
+        let predicate = require_label("predicate", &new.predicate)?;
         let relationship = Relationship {
             id,
-            from,
-            to,
+            from: new.from,
+            to: new.to,
             predicate,
-            confidence,
-            valid_from: Utc::now(),
+            confidence: new.confidence,
+            valid_from,
             valid_to: None,
         };
         if self.relationship_exists(id).await? {
@@ -140,6 +118,16 @@ impl SurrealStore {
         }
         self.relate(&relationship).await?;
         Ok(relationship)
+    }
+
+    /// [`Error::RelationshipNotFound`] unless a `relates_to` edge with this id
+    /// exists (open or closed).
+    async fn require_relationship(&self, id: RelationshipId) -> Result<()> {
+        if self.relationship_exists(id).await? {
+            Ok(())
+        } else {
+            Err(Error::RelationshipNotFound { id: id.to_string() })
+        }
     }
 
     /// Whether a `relates_to` edge with this id exists.
@@ -161,44 +149,41 @@ impl SurrealStore {
         Ok(!rows.is_empty())
     }
 
-    /// Close `old_id` (`valid_to = now`) and open a replacement edge for
-    /// `new`, in one transaction — "atomically where practical" (the
-    /// issue's wording): the first explicit `BEGIN`/`COMMIT TRANSACTION` in
-    /// this codebase, because superseding a fact should never leave the
-    /// graph with either two current edges or zero.
+    /// Close `old_id` (`valid_to = at`) and open a replacement edge for
+    /// `new` under the caller-chosen `new_id`, in one transaction —
+    /// "atomically where practical" (the issue's wording): the first
+    /// explicit `BEGIN`/`COMMIT TRANSACTION` in this codebase, because
+    /// superseding a fact should never leave the graph with either two
+    /// current edges or zero.
+    ///
+    /// The whole supersede is skipped if `new_id` already exists — an
+    /// earlier attempt already did it, and repeating it would move the old
+    /// edge's `valid_to` and open a duplicate current edge. See
+    /// [`Self::create_drawer_once`].
     pub async fn supersede_relationship(
-        &self,
-        old_id: RelationshipId,
-        new: NewRelationship,
-    ) -> Result<Relationship> {
-        self.supersede_relationship_with_id(old_id, RelationshipId::new(), new)
-            .await
-    }
-
-    /// Like [`Self::supersede_relationship`], but the replacement gets a
-    /// caller-chosen id, and the whole supersede is skipped if that id
-    /// already exists — an earlier attempt already did it, and repeating it
-    /// would move the old edge's `valid_to` and open a duplicate current
-    /// edge. See [`Self::create_drawer_once`].
-    pub async fn supersede_relationship_with_id(
         &self,
         old_id: RelationshipId,
         new_id: RelationshipId,
         new: NewRelationship,
+        at: DateTime<Utc>,
     ) -> Result<Relationship> {
-        let predicate = required_label("predicate", &new.predicate)?;
+        let predicate = require_label("predicate", &new.predicate)?;
         let replacement = Relationship {
             id: new_id,
             from: new.from,
             to: new.to,
             predicate,
             confidence: new.confidence,
-            valid_from: Utc::now(),
+            valid_from: at,
             valid_to: None,
         };
         if self.relationship_exists(new_id).await? {
             return Ok(replacement);
         }
+        // Checked, not assumed: `UPDATE` on an id that is not there reports
+        // success having changed nothing, which would leave the replacement
+        // opened with no old edge closed — two current edges for one fact.
+        self.require_relationship(old_id).await?;
 
         self.db
             .query(
@@ -210,7 +195,7 @@ impl SurrealStore {
                  COMMIT TRANSACTION;",
             )
             .bind(("old_id", old_id.to_string()))
-            .bind(("now", replacement.valid_from.to_rfc3339()))
+            .bind(("now", super::stored(replacement.valid_from)))
             .bind(("new_id", replacement.id.to_string()))
             .bind(("from", replacement.from.to_string()))
             .bind(("to", replacement.to.to_string()))
@@ -221,9 +206,24 @@ impl SurrealStore {
         Ok(replacement)
     }
 
-    /// Close a relationship (`valid_to = now`) without opening a
+    /// Close a relationship (`valid_to = at`) without opening a
     /// replacement — the fact is retracted, not superseded by a new one.
-    pub async fn invalidate_relationship(&self, id: RelationshipId) -> Result<()> {
+    ///
+    /// A soft delete, unlike [`Self::delete_drawer`]'s hard one, on purpose:
+    /// a retracted fact is still history someone may ask about ("what did we
+    /// believe in March?"), whereas a drawer is only deleted when it is an
+    /// orphan with no history worth keeping.
+    pub async fn invalidate_relationship(
+        &self,
+        id: RelationshipId,
+        at: DateTime<Utc>,
+    ) -> Result<()> {
+        // Checked first: the `UPDATE` below matches nothing for a missing id
+        // and still succeeds, so a mistyped id would read as a retraction
+        // that happened. An edge that exists but is already closed is fine —
+        // that is a replayed invalidate, and `WHERE !valid_to` keeps its
+        // original close time.
+        self.require_relationship(id).await?;
         self.db
             // `WHERE !valid_to`: only close an edge that is still open, so
             // repeating an invalidate (a replayed job item) keeps the
@@ -232,7 +232,7 @@ impl SurrealStore {
                 "UPDATE type::record('relates_to', $id) SET valid_to = $valid_to WHERE !valid_to",
             )
             .bind(("id", id.to_string()))
-            .bind(("valid_to", Utc::now().to_rfc3339()))
+            .bind(("valid_to", super::stored(at)))
             .await?
             .check()?;
         Ok(())
@@ -288,13 +288,301 @@ impl SurrealStore {
             .bind(("to", relationship.to.to_string()))
             .bind(("predicate", relationship.predicate.clone()))
             .bind(("confidence", relationship.confidence))
-            .bind(("valid_from", relationship.valid_from.to_rfc3339()))
+            .bind(("valid_from", super::stored(relationship.valid_from)))
             .bind((
                 "valid_to",
-                relationship.valid_to.map(|dt| dt.to_rfc3339()),
+                relationship.valid_to.map(super::stored),
             ))
             .await?
             .check()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+
+    use super::*;
+    use crate::error::Error;
+
+    async fn memory_store() -> SurrealStore {
+        SurrealStore::connect_memory_for_tests().await
+    }
+
+    /// A fresh relationship under a random id — what most tests want; the
+    /// replay tests choose their own ids.
+    async fn open_relationship(
+        store: &SurrealStore,
+        from: EntityId,
+        to: EntityId,
+        predicate: &str,
+        confidence: f32,
+    ) -> Result<Relationship> {
+        store
+            .create_relationship(
+                RelationshipId::new(),
+                NewRelationship {
+                    from,
+                    to,
+                    predicate: predicate.to_string(),
+                    confidence,
+                },
+                Utc::now(),
+            )
+            .await
+    }
+
+    #[tokio::test]
+    async fn creating_an_entity_twice_with_the_same_name_and_kind_is_idempotent() {
+        let store = memory_store().await;
+        let first = store
+            .get_or_create_entity("Ada Lovelace", "person", serde_json::json!({}))
+            .await
+            .expect("create");
+        let second = store
+            .get_or_create_entity("Ada Lovelace", "person", serde_json::json!({}))
+            .await
+            .expect("get-or-create");
+        assert_eq!(first.id, second.id);
+    }
+
+    #[tokio::test]
+    async fn entity_kind_is_normalized_so_casing_does_not_fragment_the_graph() {
+        let store = memory_store().await;
+        let first = store
+            .get_or_create_entity("Ada Lovelace", "Person", serde_json::json!({}))
+            .await
+            .expect("create");
+        let second = store
+            .get_or_create_entity("Ada Lovelace", "person", serde_json::json!({}))
+            .await
+            .expect("get-or-create despite different casing");
+        assert_eq!(first.id, second.id);
+        assert_eq!(second.kind, "person");
+    }
+
+    #[tokio::test]
+    async fn an_empty_kind_or_predicate_is_rejected() {
+        let store = memory_store().await;
+        let entity_err = store
+            .get_or_create_entity("Ada Lovelace", "   ", serde_json::json!({}))
+            .await
+            .expect_err("blank kind must be rejected");
+        assert!(matches!(entity_err, Error::EmptyLabel { .. }));
+
+        let alice = store
+            .get_or_create_entity("Alice", "person", serde_json::json!({}))
+            .await
+            .expect("alice");
+        let bob = store
+            .get_or_create_entity("Bob", "person", serde_json::json!({}))
+            .await
+            .expect("bob");
+        let relationship_err = open_relationship(&store, alice.id, bob.id, "", 1.0)
+            .await
+            .expect_err("blank predicate must be rejected");
+        assert!(matches!(relationship_err, Error::EmptyLabel { .. }));
+    }
+
+    #[tokio::test]
+    async fn superseding_a_relationship_closes_the_old_edge_and_leaves_history_queryable() {
+        let store = memory_store().await;
+        let alice = store
+            .get_or_create_entity("Alice", "person", serde_json::json!({}))
+            .await
+            .expect("alice");
+        let acme = store
+            .get_or_create_entity("Acme", "organization", serde_json::json!({}))
+            .await
+            .expect("acme");
+
+        let original = open_relationship(&store, alice.id, acme.id, "employee_of", 0.9)
+            .await
+            .expect("create relationship");
+
+        let replacement = store
+            .supersede_relationship(
+                original.id,
+                RelationshipId::new(),
+                NewRelationship {
+                    from: alice.id,
+                    to: acme.id,
+                    predicate: "former_employee_of".to_string(),
+                    confidence: 0.95,
+                },
+                Utc::now(),
+            )
+            .await
+            .expect("supersede");
+        assert_ne!(replacement.id, original.id);
+
+        let current = store
+            .list_relationships(alice.id, false)
+            .await
+            .expect("list current");
+        assert_eq!(
+            current.len(),
+            1,
+            "only the replacement should be current, got {current:?}"
+        );
+        assert_eq!(current[0].id, replacement.id);
+        assert_eq!(current[0].predicate, "former_employee_of");
+
+        let history = store
+            .list_relationships(alice.id, true)
+            .await
+            .expect("list including expired");
+        assert_eq!(
+            history.len(),
+            2,
+            "both the old and new edge should stay queryable, got {history:?}"
+        );
+        let old = history
+            .iter()
+            .find(|r| r.id == original.id)
+            .expect("original edge still present");
+        assert!(
+            old.valid_to.is_some(),
+            "the superseded edge must be closed, got {old:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn invalidating_a_relationship_sets_valid_to_without_creating_a_replacement() {
+        let store = memory_store().await;
+        let alice = store
+            .get_or_create_entity("Alice", "person", serde_json::json!({}))
+            .await
+            .expect("alice");
+        let acme = store
+            .get_or_create_entity("Acme", "organization", serde_json::json!({}))
+            .await
+            .expect("acme");
+        let relationship = open_relationship(&store, alice.id, acme.id, "employee_of", 0.9)
+            .await
+            .expect("create relationship");
+
+        store
+            .invalidate_relationship(relationship.id, Utc::now())
+            .await
+            .expect("invalidate");
+
+        let current = store
+            .list_relationships(alice.id, false)
+            .await
+            .expect("list current");
+        assert!(
+            current.is_empty(),
+            "an invalidated relationship must not read back as current, got {current:?}"
+        );
+
+        let history = store
+            .list_relationships(alice.id, true)
+            .await
+            .expect("list including expired");
+        assert_eq!(
+            history.len(),
+            1,
+            "invalidating must not create a replacement edge, got {history:?}"
+        );
+        assert!(history[0].valid_to.is_some());
+    }
+
+    async fn two_entities(store: &SurrealStore) -> (EntityId, EntityId) {
+        let alice = store
+            .get_or_create_entity("Alice", "person", serde_json::json!({}))
+            .await
+            .unwrap();
+        let acme = store
+            .get_or_create_entity("Acme", "organization", serde_json::json!({}))
+            .await
+            .unwrap();
+        (alice.id, acme.id)
+    }
+
+    fn a_fact(from: EntityId, to: EntityId) -> NewRelationship {
+        NewRelationship {
+            from,
+            to,
+            predicate: "employee_of".to_string(),
+            confidence: 0.9,
+        }
+    }
+
+    #[tokio::test]
+    async fn invalidating_a_relationship_that_does_not_exist_is_an_error_not_a_silent_no_op() {
+        let store = memory_store().await;
+        let missing = RelationshipId::new();
+
+        let error = store
+            .invalidate_relationship(missing, Utc::now())
+            .await
+            .expect_err("a mistyped id must not read as a retraction");
+
+        assert!(
+            matches!(error, Error::RelationshipNotFound { .. }),
+            "{error:?}"
+        );
+        assert!(
+            !store.relationship_exists(missing).await.unwrap(),
+            "and the failed call must not have created the record"
+        );
+    }
+
+    #[tokio::test]
+    async fn superseding_a_relationship_that_does_not_exist_is_an_error_and_opens_no_edge() {
+        let store = memory_store().await;
+        let (alice, acme) = two_entities(&store).await;
+        let replacement = RelationshipId::new();
+
+        let error = store
+            .supersede_relationship(
+                RelationshipId::new(),
+                replacement,
+                a_fact(alice, acme),
+                Utc::now(),
+            )
+            .await
+            .expect_err("there is no old edge to close");
+
+        assert!(
+            matches!(error, Error::RelationshipNotFound { .. }),
+            "{error:?}"
+        );
+        assert!(
+            !store.relationship_exists(replacement).await.unwrap(),
+            "no replacement may be opened when nothing was closed"
+        );
+    }
+
+    #[tokio::test]
+    async fn replaying_an_invalidate_or_a_supersede_is_still_fine() {
+        // A resumed checkpoint job repeats the item it crashed in.
+        let store = memory_store().await;
+        let (alice, acme) = two_entities(&store).await;
+        let original = open_relationship(&store, alice, acme, "employee_of", 0.9)
+            .await
+            .unwrap();
+        let replacement = RelationshipId::new();
+        store
+            .supersede_relationship(original.id, replacement, a_fact(alice, acme), Utc::now())
+            .await
+            .unwrap();
+
+        // Superseding again: the replacement exists, so it is skipped.
+        store
+            .supersede_relationship(original.id, replacement, a_fact(alice, acme), Utc::now())
+            .await
+            .expect("a replayed supersede is a no-op");
+        // Invalidating the already-closed original: it exists, so it is fine.
+        store
+            .invalidate_relationship(original.id, Utc::now())
+            .await
+            .expect("a replayed invalidate is a no-op");
+        assert_eq!(
+            store.list_relationships(alice, false).await.unwrap().len(),
+            1
+        );
     }
 }
