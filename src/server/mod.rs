@@ -16,7 +16,7 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-use crate::app::AppServices;
+use crate::app::{AppServices, RuntimeContext};
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::jobs::Scheduler;
@@ -86,7 +86,15 @@ pub async fn run(config: Config) -> Result<()> {
         tokio::spawn(async move { scheduler.run(shutdown).await })
     };
 
-    let app = AppServices::new(store, Arc::clone(&scheduler));
+    let backend_info = backend.describe();
+    let app = AppServices::new(store, Arc::clone(&scheduler)).with_runtime(RuntimeContext {
+        // The real bound address, not the requested one: `status` must agree
+        // with the registry file when port 0 was asked for.
+        bind_addr: actual_addr.to_string(),
+        palace_path: config.palace.path.display().to_string(),
+        backend: backend_info.kind.to_string(),
+        location: backend_info.location,
+    });
     let mcp_service = crate::mcp::service(app.clone(), &shutdown);
     // One trace layer over both surfaces: a request line at `debug` on the
     // way in and a response line (status, latency) on the way out, so "what

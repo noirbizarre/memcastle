@@ -32,6 +32,7 @@ backed by one SurrealDB store instead of a pile of SQLite files and a separate v
 
 ```bash
 memcastle serve &          # one daemon per palace
+memcastle status           # is it up, where, and is its datastore healthy? (--json for scripts)
 memcastle mine ./project   # submits a durable, resumable job — doesn't block
 memcastle jobs list
 memcastle search "why did we switch to GraphQL?"

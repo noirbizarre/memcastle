@@ -25,7 +25,7 @@ Or download a binary for your platform from the [latest release](https://github.
 
 ```bash
 memcastle serve &
-memcastle status
+memcastle status            # running? where? which palace? datastore healthy? (--json for scripts)
 memcastle mine ./project
 memcastle jobs list
 memcastle search "why did we switch to GraphQL?"

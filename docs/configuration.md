@@ -144,6 +144,15 @@ Client commands (`status`, `search`, `jobs` and the rest) read the config file a
 but not the flags, so a daemon started on a non-default port with `--port` is found through its registry file.
 `restart` passes its `--bind` and `--port` on to the new daemon.
 
+`memcastle status` shows which of the two it used (`endpoint_source`: `registry` or `config`).
+It exits 0 for a healthy daemon, 1 for a degraded one and 3 when none is running, and takes `--json` for scripts:
+
+```sh
+memcastle status                      # human-readable report
+memcastle status --json | jq .daemon.datastore
+memcastle status || echo "exit $?"    # 3 means not running
+```
+
 `server.bind` is an IP address, IPv4 or IPv6, and not a host name.
 A `host:port` value, as `bind` accepted before the port became its own setting, is refused with a message naming the port
 setting to use instead.

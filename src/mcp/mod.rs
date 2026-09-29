@@ -356,7 +356,7 @@ impl McpTools {
     }
 
     #[tool(
-        description = "Report daemon health: version, uptime, palace name, drawer and job counts"
+        description = "Report daemon health: version, uptime, pid, listen address, palace name and path, datastore health and migration state, drawer and job counts"
     )]
     async fn memcastle_status(
         &self,

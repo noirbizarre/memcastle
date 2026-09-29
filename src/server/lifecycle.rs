@@ -74,10 +74,62 @@ pub fn remove(palace_path: &Path) {
 /// deliberately-conservative daemon-discovery bug).
 #[must_use]
 pub fn read_if_live(palace_path: &Path) -> Option<RuntimeInfo> {
+    match inspect(palace_path) {
+        Registry::Live(info) => Some(info),
+        Registry::Absent | Registry::Stale(_) => None,
+    }
+}
+
+/// What the registry file for a palace says right now.
+#[derive(Debug, Clone)]
+pub enum Registry {
+    /// No readable registry file: no daemon has registered, or it stopped cleanly.
+    Absent,
+    /// A file whose PID is a live process.
+    Live(RuntimeInfo),
+    /// A file whose PID is dead: the daemon was killed without cleaning up.
+    /// Reported by `status` so a crash is diagnosed rather than looking like
+    /// a daemon that never ran.
+    Stale(RuntimeInfo),
+}
+
+impl Registry {
+    /// Short name for scripts: `absent`, `live` or `stale`.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Absent => "absent",
+            Self::Live(_) => "live",
+            Self::Stale(_) => "stale",
+        }
+    }
+
+    /// The recorded runtime info, whether or not its process is alive.
+    #[must_use]
+    pub fn info(&self) -> Option<&RuntimeInfo> {
+        match self {
+            Self::Absent => None,
+            Self::Live(info) | Self::Stale(info) => Some(info),
+        }
+    }
+}
+
+/// Classify the registry file for `palace_path`. An unreadable or malformed
+/// file counts as absent: it cannot be trusted to name an address or a PID.
+#[must_use]
+pub fn inspect(palace_path: &Path) -> Registry {
     let path = registry_path(palace_path);
-    let text = std::fs::read_to_string(path).ok()?;
-    let info: RuntimeInfo = serde_json::from_str(&text).ok()?;
-    if is_alive(info.pid) { Some(info) } else { None }
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Registry::Absent;
+    };
+    let Ok(info) = serde_json::from_str::<RuntimeInfo>(&text) else {
+        return Registry::Absent;
+    };
+    if is_alive(info.pid) {
+        Registry::Live(info)
+    } else {
+        Registry::Stale(info)
+    }
 }
 
 #[cfg(unix)]
