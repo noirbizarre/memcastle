@@ -4,7 +4,7 @@
 //! and remote deployments — the rest of the codebase never branches on which
 //! backend is active. Repository methods live in the sibling modules
 //! (`wings`, `drawers`, `jobs`, `entities`) as `impl SurrealStore` blocks;
-//! this file only owns connecting and migrating.
+//! this file only owns connecting and schema sync.
 //!
 //! Every write and read goes through hand-written SurrealQL with explicit
 //! `<datetime>`/`<string>` casts rather than the SDK's typed `create`/
@@ -14,10 +14,32 @@
 //! API — instead of type-coercion behaviour between chrono and the driver's
 //! own serde bridge that would otherwise have to be discovered by trial and
 //! error.
+//!
+//! Schema management (`DEFINE TABLE`/`FIELD`/`INDEX`) is delegated entirely
+//! to SurrealKit's library API, not reimplemented here — see
+//! `docs/adr/004-versioned-database-migrations.md`. `embed_schema!()` below
+//! compiles every `.surql` file under `database/schema/` (relative to
+//! `Cargo.toml`) into the binary and generates `embedded_schema::{SCHEMA,
+//! sync}`; SurrealKit tracks each file's content hash in its own `__entity`
+//! metadata table and only reapplies what actually changed. `connect()`
+//! itself does **not** sync schema — that's an explicit step of
+//! `crate::migrate::run`/`status` (schema sync must happen alongside, and
+//! in the same order as, MemCastle's own data migrations — see that
+//! module's doc), not an implicit side effect of opening a connection.
+// Wrapped in its own module so `#![allow(missing_docs)]` (an inner
+// attribute, since the crate's `#![warn(missing_docs)]` would otherwise
+// flag the macro's generated, undocumented items) only scopes to
+// generated code, not this file's own hand-written items.
+mod embedded_schema_gen {
+    #![allow(missing_docs)]
+    surrealkit::embed_schema!();
+}
+use embedded_schema_gen::embedded_schema;
 
 mod drawers;
 mod entities;
 mod jobs;
+mod migration_state;
 mod wings;
 
 use std::path::PathBuf;
@@ -64,11 +86,6 @@ pub(crate) fn take_rows<T: serde::de::DeserializeOwned>(
         .collect()
 }
 
-/// One migration file, applied in order and idempotently (every `DEFINE` in
-/// it is `IF NOT EXISTS`), so `Store::connect` can just re-run all of them
-/// on every startup instead of tracking an applied-version watermark.
-const MIGRATIONS: &[&str] = &[include_str!("migrations/0001_init.surql")];
-
 /// Where the palace's data actually lives.
 #[derive(Debug, Clone)]
 pub enum Backend {
@@ -112,13 +129,14 @@ pub struct SurrealStore {
 }
 
 impl SurrealStore {
-    /// Connect to `backend`, select its namespace/database, and apply every
-    /// pending migration.
+    /// Connect to `backend` and select its namespace/database. Does **not**
+    /// sync schema or run migrations — see this module's doc comment on why
+    /// that's a separate, explicit step (`crate::migrate::run`/`status`),
+    /// not an implicit side effect of connecting.
     ///
     /// # Errors
     ///
-    /// Returns [`crate::Error::Store`] if the connection, sign-in, or a
-    /// migration statement fails.
+    /// Returns [`crate::Error::Store`] if the connection or sign-in fails.
     pub async fn connect(backend: &Backend) -> Result<Self> {
         if let Backend::Embedded { path } = backend {
             std::fs::create_dir_all(path)
@@ -148,21 +166,22 @@ impl SurrealStore {
         };
         db.use_ns(namespace).use_db(database).await?;
 
-        let store = Self { db };
-        store.migrate().await?;
-        Ok(store)
+        Ok(Self { db })
     }
 
-    /// Apply every migration file. Safe to call repeatedly.
-    async fn migrate(&self) -> Result<()> {
-        for migration in MIGRATIONS {
-            // `.await` alone only reports transport-level failures; a
-            // malformed `DEFINE` inside the migration would otherwise fail
-            // silently. `.check()` promotes the first per-statement error,
-            // if any, to a real `Err` — see the module doc.
-            self.db.query(*migration).await?.check()?;
-        }
-        Ok(())
+    /// Apply the embedded schema via SurrealKit's `Sync`. Idempotent:
+    /// SurrealKit tracks each file's content hash in its own metadata and
+    /// only reapplies what changed. Called by `crate::migrate::run`, not by
+    /// `connect()` — see this module's doc.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::Error::SchemaSync`] if SurrealKit fails to apply
+    /// the embedded schema (e.g. a malformed `.surql` statement).
+    pub(crate) async fn sync_schema(&self) -> Result<()> {
+        embedded_schema::sync(&self.db)
+            .await
+            .map_err(|source| Error::schema_sync(source.to_string()))
     }
 }
 
@@ -173,11 +192,14 @@ impl SurrealStore {
     /// without a tempdir-backed `SurrealKV` path. `pub(crate)` and
     /// `cfg(test)`-gated: only test code anywhere in this crate should ever
     /// construct a bare in-memory store this way, never a real interface.
+    /// Syncs schema itself (unlike the real `connect()`) — this helper's
+    /// whole point is "hand me a ready-to-use store", so tests that don't
+    /// care about migration orchestration don't have to think about it.
     pub(crate) async fn connect_memory_for_tests() -> Self {
         let db = any::connect("memory").await.expect("connect");
         db.use_ns("test").use_db("test").await.expect("use ns/db");
         let store = Self { db };
-        store.migrate().await.expect("migrate");
+        store.sync_schema().await.expect("sync_schema");
         store
     }
 }
@@ -198,7 +220,7 @@ mod tests {
     async fn migrations_apply_cleanly_and_are_idempotent() {
         let store = memory_store().await;
         // Re-running must not error — every DEFINE is IF NOT EXISTS.
-        store.migrate().await.expect("second migrate");
+        store.sync_schema().await.expect("second sync_schema");
     }
 
     // "Reopen the same SurrealKV path in the same process" is deliberately
@@ -220,6 +242,9 @@ mod tests {
             path: dir.path().join("palace"),
         };
         let store = SurrealStore::connect(&backend).await.expect("connect");
+        // `connect()` no longer syncs schema itself (see this module's doc)
+        // — mirror what `server::run`/`cmd_migrate` do via `crate::migrate::run`.
+        store.sync_schema().await.expect("sync schema");
 
         let wing = store.get_or_create_wing("demo", None).await.expect("wing");
         let room = store

@@ -70,22 +70,32 @@ and re-deriving it on every domain type would make the next such change a much b
 
 ### Migrations
 
-Today, schema setup is one file, `store/migrations/0001_init.surql`,
-applied unconditionally on every `SurrealStore::connect`:
-every `DEFINE` in it is `IF NOT EXISTS`, so re-running it after the first connect is a no-op.
-There is no version-tracking table and no `memcastle migrate` command yet — sufficient for Phase 1
-because nothing shipped so far has needed a destructive or reshaping change to an already-released schema.
+Two migration shapes, kept deliberately separate, both driven by one `crate::migrate::run`:
 
-The target design (not yet built — tracked as issue #44) is one `MigrationRunner`
-used identically by normal daemon startup and by an explicit `memcastle migrate` command,
-tracking MemCastle's own application data version as a record separate from both
-the SurrealDB engine version (upgraded independently via the `surrealdb` crate)
-and the storage backend choice above (SurrealKV today, a future remote backend later) —
-none of which are allowed to stand in for MemCastle's own schema/data version.
-Startup would open the datastore, acquire a migration lock, run pending migrations in order,
-synchronize the schema, record the new version, and only then accept client connections;
-a failed migration fails the daemon closed rather than serving a partially migrated database.
-See `docs/adr/004-versioned-database-migrations.md` for the full design and issue #44 for implementation status.
+- **Schema.** Declarative `.surql` files under `database/schema/` (`database/schema/palace.surql`,
+  `database/schema/migration_state.surql`), embedded into the binary via SurrealKit's
+  `embed_schema!()` macro and applied through its `Sync` builder
+  (`store::mod`'s `SurrealStore::sync_schema`). SurrealKit — not MemCastle — owns diffing,
+  content-hash tracking (in its own `__entity` metadata table), and pruning; MemCastle does not
+  implement a parallel schema-diff/versioning engine. SurrealKit's `Rollout` API is available for a
+  future staged/expand-contract schema change, but nothing shipped yet has needed one.
+- **Data.** An ordered, immutable list of versioned Rust steps (`crate::migrate::DataMigration`) for
+  changes that can't be expressed as additive schema sync — a rename, reshape, split/merge, or
+  backfill. Gated by a MemCastle-owned version watermark (`migration_state` table, defined as one
+  of the schema files above but read/written exclusively by `store::migration_state` — never
+  SurrealKit's own bookkeeping), so each step runs exactly once. Empty today: nothing shipped yet
+  has needed one.
+
+`crate::migrate::run(&store)` is the one runner both entry points call — normal daemon startup
+(`server::run`) and the explicit `memcastle migrate` (`--check`, `--status`) command, which connects
+to storage directly like `serve` does, bypassing `client::DaemonClient`. Sequence: sync schema (so
+its own bookkeeping table exists) → acquire an exclusive lock → read the current data version → run
+pending data migrations in order, recording the watermark after each success → re-sync schema (picks
+up anything the release also shipped) → release the lock. A failed migration fails the daemon closed
+rather than serving a partially migrated database; the watermark stays at the last step that
+succeeded, so a later, corrected run resumes instead of replaying. `SurrealStore::connect` itself
+does not sync schema or migrate — that's this explicit step, not an implicit side effect of opening
+a connection. See `docs/adr/004-versioned-database-migrations.md` for the full design.
 
 ### Domain model
 
@@ -102,7 +112,7 @@ and a `valid_from`/`valid_to` pair travel alongside it.
 `domain::entity` (`Entity`, `Relationship`) defines a bi-temporal knowledge-graph shape,
 and `store::entities` is schema-**wired**: create/supersede/invalidate/list-relationships operations exist
 and are exercised today by `checkpoint::run`'s optional `fact` mutation.
-`relates_to` (`store/migrations/0001_init.surql`) is a genuine SurrealDB-native graph edge table —
+`relates_to` (`database/schema/palace.surql`) is a genuine SurrealDB-native graph edge table —
 `TYPE RELATION IN entity OUT entity`, mutated and traversed with `RELATE`/graph-traversal SurrealQL —
 unlike every other domain relationship in this codebase (wing→palace, room→wing, drawer→room),
 which is a plain foreign-key column on a regular table. The only missing piece is a *populator*:

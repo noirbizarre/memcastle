@@ -29,6 +29,7 @@ pub mod domain;
 pub mod error;
 pub mod jobs;
 pub mod mcp;
+pub mod migrate;
 pub mod mining;
 pub mod repair;
 pub mod search;

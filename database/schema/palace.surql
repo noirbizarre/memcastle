@@ -1,9 +1,11 @@
--- Migration 0001: palace hierarchy, the search index, the knowledge graph,
--- and the durable job queue.
+-- The palace hierarchy, the search index, the knowledge graph, and the
+-- durable job queue.
 --
--- `IF NOT EXISTS` on every DEFINE makes this file idempotent, so
--- `Store::connect` can safely re-run it every startup instead of needing a
--- "did this migration already apply" check per statement.
+-- Applied via SurrealKit's `Sync` (see `store::mod`'s `surrealkit::embed_schema!()`
+-- and `SurrealStore::sync_schema`), not a hand-rolled loop: SurrealKit tracks
+-- this file's content hash in its own `__entity` metadata and only reapplies
+-- it when the content actually changes — see docs/adr/004. `IF NOT EXISTS` on
+-- every DEFINE is kept anyway as a harmless extra safety net.
 
 DEFINE TABLE IF NOT EXISTS palace SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS name ON TABLE palace TYPE string;

@@ -56,6 +56,21 @@ pub enum Error {
         message: String,
     },
 
+    /// SurrealKit's schema `Sync` (or its `dry_run` check) failed. MemCastle
+    /// delegates all schema management to SurrealKit (see
+    /// `docs/adr/004-versioned-database-migrations.md`) rather than
+    /// reimplementing schema diffing, so this wraps whatever SurrealKit
+    /// itself reports.
+    #[error("schema sync failed: {message}")]
+    #[diagnostic(
+        code(memcastle::store::schema_sync),
+        help("check database/schema/*.surql for a malformed DEFINE statement")
+    )]
+    SchemaSync {
+        /// What SurrealKit reported.
+        message: String,
+    },
+
     /// A knowledge-graph label (`Entity::kind` / `Relationship::predicate`)
     /// was empty or whitespace-only after normalization.
     #[error("{field} must not be empty")]
@@ -153,6 +168,39 @@ pub enum Error {
         /// The mode that forbade it.
         mode: crate::domain::MemoryMode,
     },
+
+    /// Another run already holds the exclusive migration lock (see
+    /// `crate::migrate` and `store::migration_state`).
+    #[error("a migration is already in progress (held by {owner})")]
+    #[diagnostic(
+        code(memcastle::migrate::locked),
+        help(
+            "wait for the other migration to finish; if you believe the lock is stuck from a crashed run, it expires and can be reclaimed on its own"
+        )
+    )]
+    MigrationLocked {
+        /// The lock's current holder.
+        owner: String,
+    },
+
+    /// A data migration step failed partway through a `crate::migrate::run`.
+    /// The version watermark is left at the last step that succeeded, so a
+    /// later run resumes from here rather than re-applying it.
+    #[error("migration {version} ({name}) failed: {message}")]
+    #[diagnostic(
+        code(memcastle::migrate::failed),
+        help(
+            "migrations are immutable once released — fix forward with a new migration, never edit this one"
+        )
+    )]
+    MigrationFailed {
+        /// The failing step's version.
+        version: u32,
+        /// The failing step's name.
+        name: String,
+        /// What went wrong.
+        message: String,
+    },
 }
 
 impl Error {
@@ -178,6 +226,13 @@ impl Error {
         }
     }
 
+    /// Build an [`Error::SchemaSync`] from a message.
+    pub fn schema_sync(message: impl Into<String>) -> Self {
+        Self::SchemaSync {
+            message: message.into(),
+        }
+    }
+
     /// Build an [`Error::Client`] from a message.
     pub fn client(message: impl Into<String>) -> Self {
         Self::Client {
@@ -188,6 +243,26 @@ impl Error {
     /// Build an [`Error::Server`] from a message.
     pub fn server(message: impl Into<String>) -> Self {
         Self::Server {
+            message: message.into(),
+        }
+    }
+
+    /// Build an [`Error::MigrationLocked`].
+    pub fn migration_locked(owner: impl Into<String>) -> Self {
+        Self::MigrationLocked {
+            owner: owner.into(),
+        }
+    }
+
+    /// Build an [`Error::MigrationFailed`].
+    pub fn migration_failed(
+        version: u32,
+        name: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self::MigrationFailed {
+            version,
+            name: name.into(),
             message: message.into(),
         }
     }
