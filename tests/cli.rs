@@ -48,5 +48,18 @@ fn jobs_show_rejects_a_malformed_job_id_before_ever_reaching_the_network() {
         .env("MEMCASTLE_BIND", "127.0.0.1:1")
         .args(["jobs", "show", "not-a-uuid"])
         .assert()
-        .failure();
+        .failure()
+        // The diagnostic code, not just a non-zero exit: a malformed id must
+        // be reported as such, not as a job that "was not found".
+        .stderr(contains("memcastle::jobs::invalid_id"));
+}
+
+#[test]
+fn a_reserved_but_unimplemented_command_says_so_instead_of_blaming_the_config() {
+    Command::cargo_bin("memcastle")
+        .unwrap()
+        .arg("wings")
+        .assert()
+        .failure()
+        .stderr(contains("memcastle::cli::not_implemented"));
 }

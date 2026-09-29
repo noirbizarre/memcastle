@@ -6,7 +6,8 @@
 
 That's it — SurrealKV, the embedded storage engine, is pure Rust,
 so unlike the RocksDB backend this project used before #47,
-there's no C/C++ toolchain or `cmake` prerequisite to compile it.
+the storage engine itself needs no C/C++ toolchain.
+(A transitive TLS dependency, `aws-lc-sys`, may use `cmake` on some targets; that is unrelated to storage.)
 
 ## Everyday tasks
 
@@ -45,11 +46,17 @@ see `config::Config` for the full list of settings and their environment-variabl
 - **Unit tests** live next to the code they test (`domain::job`'s state machine, `config`'s validation,
   `store`'s migrations/persistence — the storage tests use SurrealDB's in-memory engine for speed, plus one test
   against a real SurrealKV directory to prove data survives a reconnect).
-- **Integration tests** (`tests/`) start a real daemon in-process against a tempdir palace and an OS-assigned port:
-  - `tests/server.rs` — health, status, graceful shutdown.
+- **Integration tests** (`tests/`) run against a tempdir palace and an OS-assigned port.
+  Most start the daemon in-process (`tests/common`'s `TestDaemon`); the ones that need a real process boundary
+  (SurrealKV's file lock is not released within one process) spawn the `memcastle` binary instead:
+  - `tests/server.rs` — health, status, graceful shutdown, retry (in-process).
   - `tests/concurrency.rs` — many simulated clients submitting jobs and reading status at once,
-    proving the shared store stays consistent.
-  - `tests/cli.rs` — the binary's argument parsing and its behaviour with no daemon reachable.
+    proving the shared store stays consistent (in-process).
+  - `tests/memory_mode.rs`, `tests/mcp_memory_mode.rs` — per-request and per-MCP-session memory modes (in-process).
+  - `tests/audit.rs`, `tests/repair.rs` — the audit and repair job kinds end to end (in-process).
+  - `tests/persistence.rs` — data and job state survive a daemon restart, including a SIGKILL mid-job (subprocess).
+  - `tests/migrate.rs` — `memcastle migrate` and its `--check`/`--status` modes (subprocess).
+  - `tests/cli.rs` — the binary's argument parsing and its behaviour with no daemon reachable (subprocess).
 
 Run a subset with nextest's filter syntax, e.g.:
 
@@ -60,10 +67,16 @@ mise run test -- --filter-expr 'test(job)'
 ## The architecture guard
 
 The non-negotiable invariant in `AGENTS.md` — "the CLI has no business logic MCP/HTTP can't reuse" —
-is enforced by a `prek` hook that greps `src/cli.rs`, `src/mcp/`, and `src/api/` for a direct `crate::store` import.
+is enforced by the `store-isolation` `prek` hook.
+It greps `src/main.rs`, `src/cli.rs`, `src/client/`, `src/mcp/` and `src/api/`
+for a direct `store` or `jobs` import (including grouped `use crate::{store::..}` imports).
+The one allowed exception is `main.rs`'s `SurrealStore` import, which `memcastle migrate` needs.
 If you find yourself wanting to import `store` from one of those,
 the fix is almost always to add a method to `app::AppServices` instead,
 so the same capability becomes available to every interface at once.
+
+The `single-writer` hook enforces the companion invariant, one daemon and one writer per palace:
+`SurrealStore::connect` may only be called from `src/server/`, `src/store/` and `src/main.rs` (for `migrate`).
 
 ## This repository is generated from a template
 

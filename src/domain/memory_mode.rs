@@ -13,7 +13,7 @@
 //!
 //! ## The allow/deny matrix
 //!
-//! | mode        | read (`search`/`recall`/`wake_up`/`diary_read`) | write (`checkpoint`/`emergency_checkpoint`/`diary_write`) |
+//! | mode        | read (`search`/`recall`/`wake_up`/`diary_read`, job `list`/`show`) | write (`checkpoint`/`emergency_checkpoint`/`diary_write`, `mine`, applied `repair`) |
 //! |-------------|--------------------------------------------------|-------------------------------------------------------------|
 //! | `Full`      | ok                                               | ok                                                            |
 //! | `ReadOnly`  | ok                                               | rejected (`Error::ModeForbidden`)                             |
@@ -28,17 +28,22 @@
 //!
 //! ## Explicit daemon operations vs automatic memory operations
 //!
-//! Only the seven memory-content operations named above are gated. Every
-//! other `AppServices` method — `status`, `list_jobs`/`get_job`/
-//! `pause_job`/`resume_job`/`cancel_job`/`retry_job`, `submit_mine`,
-//! `submit_demo` — is an administrative/daemon-level operation, not a
-//! session-scoped memory operation, and is never gated by `MemoryMode`: a
-//! disabled session can still see daemon/job state and submit background
-//! work. This resolves the "explicit daemon operations vs automatic memory
-//! operations" boundary the task brief calls out (§22-26) without waiting
-//! on `Audit`/`Repair` (issues #16/#17) to exist — those, too, remain
-//! available regardless of mode unless a future issue explicitly
-//! reclassifies one of them as session-scoped.
+//! The gate follows *what an operation reads or writes*, not which method
+//! name it has. A job record carries its whole input — for a checkpoint job,
+//! the memory being written — so reading jobs is a memory read
+//! (`list_jobs`/`get_job`), and a job whose purpose is to file or delete
+//! drawers is a memory write (`submit_mine`, and `submit_repair` when it is
+//! not a dry run). Gating only the obvious methods would let a `Disabled`
+//! session read palace content through the job list, or a `ReadOnly` one
+//! mutate the palace by submitting a mine.
+//!
+//! What stays ungated is genuinely administrative: `status` (counts and
+//! version, no content), `pause_job`/`resume_job`/`cancel_job`/`retry_job`
+//! (they need a job id, which a session that cannot list jobs never
+//! learns), `submit_demo` (touches no palace content), `submit_audit` and
+//! a dry-run `submit_repair` (they only report). This resolves the
+//! "explicit daemon operations vs automatic memory operations" boundary the
+//! task brief calls out (§22-26).
 
 use serde::{Deserialize, Serialize};
 

@@ -22,31 +22,38 @@ expectations.
 Preserve every existing foundation (job state machine, scheduler, `AppServices`
 seam, embedded/remote store, lexical search) and extend it: meaningful job
 priorities, checkpoint as a first-class durable job, minimal knowledge-graph
-wiring for checkpoint-originated facts, explicit per-session memory modes, and
-the recall/wake-up/diary primitives everything downstream depends on.
+wiring for checkpoint-originated facts, explicit per-session memory modes, the
+recall/wake-up/diary primitives everything downstream depends on, and a
+SurrealKV-only embedded store with a versioned migration mechanism. The
+choice of a server-side storage engine is deliberately deferred to the server
+deployment phase.
 
-| # | Title |
-|---|---|
-| [#8](https://github.com/noirbizarre/memcastle/issues/8) | Add `domain::Priority` enum and rework job priority representation |
-| [#9](https://github.com/noirbizarre/memcastle/issues/9) | Fix `Scheduler::retry()` to go through `Job::apply` (add `JobEvent::Retry`) |
-| [#10](https://github.com/noirbizarre/memcastle/issues/10) | Extend `lexical_search` with an optional wing/room scope |
-| [#11](https://github.com/noirbizarre/memcastle/issues/11) | Knowledge-graph store operations: create/supersede/invalidate relationships |
-| [#12](https://github.com/noirbizarre/memcastle/issues/12) | Add `JobKind::Checkpoint` and its handler (memory checkpoint as a durable job) |
-| [#13](https://github.com/noirbizarre/memcastle/issues/13) | Add `AppServices::diary_write` / `diary_read` (direct call, not a job) |
-| [#14](https://github.com/noirbizarre/memcastle/issues/14) | Add `AppServices::recall` and `AppServices::wake_up` |
-| [#15](https://github.com/noirbizarre/memcastle/issues/15) | Add `MemoryMode` (full/read-only/disabled) with per-session enforcement |
-| [#16](https://github.com/noirbizarre/memcastle/issues/16) | Add `JobKind::Audit` (read-only palace consistency report) |
-| [#17](https://github.com/noirbizarre/memcastle/issues/17) | Add `JobKind::Repair` (narrow, dry-run-first) |
-| [#18](https://github.com/noirbizarre/memcastle/issues/18) | Introduce a mining source-adapter seam (refactor only, no new sources) |
-| [#19](https://github.com/noirbizarre/memcastle/issues/19) | Scaffold `integrations/` and `skills/` directories |
-| [#20](https://github.com/noirbizarre/memcastle/issues/20) | Update `docs/architecture.md` and add ADRs for Phase 1 decisions |
+Status: complete — every issue below is done.
+
+| # | Title | Done |
+|---|---|---|
+| [#8](https://github.com/noirbizarre/memcastle/issues/8) | Add `domain::Priority` enum and rework job priority representation | yes |
+| [#9](https://github.com/noirbizarre/memcastle/issues/9) | Fix `Scheduler::retry()` to go through `Job::apply` (add `JobEvent::Retry`) | yes |
+| [#10](https://github.com/noirbizarre/memcastle/issues/10) | Extend `lexical_search` with an optional wing/room scope | yes |
+| [#11](https://github.com/noirbizarre/memcastle/issues/11) | Knowledge-graph store operations: create/supersede/invalidate relationships | yes |
+| [#12](https://github.com/noirbizarre/memcastle/issues/12) | Add `JobKind::Checkpoint` and its handler (memory checkpoint as a durable job) | yes |
+| [#13](https://github.com/noirbizarre/memcastle/issues/13) | Add `AppServices::diary_write` / `diary_read` (direct call, not a job) | yes |
+| [#14](https://github.com/noirbizarre/memcastle/issues/14) | Add `AppServices::recall` and `AppServices::wake_up` | yes |
+| [#15](https://github.com/noirbizarre/memcastle/issues/15) | Add `MemoryMode` (full/read-only/disabled) with per-session enforcement | yes |
+| [#16](https://github.com/noirbizarre/memcastle/issues/16) | Add `JobKind::Audit` (read-only palace consistency report) | yes |
+| [#17](https://github.com/noirbizarre/memcastle/issues/17) | Add `JobKind::Repair` (narrow, dry-run-first) | yes |
+| [#18](https://github.com/noirbizarre/memcastle/issues/18) | Introduce a mining source-adapter seam (refactor only, no new sources) | yes |
+| [#19](https://github.com/noirbizarre/memcastle/issues/19) | Scaffold `integrations/` and `skills/` directories | yes |
+| [#20](https://github.com/noirbizarre/memcastle/issues/20) | Update `docs/architecture.md` and add ADRs for Phase 1 decisions | yes |
+| [#44](https://github.com/noirbizarre/memcastle/issues/44) | Versioned database schema and data migrations (SurrealKit-backed schema sync) | yes |
+| [#47](https://github.com/noirbizarre/memcastle/issues/47) | Use SurrealKV as the only embedded storage backend | yes |
 
 **Key design corrections captured in these issues** (see the epic and each
 issue for full reasoning):
 
 - `pi-palace` routes every MemPalace write through its daemon's job queue to
   dodge a multi-process file-lock race. MemCastle already has one process, one
-  writer (`AppServices` invariant #4) — that specific race doesn't exist here.
+  writer (AGENTS.md invariant #4) — that specific race doesn't exist here.
   Checkpoint is a job for durability/priority/restart-survival, not lock
   avoidance; diary stays a direct, fast `AppServices` call (#12, #13).
 - MemCastle's single-SurrealDB design is explicitly meant to avoid needing a

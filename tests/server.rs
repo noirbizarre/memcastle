@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::TestDaemon;
+use common::{TestDaemon, get_job, wait_for_job_status};
 use memcastle::domain::{Job, JobId, JobStatus};
 
 #[tokio::test]
@@ -111,34 +111,133 @@ async fn a_failed_job_can_be_retried_over_http() {
     daemon.shutdown().await;
 }
 
-async fn get_job(client: &reqwest::Client, base_url: &str, id: JobId) -> Job {
-    client
-        .get(format!("{base_url}/api/jobs/{id}"))
+/// GET `path`, returning the status and the JSON body — for asserting on
+/// the error contract (status class, diagnostic code, help), not just success.
+async fn get_error(base_url: &str, path: &str) -> (reqwest::StatusCode, serde_json::Value) {
+    let response = reqwest::Client::new()
+        .get(format!("{base_url}{path}"))
+        .send()
+        .await
+        .expect("request");
+    let status = response.status();
+    (status, response.json().await.expect("json error body"))
+}
+
+#[tokio::test]
+async fn a_malformed_job_id_is_a_400_with_its_own_diagnostic_code() {
+    let daemon = TestDaemon::start().await;
+
+    let (status, body) = get_error(&daemon.base_url, "/api/jobs/not-a-uuid").await;
+
+    assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "memcastle::jobs::invalid_id");
+    assert!(
+        body["help"].is_string(),
+        "an error body must say what to do: {body}"
+    );
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_well_formed_id_no_job_has_is_a_404_not_found() {
+    let daemon = TestDaemon::start().await;
+
+    let (status, body) = get_error(&daemon.base_url, &format!("/api/jobs/{}", JobId::new())).await;
+
+    assert_eq!(status, reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(body["code"], "memcastle::jobs::not_found");
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn an_unknown_status_filter_is_a_400_invalid_input() {
+    let daemon = TestDaemon::start().await;
+
+    let (status, body) = get_error(&daemon.base_url, "/api/jobs?status=bogus").await;
+
+    assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "memcastle::input::invalid");
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn pausing_a_finished_job_is_a_400_invalid_transition_not_a_404() {
+    let daemon = TestDaemon::start().await;
+    let client = reqwest::Client::new();
+    let submitted: Job = client
+        .post(format!("{}/api/jobs", daemon.base_url))
+        .json(&serde_json::json!({ "type": "demo", "steps": 1, "requested_by": "test" }))
         .send()
         .await
         .expect("request")
         .json()
         .await
-        .expect("json")
+        .expect("json");
+    wait_for_job_status(
+        &client,
+        &daemon.base_url,
+        submitted.id,
+        JobStatus::Completed,
+    )
+    .await;
+
+    let response = client
+        .post(format!(
+            "{}/api/jobs/{}/pause",
+            daemon.base_url, submitted.id
+        ))
+        .send()
+        .await
+        .expect("request");
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = response.json().await.expect("json");
+    assert_eq!(body["code"], "memcastle::jobs::invalid_transition");
+    daemon.shutdown().await;
 }
 
-/// Poll rather than sleep a fixed duration, matching the convention used
-/// throughout `tests/concurrency.rs` — a fixed sleep only holds up on a
-/// fast, idle machine.
-async fn wait_for_job_status(
-    client: &reqwest::Client,
-    base_url: &str,
-    id: JobId,
-    status: JobStatus,
-) -> Job {
-    for _ in 0..300 {
-        let job = get_job(client, base_url, id).await;
-        if job.status == status {
-            return job;
+#[tokio::test]
+async fn the_client_reports_what_the_daemon_said_instead_of_blaming_the_connection() {
+    let daemon = TestDaemon::start().await;
+    let bind = daemon
+        .base_url
+        .trim_start_matches("http://")
+        .parse()
+        .unwrap();
+    let client = memcastle::client::DaemonClient::discover(&daemon.palace_path, bind);
+
+    let missing = client.get_job(JobId::new()).await.unwrap_err();
+
+    match &missing {
+        memcastle::Error::Remote {
+            status, message, ..
+        } => {
+            assert_eq!(*status, 404);
+            assert!(
+                !message.contains("job job"),
+                "the message must not be re-wrapped as if it were an id: {message}"
+            );
         }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        other => panic!("expected the daemon's rejection, got {other:?}"),
     }
-    panic!("job {id} did not reach {status:?} within 30s");
+    let rendered = missing.to_string();
+    assert!(rendered.contains("not found"), "{rendered}");
+    assert!(
+        !rendered.contains("not found not found"),
+        "message must not be doubled: {rendered}"
+    );
+
+    // A pause on a finished job must come back as the daemon's 400, with the
+    // daemon's own advice attached — not as "is the daemon running?".
+    let job = client.demo(1).await.expect("submit");
+    let http = reqwest::Client::new();
+    wait_for_job_status(&http, &daemon.base_url, job.id, JobStatus::Completed).await;
+    let error = client.pause_job(job.id).await.unwrap_err();
+    assert!(
+        matches!(&error, memcastle::Error::Remote { status: 400, .. }),
+        "{error:?}"
+    );
+    daemon.shutdown().await;
 }
 
 /// Unlike [`wait_for_job_status`], checks `attempt` and `status` in the

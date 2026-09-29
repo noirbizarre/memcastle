@@ -8,10 +8,11 @@
 //! orchestrates versus what `store` merely persists.
 //!
 //! Locking is a compare-and-swap over one row rather than SurrealDB's own
-//! transaction/locking primitives, for the same reason `claim_next_job`
-//! (`store::jobs`) doesn't use one either: it needs to work identically
+//! transaction/locking primitives, because it needs to work identically
 //! against the embedded and a future remote backend, and a CAS over a plain
-//! row is the smallest surface that does. Two distinct `WHERE` shapes are
+//! row is the smallest surface that does. (`claim_next_job` in `store::jobs`
+//! takes no database-level lock either, but for a different reason: its
+//! safety comes from the single sequential dispatcher.) Two distinct `WHERE` shapes are
 //! used depending on whether the lock currently looks free or held-but-
 //! stale: comparing a *bound* parameter against an absent (`NONE`) field
 //! silently never matches (binding `Option::None` produces SurrealDB's

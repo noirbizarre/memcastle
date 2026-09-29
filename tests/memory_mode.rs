@@ -282,3 +282,85 @@ async fn a_missing_mode_header_defaults_to_full() {
 
     daemon.shutdown().await;
 }
+
+#[tokio::test]
+async fn a_disabled_client_cannot_read_checkpointed_content_through_the_job_endpoints() {
+    let daemon = TestDaemon::start().await;
+    let client = reqwest::Client::new();
+
+    let submitted: memcastle::domain::Job = client
+        .post(format!("{}/api/jobs", daemon.base_url))
+        .json(&checkpoint_body("content only a full session may see"))
+        .send()
+        .await
+        .expect("request")
+        .json()
+        .await
+        .expect("json");
+
+    let list = client
+        .get(format!("{}/api/jobs", daemon.base_url))
+        .header(HEADER, "disabled")
+        .send()
+        .await
+        .expect("request");
+    assert_eq!(list.status(), StatusCode::FORBIDDEN);
+    let body = list.text().await.expect("body");
+    assert!(
+        !body.contains("only a full session"),
+        "the rejection must not echo palace content: {body}"
+    );
+
+    let show = client
+        .get(format!("{}/api/jobs/{}", daemon.base_url, submitted.id))
+        .header(HEADER, "disabled")
+        .send()
+        .await
+        .expect("request");
+    assert_eq!(show.status(), StatusCode::FORBIDDEN);
+
+    // The same job stays visible to a read-only client, which may already
+    // read that content through search.
+    let read_only = client
+        .get(format!("{}/api/jobs/{}", daemon.base_url, submitted.id))
+        .header(HEADER, "read_only")
+        .send()
+        .await
+        .expect("request");
+    assert_eq!(read_only.status(), StatusCode::OK);
+
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_read_only_client_cannot_mine_or_apply_a_repair_but_can_dry_run_one() {
+    let daemon = TestDaemon::start().await;
+    let client = reqwest::Client::new();
+    let submit = |body: serde_json::Value| {
+        client
+            .post(format!("{}/api/jobs", daemon.base_url))
+            .header(HEADER, "read_only")
+            .json(&body)
+            .send()
+    };
+
+    let mine =
+        submit(serde_json::json!({ "type": "mine", "path": "/tmp", "requested_by": "test" }))
+            .await
+            .expect("request");
+    assert_eq!(mine.status(), StatusCode::FORBIDDEN);
+
+    let apply =
+        submit(serde_json::json!({ "type": "repair", "dry_run": false, "requested_by": "test" }))
+            .await
+            .expect("request");
+    assert_eq!(apply.status(), StatusCode::FORBIDDEN);
+
+    let dry_run =
+        submit(serde_json::json!({ "type": "repair", "dry_run": true, "requested_by": "test" }))
+            .await
+            .expect("request");
+    assert_eq!(dry_run.status(), StatusCode::OK);
+
+    daemon.shutdown().await;
+}

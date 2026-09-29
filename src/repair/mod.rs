@@ -35,6 +35,12 @@
 //! that was created after that audit ran is correctly never touched, no
 //! matter what the (by then stale) report said.
 //!
+//! A cancel request is honoured before each delete of an applied repair
+//! (the codebase's only destructive loop); a pause request is not honoured
+//! at all — see `crate::audit`'s note that these handlers run to completion
+//! — so `POST /api/jobs/{id}/pause` on an audit or repair only *requests*
+//! a pause, which such a job ignores.
+//!
 //! Like `crate::audit`, this handler does not chunk its work with a
 //! per-unit checkpoint — see that module's doc comment for why a palace
 //! scan (plus, here, a handful of deletes) doesn't need resumable partial
@@ -111,20 +117,19 @@ pub async fn run(
         orphans.retain(|orphan| audited_ids.contains(&orphan.drawer_id));
     }
 
-    let mut actions = Vec::with_capacity(orphans.len());
-    for orphan in orphans {
-        if !dry_run {
-            store.delete_drawer(orphan.drawer_id).await?;
-        }
-        actions.push(RepairAction::RemoveOrphanDrawer(orphan));
-    }
+    let (actions, cancelled) = plan_or_apply(store, ctx, orphans, dry_run).await?;
 
     job.progress = JobProgress {
         current: 1,
         total: Some(1),
         message: Some(format!(
-            "{}: {} orphan drawer(s)",
+            "{}{}: {} orphan drawer(s)",
             if dry_run { "planned" } else { "applied" },
+            if cancelled {
+                " before cancellation"
+            } else {
+                ""
+            },
             actions.len()
         )),
     };
@@ -139,7 +144,41 @@ pub async fn run(
         generated_at: Utc::now(),
     })?);
 
-    Ok(JobOutcome::Completed)
+    // The report above is kept even when cancelled: deletions are
+    // irreversible, so what was already removed must stay on record.
+    Ok(if cancelled {
+        JobOutcome::Cancelled
+    } else {
+        JobOutcome::Completed
+    })
+}
+
+/// Plan (dry run) or apply the removal of each orphan, returning the actions
+/// taken and whether a cancel stopped the loop early.
+///
+/// The cancel check sits before *each* delete, not just at the top of
+/// [`run`]: this is the one destructive loop in the codebase, and a cancel a
+/// user sends mid-repair must stop further deletions rather than be honoured
+/// only after the last one. Pause is deliberately not honoured — a
+/// half-applied repair has no checkpoint worth resuming from, since the next
+/// run recomputes the live orphan set.
+async fn plan_or_apply(
+    store: &SurrealStore,
+    ctx: &JobContext,
+    orphans: Vec<crate::audit::OrphanDrawer>,
+    dry_run: bool,
+) -> Result<(Vec<RepairAction>, bool)> {
+    let mut actions = Vec::with_capacity(orphans.len());
+    for orphan in orphans {
+        if !dry_run {
+            if ctx.is_cancelled() {
+                return Ok((actions, true));
+            }
+            store.delete_drawer(orphan.drawer_id).await?;
+        }
+        actions.push(RepairAction::RemoveOrphanDrawer(orphan));
+    }
+    Ok((actions, false))
 }
 
 /// Load the drawer ids a prior audit job flagged as orphans.
@@ -237,6 +276,47 @@ mod tests {
         };
         store.create_drawer(&drawer).await.expect("create drawer");
         (drawer_id, orphan_room)
+    }
+
+    #[tokio::test]
+    async fn a_cancel_stops_an_applied_repair_before_it_deletes_anything_further() {
+        let store = memory_store().await;
+        let (first, _) = create_orphan_drawer(&store).await;
+        let (second, _) = create_orphan_drawer(&store).await;
+        let orphans = crate::audit::find_orphan_drawers(&store).await.unwrap();
+        assert_eq!(orphans.len(), 2);
+
+        let control = JobControl::default();
+        control.request_cancel();
+        let job = repair_job(false, None);
+        let ctx = ctx_for(&store, &job, control);
+
+        let (actions, cancelled) = plan_or_apply(&store, &ctx, orphans, false).await.unwrap();
+
+        assert!(cancelled, "the loop must report that it was cut short");
+        assert!(
+            actions.is_empty(),
+            "nothing may be reported as done that was not"
+        );
+        assert!(store.drawer_exists(first).await.unwrap());
+        assert!(store.drawer_exists(second).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_cancel_does_not_stop_a_dry_run_from_finishing_its_plan() {
+        // A dry run deletes nothing, so there is nothing for a cancel to
+        // protect and the plan is complete and cheap.
+        let store = memory_store().await;
+        create_orphan_drawer(&store).await;
+        let orphans = crate::audit::find_orphan_drawers(&store).await.unwrap();
+        let control = JobControl::default();
+        control.request_cancel();
+        let ctx = ctx_for(&store, &repair_job(true, None), control);
+
+        let (actions, cancelled) = plan_or_apply(&store, &ctx, orphans, true).await.unwrap();
+
+        assert!(!cancelled);
+        assert_eq!(actions.len(), 1);
     }
 
     #[tokio::test]

@@ -73,7 +73,7 @@ struct SearchParams {
 }
 
 fn default_search_limit() -> u32 {
-    10
+    crate::app::DEFAULT_SEARCH_LIMIT
 }
 
 async fn search(
@@ -132,11 +132,7 @@ async fn wake_up(
     Query(params): Query<WakeUpParams>,
     ModeHeader(mode): ModeHeader,
 ) -> Result<impl IntoResponse, ApiError> {
-    let default_budget = WakeUpBudget::default();
-    let budget = WakeUpBudget {
-        max_items: params.max_items.unwrap_or(default_budget.max_items),
-        max_bytes: params.max_bytes.unwrap_or(default_budget.max_bytes),
-    };
+    let budget = WakeUpBudget::from_options(params.max_items, params.max_bytes);
     Ok(Json(
         state
             .app
@@ -177,7 +173,7 @@ struct DiaryReadParams {
 }
 
 fn default_diary_limit() -> u32 {
-    20
+    crate::app::DEFAULT_DIARY_LIMIT
 }
 
 async fn diary_read(
@@ -200,10 +196,11 @@ struct ListJobsParams {
 
 async fn list_jobs(
     State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
     Query(params): Query<ListJobsParams>,
 ) -> Result<impl IntoResponse, ApiError> {
     let status = params.status.map(|s| parse_status(&s)).transpose()?;
-    Ok(Json(state.app.list_jobs(status).await?))
+    Ok(Json(state.app.list_jobs(status, mode).await?))
 }
 
 #[derive(Debug, Deserialize)]
@@ -232,9 +229,11 @@ async fn submit_job(
     let job = match body.kind {
         JobKind::Mine { source, wing } => {
             let MiningSource::Directory { path } = source;
-            // Not gated by `mode` — mining is not in this issue's scope
-            // (see `MemoryMode`'s doc comment on daemon vs memory ops).
-            state.app.submit_mine(path, wing, body.requested_by).await?
+            // Gated as a write inside `submit_mine`: mining files drawers.
+            state
+                .app
+                .submit_mine(path, wing, body.requested_by, mode)
+                .await?
         }
         JobKind::Demo { steps } => state.app.submit_demo(steps, body.requested_by).await?,
         JobKind::Checkpoint { payload } => {
@@ -259,11 +258,11 @@ async fn submit_job(
             dry_run,
             based_on_job,
         } => {
-            // Not gated by `mode` — same reasoning as `Audit` above (see
-            // `AppServices::submit_repair`'s doc comment).
+            // A dry run is ungated like `Audit`; an applied repair is gated
+            // as a write inside `submit_repair` (see its doc comment).
             state
                 .app
-                .submit_repair(dry_run, based_on_job, body.requested_by)
+                .submit_repair(dry_run, based_on_job, body.requested_by, mode)
                 .await?
         }
     };
@@ -272,10 +271,11 @@ async fn submit_job(
 
 async fn get_job(
     State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
     let id = parse_job_id(&id)?;
-    match state.app.get_job(id).await? {
+    match state.app.get_job(id, mode).await? {
         Some(job) => Ok(Json(job)),
         None => Err(ApiError::from(crate::Error::JobNotFound {
             id: id.to_string(),
@@ -287,7 +287,10 @@ async fn pause_job(
     State(state): State<ApiState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    state.app.pause_job(parse_job_id(&id)?)?;
+    state.app.pause_job(parse_job_id(&id)?).await?;
+    // "requested", not "paused": pausing is cooperative, and audit/repair
+    // never check for it (see `repair`'s module doc), so the job may simply
+    // run to completion.
     Ok(Json(serde_json::json!({ "status": "pause_requested" })))
 }
 
@@ -321,14 +324,14 @@ async fn shutdown_now(State(state): State<ApiState>) -> impl IntoResponse {
 }
 
 fn parse_job_id(raw: &str) -> Result<JobId, ApiError> {
-    JobId::from_str(raw).map_err(|_| {
-        ApiError::from(crate::Error::JobNotFound {
-            id: raw.to_string(),
-        })
-    })
+    JobId::from_str(raw).map_err(|_| ApiError::from(crate::Error::invalid_job_id(raw)))
 }
 
 fn parse_status(raw: &str) -> Result<JobStatus, ApiError> {
-    serde_json::from_value(serde_json::Value::String(raw.to_string()))
-        .map_err(|_| ApiError::from(crate::Error::config(format!("unknown job status `{raw}`"))))
+    serde_json::from_value(serde_json::Value::String(raw.to_string())).map_err(|_| {
+        ApiError::from(crate::Error::invalid_input(
+            "status",
+            format!("unknown job status `{raw}`"),
+        ))
+    })
 }

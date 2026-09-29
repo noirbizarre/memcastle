@@ -3,8 +3,8 @@
 //! One connection type (`Surreal<Any>`, via `engine::any`) for both embedded
 //! and remote deployments — the rest of the codebase never branches on which
 //! backend is active. Repository methods live in the sibling modules
-//! (`wings`, `drawers`, `jobs`, `entities`) as `impl SurrealStore` blocks;
-//! this file only owns connecting and schema sync.
+//! (`wings`, `drawers`, `jobs`, `entities`, `migration_state`) as `impl SurrealStore`
+//! blocks; this file only owns connecting and schema sync.
 //!
 //! Every write and read goes through hand-written SurrealQL with explicit
 //! `<datetime>`/`<string>` casts rather than the SDK's typed `create`/
@@ -102,9 +102,9 @@ pub enum Backend {
         namespace: String,
         /// The database to select after connecting.
         database: String,
-        /// Root (or namespace/database) username.
+        /// Root username (`connect` always signs in as root).
         username: String,
-        /// Root (or namespace/database) password.
+        /// Root password.
         password: String,
     },
 }
@@ -122,7 +122,8 @@ impl Backend {
     }
 }
 
-/// A connected, migrated handle to one palace's storage.
+/// A connected handle to one palace's storage. Connecting does not migrate —
+/// see [`SurrealStore::connect`].
 #[derive(Clone)]
 pub struct SurrealStore {
     db: Surreal<Any>,
@@ -808,11 +809,11 @@ mod tests {
     async fn creating_an_entity_twice_with_the_same_name_and_kind_is_idempotent() {
         let store = memory_store().await;
         let first = store
-            .create_entity("Ada Lovelace", "person", serde_json::json!({}))
+            .get_or_create_entity("Ada Lovelace", "person", serde_json::json!({}))
             .await
             .expect("create");
         let second = store
-            .create_entity("Ada Lovelace", "person", serde_json::json!({}))
+            .get_or_create_entity("Ada Lovelace", "person", serde_json::json!({}))
             .await
             .expect("get-or-create");
         assert_eq!(first.id, second.id);
@@ -822,11 +823,11 @@ mod tests {
     async fn entity_kind_is_normalized_so_casing_does_not_fragment_the_graph() {
         let store = memory_store().await;
         let first = store
-            .create_entity("Ada Lovelace", "Person", serde_json::json!({}))
+            .get_or_create_entity("Ada Lovelace", "Person", serde_json::json!({}))
             .await
             .expect("create");
         let second = store
-            .create_entity("Ada Lovelace", "person", serde_json::json!({}))
+            .get_or_create_entity("Ada Lovelace", "person", serde_json::json!({}))
             .await
             .expect("get-or-create despite different casing");
         assert_eq!(first.id, second.id);
@@ -837,17 +838,17 @@ mod tests {
     async fn an_empty_kind_or_predicate_is_rejected() {
         let store = memory_store().await;
         let entity_err = store
-            .create_entity("Ada Lovelace", "   ", serde_json::json!({}))
+            .get_or_create_entity("Ada Lovelace", "   ", serde_json::json!({}))
             .await
             .expect_err("blank kind must be rejected");
         assert!(matches!(entity_err, crate::error::Error::EmptyLabel { .. }));
 
         let alice = store
-            .create_entity("Alice", "person", serde_json::json!({}))
+            .get_or_create_entity("Alice", "person", serde_json::json!({}))
             .await
             .expect("alice");
         let bob = store
-            .create_entity("Bob", "person", serde_json::json!({}))
+            .get_or_create_entity("Bob", "person", serde_json::json!({}))
             .await
             .expect("bob");
         let relationship_err = store
@@ -864,11 +865,11 @@ mod tests {
     async fn superseding_a_relationship_closes_the_old_edge_and_leaves_history_queryable() {
         let store = memory_store().await;
         let alice = store
-            .create_entity("Alice", "person", serde_json::json!({}))
+            .get_or_create_entity("Alice", "person", serde_json::json!({}))
             .await
             .expect("alice");
         let acme = store
-            .create_entity("Acme", "organization", serde_json::json!({}))
+            .get_or_create_entity("Acme", "organization", serde_json::json!({}))
             .await
             .expect("acme");
 
@@ -926,11 +927,11 @@ mod tests {
     async fn invalidating_a_relationship_sets_valid_to_without_creating_a_replacement() {
         let store = memory_store().await;
         let alice = store
-            .create_entity("Alice", "person", serde_json::json!({}))
+            .get_or_create_entity("Alice", "person", serde_json::json!({}))
             .await
             .expect("alice");
         let acme = store
-            .create_entity("Acme", "organization", serde_json::json!({}))
+            .get_or_create_entity("Acme", "organization", serde_json::json!({}))
             .await
             .expect("acme");
         let relationship = store

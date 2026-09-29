@@ -6,7 +6,6 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::error::{Error, Result};
 
@@ -35,16 +34,7 @@ pub struct RuntimeInfo {
 pub fn registry_path(palace_path: &Path) -> PathBuf {
     let canonical =
         std::fs::canonicalize(palace_path).unwrap_or_else(|_| palace_path.to_path_buf());
-    let mut hasher = Sha256::new();
-    hasher.update(canonical.display().to_string().as_bytes());
-    // `finalize()` returns a fixed-size byte array, not something that
-    // implements `LowerHex` directly — encode by hand rather than pull in a
-    // dependency just for this.
-    let digest: String = hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
+    let digest = crate::domain::sha256_hex(canonical.display().to_string().as_bytes());
     let short = &digest[..16];
 
     dirs::home_dir()

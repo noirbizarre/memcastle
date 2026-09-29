@@ -8,6 +8,8 @@ MemCastle is **a long-running memory server, not a CLI process that happens to e
 One daemon serves one palace; `memcastle serve`/`daemon` is the only command that does real work locally —
 every other subcommand (`status`, `search`, `mine`, `jobs ...`) is a thin HTTP client to that daemon,
 so a web dashboard could do everything the CLI does by calling the same API.
+The one exception is `memcastle migrate`, which touches storage directly because it must work before a daemon
+exists (see invariant 1).
 Storage is unified in SurrealDB (embedded SurrealKV for local dev, remote for server deployments) —
 never a second datastore, never a separate vector index file to fall out of sync.
 See `docs/architecture.md` for the full rationale, including what this deliberately does *not* do yet.
@@ -21,16 +23,18 @@ Each of these should be enforced by a hook or a test. An invariant nothing check
    directly. `migrate` is a second, narrow exception alongside `serve`: it connects to storage directly (via
    `crate::migrate::run`/`status`, the same runner `serve` calls on every startup) because migration must work
    without, and before, a daemon exists — see `docs/adr/004-versioned-database-migrations.md`.
-   Enforced by the `prek` architecture-guard hook (grep for `crate::store` outside `store`/`app`/`server`)
-   and by `tests/cli.rs`.
+   Enforced by the `prek` `store-isolation` hook: it greps `main.rs`, `cli.rs`, `client/`, `mcp/` and `api/`
+   for any `crate::`/`memcastle::` `store` or `jobs` import, allowing only `main.rs`'s `SurrealStore` import for `migrate`.
 2. **Job status only changes through `domain::Job::apply`** — no other code assigns `job.status` directly.
    Enforced by `domain::job`'s unit tests (every transition, including the rejected ones).
 3. **The job queue is durable, the scheduler is only the execution mechanism** —
    a job's state survives a daemon restart.
-   Enforced by `jobs::Scheduler::recover` and its exercise in `tests/server.rs`.
+   Enforced by `jobs::Scheduler::recover`, its per-state unit tests in `jobs::tests`,
+   and `tests/persistence.rs` (SIGKILL a daemon mid-job, restart, the job resumes).
 4. **One daemon per palace, one writer** — `store` is only ever constructed by `server::run` or the `migrate`
    CLI command (the same second exception as (1)); nothing else opens the embedded SurrealKV path directly.
-   Enforced by the same architecture-guard hook as (1).
+   Enforced by the prek `single-writer` hook: `SurrealStore::connect` and the `surrealkv:` endpoint
+   may only appear under `server/`, `store/` and in `main.rs`.
 5. **Schema management is SurrealKit's, not MemCastle's** — `database/schema/*.surql` is applied through
    SurrealKit's `Sync`/`embed_schema!()` (`store::mod`), never a hand-rolled schema-diff/versioning engine.
    MemCastle owns only its own application data-migration steps and version watermark
@@ -40,24 +44,28 @@ Each of these should be enforced by a hook or a test. An invariant nothing check
 
 ```text
 src/
-├── main.rs     the memcastle binary: parses Cli, dispatches, nothing else
+├── main.rs     the memcastle binary: parses Cli, dispatches (and hosts `migrate`'s direct storage access)
 ├── cli.rs      argument types only
 ├── lib.rs      module wiring
 ├── error.rs    the crate's error type
 ├── config/     typed configuration (defaults -> file -> env -> validate)
-├── domain/     Palace/Wing/Room/Drawer/Job — pure types, no I/O
-├── store/      SurrealDB connection, schema, and repository methods
-├── jobs/       the scheduler: claiming, dispatch, cooperative pause/cancel
+├── domain/     Palace/Wing/Room/Drawer/Job, checkpoint payloads, entities, memory modes — pure types, no I/O
+├── store/      SurrealDB connection and repository methods (schema is applied from `database/schema/`)
+├── migrate/    versioned data migrations and the version watermark, run before serving
+├── jobs/       the scheduler: claiming, dispatch, cooperative pause/cancel, crash recovery
 ├── mining/     the mining job handler
+├── checkpoint/ the checkpoint job handler (durable, resumable memory writes)
+├── audit/      the audit job handler (read-only consistency report)
+├── repair/     the repair job handler (narrow, dry-run-first fixes)
 ├── search/     the search abstraction (lexical today; semantic later)
 ├── app/        application services — the one layer cli/mcp/api call into
 ├── server/     the daemon composition root + lifecycle (registry file)
 ├── mcp/        MCP tool surface, over HTTP
-├── api/        the REST API (health/status/jobs/search)
+├── api/        the REST API (health/status/jobs/search/recall/wake-up/diary/shutdown)
 └── client/     the CLI's HTTP client for a running daemon
 ```
 
-Dependencies point inward: `cli / mcp / api -> app -> domain (+ store/jobs/search traits) -> store`.
+Dependencies point inward: `cli / mcp / api -> app -> domain + store/jobs/search -> store`.
 Nothing in `domain` knows SurrealDB exists; nothing in `cli`/`mcp`/`api` knows `store` exists.
 
 ## Style

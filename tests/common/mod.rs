@@ -4,13 +4,16 @@
 //!
 //! Used unevenly across integration test binaries (each `tests/*.rs` file
 //! compiles this module separately), so unused-item warnings here are
-//! expected and silenced rather than a signal of dead code.
+//! expected and silenced rather than a signal of dead code. Helpers that
+//! several binaries need (`get_job`, `wait_for_job_status`) live here once
+//! rather than being copied into each.
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use memcastle::config::Config;
+use memcastle::domain::{Job, JobId, JobStatus};
 use memcastle::server::lifecycle::RuntimeInfo;
 use tempfile::TempDir;
 use tokio::task::JoinHandle;
@@ -92,4 +95,34 @@ pub async fn wait_for_registry(palace_path: &Path) -> RuntimeInfo {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("daemon did not start within 60s");
+}
+
+/// Fetch one job over the daemon's REST API.
+pub async fn get_job(client: &reqwest::Client, base_url: &str, id: JobId) -> Job {
+    client
+        .get(format!("{base_url}/api/jobs/{id}"))
+        .send()
+        .await
+        .expect("request")
+        .json()
+        .await
+        .expect("json")
+}
+
+/// Poll until job `id` reaches `status`, rather than sleeping a fixed
+/// duration — a fixed sleep only holds up on a fast, idle machine.
+pub async fn wait_for_job_status(
+    client: &reqwest::Client,
+    base_url: &str,
+    id: JobId,
+    status: JobStatus,
+) -> Job {
+    for _ in 0..300 {
+        let job = get_job(client, base_url, id).await;
+        if job.status == status {
+            return job;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("job {id} did not reach {status:?} within 30s");
 }

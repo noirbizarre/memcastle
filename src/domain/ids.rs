@@ -25,6 +25,33 @@ macro_rules! define_id {
             pub fn new() -> Self {
                 Self(Uuid::new_v4())
             }
+
+            /// Derive the same identifier every time from `seed` and
+            /// `name`, instead of generating a random one.
+            ///
+            /// For writes a job may replay after a crash: the first attempt
+            /// may have stored the record but died before checkpointing, and
+            /// a random id on the replay would store it a second time. With
+            /// an id derived from (job, item index), the replay names the
+            /// record it already wrote and can recognise it as done.
+            ///
+            /// SHA-256 over `seed || name`, truncated, with the UUID
+            /// version/variant bits set so it round-trips through
+            /// `Uuid::parse_str` like any other id. (Not RFC 4122's SHA-1
+            /// v5 — nothing outside this process needs to reproduce it.)
+            #[must_use]
+            pub fn derive(seed: Uuid, name: &str) -> Self {
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(seed.as_bytes());
+                hasher.update(name.as_bytes());
+                let digest = hasher.finalize();
+                let mut bytes = [0u8; 16];
+                bytes.copy_from_slice(&digest[..16]);
+                bytes[6] = (bytes[6] & 0x0f) | 0x50;
+                bytes[8] = (bytes[8] & 0x3f) | 0x80;
+                Self(Uuid::from_bytes(bytes))
+            }
         }
 
         impl Default for $name {
@@ -97,3 +124,37 @@ define_id!(
     /// Identifies a [`Relationship`](super::Relationship).
     RelationshipId
 );
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_derived_id_is_the_same_every_time_for_the_same_inputs() {
+        let seed = Uuid::new_v4();
+        assert_eq!(
+            DrawerId::derive(seed, "item:3"),
+            DrawerId::derive(seed, "item:3")
+        );
+    }
+
+    #[test]
+    fn derived_ids_differ_by_seed_and_by_name() {
+        let seed = Uuid::new_v4();
+        assert_ne!(
+            DrawerId::derive(seed, "item:3"),
+            DrawerId::derive(seed, "item:4")
+        );
+        assert_ne!(
+            DrawerId::derive(seed, "item:3"),
+            DrawerId::derive(Uuid::new_v4(), "item:3")
+        );
+    }
+
+    #[test]
+    fn a_derived_id_survives_the_string_round_trip_every_store_write_relies_on() {
+        let id = DrawerId::derive(Uuid::new_v4(), "item:0");
+        assert_eq!(id.to_string().parse::<DrawerId>().unwrap(), id);
+        assert_eq!(id.0.get_version_num(), 5);
+    }
+}

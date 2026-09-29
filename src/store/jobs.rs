@@ -91,7 +91,7 @@ impl SurrealStore {
     }
 
     /// Every job left `Running` from a previous, uncleanly stopped daemon —
-    /// crash-recovery's starting point. See `jobs::scheduler::recover`.
+    /// crash-recovery's starting point. See `jobs::Scheduler::recover`.
     pub async fn list_running_jobs(&self) -> Result<Vec<Job>> {
         self.list_jobs(Some(JobStatus::Running)).await
     }

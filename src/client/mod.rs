@@ -14,8 +14,8 @@ use serde_json::json;
 use crate::app::{StatusReport, WakeUpBudget, WakeUpContext};
 use crate::domain::{CheckpointPayload, Drawer, Job, JobId, JobStatus};
 use crate::error::{Error, Result};
+use crate::search::SearchHit;
 use crate::server::lifecycle;
-use crate::store::SearchHit;
 
 /// A client for one running daemon, discovered via the registry file for
 /// `palace_path` (falling back to the configured bind address if no live
@@ -51,16 +51,20 @@ impl DaemonClient {
         })?;
         if !response.status().is_success() {
             let status = response.status();
+            // A body that isn't our JSON (an old daemon, a proxy in the way)
+            // degrades to the bare status line rather than failing to parse.
             let body: serde_json::Value = response.json().await.unwrap_or_default();
-            let message = body
-                .get("error")
-                .and_then(serde_json::Value::as_str)
-                .map_or_else(|| status.to_string(), str::to_string);
-            return if status == reqwest::StatusCode::NOT_FOUND {
-                Err(Error::JobNotFound { id: message })
-            } else {
-                Err(Error::client(message))
+            let text = |key: &str| {
+                body.get(key)
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
             };
+            return Err(Error::remote(
+                status.as_u16(),
+                text("code").as_deref(),
+                text("error").unwrap_or_else(|| status.to_string()),
+                text("help"),
+            ));
         }
         response.json().await.map_err(Error::from)
     }

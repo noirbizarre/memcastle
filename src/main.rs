@@ -62,9 +62,23 @@ async fn async_main() -> ExitCode {
     let args = Cli::parse();
     let verbose = args.verbose > 0 || std::env::var_os("RUST_BACKTRACE").is_some();
     install_miette_hook(verbose);
-    init_tracing();
 
-    match run(args).await {
+    // Config is loaded before tracing so `logging.level` can drive the
+    // filter. A config that fails to load still gets a working logger (at
+    // the default level) — the failure itself is reported through miette
+    // below, not tracing, so nothing is lost by initializing second.
+    let config = Config::load(args.config.as_deref());
+    init_tracing(
+        config
+            .as_ref()
+            .map_or_else(|_| "info".to_string(), Config::log_filter),
+    );
+
+    let outcome = match config {
+        Ok(config) => run(args, config).await,
+        Err(error) => Err(error),
+    };
+    match outcome {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{:?}", miette::Report::new(error));
@@ -73,9 +87,7 @@ async fn async_main() -> ExitCode {
     }
 }
 
-async fn run(args: Cli) -> Result<()> {
-    let mut config = Config::load(args.config.as_deref())?;
-
+async fn run(args: Cli, mut config: Config) -> Result<()> {
     match args.command {
         Command::Serve(serve_args) => {
             if let Some(bind) = serve_args.bind {
@@ -96,11 +108,10 @@ async fn run(args: Cli) -> Result<()> {
         Command::Repair(args) => cmd_repair(&config, args).await,
         Command::Diary(cmd) => cmd_diary(&config, cmd).await,
         Command::Jobs(jobs) => cmd_jobs(&config, jobs).await,
-        Command::Wings | Command::Rooms | Command::Drawers | Command::Maintenance => {
-            Err(Error::config(
-                "not implemented in this bootstrap — the architecture reserves this command, see docs/architecture.md",
-            ))
-        }
+        Command::Wings => Err(Error::not_implemented("memcastle wings")),
+        Command::Rooms => Err(Error::not_implemented("memcastle rooms")),
+        Command::Drawers => Err(Error::not_implemented("memcastle drawers")),
+        Command::Maintenance => Err(Error::not_implemented("memcastle maintenance")),
     }
 }
 
@@ -133,11 +144,10 @@ async fn cmd_migrate(config: &Config, args: MigrateArgs) -> Result<()> {
         let status = memcastle::migrate::status(&store).await?;
         print_json(&status);
         if args.check && !status.pending.is_empty() {
-            return Err(Error::config(format!(
-                "{} migration(s) pending: {:?}",
-                status.pending.len(),
-                status.pending
-            )));
+            return Err(Error::MigrationsPending {
+                count: status.pending.len(),
+                versions: format!("{:?}", status.pending),
+            });
         }
         return Ok(());
     }
@@ -198,11 +208,7 @@ async fn cmd_recall(config: &Config, args: RecallArgs) -> Result<()> {
 }
 
 async fn cmd_wake_up(config: &Config, args: WakeUpArgs) -> Result<()> {
-    let default_budget = WakeUpBudget::default();
-    let budget = WakeUpBudget {
-        max_items: args.max_items.unwrap_or(default_budget.max_items),
-        max_bytes: args.max_bytes.unwrap_or(default_budget.max_bytes),
-    };
+    let budget = WakeUpBudget::from_options(args.max_items, args.max_bytes);
     let context = client(config)
         .wake_up(&args.agent_identity, args.wing.as_deref(), budget)
         .await?;
@@ -237,7 +243,7 @@ async fn cmd_checkpoint(config: &Config, args: CheckpointArgs) -> Result<()> {
     // payload should fail fast with a clear local error, not round-trip to
     // the API just to bounce back as a generic 400.
     let payload: memcastle::domain::CheckpointPayload = serde_json::from_str(&raw)
-        .map_err(|source| Error::config(format!("invalid checkpoint payload: {source}")))?;
+        .map_err(|source| Error::invalid_input("checkpoint payload", source.to_string()))?;
     let job = client(config).checkpoint(payload, args.emergency).await?;
     print_json(&job);
     Ok(())
@@ -320,14 +326,12 @@ async fn cmd_jobs(config: &Config, command: JobsCommand) -> Result<()> {
 }
 
 fn parse_job_id(raw: &str) -> Result<JobId> {
-    JobId::from_str(raw).map_err(|_| Error::JobNotFound {
-        id: raw.to_string(),
-    })
+    JobId::from_str(raw).map_err(|_| Error::invalid_job_id(raw))
 }
 
 fn parse_status(raw: &str) -> Result<memcastle::domain::JobStatus> {
     serde_json::from_value(serde_json::Value::String(raw.to_string()))
-        .map_err(|_| Error::config(format!("unknown job status `{raw}`")))
+        .map_err(|_| Error::invalid_input("status", format!("unknown job status `{raw}`")))
 }
 
 /// Install miette's diagnostic handler.
@@ -349,13 +353,9 @@ fn install_miette_hook(verbose: bool) {
     }));
 }
 
-/// Structured logging, level from `MEMCASTLE_LOG`/`RUST_LOG`, defaulting to
-/// `info`. Set up before config loading so a config-load failure is itself
-/// logged consistently with everything after it.
-fn init_tracing() {
-    let filter = std::env::var("MEMCASTLE_LOG")
-        .or_else(|_| std::env::var("RUST_LOG"))
-        .unwrap_or_else(|_| "info".to_string());
+/// Structured logging with `filter` as the `EnvFilter` directive — see
+/// `Config::log_filter` for where it comes from and its precedence.
+fn init_tracing(filter: String) {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
         .with_writer(std::io::stderr)

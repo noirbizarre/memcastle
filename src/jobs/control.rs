@@ -2,9 +2,9 @@
 //! handler.
 //!
 //! Deliberately not "kill the task": a handler only stops between discrete
-//! units of work, of its own accord, after checkpointing — see the
-//! `jobs` module doc and `domain::job`'s doc comment on why pause is
-//! cooperative rather than a process kill.
+//! units of work, of its own accord, after checkpointing — see
+//! `docs/architecture.md` ("Pause and cancel are cooperative") for why pause
+//! is cooperative rather than a process kill.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,6 +23,12 @@ use crate::store::SurrealStore;
 pub struct JobControl {
     cancel: CancellationToken,
     pause_requested: Arc<AtomicBool>,
+    /// Set only when the *scheduler* (daemon shutdown) asked for the pause,
+    /// as opposed to a user. Kept apart from `pause_requested` because the
+    /// two must end differently: a user's pause leaves the job `Paused`
+    /// until they resume it, while a shutdown's pause must put the job
+    /// straight back in the queue so the next daemon picks it up unasked.
+    interrupted: Arc<AtomicBool>,
 }
 
 impl JobControl {
@@ -34,6 +40,22 @@ impl JobControl {
     /// Ask the handler to stop at its next opportunity.
     pub fn request_cancel(&self) {
         self.cancel.cancel();
+    }
+
+    /// Ask the handler to stop at its next unit of work because the daemon
+    /// is shutting down. Handlers see this as an ordinary pause request; the
+    /// scheduler then re-queues the job instead of leaving it `Paused`.
+    /// A pause a user already requested wins — they asked for it to stay
+    /// paused, and a restart must not silently un-pause it.
+    pub(crate) fn request_interrupt(&self) {
+        if !self.pause_requested.swap(true, Ordering::Relaxed) {
+            self.interrupted.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Whether the pause this control carries came from a daemon shutdown.
+    pub(crate) fn was_interrupted(&self) -> bool {
+        self.interrupted.load(Ordering::Relaxed)
     }
 }
 
@@ -91,5 +113,34 @@ impl JobContext {
         job.progress = progress;
         job.checkpoint = checkpoint;
         self.store.save_job(job).await
+    }
+
+    /// Checkpoint an index-based handler (mining, checkpoint): record that
+    /// `index` of `total` units are done, with `{"next_index": index}` as the
+    /// resume state and `"{verb} {index}/{total} {unit}"` as the progress
+    /// line.
+    ///
+    /// Shared so every handler that walks a list agrees on the resume key —
+    /// a handler that spelled it differently would silently restart from
+    /// zero when resumed by the shared logic.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the store write fails.
+    pub async fn checkpoint_at(
+        &self,
+        job: &mut Job,
+        index: usize,
+        total: usize,
+        verb: &str,
+        unit: &str,
+    ) -> Result<()> {
+        let progress = JobProgress {
+            current: index as u32,
+            total: Some(total as u32),
+            message: Some(format!("{verb} {index}/{total} {unit}")),
+        };
+        self.checkpoint(job, progress, serde_json::json!({ "next_index": index }))
+            .await
     }
 }

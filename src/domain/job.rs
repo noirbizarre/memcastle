@@ -34,7 +34,7 @@ pub enum JobStatus {
 /// Where a mining job reads its source material from — the seam Phase 5
 /// slots a non-filesystem reader (e.g. a Pi/OpenCode session-transcript
 /// reader) behind. `JobKind::Mine`'s shape (`source`, `wing`) never changes
-/// when a variant is added here, so neither `jobs::execute`'s dispatch nor
+/// when a variant is added here, so neither `Scheduler::execute`'s dispatch nor
 /// the wire format's `"type": "mine"` tag needs to change either — adding a
 /// source kind means adding a variant here and a matching arm in
 /// `mining::run`, nothing more.
@@ -106,10 +106,12 @@ pub enum JobKind {
     /// issue that requested it (a second "fail stuck jobs" action turned
     /// out to be redundant with `jobs::Scheduler::recover`).
     Repair {
-        /// When `true` (the default at every CLI/API entry point), only
-        /// record what would be done in the report — never mutate
+        /// When `true` (the default at every entry point — a submission that
+        /// omits it deserializes as a dry run, never as a destructive one),
+        /// only record what would be done in the report — never mutate
         /// anything. `false` performs exactly the actions a prior dry run
         /// would have reported, no more.
+        #[serde(default = "default_dry_run")]
         dry_run: bool,
         /// Restrict actions to what a specific prior [`JobKind::Audit`]
         /// job found, rather than a fresh palace-wide scan alone. Only
@@ -118,6 +120,12 @@ pub enum JobKind {
         /// never trusts a stored report on its own.
         based_on_job: Option<JobId>,
     },
+}
+
+/// A repair that says nothing about `dry_run` must fail safe: destructive
+/// only when the caller asked for it explicitly.
+fn default_dry_run() -> bool {
+    true
 }
 
 /// A snapshot of how far along a job is.
@@ -148,7 +156,7 @@ pub enum JobEvent {
     Complete,
     /// The handler hit an unrecoverable error.
     Fail,
-    /// A caller (or crash recovery) is withdrawing the job.
+    /// A caller is withdrawing the job.
     Cancel,
     /// A caller has asked for a `Failed` job to run again. Distinct from
     /// `Resume` even though both land on `Queued`: `Retry` additionally
@@ -247,7 +255,7 @@ pub struct Job {
     pub started_at: Option<DateTime<Utc>>,
     /// When it reached a terminal status.
     pub completed_at: Option<DateTime<Utc>>,
-    /// Who asked for this (`"cli"`, `"mcp:<client>"`, `"http"`).
+    /// Which interface submitted this (`"cli"`, `"mcp"`, `"http"`).
     pub requested_by: String,
     /// How far along it is.
     pub progress: JobProgress,
@@ -265,8 +273,7 @@ pub struct Job {
     /// itself — carries here.
     pub checkpoint: Value,
     /// The final output of a job whose whole point is to produce a report —
-    /// currently only [`JobKind::Audit`] (and, per that issue's design
-    /// decision, the future `Repair`). Deliberately a separate field from
+    /// [`JobKind::Audit`] and [`JobKind::Repair`]. Deliberately a separate field from
     /// [`Self::checkpoint`], not a reuse of it: `checkpoint` is documented
     /// as handler-defined *resume* state, and stuffing a final report in
     /// there would be exactly the "abuse of a field's stated purpose" this
@@ -275,9 +282,14 @@ pub struct Job {
     pub result: Option<Value>,
     /// The terminal error, when `status == Failed`.
     pub error: Option<String>,
-    /// The scheduler instance currently holding this job, if `Running`.
+    /// The scheduler instance currently holding this job — `Some` only
+    /// while `Running`; [`Job::apply`] clears it on every transition out of
+    /// `Running`, so a paused, finished or crash-recovered job never claims
+    /// an owner that no longer holds it.
     pub lease_owner: Option<String>,
-    /// When the current lease is considered stale (crash-recovery threshold).
+    /// When the current lease would be considered stale. Reserved: nothing
+    /// populates it yet, because crash recovery runs once at startup rather
+    /// than by lease expiry. Cleared together with `lease_owner`.
     pub lease_expires_at: Option<DateTime<Utc>>,
 }
 
@@ -348,6 +360,13 @@ impl Job {
         if next == Running {
             self.started_at.get_or_insert(now);
         }
+        if self.status == Running && next != Running {
+            // Leaving `Running` ends the lease. Done here, not by each
+            // caller, for the same reason `completed_at` is: a caller that
+            // forgot would leave a finished job naming a worker as its owner.
+            self.lease_owner = None;
+            self.lease_expires_at = None;
+        }
         if matches!(next, Completed | Failed | Cancelled) {
             self.completed_at = Some(now);
         }
@@ -358,6 +377,9 @@ impl Job {
             // same reason `completed_at` is set here rather than by every
             // caller of `Complete`/`Fail`/`Cancel`: one place to get right.
             self.error = None;
+            // Likewise `completed_at`: a re-queued job is not complete, and
+            // a stale timestamp would make it look finished-and-running.
+            self.completed_at = None;
         }
         self.status = next;
         Ok(())
@@ -436,6 +458,89 @@ mod tests {
     }
 
     #[test]
+    fn crash_recovery_is_rejected_from_every_status_but_running() {
+        // Only a `Running` job can have been interrupted by a crash;
+        // re-queuing anything else would resurrect finished work or
+        // silently un-pause a job the user paused.
+        let terminal_or_idle: [fn(&mut Job); 5] = [
+            |_| {},
+            |job| {
+                job.apply(JobEvent::Claim).unwrap();
+                job.apply(JobEvent::Pause).unwrap();
+            },
+            |job| {
+                job.apply(JobEvent::Claim).unwrap();
+                job.apply(JobEvent::Complete).unwrap();
+            },
+            |job| {
+                job.apply(JobEvent::Claim).unwrap();
+                job.apply(JobEvent::Fail).unwrap();
+            },
+            |job| job.apply(JobEvent::Cancel).unwrap(),
+        ];
+        for seed in terminal_or_idle {
+            let mut job = demo_job();
+            seed(&mut job);
+            let before = job.status;
+            assert!(job.apply(JobEvent::RecoverToQueued).is_err());
+            assert_eq!(
+                job.status, before,
+                "a rejected transition must not mutate state"
+            );
+        }
+    }
+
+    #[test]
+    fn every_transition_out_of_running_releases_the_lease() {
+        for event in [
+            JobEvent::Pause,
+            JobEvent::Complete,
+            JobEvent::Fail,
+            JobEvent::Cancel,
+            JobEvent::RecoverToQueued,
+        ] {
+            let mut job = demo_job();
+            job.apply(JobEvent::Claim).unwrap();
+            job.lease_owner = Some("worker-1".to_string());
+            job.lease_expires_at = Some(Utc::now());
+
+            job.apply(event).unwrap();
+
+            assert_eq!(
+                job.lease_owner, None,
+                "{event:?} must release the lease owner"
+            );
+            assert_eq!(
+                job.lease_expires_at, None,
+                "{event:?} must clear the lease expiry"
+            );
+        }
+    }
+
+    #[test]
+    fn a_rejected_transition_leaves_the_lease_alone() {
+        let mut job = demo_job();
+        job.apply(JobEvent::Claim).unwrap();
+        job.lease_owner = Some("worker-1".to_string());
+
+        assert!(job.apply(JobEvent::Retry).is_err());
+
+        assert_eq!(job.lease_owner.as_deref(), Some("worker-1"));
+    }
+
+    #[test]
+    fn retrying_a_failed_job_clears_its_completion_time() {
+        let mut job = demo_job();
+        job.apply(JobEvent::Claim).unwrap();
+        job.apply(JobEvent::Fail).unwrap();
+        assert!(job.completed_at.is_some());
+
+        job.apply(JobEvent::Retry).unwrap();
+
+        assert_eq!(job.completed_at, None, "a re-queued job is not complete");
+    }
+
+    #[test]
     fn a_failed_job_can_be_retried_to_queued() {
         let mut job = demo_job();
         job.apply(JobEvent::Claim).unwrap();
@@ -483,6 +588,30 @@ mod tests {
         let err = job.apply(JobEvent::Retry).unwrap_err();
         assert_eq!(err.from, JobStatus::Completed);
         assert_eq!(job.status, JobStatus::Completed);
+    }
+
+    #[test]
+    fn a_repair_submission_that_omits_dry_run_is_a_dry_run() {
+        let kind: JobKind =
+            serde_json::from_value(serde_json::json!({ "type": "repair" })).unwrap();
+        assert!(
+            matches!(
+                kind,
+                JobKind::Repair {
+                    dry_run: true,
+                    based_on_job: None
+                }
+            ),
+            "an omitted dry_run must never mean a destructive run: {kind:?}"
+        );
+    }
+
+    #[test]
+    fn an_explicit_dry_run_false_is_honoured() {
+        let kind: JobKind =
+            serde_json::from_value(serde_json::json!({ "type": "repair", "dry_run": false }))
+                .unwrap();
+        assert!(matches!(kind, JobKind::Repair { dry_run: false, .. }));
     }
 
     #[test]

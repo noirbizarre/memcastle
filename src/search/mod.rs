@@ -10,7 +10,12 @@
 //! `app` or the interfaces above it changing shape.
 
 use crate::error::Result;
-use crate::store::{SearchHit, SurrealStore};
+use crate::store::SurrealStore;
+
+// Re-exported so the interface layers (notably `client`, which only needs
+// the wire type) can name a search result without importing `crate::store`
+// — which AGENTS.md invariant #1 and the `store-isolation` hook forbid them.
+pub use crate::store::SearchHit;
 
 /// Search drawer content lexically, returning at most `limit` hits ordered
 /// by BM25 relevance, optionally scoped to one wing and/or room by name.

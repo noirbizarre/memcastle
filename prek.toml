@@ -104,14 +104,30 @@ pass_filenames = false
 #   files = "\\.rs$"
 #   pass_filenames = false
 
-# AGENTS.md invariant #1: the CLI, MCP, and HTTP layers reach storage only
-# through `app::AppServices` — never `crate::store` directly — so any
-# interface (or a future one, like a web dashboard) can only ever do what
-# that struct exposes.
+# AGENTS.md invariant #1: the CLI, MCP, HTTP, and client layers reach storage
+# and the scheduler only through `app::AppServices` (or, for the CLI, the
+# daemon over HTTP) — never `store` or `jobs` directly — so any interface
+# (or a future one, like a web dashboard) can only ever do what that struct
+# exposes. `src/main.rs` is included, minus its one documented exception:
+# `memcastle migrate` connects to storage itself (ADR-004). The pattern also
+# catches grouped imports (`use crate::{store::..}`), not just `crate::store`.
 [[repos.hooks]]
 id = "store-isolation"
-name = "cli/mcp/api reach storage only through app::AppServices"
+name = "cli/mcp/api/client/main reach storage only through app::AppServices"
 language = "system"
-entry = "bash -c '! grep -nP \"(?<![A-Za-z0-9_])crate::store\" src/cli.rs src/mcp/*.rs src/api/*.rs 2>/dev/null'"
-files = "^src/(cli\\.rs|mcp/|api/)"
+entry = '''bash -c '! grep -rnP --include=*.rs "(?<![A-Za-z0-9_])(crate|memcastle)::(\{[^}]*)?(store|jobs)\b" src/main.rs src/cli.rs src/client src/mcp src/api | grep -vP "^src/main\.rs:\d+:use memcastle::store::SurrealStore;$"' '''
+files = '^src/(main\.rs|cli\.rs|client/|mcp/|api/)'
+pass_filenames = false
+
+# AGENTS.md invariant #4: one daemon per palace, one writer — a store is only
+# ever constructed by `server::run` or the `migrate` command in `main.rs`
+# (the same documented exception as invariant #1). Nothing else may open the
+# embedded SurrealKV path, since a second opener would either fail on the
+# file lock or, on the remote backend, become a second writer.
+[[repos.hooks]]
+id = "single-writer"
+name = "only server::run and `migrate` construct a SurrealStore"
+language = "system"
+entry = '''bash -c '! grep -rnP --include=*.rs "SurrealStore::connect\(|surrealkv:" src | grep -vP "^src/(server/|store/|main\.rs:)" | grep -vP "^\S+:\d+:\s*//"' '''
+files = '^src/.*\.rs$'
 pass_filenames = false

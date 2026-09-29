@@ -10,8 +10,8 @@
 //!
 //! - Schema: declarative `.surql` files under `database/schema/`, embedded
 //!   into the binary and applied through SurrealKit's `Sync` (see
-//!   `store::mod`'s `SurrealStore::sync_schema`) — synced as the last step
-//!   of [`run`], never gated by the version watermark below, since
+//!   `store::mod`'s `SurrealStore::sync_schema`) — synced both first (so the
+//!   bookkeeping table exists before the lock is taken) and last in [`run`], never gated by the version watermark below, since
 //!   SurrealKit's own content-hash tracking already makes re-applying an
 //!   unchanged file a no-op. MemCastle does not reimplement that diffing.
 //! - Data migrations ([`DataMigration`]): versioned Rust steps for a
@@ -97,9 +97,10 @@ pub struct MigrationStatus {
     pub pending: Vec<String>,
 }
 
-/// Bring `store` up to the latest known data-migration version: acquire
-/// the exclusive migration lock, apply every pending step in order,
-/// re-synchronize the declarative schema, then release the lock. The same
+/// Bring `store` up to the latest known data-migration version: sync the
+/// declarative schema (so the lock table exists), acquire the exclusive
+/// migration lock, apply every pending step in order, re-synchronize the
+/// schema, then release the lock. The same
 /// function `server::run` calls on every daemon startup and `memcastle
 /// migrate` calls directly — there is exactly one runner.
 ///

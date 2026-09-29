@@ -5,8 +5,8 @@
 
 mod common;
 
-use common::TestDaemon;
-use memcastle::domain::{Job, JobId, JobStatus};
+use common::{TestDaemon, wait_for_job_status};
+use memcastle::domain::{Job, JobStatus};
 
 #[tokio::test]
 async fn a_fresh_palaces_audit_completes_with_a_zero_finding_result() {
@@ -45,35 +45,4 @@ async fn a_fresh_palaces_audit_completes_with_a_zero_finding_result() {
     assert_eq!(result["total_drawers_in_scope"], 0);
 
     daemon.shutdown().await;
-}
-
-async fn get_job(client: &reqwest::Client, base_url: &str, id: JobId) -> Job {
-    client
-        .get(format!("{base_url}/api/jobs/{id}"))
-        .send()
-        .await
-        .expect("request")
-        .json()
-        .await
-        .expect("json")
-}
-
-/// Poll rather than sleep a fixed duration — same convention as
-/// `tests/server.rs`'s identical helper (each integration test binary
-/// keeps its own copy; see `tests/common/mod.rs`'s module doc on why that
-/// duplication is accepted here).
-async fn wait_for_job_status(
-    client: &reqwest::Client,
-    base_url: &str,
-    id: JobId,
-    status: JobStatus,
-) -> Job {
-    for _ in 0..300 {
-        let job = get_job(client, base_url, id).await;
-        if job.status == status {
-            return job;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    panic!("job {id} did not reach {status:?} within 30s");
 }

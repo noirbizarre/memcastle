@@ -21,7 +21,7 @@ const HEADER_NAME: &str = "x-memcastle-mode";
 
 /// The effective [`MemoryMode`] for one HTTP request — `Full` when the
 /// header is absent entirely (existing clients that don't send it must see
-/// today's unrestricted behavior unchanged), a 400 [`Error::Config`] when
+/// today's unrestricted behavior unchanged), a 400 [`Error::InvalidInput`] when
 /// present but not one of `full`/`read_only`/`disabled`.
 ///
 /// Deliberately never silently downgrades an unparsable value to `Full`:
@@ -40,14 +40,19 @@ where
         let Some(value) = parts.headers.get(HEADER_NAME) else {
             return Ok(Self(MemoryMode::Full));
         };
-        let raw = value.to_str().map_err(|_| {
-            ApiError::from(Error::config(format!("{HEADER_NAME} header must be ASCII")))
-        })?;
+        let raw = value
+            .to_str()
+            .map_err(|_| ApiError::from(Error::invalid_input(HEADER_NAME, "must be ASCII")))?;
         // Reuses the exact "parse a snake_case wire string through the
         // type's own Deserialize" trick `api::parse_status` already uses
         // for `JobStatus` — no bespoke parsing logic for a second enum.
-        let mode = serde_json::from_value(serde_json::Value::String(raw.to_string()))
-            .map_err(|_| ApiError::from(Error::config(format!("unknown memory mode `{raw}`"))))?;
+        let mode =
+            serde_json::from_value(serde_json::Value::String(raw.to_string())).map_err(|_| {
+                ApiError::from(Error::invalid_input(
+                    HEADER_NAME,
+                    format!("unknown memory mode `{raw}` (expected full, read_only or disabled)"),
+                ))
+            })?;
         Ok(Self(mode))
     }
 }
@@ -58,9 +63,9 @@ mod tests {
     use axum::body::Body;
     use axum::http::Request;
 
-    /// `ApiError` has no `Debug` impl (it wraps `crate::Error`, which isn't
-    /// one either) — extract the mode with an explicit `match` rather than
-    /// `.expect()`/`.unwrap()`, which both require `E: Debug`.
+    /// `ApiError` has no `Debug` impl — extract the mode with an explicit
+    /// `match` rather than `.expect()`/`.unwrap()`, which both require
+    /// `E: Debug`.
     async fn extract_ok(request: Request<Body>) -> MemoryMode {
         let (mut parts, _body) = request.into_parts();
         match ModeHeader::from_request_parts(&mut parts, &()).await {

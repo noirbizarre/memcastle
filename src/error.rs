@@ -19,7 +19,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     /// Reading or writing a file failed.
     #[error("failed to access `{path}`")]
-    #[diagnostic(code(memcastle::error::io))]
+    #[diagnostic(
+        code(memcastle::error::io),
+        help("check that the path exists and that this user may read and write it")
+    )]
     Io {
         /// The path that could not be accessed.
         path: String,
@@ -39,9 +42,69 @@ pub enum Error {
         message: String,
     },
 
+    /// A caller-supplied value (a CLI argument, request parameter or header)
+    /// was not one this operation accepts. Distinct from [`Error::Config`],
+    /// whose help points at the config file — the fix here is the input.
+    #[error("invalid {field}: {message}")]
+    #[diagnostic(
+        code(memcastle::input::invalid),
+        help("fix the value and retry; `memcastle --help` lists what each argument accepts")
+    )]
+    InvalidInput {
+        /// Which argument, parameter or header was rejected.
+        field: String,
+        /// What was wrong with it.
+        message: String,
+    },
+
+    /// A job id that isn't shaped like one, as opposed to a well-formed id
+    /// no job has ([`Error::JobNotFound`]).
+    #[error("`{raw}` is not a job id")]
+    #[diagnostic(
+        code(memcastle::jobs::invalid_id),
+        help("job ids are UUIDs, as printed by `memcastle jobs list`")
+    )]
+    InvalidJobId {
+        /// What was given.
+        raw: String,
+    },
+
+    /// The command exists so the architecture has a place for it, but
+    /// nothing implements it yet.
+    #[error("`{feature}` is not implemented yet")]
+    #[diagnostic(
+        code(memcastle::cli::not_implemented),
+        help("this command is reserved by the architecture; see docs/architecture.md")
+    )]
+    NotImplemented {
+        /// The unimplemented command or feature.
+        feature: String,
+    },
+
+    /// `memcastle migrate --check` found migrations that have not been
+    /// applied.
+    #[error("{count} migration(s) pending: {versions}")]
+    #[diagnostic(
+        code(memcastle::migrate::pending),
+        help(
+            "run `memcastle migrate` (or start the daemon, which applies them) to bring the palace up to date"
+        )
+    )]
+    MigrationsPending {
+        /// How many migrations are pending.
+        count: usize,
+        /// The pending versions, for display.
+        versions: String,
+    },
+
     /// A SurrealDB operation failed.
     #[error("storage backend error")]
-    #[diagnostic(code(memcastle::store::backend))]
+    #[diagnostic(
+        code(memcastle::store::backend),
+        help(
+            "for an embedded palace, check that no other memcastle process holds it (`memcastle status`); for a remote one, check its URL and credentials"
+        )
+    )]
     Store {
         /// The underlying driver error.
         #[source]
@@ -50,7 +113,12 @@ pub enum Error {
 
     /// A row read back from the store didn't shape the way we expected.
     #[error("storage returned malformed data: {message}")]
-    #[diagnostic(code(memcastle::store::malformed))]
+    #[diagnostic(
+        code(memcastle::store::malformed),
+        help(
+            "the palace may have been written by a different memcastle version; run `memcastle migrate --status`, and `memcastle audit` to look for damage"
+        )
+    )]
     StoreMalformed {
         /// What was malformed.
         message: String,
@@ -102,7 +170,10 @@ pub enum Error {
 
     /// No job exists with the given id.
     #[error("job {id} not found")]
-    #[diagnostic(code(memcastle::jobs::not_found))]
+    #[diagnostic(
+        code(memcastle::jobs::not_found),
+        help("list the jobs this daemon knows about with `memcastle jobs list`")
+    )]
     JobNotFound {
         /// The id that was looked up.
         id: String,
@@ -135,6 +206,25 @@ pub enum Error {
         message: String,
     },
 
+    /// The daemon answered, but with an error. Carries what the daemon said —
+    /// its diagnostic code, message and help — so the CLI shows the real
+    /// cause instead of collapsing every rejection into "is the daemon
+    /// running?", which is plainly false when it just replied.
+    #[error("the daemon rejected the request ({status}{code}): {message}")]
+    #[diagnostic(code(memcastle::client::remote))]
+    Remote {
+        /// The HTTP status the daemon answered with.
+        status: u16,
+        /// The daemon's own diagnostic code, formatted as `, <code>` (empty
+        /// when the response carried none), ready to splice into the message.
+        code: String,
+        /// The daemon's error message.
+        message: String,
+        /// The daemon's own advice, if it gave any.
+        #[help]
+        help: Option<String>,
+    },
+
     /// No daemon is reachable for this palace.
     #[error("no running memcastle daemon found for this palace")]
     #[diagnostic(
@@ -145,7 +235,12 @@ pub enum Error {
 
     /// The HTTP server failed to bind or serve.
     #[error("server error: {message}")]
-    #[diagnostic(code(memcastle::server::failure))]
+    #[diagnostic(
+        code(memcastle::server::failure),
+        help(
+            "check that the bind address is free, or pick another with `--bind` or MEMCASTLE_BIND"
+        )
+    )]
     Server {
         /// What went wrong.
         message: String,
@@ -216,6 +311,41 @@ impl Error {
     pub fn config(message: impl Into<String>) -> Self {
         Self::Config {
             message: message.into(),
+        }
+    }
+
+    /// Build an [`Error::InvalidInput`].
+    pub fn invalid_input(field: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::InvalidInput {
+            field: field.into(),
+            message: message.into(),
+        }
+    }
+
+    /// Build an [`Error::InvalidJobId`].
+    pub fn invalid_job_id(raw: impl Into<String>) -> Self {
+        Self::InvalidJobId { raw: raw.into() }
+    }
+
+    /// Build an [`Error::NotImplemented`].
+    pub fn not_implemented(feature: impl Into<String>) -> Self {
+        Self::NotImplemented {
+            feature: feature.into(),
+        }
+    }
+
+    /// Build an [`Error::Remote`] from a daemon's error response.
+    pub fn remote(
+        status: u16,
+        code: Option<&str>,
+        message: impl Into<String>,
+        help: Option<String>,
+    ) -> Self {
+        Self::Remote {
+            status,
+            code: code.map(|code| format!(", {code}")).unwrap_or_default(),
+            message: message.into(),
+            help,
         }
     }
 
@@ -297,5 +427,56 @@ impl From<toml::de::Error> for Error {
         Self::Config {
             message: source.to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use miette::Diagnostic;
+
+    use super::*;
+
+    /// AGENTS.md: a diagnostic must say what to do. Every variant a user can
+    /// realistically hit without a wrapped source error to explain it needs
+    /// a `help`, and a code in the `memcastle::` namespace.
+    #[test]
+    fn user_facing_errors_carry_a_help_line_and_a_memcastle_code() {
+        let errors = [
+            Error::invalid_input("status", "unknown"),
+            Error::invalid_job_id("nope"),
+            Error::not_implemented("memcastle wings"),
+            Error::MigrationsPending {
+                count: 1,
+                versions: "[2]".to_string(),
+            },
+            Error::JobNotFound {
+                id: "x".to_string(),
+            },
+            Error::server("boom"),
+            Error::store_malformed("bad row"),
+            Error::io("/nowhere", std::io::Error::other("denied")),
+        ];
+        for error in errors {
+            let code = error.code().map(|c| c.to_string()).unwrap_or_default();
+            assert!(
+                code.starts_with("memcastle::"),
+                "bad code on {error:?}: {code}"
+            );
+            assert!(error.help().is_some(), "{code} has no help line");
+        }
+    }
+
+    #[test]
+    fn invalid_input_and_config_errors_point_the_user_at_different_fixes() {
+        let input = Error::invalid_input("status", "unknown")
+            .help()
+            .unwrap()
+            .to_string();
+        let config = Error::config("bad").help().unwrap().to_string();
+        assert!(
+            !input.contains("config file"),
+            "input help must not blame the config: {input}"
+        );
+        assert!(config.contains("config file"));
     }
 }

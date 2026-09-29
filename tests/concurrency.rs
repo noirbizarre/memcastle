@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::TestDaemon;
+use common::{TestDaemon, get_job, wait_for_job_status};
 use futures::future::join_all;
 
 #[tokio::test]
@@ -255,35 +255,4 @@ async fn a_disabled_clients_mode_does_not_affect_another_clients_in_flight_job()
     );
 
     daemon.shutdown().await;
-}
-
-async fn get_job(
-    client: &reqwest::Client,
-    base_url: &str,
-    id: memcastle::domain::JobId,
-) -> memcastle::domain::Job {
-    client
-        .get(format!("{base_url}/api/jobs/{id}"))
-        .send()
-        .await
-        .expect("request")
-        .json()
-        .await
-        .expect("json")
-}
-
-async fn wait_for_job_status(
-    client: &reqwest::Client,
-    base_url: &str,
-    id: memcastle::domain::JobId,
-    status: memcastle::domain::JobStatus,
-) -> memcastle::domain::Job {
-    for _ in 0..300 {
-        let job = get_job(client, base_url, id).await;
-        if job.status == status {
-            return job;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    panic!("job {id} did not reach {status:?} within 30s");
 }

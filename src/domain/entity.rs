@@ -1,10 +1,11 @@
 //! Temporal knowledge-graph types.
 //!
 //! Schema-ready and, as of `store::entities`, schema-wired: the SurrealDB
-//! tables and graph edge these map to exist from the first migration (see
-//! `store::migrations`), and `store::entities` reads and writes them. What
-//! is still missing is a populator — no mining or MCP code creates these
-//! yet (that's #40's deliberate future work, not an oversight).
+//! tables and graph edge these map to are defined in
+//! `database/schema/palace.surql`, and `store::entities` reads and writes
+//! them. The only populator today is a checkpoint item's optional `fact`
+//! mutation (`checkpoint::apply_fact_mutation`); mining does not extract
+//! entities yet (that's #40's deliberate future work, not an oversight).
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

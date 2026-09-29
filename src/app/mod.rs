@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::domain::{
     CheckpointPayload, Drawer, DrawerId, Job, JobId, JobKind, JobStatus, MemoryMode, MiningSource,
@@ -62,6 +61,30 @@ pub struct WakeUpBudget {
     /// Maximum total content bytes across `recent_highlights` (not
     /// counting `diary`).
     pub max_bytes: usize,
+}
+
+/// How many hits `search`/`recall` return when the caller does not say. One
+/// value for every interface: the CLI, REST and MCP each used to carry their
+/// own copy of `10`, and a change to one would have made the same query
+/// return different amounts depending on how it was asked.
+pub const DEFAULT_SEARCH_LIMIT: u32 = 10;
+
+/// How many entries `diary_read` returns when the caller does not say —
+/// shared by every interface for the same reason as [`DEFAULT_SEARCH_LIMIT`].
+pub const DEFAULT_DIARY_LIMIT: u32 = 20;
+
+impl WakeUpBudget {
+    /// A budget from optional caller-supplied limits, each falling back to
+    /// [`WakeUpBudget::default`]'s value when omitted. The one place that
+    /// merge is written, instead of once per interface.
+    #[must_use]
+    pub fn from_options(max_items: Option<usize>, max_bytes: Option<usize>) -> Self {
+        let default = Self::default();
+        Self {
+            max_items: max_items.unwrap_or(default.max_items),
+            max_bytes: max_bytes.unwrap_or(default.max_bytes),
+        }
+    }
 }
 
 impl Default for WakeUpBudget {
@@ -190,15 +213,22 @@ impl AppServices {
     /// Mining is background work: it always runs at [`Priority::Background`]
     /// so it never delays checkpoint/audit/repair jobs.
     ///
+    /// Gated as a **write**: the job's whole purpose is to file drawers, so
+    /// letting a `ReadOnly` session submit it would mutate the palace
+    /// through the back door, and a `Disabled` one must not touch it at all.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the job cannot be persisted.
+    /// Returns an error if the job cannot be persisted, or
+    /// [`Error::ModeForbidden`] if `mode` doesn't permit writes.
     pub async fn submit_mine(
         &self,
         path: PathBuf,
         wing: Option<String>,
         requested_by: impl Into<String>,
+        mode: MemoryMode,
     ) -> Result<Job> {
+        Self::require_write(mode, "mine")?;
         self.scheduler
             .submit(
                 JobKind::Mine {
@@ -307,19 +337,26 @@ impl AppServices {
     /// named in that issue was dropped as redundant with
     /// `jobs::Scheduler::recover`.
     ///
-    /// Runs at [`Priority::Normal`], same as `submit_audit`. **Not** gated
-    /// by [`MemoryMode`] — administrative, same reasoning as
-    /// `submit_audit`.
+    /// Runs at [`Priority::Normal`], same as `submit_audit`. A **dry run** is
+    /// not gated by [`MemoryMode`] — it only reports, exactly like audit.
+    /// An applied repair (`dry_run == false`) deletes drawers, so it is
+    /// gated as a **write**.
     ///
     /// # Errors
     ///
-    /// Returns an error if the job cannot be persisted.
+    /// Returns an error if the job cannot be persisted, or
+    /// [`Error::ModeForbidden`] if this is an applied repair and `mode`
+    /// doesn't permit writes.
     pub async fn submit_repair(
         &self,
         dry_run: bool,
         based_on_job: Option<JobId>,
         requested_by: impl Into<String>,
+        mode: MemoryMode,
     ) -> Result<Job> {
+        if !dry_run {
+            Self::require_write(mode, "repair")?;
+        }
         self.scheduler
             .submit(
                 JobKind::Repair {
@@ -334,19 +371,30 @@ impl AppServices {
 
     /// List jobs, optionally filtered to one status.
     ///
+    /// Gated as a **read**: a job record carries its whole input, and for a
+    /// checkpoint job that is the memory being written. Leaving this open
+    /// would let a `Disabled` session read palace content through the job
+    /// list, defeating the guarantee that nothing MemCastle-derived reaches
+    /// it.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the store query fails.
-    pub async fn list_jobs(&self, status: Option<JobStatus>) -> Result<Vec<Job>> {
+    /// Returns an error if the store query fails, or
+    /// [`Error::ModeForbidden`] if `mode` doesn't permit reads.
+    pub async fn list_jobs(&self, status: Option<JobStatus>, mode: MemoryMode) -> Result<Vec<Job>> {
+        Self::require_read(mode, "jobs list")?;
         self.store.list_jobs(status).await
     }
 
-    /// Fetch one job by id.
+    /// Fetch one job by id. Gated as a **read** for the same reason as
+    /// [`Self::list_jobs`].
     ///
     /// # Errors
     ///
-    /// Returns an error if the store query fails.
-    pub async fn get_job(&self, id: JobId) -> Result<Option<Job>> {
+    /// Returns an error if the store query fails, or
+    /// [`Error::ModeForbidden`] if `mode` doesn't permit reads.
+    pub async fn get_job(&self, id: JobId, mode: MemoryMode) -> Result<Option<Job>> {
+        Self::require_read(mode, "jobs show")?;
         self.store.get_job(id).await
     }
 
@@ -354,9 +402,10 @@ impl AppServices {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::Error::JobNotFound`] if the job isn't running.
-    pub fn pause_job(&self, id: JobId) -> Result<()> {
-        self.scheduler.request_pause(id)
+    /// Returns [`crate::Error::JobNotFound`] if the job doesn't exist, or
+    /// [`crate::Error::InvalidJobTransition`] if it isn't running.
+    pub async fn pause_job(&self, id: JobId) -> Result<()> {
+        self.scheduler.request_pause(id).await
     }
 
     /// Resume a paused job.
@@ -413,32 +462,21 @@ impl AppServices {
             .get_or_create_room(wing_record.id, "diary", None)
             .await?;
 
-        let now = Utc::now();
-        let mut hasher = Sha256::new();
-        hasher.update(content.as_bytes());
-        let content_hash = hex_encode(&hasher.finalize());
-
-        let drawer = Drawer {
-            id: DrawerId::new(),
-            room: room.id,
+        let drawer = Drawer::new(
+            DrawerId::new(),
+            room.id,
             content,
-            content_hash,
-            source: Source {
+            Source {
                 kind: SourceKind::Manual,
                 uri: None,
                 agent: Some(agent_identity.to_string()),
             },
-            tags: vec![],
-            embedding: None,
-            provenance: Provenance {
+            vec![],
+            Provenance {
                 requested_by: agent_identity.to_string(),
                 job_id: None,
             },
-            valid_from: now,
-            valid_to: None,
-            created_at: now,
-            updated_at: now,
-        };
+        );
         self.store.create_drawer(&drawer).await?;
         Ok(drawer)
     }
@@ -573,12 +611,6 @@ impl AppServices {
             generated_at: Utc::now(),
         })
     }
-}
-
-/// Lowercase hex — see `mining`/`checkpoint`'s identical helper for why this
-/// is a few lines of its own rather than a shared dependency.
-fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[cfg(test)]
@@ -829,6 +861,113 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_wake_up_budget_falls_back_to_the_default_only_for_what_was_omitted() {
+        let default = WakeUpBudget::default();
+
+        let none = WakeUpBudget::from_options(None, None);
+        assert_eq!(
+            (none.max_items, none.max_bytes),
+            (default.max_items, default.max_bytes)
+        );
+
+        let partial = WakeUpBudget::from_options(Some(3), None);
+        assert_eq!(
+            (partial.max_items, partial.max_bytes),
+            (3, default.max_bytes)
+        );
+
+        let full = WakeUpBudget::from_options(Some(3), Some(100));
+        assert_eq!((full.max_items, full.max_bytes), (3, 100));
+    }
+
+    #[tokio::test]
+    async fn a_disabled_session_cannot_read_checkpointed_content_through_the_job_list() {
+        let app = test_app().await;
+        let submitted = app
+            .checkpoint(
+                one_item_payload("a secret preference"),
+                "test",
+                MemoryMode::Full,
+            )
+            .await
+            .expect("full-mode checkpoint");
+
+        // A job record carries its whole payload, so listing or showing it
+        // is a memory read: it must be refused, not merely redacted.
+        assert_mode_forbidden(
+            &app.list_jobs(None, MemoryMode::Disabled).await,
+            MemoryMode::Disabled,
+        );
+        assert_mode_forbidden(
+            &app.get_job(submitted.id, MemoryMode::Disabled).await,
+            MemoryMode::Disabled,
+        );
+    }
+
+    #[tokio::test]
+    async fn a_read_only_session_can_still_list_and_show_jobs() {
+        let app = test_app().await;
+        let submitted = app
+            .checkpoint(one_item_payload("readable"), "test", MemoryMode::Full)
+            .await
+            .expect("full-mode checkpoint");
+
+        // ReadOnly may already read the same content through search/recall,
+        // so blocking job reads for it would protect nothing.
+        assert_eq!(
+            app.list_jobs(None, MemoryMode::ReadOnly)
+                .await
+                .expect("list")
+                .len(),
+            1
+        );
+        assert!(
+            app.get_job(submitted.id, MemoryMode::ReadOnly)
+                .await
+                .expect("get")
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn mining_is_a_write_so_read_only_and_disabled_sessions_cannot_submit_it() {
+        let app = test_app().await;
+        for mode in [MemoryMode::ReadOnly, MemoryMode::Disabled] {
+            let result = app
+                .submit_mine("/tmp/anything".into(), None, "test", mode)
+                .await;
+            assert_mode_forbidden(&result, mode);
+        }
+        assert!(
+            app.list_jobs(None, MemoryMode::Full)
+                .await
+                .expect("list")
+                .is_empty(),
+            "a rejected mine must not leave a job behind"
+        );
+        app.submit_mine("/tmp/anything".into(), None, "test", MemoryMode::Full)
+            .await
+            .expect("full-mode mine is accepted");
+    }
+
+    #[tokio::test]
+    async fn an_applied_repair_is_a_write_but_a_dry_run_is_only_a_report() {
+        let app = test_app().await;
+
+        assert_mode_forbidden(
+            &app.submit_repair(false, None, "test", MemoryMode::ReadOnly)
+                .await,
+            MemoryMode::ReadOnly,
+        );
+        app.submit_repair(true, None, "test", MemoryMode::ReadOnly)
+            .await
+            .expect("a read-only session may ask what a repair would do");
+        app.submit_repair(false, None, "test", MemoryMode::Full)
+            .await
+            .expect("a full-mode session may apply a repair");
+    }
+
     #[tokio::test]
     async fn a_disabled_search_is_rejected_without_a_store_query() {
         let app = test_app().await;
@@ -1012,6 +1151,63 @@ mod tests {
             .emergency_checkpoint(payload, "test", MemoryMode::Disabled)
             .await;
         assert_mode_forbidden(&result, MemoryMode::Disabled);
+    }
+
+    fn one_item_payload(content: &str) -> CheckpointPayload {
+        CheckpointPayload {
+            items: vec![crate::domain::CheckpointItem {
+                destination: crate::domain::CheckpointDestination::General,
+                wing: Some("project-x".to_string()),
+                content: content.to_string(),
+                tags: vec![],
+                source: Source {
+                    kind: SourceKind::Manual,
+                    uri: None,
+                    agent: Some("test-agent".to_string()),
+                },
+                fact: None,
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn a_read_only_emergency_checkpoint_is_rejected_and_queues_nothing() {
+        let app = test_app().await;
+        let result = app
+            .emergency_checkpoint(
+                one_item_payload("never queued"),
+                "test",
+                MemoryMode::ReadOnly,
+            )
+            .await;
+        assert_mode_forbidden(&result, MemoryMode::ReadOnly);
+        assert!(
+            app.list_jobs(None, MemoryMode::Full)
+                .await
+                .expect("list")
+                .is_empty(),
+            "a rejected emergency checkpoint must not leave a job behind"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_full_mode_emergency_checkpoint_is_queued_at_critical_priority() {
+        let app = test_app().await;
+        let job = app
+            .emergency_checkpoint(one_item_payload("save me"), "test", MemoryMode::Full)
+            .await
+            .expect("full-mode emergency checkpoint must be accepted");
+        assert_eq!(job.priority, Priority::Critical);
+    }
+
+    #[tokio::test]
+    async fn a_routine_checkpoint_is_queued_below_critical_priority() {
+        let app = test_app().await;
+        let job = app
+            .checkpoint(one_item_payload("routine"), "test", MemoryMode::Full)
+            .await
+            .expect("full-mode checkpoint must be accepted");
+        assert_eq!(job.priority, Priority::High);
     }
 
     #[tokio::test]

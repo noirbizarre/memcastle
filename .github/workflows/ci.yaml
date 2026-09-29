@@ -21,7 +21,7 @@ env:
   RUST_BACKTRACE: full
 
   # sccache caches individual compiled objects rather than Cargo's target/
-  # dir wholesale, so a Cargo.lock bump doesn't force every crate (RocksDB
+  # dir wholesale, so a Cargo.lock bump doesn't force every crate (SurrealDB
   # included) to recompile from zero the way Swatinem/rust-cache's key does.
   RUSTC_WRAPPER: sccache
   # Required by sccache: incremental compilation writes its own on-disk

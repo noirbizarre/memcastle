@@ -110,7 +110,7 @@ pub struct SearchArgs {
     /// The search query.
     pub query: String,
     /// Maximum number of results.
-    #[arg(long, default_value_t = 10)]
+    #[arg(long, default_value_t = memcastle::app::DEFAULT_SEARCH_LIMIT)]
     pub limit: u32,
     /// Restrict results to drawers filed (transitively) under this wing.
     #[arg(long)]
@@ -126,7 +126,7 @@ pub struct RecallArgs {
     /// The recall query.
     pub query: String,
     /// Maximum number of results.
-    #[arg(long, default_value_t = 10)]
+    #[arg(long, default_value_t = memcastle::app::DEFAULT_SEARCH_LIMIT)]
     pub limit: u32,
     /// Restrict results to drawers filed (transitively) under this wing.
     #[arg(long)]
@@ -232,7 +232,7 @@ pub enum DiaryCommand {
         #[arg(long)]
         wing: String,
         /// Maximum number of entries to return, newest first.
-        #[arg(long, default_value_t = 20)]
+        #[arg(long, default_value_t = memcastle::app::DEFAULT_DIARY_LIMIT)]
         limit: u32,
     },
 }

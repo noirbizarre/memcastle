@@ -13,14 +13,10 @@
 //! dispatches on `domain::MiningSource`, today's only variant
 //! (`Directory`) routing to [`mine_directory`] below. Adding a source kind
 //! means adding a `MiningSource` variant (`domain::job`) and a matching arm
-//! here — `jobs::execute`'s dispatch, which just forwards `JobKind::Mine`'s
+//! here — `Scheduler::execute`'s dispatch, which just forwards `JobKind::Mine`'s
 //! fields through unchanged, never needs to change.
 
 use std::path::{Path, PathBuf};
-
-use chrono::Utc;
-use serde_json::json;
-use sha2::{Digest, Sha256};
 
 use crate::domain::Job;
 use crate::domain::{Drawer, DrawerId, MiningSource, Provenance, Source, SourceKind};
@@ -48,8 +44,10 @@ const SKIP_DIRS: &[&str] = &[
 const MAX_FILE_BYTES: u64 = 256 * 1024;
 
 /// A hard ceiling on how many files one mining job will file, so pointing it
-/// at an enormous tree fails predictably (a job stuck for hours with no
-/// visible progress is worse than one that stops early with a clear count).
+/// at an enormous tree finishes in bounded time (a job stuck for hours with no
+/// visible progress is worse than one that stops early). Files beyond the
+/// ceiling are silently not mined: the progress total is capped at this
+/// value, not the tree's real size.
 const MAX_FILES: usize = 2_000;
 
 /// Mine `source` into `wing`, checking in with `ctx` between units of work
@@ -116,54 +114,38 @@ async fn mine_directory(
             return Ok(JobOutcome::Cancelled);
         }
         if ctx.should_pause() {
-            checkpoint_at(ctx, job, index, files.len()).await?;
+            ctx.checkpoint_at(job, index, files.len(), "mined", "files")
+                .await?;
             return Ok(JobOutcome::Paused);
         }
 
         if let Some(content) = read_mineable(file) {
-            let now = Utc::now();
-            let mut hasher = Sha256::new();
-            hasher.update(content.as_bytes());
-            let content_hash = hex_encode(&hasher.finalize());
-
-            let drawer = Drawer {
-                id: DrawerId::new(),
-                room: room.id,
+            let drawer = Drawer::new(
+                // Derived, not random: a crash between the write below and
+                // the checkpoint at the loop's end makes the resumed attempt
+                // redo this same file, and a fresh id would store it twice.
+                DrawerId::derive(job.id.0, &format!("mine-drawer:{index}")),
+                room.id,
                 content,
-                content_hash,
-                source: Source {
+                Source {
                     kind: SourceKind::File,
                     uri: Some(file.display().to_string()),
                     agent: None,
                 },
-                tags: vec![],
-                embedding: None,
-                provenance: Provenance {
+                vec![],
+                Provenance {
                     requested_by: job.requested_by.clone(),
                     job_id: Some(job.id),
                 },
-                valid_from: now,
-                valid_to: None,
-                created_at: now,
-                updated_at: now,
-            };
-            store.create_drawer(&drawer).await?;
+            );
+            store.create_drawer_once(&drawer).await?;
         }
 
-        checkpoint_at(ctx, job, index + 1, files.len()).await?;
+        ctx.checkpoint_at(job, index + 1, files.len(), "mined", "files")
+            .await?;
     }
 
     Ok(JobOutcome::Completed)
-}
-
-async fn checkpoint_at(ctx: &JobContext, job: &mut Job, index: usize, total: usize) -> Result<()> {
-    let progress = crate::domain::JobProgress {
-        current: index as u32,
-        total: Some(total as u32),
-        message: Some(format!("mined {index}/{total} files")),
-    };
-    ctx.checkpoint(job, progress, json!({ "next_index": index }))
-        .await
 }
 
 /// Recursively collect file paths under `dir`, skipping noisy subtrees and
@@ -199,13 +181,6 @@ fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Lowercase hex, without pulling in a dependency just for this — `sha2`'s
-/// `finalize()` returns a fixed-size byte array, not something that
-/// implements `LowerHex` directly.
-fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
 /// Read `path` as UTF-8 text, or `None` if it's too large, empty, or not
 /// valid UTF-8 — a silent skip rather than a job-ending error, since a mixed
 /// tree of text and binary files is the normal case, not an exceptional one.
@@ -216,4 +191,52 @@ fn read_mineable(path: &Path) -> Option<String> {
     }
     let bytes = std::fs::read(path).ok()?;
     String::from_utf8(bytes).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{JobKind, Priority};
+    use crate::jobs::JobControl;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn replaying_files_whose_checkpoint_was_never_saved_mines_no_duplicates() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(dir.path().join(name), format!("contents of {name}")).unwrap();
+        }
+        let source = MiningSource::Directory {
+            path: dir.path().to_path_buf(),
+        };
+        let mut job = Job::new(
+            JobKind::Mine {
+                source: source.clone(),
+                wing: Some("docs".to_string()),
+            },
+            Priority::Background,
+            "test",
+        );
+        job.apply(crate::domain::JobEvent::Claim).unwrap();
+
+        let ctx = JobContext::new(job.id, JobControl::default(), store.clone());
+        run(&store, &ctx, &mut job, &source, Some("docs"))
+            .await
+            .unwrap();
+
+        // Crash: every drawer was written, but the saved checkpoint predates
+        // them, so the resumed attempt walks the same files again.
+        job.checkpoint = json!({});
+        let ctx = JobContext::new(job.id, JobControl::default(), store.clone());
+        run(&store, &ctx, &mut job, &source, Some("docs"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store.list_all_drawers().await.unwrap().len(),
+            3,
+            "each file must be mined exactly once across the replay"
+        );
+    }
 }

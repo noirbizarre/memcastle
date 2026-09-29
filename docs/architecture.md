@@ -38,14 +38,18 @@ cli / mcp / api          <- interfaces (thin: parse, dispatch, serialize)
 ```
 
 **The CLI has no business logic MCP/HTTP can't reuse.**
-Every subcommand except `serve`/`daemon` is a thin `client::DaemonClient` HTTP call —
+Every subcommand except `serve`/`daemon`/`migrate` is a thin `client::DaemonClient` HTTP call —
 `memcastle mine ./project` submits a job over HTTP
 exactly the way an MCP tool call or a future web dashboard would, rather than mining anything itself.
 `serve`/`daemon` is the one command with real work:
 it *is* the composition root (`server::run`) that owns the store, the scheduler, and the HTTP/MCP listeners.
+`migrate` is a second, narrow exception: it connects to storage directly through `crate::migrate`,
+the same runner `serve` calls on every startup, because migration must work before a daemon exists
+(see `docs/adr/004-versioned-database-migrations.md`).
 
 `app::AppServices` is the one seam every interface (`api`, `mcp`, and `server::run` itself) calls through.
-Nothing under `api`/`mcp`/`cli` reaches into `store` or `jobs` directly — a `prek` hook greps for that.
+Nothing under `api`/`mcp`/`cli`/`client` reaches into `store` or `jobs` directly —
+the `store-isolation` `prek` hook greps for that (and `single-writer` limits who may construct a store).
 
 ## Storage: one SurrealDB, embedded or remote
 
@@ -76,7 +80,7 @@ Two migration shapes, kept deliberately separate, both driven by one `crate::mig
   `database/schema/migration_state.surql`), embedded into the binary via SurrealKit's
   `embed_schema!()` macro and applied through its `Sync` builder
   (`store::mod`'s `SurrealStore::sync_schema`). SurrealKit — not MemCastle — owns diffing,
-  content-hash tracking (in its own `__entity` metadata table), and pruning; MemCastle does not
+  content-hash tracking (in its own `__entity`/`__rollout` metadata tables), and pruning; MemCastle does not
   implement a parallel schema-diff/versioning engine. SurrealKit's `Rollout` API is available for a
   future staged/expand-contract schema change, but nothing shipped yet has needed one.
 - **Data.** An ordered, immutable list of versioned Rust steps (`crate::migrate::DataMigration`) for
@@ -137,7 +141,7 @@ It is *never* a process-wide setting — there is no `MEMCASTLE_ENABLED=false` d
 because the daemon already serves many agents at once;
 disabling memory for one of them must not touch the others' in-flight jobs or reads.
 
-| mode        | read (`search`/`recall`/`wake_up`/`diary_read`) | write (`checkpoint`/`emergency_checkpoint`/`diary_write`) |
+| mode        | read (`search`/`recall`/`wake_up`/`diary_read`, job `list`/`show`) | write (`checkpoint`/`emergency_checkpoint`/`diary_write`, `mine`, applied `repair`) |
 |-------------|--------------------------------------------------|-------------------------------------------------------------|
 | `Full`      | ok                                               | ok                                                            |
 | `ReadOnly`  | ok                                               | rejected (`Error::ModeForbidden`)                             |
@@ -147,13 +151,18 @@ disabling memory for one of them must not touch the others' in-flight jobs or re
 an empty result would be indistinguishable from "genuinely found nothing,"
 which would leak an ambiguous signal into a session that is supposed to behave as if MemCastle doesn't exist.
 
-Only those seven operations are gated. Administrative/daemon-level operations —
-`status`, job listing/control (`list_jobs`, `pause_job`, `resume_job`, `cancel_job`, `retry_job`),
-and job submission (`submit_mine`, `submit_demo`) —
-are not session-scoped memory operations and are never gated by mode:
-a disabled session can still see daemon/job state and submit background work.
-`Audit`/`Repair` fall on the administrative side of this line too,
-unless a future issue explicitly reclassifies one of them.
+The gate follows what an operation reads or writes, not its method name.
+A job record carries its whole input — for a checkpoint job, the memory being written —
+so listing or showing jobs is a memory read, and a job whose purpose is to file or delete drawers
+(`submit_mine`, and `submit_repair` when it is not a dry run) is a memory write.
+Otherwise a disabled session could read palace content through the job list,
+and a read-only one could mutate the palace by submitting a mine.
+`ReadOnly` keeps job reads, since it can already read the same content through search.
+
+What stays ungated is genuinely administrative:
+`status` (counts and version, no content), job control (`pause_job`, `resume_job`, `cancel_job`, `retry_job` —
+they need a job id, which a session that cannot list jobs never learns),
+`submit_demo` (touches no palace content), `submit_audit` and a dry-run `submit_repair` (they only report).
 
 Enforcement is centralized in `app::AppServices` (`require_read`/`require_write`, checked before any store contact) —
 `api` and `mcp` only *extract* a `MemoryMode` and pass it down, never independently deciding what's allowed:
@@ -195,7 +204,8 @@ All four are gated by `MemoryMode` exactly like `search` — see the mode table 
 
 `domain::Job` is a plain record (`id`, `kind`, `status`, `priority`, timestamps, `progress`, `attempt`/`max_attempts`,
 `checkpoint`, `error`, lease fields) persisted in SurrealDB.
-Its status only ever changes through `Job::apply(event)`, an explicit, exhaustively-matched transition table:
+Its status only ever changes through `Job::apply(event)`, an explicit transition table
+(any `(status, event)` pair not listed here is rejected with a `TransitionError`):
 
 ```text
 queued   -> running    (claimed)
@@ -205,6 +215,7 @@ running  -> completed
 running  -> failed
 queued | paused | running -> cancelled
 running  -> queued     (crash recovery, attempt budget permitting)
+failed   -> queued     (retry; clears the error, keeps the checkpoint)
 ```
 
 **Priority.** `Job.priority` is `domain::Priority`, a five-level enum (`Background < Low < Normal < High < Critical`) —
@@ -214,14 +225,15 @@ It serializes to/from the store's existing `job.priority` (`TYPE int`) column vi
 so introducing the enum took no migration.
 A value read back that doesn't match one of the five is a surfaced `InvalidPriority` error,
 never silently coerced to a default.
-`jobs::Scheduler::claim_next_job` claims the oldest, highest-priority `Queued` job first,
+`SurrealStore::claim_next_job` claims the oldest, highest-priority `Queued` job first,
 backed by the composite index `job_status_idx ON job FIELDS status, priority, created_at`.
 Default priorities per submission path: `Mine` → `Background` (so mining never delays anything else), `Demo` → `Normal`,
 `Audit`/`Repair` → `Normal`, `Checkpoint` → `High`, `Checkpoint` (emergency) → `Critical`.
 
-`jobs::Scheduler` is a single sequential dispatcher loop (`store.claim_next_job`, an atomic claim-and-transition)
+`jobs::Scheduler` is a single sequential dispatcher loop (`store.claim_next_job`, a claim-and-transition)
 that spawns bounded worker tasks (a `tokio::sync::Semaphore`) to execute claimed jobs.
-Because exactly one scheduler owns the queue per daemon — the same "one daemon per palace" invariant as storage —
+The claim is a `SELECT` followed by an `UPSERT`, not a database-level atomic operation:
+because exactly one scheduler owns the queue per daemon — the same "one daemon per palace" invariant as storage —
 the sequential claim loop needs no distributed lock to be safe.
 
 **Pause and cancel are cooperative, never a process kill.**
@@ -229,10 +241,21 @@ A handler (`jobs::demo`, `mining::run`) is written as a loop over discrete units
 that checks `JobContext::should_pause`/`is_cancelled` between units,
 persists a `checkpoint` before stopping, and returns — the scheduler transitions its status afterward.
 Resuming a paused job re-reads that checkpoint and continues from there, not from zero.
+`Audit` and `Repair` never check for pause, so a pause request only *requests* one and they run to completion;
+an applied `Repair` does check for cancel before each delete.
+
+**Resuming is replay-safe.**
+A handler writes an item's records first and saves the checkpoint after, so a crash between the two
+makes the resumed attempt redo that item.
+Mining and checkpoint therefore derive each drawer's id (and each new fact edge's id) from the job id and item index
+and skip a record that already exists, so the replay lands on the same record instead of storing a second copy.
 
 **Crash recovery** (`Scheduler::recover`, run once at daemon startup):
 any job left `Running` by an unclean shutdown is re-queued if its attempt budget allows,
 or marked `Failed` otherwise — never silently forgotten.
+`Queued` jobs need no recovery, and `Paused` jobs are deliberately left paused until someone resumes them.
+Only the in-memory `JobControl` handles are lost in a crash: a pause or cancel request that was still pending
+is lost with them, and the recovered job runs again from its checkpoint.
 
 **`checkpoint` vs `result`.** `Job.checkpoint` is handler-defined *resume* state
 (`mining`/`checkpoint`'s per-item `{"next_index": n}`) —
@@ -284,7 +307,13 @@ a destructive operation must never act on a report that might have gone stale si
 backgrounding is a supervisor's job (systemd, Docker, your shell), not this binary's.
 On startup it: loads config, connects and migrates storage, recovers interrupted jobs,
 starts the scheduler, binds the HTTP listener (serving both the REST API and MCP), and writes a small registry file.
-On SIGINT/SIGTERM or `POST /api/shutdown`, it stops accepting new jobs, lets the scheduler's dispatch loop drain, and exits.
+On SIGINT/SIGTERM or `POST /api/shutdown`, it stops accepting new jobs and asks every running job to stop
+at its next unit-of-work boundary.
+Each one checkpoints and goes straight back to `Queued` (a job the user had paused stays `Paused`),
+so the next daemon resumes it without anyone pressing resume.
+The wait is bounded (10 seconds): a job that does not stop in time — one that never checks for pause,
+like `Audit`/`Repair` — is left `Running` and re-queued by `Scheduler::recover` on the next start.
+The daemon then removes its registry file and exits.
 
 The registry file (`~/.memcastle/run/<hash of the canonical palace path>/daemon.json`)
 is **operational metadata, never the source of truth** for "is a daemon running" —
