@@ -48,6 +48,31 @@ impl JobStatus {
     }
 }
 
+impl std::str::FromStr for JobStatus {
+    type Err = String;
+
+    /// Parse the names [`JobStatus::as_str`] produces — one parser for the
+    /// REST filter, the CLI's `--status` and MCP's `status` argument, saying
+    /// what is accepted when it is not one of them.
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        [
+            Self::Queued,
+            Self::Running,
+            Self::Paused,
+            Self::Completed,
+            Self::Failed,
+            Self::Cancelled,
+        ]
+        .into_iter()
+        .find(|status| status.as_str() == raw)
+        .ok_or_else(|| {
+            format!(
+                "unknown job status `{raw}` (expected queued, running, paused, completed, failed or cancelled)"
+            )
+        })
+    }
+}
+
 /// Where a mining job reads its source material from — the seam Phase 5
 /// slots a non-filesystem reader (e.g. a Pi/OpenCode session-transcript
 /// reader) behind. `JobKind::Mine`'s shape (`source`, `wing`) never changes
@@ -785,6 +810,13 @@ mod tests {
             JobStatus::Cancelled,
         ] {
             assert_eq!(serde_json::to_value(status).unwrap(), status.as_str());
+            assert_eq!(status.as_str().parse::<JobStatus>(), Ok(status));
         }
+        assert!(
+            "done"
+                .parse::<JobStatus>()
+                .unwrap_err()
+                .contains("completed")
+        );
     }
 }

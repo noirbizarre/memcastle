@@ -293,35 +293,35 @@ async fn pause_job(
     State(state): State<ApiState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    state.app.pause_job(parse_job_id(&id)?).await?;
+    let result = state.app.pause_job(parse_job_id(&id)?).await?;
     // "requested", not "paused": pausing is cooperative, so the job stops
     // at its next check (every handler has one, audit and repair included)
     // rather than at the instant of the request.
-    Ok(Json(serde_json::json!({ "status": "pause_requested" })))
+    Ok(Json(result))
 }
 
 async fn resume_job(
     State(state): State<ApiState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    state.app.resume_job(parse_job_id(&id)?).await?;
-    Ok(Json(serde_json::json!({ "status": "resumed" })))
+    let result = state.app.resume_job(parse_job_id(&id)?).await?;
+    Ok(Json(result))
 }
 
 async fn cancel_job(
     State(state): State<ApiState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    state.app.cancel_job(parse_job_id(&id)?).await?;
-    Ok(Json(serde_json::json!({ "status": "cancel_requested" })))
+    let result = state.app.cancel_job(parse_job_id(&id)?).await?;
+    Ok(Json(result))
 }
 
 async fn retry_job(
     State(state): State<ApiState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    state.app.retry_job(parse_job_id(&id)?).await?;
-    Ok(Json(serde_json::json!({ "status": "retried" })))
+    let result = state.app.retry_job(parse_job_id(&id)?).await?;
+    Ok(Json(result))
 }
 
 async fn shutdown_now(State(state): State<ApiState>) -> impl IntoResponse {
@@ -334,10 +334,6 @@ fn parse_job_id(raw: &str) -> Result<JobId, ApiError> {
 }
 
 fn parse_status(raw: &str) -> Result<JobStatus, ApiError> {
-    serde_json::from_value(serde_json::Value::String(raw.to_string())).map_err(|_| {
-        ApiError::from(crate::Error::invalid_input(
-            "status",
-            format!("unknown job status `{raw}`"),
-        ))
-    })
+    raw.parse()
+        .map_err(|message: String| ApiError::from(crate::Error::invalid_input("status", message)))
 }

@@ -327,8 +327,8 @@ fn parse_job_id(raw: &str) -> Result<JobId> {
 }
 
 fn parse_status(raw: &str) -> Result<memcastle::domain::JobStatus> {
-    serde_json::from_value(serde_json::Value::String(raw.to_string()))
-        .map_err(|_| Error::invalid_input("status", format!("unknown job status `{raw}`")))
+    raw.parse()
+        .map_err(|message: String| Error::invalid_input("status", message))
 }
 
 /// Install miette's diagnostic handler.

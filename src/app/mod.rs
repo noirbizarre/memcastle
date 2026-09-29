@@ -119,6 +119,18 @@ pub struct WakeUpContext {
     pub generated_at: DateTime<Utc>,
 }
 
+/// What a job-control request answers: the state the request left the job
+/// heading for. One shape, served identically by REST, MCP and the CLI.
+///
+/// `pause_requested` and `cancel_requested` are *requests*, not outcomes:
+/// stopping is cooperative, so the job may still be running when this comes
+/// back (and, if the daemon dies first, is stopped by recovery instead).
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct JobControlResult {
+    /// `pause_requested`, `resumed`, `cancel_requested` or `retried`.
+    pub status: &'static str,
+}
+
 /// The application services shared by every interface. Cheap to clone
 /// (everything inside is a handle: `SurrealStore` wraps a connection,
 /// `Scheduler` is behind an `Arc`), so it can be axum/rmcp request state
@@ -447,8 +459,11 @@ impl AppServices {
     ///
     /// Returns [`crate::Error::JobNotFound`] if the job doesn't exist, or
     /// [`crate::Error::InvalidJobTransition`] if it isn't running.
-    pub async fn pause_job(&self, id: JobId) -> Result<()> {
-        self.scheduler.request_pause(id).await
+    pub async fn pause_job(&self, id: JobId) -> Result<JobControlResult> {
+        self.scheduler.request_pause(id).await?;
+        Ok(JobControlResult {
+            status: "pause_requested",
+        })
     }
 
     /// Resume a paused job.
@@ -456,8 +471,9 @@ impl AppServices {
     /// # Errors
     ///
     /// Returns an error if the job doesn't exist or isn't paused.
-    pub async fn resume_job(&self, id: JobId) -> Result<()> {
-        self.scheduler.resume(id).await
+    pub async fn resume_job(&self, id: JobId) -> Result<JobControlResult> {
+        self.scheduler.resume(id).await?;
+        Ok(JobControlResult { status: "resumed" })
     }
 
     /// Cancel a queued, paused, or running job.
@@ -466,8 +482,11 @@ impl AppServices {
     ///
     /// Returns an error if the job doesn't exist or can't be cancelled from
     /// its current status.
-    pub async fn cancel_job(&self, id: JobId) -> Result<()> {
-        self.scheduler.request_cancel(id).await
+    pub async fn cancel_job(&self, id: JobId) -> Result<JobControlResult> {
+        self.scheduler.request_cancel(id).await?;
+        Ok(JobControlResult {
+            status: "cancel_requested",
+        })
     }
 
     /// Retry a failed job.
@@ -475,8 +494,9 @@ impl AppServices {
     /// # Errors
     ///
     /// Returns an error if the job doesn't exist or isn't failed.
-    pub async fn retry_job(&self, id: JobId) -> Result<()> {
-        self.scheduler.retry(id).await
+    pub async fn retry_job(&self, id: JobId) -> Result<JobControlResult> {
+        self.scheduler.retry(id).await?;
+        Ok(JobControlResult { status: "retried" })
     }
 
     /// Persist a diary entry for `agent_identity`, filed as a drawer under

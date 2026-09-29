@@ -396,3 +396,56 @@ async fn an_mcp_mode_rejection_carries_the_diagnostic_code_and_help() {
     client.cancel().await.expect("close session");
     daemon.shutdown().await;
 }
+
+/// What the job tools are for: an integration that submitted work over MCP
+/// can check on it and stop it, without leaving MCP for REST.
+#[tokio::test]
+async fn an_mcp_client_can_submit_check_on_and_stop_its_own_jobs() {
+    let daemon = TestDaemon::start().await;
+    let client = connect(&daemon.base_url).await;
+
+    // Submit a repair (dry run by default) and read it back by id.
+    let (failed, text) = call_text(&client, "memcastle_repair", serde_json::json!({})).await;
+    assert!(!failed, "{text}");
+    let job: serde_json::Value = serde_json::from_str(&text).expect("job json");
+    let id = job["id"].as_str().expect("job id").to_string();
+    assert_eq!(
+        job["kind"]["dry_run"], true,
+        "a repair must default to a dry run"
+    );
+
+    let (failed, text) = call_text(
+        &client,
+        "memcastle_job_get",
+        serde_json::json!({ "id": id }),
+    )
+    .await;
+    assert!(!failed, "{text}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&text).unwrap()["id"],
+        id
+    );
+
+    // The status filter narrows the list.
+    let (_, text) = call_text(
+        &client,
+        "memcastle_jobs_list",
+        serde_json::json!({ "status": "failed" }),
+    )
+    .await;
+    assert_eq!(text.trim(), "[]");
+
+    // Retrying a job that has not failed is a typed error, not a silent no-op.
+    let (failed, text) = call_text(
+        &client,
+        "memcastle_job_retry",
+        serde_json::json!({ "id": id }),
+    )
+    .await;
+    assert!(failed);
+    let body: serde_json::Value = serde_json::from_str(&text).expect("error json");
+    assert_eq!(body["code"], "memcastle::jobs::invalid_transition");
+
+    client.cancel().await.expect("close session");
+    daemon.shutdown().await;
+}

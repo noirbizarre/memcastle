@@ -363,6 +363,22 @@ A stdio bridge for clients that only support spawning a local subprocess is real
 but explicitly deferred, future work (see below) —
 tool logic itself never touches a transport type, so adding one is additive when it's needed.
 
+**The tool surface** mirrors what the CLI and REST offer, so an integration never has to leave MCP:
+
+| Tool | Does | Gate |
+| --- | --- | --- |
+| `memcastle_set_mode` | choose this session's memory mode | — |
+| `memcastle_status` | daemon health and counts | ungated |
+| `memcastle_search`, `memcastle_recall`, `memcastle_wake_up`, `memcastle_diary_read` | read memory | read |
+| `memcastle_diary_write`, `memcastle_checkpoint`, `memcastle_mine` | write memory | write |
+| `memcastle_audit` | submit a read-only audit | ungated |
+| `memcastle_repair` | submit a repair; dry-run by default | dry run ungated, applied is a write |
+| `memcastle_jobs_list` (optional `status`), `memcastle_job_get` | read jobs | read |
+| `memcastle_job_pause`, `_resume`, `_cancel`, `_retry` | control a job | ungated |
+
+The instruction text sent at `initialize` is generated from the registered tools, and a test compares the two,
+so it cannot drift from the surface.
+
 **One error and logging surface.**
 Whichever way a failure is reached, it is the same `{error, code, help}` (`Error::body`):
 the REST API serves it as the response body, every MCP tool returns it as the text of an error result

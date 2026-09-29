@@ -25,7 +25,7 @@ use rmcp::{ErrorData as McpError, ServerHandler, schemars, tool, tool_handler, t
 use tokio_util::sync::CancellationToken;
 
 use crate::app::{AppServices, WakeUpBudget};
-use crate::domain::{CheckpointPayload, Job, MemoryMode};
+use crate::domain::{CheckpointPayload, Job, JobId, JobStatus, MemoryMode};
 use crate::error::Error;
 
 /// The MCP tool surface. Cheap to clone (holds only `AppServices`, itself
@@ -58,7 +58,6 @@ use crate::error::Error;
 pub struct McpTools {
     app: AppServices,
     mode: Arc<Mutex<Option<SessionMode>>>,
-    #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
 }
 
@@ -180,6 +179,36 @@ struct AuditArgs {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct RepairArgs {
+    /// Only report what would be removed (the default). Set `false` to
+    /// actually remove orphan drawers — that is a write, so it is rejected
+    /// in `read_only` and `disabled` mode.
+    #[serde(default = "default_dry_run")]
+    dry_run: bool,
+    /// Narrow the repair to what this completed audit job also found (a job
+    /// id from `memcastle_audit`). A live scan always decides what is
+    /// removed; this can only narrow it.
+    based_on_job: Option<String>,
+}
+
+fn default_dry_run() -> bool {
+    true
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct JobIdArgs {
+    /// The job's id, as returned when it was submitted.
+    id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct JobsListArgs {
+    /// Only list jobs in this status: queued, running, paused, completed,
+    /// failed or cancelled.
+    status: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct SetModeArgs {
     /// This session's memory mode from now on: `"full"` (default — reads
     /// and writes both proceed), `"read_only"` (reads proceed, writes
@@ -196,6 +225,12 @@ struct SetModeArgs {
 /// What every job and drawer written through this surface records as the
 /// channel it came through (`Job::requested_by`, `provenance.requested_by`).
 const CHANNEL: &str = "mcp";
+
+/// Parse a job id a caller supplied, as the same diagnostic REST and the CLI
+/// raise for one that is not shaped like a job id.
+fn parse_job_id(raw: &str) -> crate::Result<JobId> {
+    raw.parse().map_err(|_| Error::invalid_job_id(raw))
+}
 
 /// The one place a tool's outcome becomes an MCP result, so every tool
 /// reports success and failure the same way.
@@ -489,13 +524,134 @@ impl McpTools {
         tool_result("memcastle_diary_read", entries)
     }
 
-    #[tool(description = "List jobs known to the daemon")]
-    async fn memcastle_jobs_list(
+    #[tool(
+        description = "Submit a repair job that removes orphan drawers (drawers whose room no \
+                        longer exists). Dry-run by default: it only reports what it would \
+                        remove, in the job's `result`. Pass dry_run=false to apply it, which is a \
+                        write. based_on_job narrows it to what a completed memcastle_audit found"
+    )]
+    async fn memcastle_repair(
         &self,
+        Parameters(args): Parameters<RepairArgs>,
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
         let mode = self.mode_for(&parts);
-        tool_result("memcastle_jobs_list", self.app.list_jobs(None, mode).await)
+        let job = async {
+            let based_on_job = args.based_on_job.as_deref().map(parse_job_id).transpose()?;
+            self.app
+                .submit_repair(args.dry_run, based_on_job, CHANNEL, mode)
+                .await
+        }
+        .await;
+        tool_result("memcastle_repair", job)
+    }
+
+    #[tool(
+        description = "List jobs known to the daemon, newest first, optionally only those in one \
+                        status (queued, running, paused, completed, failed or cancelled)"
+    )]
+    async fn memcastle_jobs_list(
+        &self,
+        Parameters(args): Parameters<JobsListArgs>,
+        Extension(parts): Extension<http::request::Parts>,
+    ) -> Result<CallToolResult, McpError> {
+        let mode = self.mode_for(&parts);
+        let jobs = async {
+            let status = args
+                .status
+                .as_deref()
+                .map(|raw| {
+                    raw.parse::<JobStatus>()
+                        .map_err(|message| Error::invalid_input("status", message))
+                })
+                .transpose()?;
+            self.app.list_jobs(status, mode).await
+        }
+        .await;
+        tool_result("memcastle_jobs_list", jobs)
+    }
+
+    #[tool(
+        description = "Show one job: its status, progress, attempt counts and, once finished, \
+                        its result (an audit's or repair's report) or error"
+    )]
+    async fn memcastle_job_get(
+        &self,
+        Parameters(args): Parameters<JobIdArgs>,
+        Extension(parts): Extension<http::request::Parts>,
+    ) -> Result<CallToolResult, McpError> {
+        let mode = self.mode_for(&parts);
+        let job = async { self.app.get_job(parse_job_id(&args.id)?, mode).await }.await;
+        tool_result("memcastle_job_get", job)
+    }
+
+    #[tool(
+        description = "Ask a running job to pause at its next checkpoint. It is a request: the \
+                        job stops at its next check, not instantly. Resume it with memcastle_job_resume"
+    )]
+    async fn memcastle_job_pause(
+        &self,
+        Parameters(args): Parameters<JobIdArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let result = async { self.app.pause_job(parse_job_id(&args.id)?).await }.await;
+        tool_result("memcastle_job_pause", result)
+    }
+
+    #[tool(description = "Resume a paused job; it continues from where it stopped")]
+    async fn memcastle_job_resume(
+        &self,
+        Parameters(args): Parameters<JobIdArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let result = async { self.app.resume_job(parse_job_id(&args.id)?).await }.await;
+        tool_result("memcastle_job_resume", result)
+    }
+
+    #[tool(
+        description = "Cancel a queued, paused or running job. For a running one it is a \
+                        request: the job stops at its next check. A cancelled job is not re-run"
+    )]
+    async fn memcastle_job_cancel(
+        &self,
+        Parameters(args): Parameters<JobIdArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let result = async { self.app.cancel_job(parse_job_id(&args.id)?).await }.await;
+        tool_result("memcastle_job_cancel", result)
+    }
+
+    #[tool(
+        description = "Retry a failed job: it goes back to the queue and resumes from its checkpoint"
+    )]
+    async fn memcastle_job_retry(
+        &self,
+        Parameters(args): Parameters<JobIdArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let result = async { self.app.retry_job(parse_job_id(&args.id)?).await }.await;
+        tool_result("memcastle_job_retry", result)
+    }
+}
+
+impl McpTools {
+    /// The instruction text sent to every client at `initialize`.
+    ///
+    /// The tool list is read from the router, not typed out: this string is
+    /// where an integration first learns what exists, and a hand-kept copy
+    /// silently omitted `repair` and every job-control tool until a test
+    /// compared the two.
+    fn instructions(&self) -> String {
+        let tools: Vec<String> = self
+            .tool_router
+            .list_all()
+            .into_iter()
+            .map(|tool| tool.name.into_owned())
+            .collect();
+        format!(
+            "MemCastle: a shared memory palace daemon. Tools: {}. Call memcastle_set_mode once \
+             at session start to switch this session to read_only or disabled memory mode \
+             (defaults to full). Submitting work (mine, checkpoint, audit, repair) returns a job \
+             immediately; follow it with memcastle_job_get and control it with memcastle_job_pause, \
+             memcastle_job_resume, memcastle_job_cancel and memcastle_job_retry.",
+            tools.join(", ")
+        )
     }
 }
 
@@ -504,15 +660,7 @@ impl ServerHandler for McpTools {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::from_build_env())
-            .with_instructions(
-                "MemCastle: a shared memory palace daemon. Tools: memcastle_status, \
-                 memcastle_search, memcastle_recall, memcastle_wake_up, memcastle_mine, \
-                 memcastle_checkpoint, memcastle_audit, memcastle_diary_write, \
-                 memcastle_diary_read, memcastle_jobs_list, memcastle_set_mode. Call \
-                 memcastle_set_mode once at session start to switch this session to read_only \
-                 or disabled memory mode (defaults to full)."
-                    .to_string(),
-            )
+            .with_instructions(self.instructions())
     }
 }
 
@@ -710,5 +858,280 @@ mod tests {
         let body: serde_json::Value = serde_json::from_str(&text_of(&result)).unwrap();
         assert_eq!(body["code"], "memcastle::input::invalid");
         assert!(body["error"].as_str().unwrap().contains("read_only"));
+    }
+
+    /// The diagnostic code of a failed tool call, or `None` if it succeeded.
+    fn code_of(result: &CallToolResult) -> Option<String> {
+        if result.is_error != Some(true) {
+            return None;
+        }
+        let body: serde_json::Value = serde_json::from_str(&text_of(result)).ok()?;
+        body["code"].as_str().map(str::to_string)
+    }
+
+    const MODE_FORBIDDEN: &str = "memcastle::app::mode_forbidden";
+
+    /// A tools surface whose one session `s` has chosen `mode`.
+    async fn tools_in_mode(mode: &str) -> McpTools {
+        let tools = tools().await;
+        set_mode(&tools, Some("s"), mode).await;
+        tools
+    }
+
+    async fn queued_job(tools: &McpTools) -> String {
+        tools
+            .app
+            .submit_demo(1, "test")
+            .await
+            .expect("submit")
+            .id
+            .to_string()
+    }
+
+    fn id_args(id: &str) -> Parameters<JobIdArgs> {
+        Parameters(JobIdArgs { id: id.to_string() })
+    }
+
+    #[tokio::test]
+    async fn the_instructions_name_exactly_the_registered_tools() {
+        let tools = tools().await;
+        let registered: std::collections::BTreeSet<String> = tools
+            .tool_router
+            .list_all()
+            .into_iter()
+            .map(|tool| tool.name.into_owned())
+            .collect();
+
+        let mentioned: std::collections::BTreeSet<String> = tools
+            .instructions()
+            .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .filter(|word| word.starts_with("memcastle_"))
+            .map(str::to_string)
+            .collect();
+
+        assert_eq!(
+            mentioned, registered,
+            "an unlisted tool is invisible to an integration; a listed one that does not exist is a lie"
+        );
+        for expected in [
+            "memcastle_repair",
+            "memcastle_job_get",
+            "memcastle_job_pause",
+            "memcastle_job_resume",
+            "memcastle_job_cancel",
+            "memcastle_job_retry",
+        ] {
+            assert!(
+                registered.contains(expected),
+                "{expected} is not registered"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_repair_dry_run_is_allowed_in_every_mode_but_applying_one_is_a_write() {
+        for mode in ["full", "read_only", "disabled"] {
+            let tools = tools_in_mode(mode).await;
+            let dry = tools
+                .memcastle_repair(
+                    Parameters(RepairArgs {
+                        dry_run: true,
+                        based_on_job: None,
+                    }),
+                    Extension(parts(Some("s"))),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                code_of(&dry),
+                None,
+                "a dry run only reports, in {mode} mode"
+            );
+
+            let applied = tools
+                .memcastle_repair(
+                    Parameters(RepairArgs {
+                        dry_run: false,
+                        based_on_job: None,
+                    }),
+                    Extension(parts(Some("s"))),
+                )
+                .await
+                .unwrap();
+            let expected = (mode != "full").then(|| MODE_FORBIDDEN.to_string());
+            assert_eq!(code_of(&applied), expected, "applied repair in {mode} mode");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_repair_based_on_a_malformed_or_unknown_job_is_an_input_error_not_a_crash() {
+        let tools = tools().await;
+        for based_on_job in ["not-a-job-id", &JobId::new().to_string()] {
+            let result = tools
+                .memcastle_repair(
+                    Parameters(RepairArgs {
+                        dry_run: true,
+                        based_on_job: Some(based_on_job.to_string()),
+                    }),
+                    Extension(parts(Some("s"))),
+                )
+                .await
+                .unwrap();
+            let code = code_of(&result).expect("must fail");
+            assert!(
+                code == "memcastle::jobs::invalid_id"
+                    || code == "memcastle::repair::invalid_based_on_job",
+                "{code}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn job_reads_are_allowed_in_full_and_read_only_mode_and_rejected_when_disabled() {
+        for (mode, allowed) in [("full", true), ("read_only", true), ("disabled", false)] {
+            let tools = tools_in_mode(mode).await;
+            let id = queued_job(&tools).await;
+
+            let get = tools
+                .memcastle_job_get(id_args(&id), Extension(parts(Some("s"))))
+                .await
+                .unwrap();
+            let list = tools
+                .memcastle_jobs_list(
+                    Parameters(JobsListArgs { status: None }),
+                    Extension(parts(Some("s"))),
+                )
+                .await
+                .unwrap();
+
+            let expected = (!allowed).then(|| MODE_FORBIDDEN.to_string());
+            assert_eq!(code_of(&get), expected, "job_get in {mode} mode");
+            assert_eq!(code_of(&list), expected, "jobs_list in {mode} mode");
+        }
+    }
+
+    #[tokio::test]
+    async fn jobs_list_filters_by_status_and_rejects_an_unknown_one() {
+        let tools = tools().await;
+        queued_job(&tools).await;
+
+        let queued = tools
+            .memcastle_jobs_list(
+                Parameters(JobsListArgs {
+                    status: Some("queued".to_string()),
+                }),
+                Extension(parts(Some("s"))),
+            )
+            .await
+            .unwrap();
+        let running = tools
+            .memcastle_jobs_list(
+                Parameters(JobsListArgs {
+                    status: Some("running".to_string()),
+                }),
+                Extension(parts(Some("s"))),
+            )
+            .await
+            .unwrap();
+        let bogus = tools
+            .memcastle_jobs_list(
+                Parameters(JobsListArgs {
+                    status: Some("done".to_string()),
+                }),
+                Extension(parts(Some("s"))),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            serde_json::from_str::<Vec<Job>>(&text_of(&queued))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            serde_json::from_str::<Vec<Job>>(&text_of(&running))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            code_of(&bogus).as_deref(),
+            Some("memcastle::input::invalid")
+        );
+    }
+
+    #[tokio::test]
+    async fn job_control_is_administrative_so_no_mode_rejects_it() {
+        for mode in ["full", "read_only", "disabled"] {
+            let tools = tools_in_mode(mode).await;
+            let id = queued_job(&tools).await;
+
+            let results = [
+                (
+                    "pause",
+                    tools.memcastle_job_pause(id_args(&id)).await.unwrap(),
+                ),
+                (
+                    "resume",
+                    tools.memcastle_job_resume(id_args(&id)).await.unwrap(),
+                ),
+                (
+                    "retry",
+                    tools.memcastle_job_retry(id_args(&id)).await.unwrap(),
+                ),
+                (
+                    "cancel",
+                    tools.memcastle_job_cancel(id_args(&id)).await.unwrap(),
+                ),
+            ];
+            for (name, result) in results {
+                assert_ne!(
+                    code_of(&result).as_deref(),
+                    Some(MODE_FORBIDDEN),
+                    "job {name} is administrative and must work in {mode} mode"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_queued_job_over_mcp_reports_the_daemons_answer() {
+        let tools = tools().await;
+        let id = queued_job(&tools).await;
+
+        let result = tools.memcastle_job_cancel(id_args(&id)).await.unwrap();
+
+        assert_eq!(code_of(&result), None);
+        let body: serde_json::Value = serde_json::from_str(&text_of(&result)).unwrap();
+        assert_eq!(body["status"], "cancel_requested");
+        let job = tools
+            .memcastle_job_get(id_args(&id), Extension(parts(None)))
+            .await
+            .unwrap();
+        let job: Job = serde_json::from_str(&text_of(&job)).unwrap();
+        assert_eq!(job.status, JobStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn a_malformed_or_unknown_job_id_is_a_typed_error() {
+        let tools = tools().await;
+
+        let malformed = tools
+            .memcastle_job_get(id_args("nope"), Extension(parts(None)))
+            .await
+            .unwrap();
+        let unknown = tools
+            .memcastle_job_get(id_args(&JobId::new().to_string()), Extension(parts(None)))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            code_of(&malformed).as_deref(),
+            Some("memcastle::jobs::invalid_id")
+        );
+        assert_eq!(
+            code_of(&unknown).as_deref(),
+            Some("memcastle::jobs::not_found")
+        );
     }
 }
