@@ -86,9 +86,9 @@ async fn search(
             .app
             .search(
                 &params.q,
-                params.limit,
                 params.wing.as_deref(),
                 params.room.as_deref(),
+                params.limit,
                 mode,
             )
             .await?,
@@ -232,27 +232,27 @@ async fn submit_job(
             // Gated as a write inside `submit_mine`: mining files drawers.
             state
                 .app
-                .submit_mine(path, wing, body.requested_by, mode)
+                .submit_mine(path, wing, &body.requested_by, mode)
                 .await?
         }
-        JobKind::Demo { steps } => state.app.submit_demo(steps, body.requested_by).await?,
+        JobKind::Demo { steps } => state.app.submit_demo(steps, &body.requested_by).await?,
         JobKind::Checkpoint { payload } => {
             if body.emergency {
                 state
                     .app
-                    .emergency_checkpoint(payload, body.requested_by, mode)
+                    .emergency_checkpoint(payload, &body.requested_by, mode)
                     .await?
             } else {
                 state
                     .app
-                    .checkpoint(payload, body.requested_by, mode)
+                    .checkpoint(payload, &body.requested_by, mode)
                     .await?
             }
         }
         JobKind::Audit { scope } => {
             // Not gated by `mode` — same reasoning as `Mine` above (see
             // `AppServices::submit_audit`'s doc comment).
-            state.app.submit_audit(scope, body.requested_by).await?
+            state.app.submit_audit(scope, &body.requested_by).await?
         }
         JobKind::Repair {
             dry_run,
@@ -262,7 +262,7 @@ async fn submit_job(
             // as a write inside `submit_repair` (see its doc comment).
             state
                 .app
-                .submit_repair(dry_run, based_on_job, body.requested_by, mode)
+                .submit_repair(dry_run, based_on_job, &body.requested_by, mode)
                 .await?
         }
     };
@@ -275,12 +275,7 @@ async fn get_job(
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
     let id = parse_job_id(&id)?;
-    match state.app.get_job(id, mode).await? {
-        Some(job) => Ok(Json(job)),
-        None => Err(ApiError::from(crate::Error::JobNotFound {
-            id: id.to_string(),
-        })),
-    }
+    Ok(Json(state.app.get_job(id, mode).await?))
 }
 
 async fn pause_job(

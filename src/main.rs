@@ -190,9 +190,9 @@ async fn cmd_search(config: &Config, args: SearchArgs) -> Result<()> {
     let hits = client(config)
         .search(
             &args.query,
-            args.limit,
             args.wing.as_deref(),
             args.room.as_deref(),
+            args.limit,
         )
         .await?;
     print_json(&hits);

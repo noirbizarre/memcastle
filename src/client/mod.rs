@@ -98,9 +98,9 @@ impl DaemonClient {
     pub async fn search(
         &self,
         query: &str,
-        limit: u32,
         wing: Option<&str>,
         room: Option<&str>,
+        limit: u32,
     ) -> Result<Vec<SearchHit>> {
         let mut request = self
             .http

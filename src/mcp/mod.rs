@@ -266,9 +266,9 @@ impl McpTools {
             .app
             .search(
                 &args.query,
-                args.limit,
                 args.wing.as_deref(),
                 args.room.as_deref(),
+                args.limit,
                 mode,
             )
             .await
@@ -342,7 +342,7 @@ impl McpTools {
         Parameters(args): Parameters<MineArgs>,
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
-        let requested_by = "mcp".to_string();
+        let requested_by = "mcp";
         let mode = self.mode_for(&parts);
         match self
             .app
@@ -378,7 +378,7 @@ impl McpTools {
                 )]));
             }
         };
-        let requested_by = "mcp".to_string();
+        let requested_by = "mcp";
         let result = if args.emergency {
             self.app
                 .emergency_checkpoint(payload, requested_by, mode)
@@ -406,7 +406,7 @@ impl McpTools {
         &self,
         Parameters(args): Parameters<AuditArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let requested_by = "mcp".to_string();
+        let requested_by = "mcp";
         match self.app.submit_audit(args.scope, requested_by).await {
             Ok(job) => {
                 let text = serde_json::to_string_pretty(&job).unwrap_or_default();

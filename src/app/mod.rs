@@ -73,6 +73,13 @@ pub const DEFAULT_SEARCH_LIMIT: u32 = 10;
 /// shared by every interface for the same reason as [`DEFAULT_SEARCH_LIMIT`].
 pub const DEFAULT_DIARY_LIMIT: u32 = 20;
 
+/// The most hits or entries any one read returns, whatever the caller asks
+/// for. Without a ceiling `limit=4294967295` is accepted verbatim and the
+/// query is asked to materialise (and the response to serialize) the whole
+/// palace. Clamped rather than rejected so an over-eager integration still
+/// gets a useful answer instead of a failure it must special-case.
+pub const MAX_READ_LIMIT: u32 = 200;
+
 impl WakeUpBudget {
     /// A budget from optional caller-supplied limits, each falling back to
     /// [`WakeUpBudget::default`]'s value when omitted. The one place that
@@ -198,12 +205,13 @@ impl AppServices {
     pub async fn search(
         &self,
         query: &str,
-        limit: u32,
         wing: Option<&str>,
         room: Option<&str>,
+        limit: u32,
         mode: MemoryMode,
     ) -> Result<Vec<SearchHit>> {
         Self::require_read(mode, "search")?;
+        let limit = limit.min(MAX_READ_LIMIT);
         crate::search::lexical_search(&self.store, query, limit, wing, room).await
     }
 
@@ -225,7 +233,7 @@ impl AppServices {
         &self,
         path: PathBuf,
         wing: Option<String>,
-        requested_by: impl Into<String>,
+        requested_by: &str,
         mode: MemoryMode,
     ) -> Result<Job> {
         Self::require_write(mode, "mine")?;
@@ -247,7 +255,7 @@ impl AppServices {
     /// # Errors
     ///
     /// Returns an error if the job cannot be persisted.
-    pub async fn submit_demo(&self, steps: u32, requested_by: impl Into<String>) -> Result<Job> {
+    pub async fn submit_demo(&self, steps: u32, requested_by: &str) -> Result<Job> {
         self.scheduler
             .submit(JobKind::Demo { steps }, Priority::Normal, requested_by)
             .await
@@ -262,10 +270,13 @@ impl AppServices {
         &self,
         payload: CheckpointPayload,
         priority: Priority,
-        requested_by: impl Into<String>,
+        requested_by: &str,
+        operation: &'static str,
         mode: MemoryMode,
     ) -> Result<Job> {
-        Self::require_write(mode, "checkpoint")?;
+        // The caller's own name, so a rejected emergency checkpoint says
+        // `emergency_checkpoint`, not the `checkpoint` it never asked for.
+        Self::require_write(mode, operation)?;
         self.scheduler
             .submit(JobKind::Checkpoint { payload }, priority, requested_by)
             .await
@@ -282,10 +293,10 @@ impl AppServices {
     pub async fn checkpoint(
         &self,
         payload: CheckpointPayload,
-        requested_by: impl Into<String>,
+        requested_by: &str,
         mode: MemoryMode,
     ) -> Result<Job> {
-        self.submit_checkpoint(payload, Priority::High, requested_by, mode)
+        self.submit_checkpoint(payload, Priority::High, requested_by, "checkpoint", mode)
             .await
     }
 
@@ -300,11 +311,17 @@ impl AppServices {
     pub async fn emergency_checkpoint(
         &self,
         payload: CheckpointPayload,
-        requested_by: impl Into<String>,
+        requested_by: &str,
         mode: MemoryMode,
     ) -> Result<Job> {
-        self.submit_checkpoint(payload, Priority::Critical, requested_by, mode)
-            .await
+        self.submit_checkpoint(
+            payload,
+            Priority::Critical,
+            requested_by,
+            "emergency_checkpoint",
+            mode,
+        )
+        .await
     }
 
     /// Submit a read-only palace consistency audit, optionally narrowing its
@@ -322,11 +339,7 @@ impl AppServices {
     /// # Errors
     ///
     /// Returns an error if the job cannot be persisted.
-    pub async fn submit_audit(
-        &self,
-        scope: Option<String>,
-        requested_by: impl Into<String>,
-    ) -> Result<Job> {
+    pub async fn submit_audit(&self, scope: Option<String>, requested_by: &str) -> Result<Job> {
         self.scheduler
             .submit(JobKind::Audit { scope }, Priority::Normal, requested_by)
             .await
@@ -351,7 +364,7 @@ impl AppServices {
         &self,
         dry_run: bool,
         based_on_job: Option<JobId>,
-        requested_by: impl Into<String>,
+        requested_by: &str,
         mode: MemoryMode,
     ) -> Result<Job> {
         if !dry_run {
@@ -382,7 +395,7 @@ impl AppServices {
     /// Returns an error if the store query fails, or
     /// [`Error::ModeForbidden`] if `mode` doesn't permit reads.
     pub async fn list_jobs(&self, status: Option<JobStatus>, mode: MemoryMode) -> Result<Vec<Job>> {
-        Self::require_read(mode, "jobs list")?;
+        Self::require_read(mode, "jobs_list")?;
         self.store.list_jobs(status).await
     }
 
@@ -391,11 +404,17 @@ impl AppServices {
     ///
     /// # Errors
     ///
-    /// Returns an error if the store query fails, or
-    /// [`Error::ModeForbidden`] if `mode` doesn't permit reads.
-    pub async fn get_job(&self, id: JobId, mode: MemoryMode) -> Result<Option<Job>> {
-        Self::require_read(mode, "jobs show")?;
-        self.store.get_job(id).await
+    /// Returns [`Error::JobNotFound`] if no job has that id — every
+    /// interface wants that same error, so it is raised once here instead of
+    /// being rebuilt from an `Option` by each of them — an error if the store
+    /// query fails, or [`Error::ModeForbidden`] if `mode` doesn't permit
+    /// reads.
+    pub async fn get_job(&self, id: JobId, mode: MemoryMode) -> Result<Job> {
+        Self::require_read(mode, "jobs_show")?;
+        self.store
+            .get_job(id)
+            .await?
+            .ok_or_else(|| Error::JobNotFound { id: id.to_string() })
     }
 
     /// Request that a running job pause.
@@ -498,6 +517,7 @@ impl AppServices {
         mode: MemoryMode,
     ) -> Result<Vec<Drawer>> {
         Self::require_read(mode, "diary_read")?;
+        let limit = limit.min(MAX_READ_LIMIT);
         let wing_record = self.store.get_or_create_wing(wing, None).await?;
         let room = self
             .store
@@ -538,7 +558,7 @@ impl AppServices {
         limit: u32,
         mode: MemoryMode,
     ) -> Result<Vec<SearchHit>> {
-        self.search(query, limit, wing, None, mode).await
+        self.search(query, wing, None, limit, mode).await
     }
 
     /// Build an agent's session-start context: its most recent diary entry
@@ -922,11 +942,12 @@ mod tests {
                 .len(),
             1
         );
-        assert!(
+        assert_eq!(
             app.get_job(submitted.id, MemoryMode::ReadOnly)
                 .await
                 .expect("get")
-                .is_some()
+                .id,
+            submitted.id
         );
     }
 
@@ -972,7 +993,7 @@ mod tests {
     async fn a_disabled_search_is_rejected_without_a_store_query() {
         let app = test_app().await;
         let result = app
-            .search("anything", 10, None, None, MemoryMode::Disabled)
+            .search("anything", None, None, 10, MemoryMode::Disabled)
             .await;
         assert_mode_forbidden(&result, MemoryMode::Disabled);
     }
@@ -1218,5 +1239,50 @@ mod tests {
             .await
             .expect("status must never be gated by mode");
         assert_eq!(report.mode, MemoryMode::Disabled);
+    }
+
+    #[tokio::test]
+    async fn a_rejected_emergency_checkpoint_names_the_operation_the_caller_asked_for() {
+        let app = test_app().await;
+        let result = app
+            .emergency_checkpoint(one_item_payload("x"), "test", MemoryMode::ReadOnly)
+            .await;
+        assert!(
+            matches!(&result, Err(Error::ModeForbidden { operation, .. }) if operation == "emergency_checkpoint"),
+            "got {result:?}"
+        );
+        let result = app
+            .checkpoint(one_item_payload("x"), "test", MemoryMode::ReadOnly)
+            .await;
+        assert!(
+            matches!(&result, Err(Error::ModeForbidden { operation, .. }) if operation == "checkpoint"),
+            "got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_absurd_limit_is_clamped_to_the_maximum_instead_of_being_honoured() {
+        let app = test_app().await;
+        let extra = 5;
+        for i in 0..(MAX_READ_LIMIT + extra) {
+            app.diary_write("agent-a", "wing", format!("entry {i}"), MemoryMode::Full)
+                .await
+                .expect("diary write");
+        }
+        let entries = app
+            .diary_read("agent-a", "wing", u32::MAX, MemoryMode::Full)
+            .await
+            .expect("diary read");
+        assert_eq!(entries.len(), MAX_READ_LIMIT as usize);
+    }
+
+    #[tokio::test]
+    async fn getting_an_unknown_job_is_a_typed_not_found_error() {
+        let app = test_app().await;
+        let result = app.get_job(JobId::new(), MemoryMode::Full).await;
+        assert!(
+            matches!(result, Err(Error::JobNotFound { .. })),
+            "got {result:?}"
+        );
     }
 }
