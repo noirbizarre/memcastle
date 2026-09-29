@@ -181,10 +181,13 @@ Enforcement is centralized in `app::AppServices` (`require_read`/`require_write`
   defaulting to `Full` when the header is absent so existing clients are unaffected.
   An unparsable value is a 400, never silently downgraded to `Full`.
 - **MCP** has no per-request header in the tool-call model, so mode is negotiated once per session:
-  a `memcastle_set_mode` tool call is cached in an `Arc<DashMap<session id, MemoryMode>>` inside `McpTools`,
-  keyed by the `mcp-session-id` header rmcp's streamable-HTTP transport already assigns.
-  Every other tool looks up this map before delegating to `AppServices`,
+  a `memcastle_set_mode` tool call is remembered in a single slot inside `McpTools`,
+  tagged with the `mcp-session-id` header rmcp's streamable-HTTP transport already assigns.
+  rmcp builds one `McpTools` per session and drops it when the session ends, so nothing accumulates.
+  Every other tool reads the slot before delegating to `AppServices`,
   defaulting to `Full` for a session that never called `memcastle_set_mode`.
+  A call with no session id has nothing to remember a mode under:
+  it runs as `Full` without caching, and `memcastle_set_mode` on it is an error.
 
 See `docs/adr/002-memory-mode-session-scoping.md` for the full rationale and rejected alternatives.
 

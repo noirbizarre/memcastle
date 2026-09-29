@@ -12,10 +12,9 @@
 //! Every tool calls `AppServices` only — never `store` or `jobs` directly,
 //! same rule as `api` (see that module's doc comment).
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::http;
-use dashmap::DashMap;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::tool::Extension;
 use rmcp::handler::server::wrapper::Parameters;
@@ -29,27 +28,44 @@ use crate::app::{AppServices, WakeUpBudget};
 use crate::domain::{CheckpointPayload, MemoryMode};
 
 /// The MCP tool surface. Cheap to clone (holds only `AppServices`, itself
-/// cheap to clone, an `Arc<DashMap<..>>`, and the macro-generated router).
+/// cheap to clone, one small shared slot, and the macro-generated router).
 ///
 /// `tool_router` looks unread to a naive dead-code scan — `#[tool_handler]`
 /// wires it into `call_tool`/`list_tools` through macro-generated code, the
 /// same pattern (and the same warning) as the SDK's own examples.
 ///
-/// `modes` caches each MCP session's [`MemoryMode`], keyed by the
-/// `mcp-session-id` HTTP header `StreamableHttpService`/`LocalSessionManager`
-/// assigns per session — the MCP surface has no per-request header the way
-/// HTTP does (see `api::ModeHeader`), so mode is instead negotiated once,
-/// via `memcastle_set_mode`, and looked up by every subsequent tool call on
-/// the same session. A session that never calls `memcastle_set_mode`
-/// defaults to `Full` (`DashMap::get` returning `None`), exactly like a
-/// missing `X-MemCastle-Mode` header does over HTTP. Same `Arc<DashMap<..>>`
-/// pattern `jobs::Scheduler` already uses for `controls`.
+/// `mode` remembers the [`MemoryMode`] one MCP session chose — the MCP
+/// surface has no per-request header the way HTTP does (see
+/// `api::ModeHeader`), so mode is instead negotiated once, via
+/// `memcastle_set_mode`, and applied to every later tool call *on the same
+/// session*, identified by the `mcp-session-id` header
+/// `StreamableHttpService` assigns.
+///
+/// rmcp builds one `McpTools` per session (the service factory in
+/// [`service`] runs once per `initialize`) and drops it when the session
+/// ends, so this is a single slot tagged with the session it belongs to, not
+/// a map keyed by every session ever seen: nothing accumulates for the life
+/// of the daemon, and nothing needs pruning when a session closes. The tag
+/// is what keeps a call that arrives *without* a session (stateless
+/// transport, or any request that never went through `initialize`) from
+/// reading, or overwriting, the session's choice: such a call has no
+/// identity to remember a mode under, so it runs as `Full` and
+/// `memcastle_set_mode` refuses it. A session that never calls
+/// `memcastle_set_mode` is `Full`, exactly like a missing
+/// `X-MemCastle-Mode` header over HTTP.
 #[derive(Clone)]
 pub struct McpTools {
     app: AppServices,
-    modes: Arc<DashMap<String, MemoryMode>>,
+    mode: Arc<Mutex<Option<SessionMode>>>,
     #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
+}
+
+/// The mode a session chose, and which session that was.
+#[derive(Debug, Clone)]
+struct SessionMode {
+    session_id: String,
+    mode: MemoryMode,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -183,7 +199,7 @@ impl McpTools {
     pub fn new(app: AppServices) -> Self {
         Self {
             app,
-            modes: Arc::new(DashMap::new()),
+            mode: Arc::new(Mutex::new(None)),
             tool_router: Self::tool_router(),
         }
     }
@@ -192,22 +208,36 @@ impl McpTools {
     /// sets on every request after the initialize handshake — the only way
     /// to identify "which session is this" from inside a tool handler (see
     /// `McpTools::modes`'s doc comment).
-    fn session_id(parts: &http::request::Parts) -> String {
+    ///
+    /// `None` when the header is absent or empty: a request with no session
+    /// has no identity, and must not be given one by falling back to `""`,
+    /// which every such request would share.
+    fn session_id(parts: &http::request::Parts) -> Option<String> {
         parts
             .headers
             .get("mcp-session-id")
             .and_then(|value| value.to_str().ok())
-            .unwrap_or_default()
-            .to_string()
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
     }
 
     /// This request's effective `MemoryMode`: whatever `memcastle_set_mode`
-    /// last cached for its session, or `Full` if it never called that tool.
+    /// last recorded for *its* session, or `Full` — including for a request
+    /// with no session, which is never cached and never sees another's mode.
     fn mode_for(&self, parts: &http::request::Parts) -> MemoryMode {
-        self.modes
-            .get(&Self::session_id(parts))
-            .map(|mode| *mode)
-            .unwrap_or_default()
+        let Some(session_id) = Self::session_id(parts) else {
+            return MemoryMode::Full;
+        };
+        // A poisoned lock only means another tool call panicked mid-update;
+        // the slot is a plain value, so reading it is still sound.
+        let slot = self
+            .mode
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match slot.as_ref() {
+            Some(chosen) if chosen.session_id == session_id => chosen.mode,
+            _ => MemoryMode::Full,
+        }
     }
 
     #[tool(
@@ -230,7 +260,21 @@ impl McpTools {
                     ))]));
                 }
             };
-        self.modes.insert(Self::session_id(&parts), mode);
+        let Some(session_id) = Self::session_id(&parts) else {
+            // Nothing to remember it under. Accepting it would be a lie (the
+            // next call would still run as `Full`), and remembering it under
+            // a shared empty id would let one client change another's mode.
+            return Ok(CallToolResult::error(vec![ContentBlock::text(
+                "memcastle_set_mode needs an MCP session, and this request has no \
+                 `mcp-session-id` header, so the mode cannot be remembered for later calls; \
+                 use a client that keeps an MCP session open, or send `X-MemCastle-Mode` over REST",
+            )]));
+        };
+        *self
+            .mode
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(SessionMode { session_id, mode });
         Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "memory mode set to {mode:?}"
         ))]))
@@ -512,4 +556,105 @@ pub fn service(
         LocalSessionManager::default().into(),
         StreamableHttpServerConfig::default().with_cancellation_token(shutdown.child_token()),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The `Parts` of a request carrying `session` as its `mcp-session-id`,
+    /// or none at all.
+    fn parts(session: Option<&str>) -> http::request::Parts {
+        let mut request = http::Request::builder();
+        if let Some(session) = session {
+            request = request.header("mcp-session-id", session);
+        }
+        request.body(()).expect("request").into_parts().0
+    }
+
+    async fn tools() -> McpTools {
+        McpTools::new(AppServices::for_tests().await)
+    }
+
+    async fn set_mode(tools: &McpTools, session: Option<&str>, mode: &str) -> CallToolResult {
+        tools
+            .memcastle_set_mode(
+                Parameters(SetModeArgs {
+                    mode: mode.to_string(),
+                }),
+                Extension(parts(session)),
+            )
+            .await
+            .expect("tool call")
+    }
+
+    #[tokio::test]
+    async fn a_session_that_never_set_a_mode_runs_as_full() {
+        let tools = tools().await;
+        assert_eq!(tools.mode_for(&parts(Some("s1"))), MemoryMode::Full);
+    }
+
+    #[tokio::test]
+    async fn a_session_keeps_the_mode_it_chose() {
+        let tools = tools().await;
+
+        let result = set_mode(&tools, Some("s1"), "read_only").await;
+
+        assert_ne!(result.is_error, Some(true));
+        assert_eq!(tools.mode_for(&parts(Some("s1"))), MemoryMode::ReadOnly);
+    }
+
+    #[tokio::test]
+    async fn a_call_from_another_session_does_not_inherit_the_mode() {
+        let tools = tools().await;
+        set_mode(&tools, Some("s1"), "disabled").await;
+
+        assert_eq!(tools.mode_for(&parts(Some("s2"))), MemoryMode::Full);
+    }
+
+    #[tokio::test]
+    async fn setting_a_mode_without_a_session_is_refused_and_remembers_nothing() {
+        let tools = tools().await;
+
+        let result = set_mode(&tools, None, "disabled").await;
+
+        assert_eq!(
+            result.is_error,
+            Some(true),
+            "the caller must be told it failed"
+        );
+        assert_eq!(tools.mode_for(&parts(None)), MemoryMode::Full);
+    }
+
+    #[tokio::test]
+    async fn two_headerless_calls_cannot_influence_each_others_mode() {
+        let tools = tools().await;
+        // One headerless client tries to lock everyone out...
+        set_mode(&tools, None, "disabled").await;
+
+        // ...and a second one is unaffected, as is a real session.
+        assert_eq!(tools.mode_for(&parts(None)), MemoryMode::Full);
+        assert_eq!(tools.mode_for(&parts(Some("s1"))), MemoryMode::Full);
+    }
+
+    #[tokio::test]
+    async fn a_headerless_call_never_sees_a_sessions_mode() {
+        let tools = tools().await;
+        set_mode(&tools, Some("s1"), "read_only").await;
+
+        assert_eq!(
+            tools.mode_for(&parts(None)),
+            MemoryMode::Full,
+            "a request with no session must not read another session's choice"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_empty_session_header_is_treated_as_no_session() {
+        let tools = tools().await;
+
+        let result = set_mode(&tools, Some(""), "disabled").await;
+
+        assert_eq!(result.is_error, Some(true));
+    }
 }

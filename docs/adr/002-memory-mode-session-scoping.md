@@ -77,3 +77,13 @@ reads are rejected with the same typed `Error::ModeForbidden` as writes, never a
   since "no results" and "not allowed to read" are only distinguishable through the error type, by design.
 - `Audit`/`Repair` remaining ungated is provisional
   (flagged in `domain::memory_mode`'s module doc as open to future reclassification), not a settled boundary.
+
+## Amendment: how the session's mode is held
+
+The decision above stands; only the mechanism changed (issue #72).
+rmcp constructs one `McpTools` per session and drops it when the session closes,
+so the per-session map described under Decision never held more than one entry.
+It is now a single slot tagged with its session id, which makes the "nothing outlives the session" property structural.
+A request without an `mcp-session-id` (a stateless transport) is treated as having no session:
+it runs as `Full`, is never cached, and `memcastle_set_mode` refuses it,
+instead of every such request sharing one empty-string entry and changing each other's mode.

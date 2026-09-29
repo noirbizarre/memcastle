@@ -4,7 +4,7 @@
 //! gated tool call on *that* session rejected, while a second, independent
 //! MCP session against the very same daemon — which never called
 //! `memcastle_set_mode` — keeps its default `Full` behavior. This is the
-//! integration-level proof that `McpTools::modes` is keyed per session, not
+//! integration-level proof that `McpTools`'s mode is scoped to its session, not
 //! a shared/global flag (see `src/mcp/mod.rs`'s doc comment).
 
 mod common;
@@ -335,5 +335,38 @@ async fn the_mcp_job_list_and_mine_tools_follow_the_sessions_mode() {
 
     disabled.cancel().await.expect("close session");
     read_only.cancel().await.expect("close session");
+    daemon.shutdown().await;
+}
+
+/// A session's chosen mode dies with the session: nothing about it lingers in
+/// the daemon for a later session to inherit, however long the daemon lives.
+#[tokio::test]
+async fn a_closed_sessions_mode_does_not_carry_over_to_the_next_session() {
+    let daemon = TestDaemon::start().await;
+
+    let first = connect(&daemon.base_url).await;
+    set_mode(&first, "disabled").await;
+    assert!(
+        call(
+            &first,
+            "memcastle_search",
+            serde_json::json!({ "query": "x" })
+        )
+        .await
+    );
+    first.cancel().await.expect("close session");
+
+    let second = connect(&daemon.base_url).await;
+    assert!(
+        !call(
+            &second,
+            "memcastle_search",
+            serde_json::json!({ "query": "x" })
+        )
+        .await,
+        "a new session must start as full, not as whatever a closed one chose"
+    );
+
+    second.cancel().await.expect("close session");
     daemon.shutdown().await;
 }

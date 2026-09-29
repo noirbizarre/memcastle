@@ -141,6 +141,16 @@ impl AppServices {
         }
     }
 
+    /// An `AppServices` over a fresh in-memory store and an idle scheduler,
+    /// for the unit tests of the layers above (`mcp` cannot construct a store
+    /// itself: the `store-isolation` hook forbids it).
+    #[cfg(test)]
+    pub(crate) async fn for_tests() -> Self {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let scheduler = Arc::new(Scheduler::new(store.clone(), 1));
+        Self::new(store, scheduler)
+    }
+
     /// Summarise current daemon health. `mode` is stamped into the report
     /// purely for observability (`status` is a daemon-level operation, not
     /// a memory operation — see `MemoryMode`'s doc comment) — never gated.
