@@ -357,7 +357,7 @@ mod tests {
         assert_eq!(orphan.drawer_id, drawer_id);
         assert_eq!(orphan.room, room);
 
-        let remaining = store.list_all_drawers().await.expect("list drawers");
+        let remaining = store.list_drawers(None).await.expect("list drawers");
         assert!(
             remaining.iter().any(|d| d.id == drawer_id),
             "dry_run must never delete anything"
@@ -378,7 +378,7 @@ mod tests {
         let report = report_of(&job);
         assert_eq!(report.actions.len(), 1);
 
-        let remaining = store.list_all_drawers().await.expect("list drawers");
+        let remaining = store.list_drawers(None).await.expect("list drawers");
         assert!(
             !remaining.iter().any(|d| d.id == drawer_id),
             "apply must actually delete the orphan drawer"

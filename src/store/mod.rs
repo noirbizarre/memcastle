@@ -6,6 +6,12 @@
 //! (`wings`, `drawers`, `jobs`, `entities`, `migration_state`) as `impl SurrealStore`
 //! blocks; this file only owns connecting and schema sync.
 //!
+//! Method names say what they do: `get_*` reads one record, `list_*` reads
+//! many, `create_*` inserts (replay-safe `_once` forms skip an existing id),
+//! `save_*` upserts a whole record, and `get_or_create_*` reads and inserts
+//! when absent. Callers own ids and timestamps, except inside
+//! `get_or_create_*` — see `domain::ids` for why.
+//!
 //! Every write and read goes through hand-written SurrealQL with explicit
 //! `<datetime>`/`<string>` casts rather than the SDK's typed `create`/
 //! `select` helpers or its `Datetime`/`RecordId` wrapper types. That costs
@@ -276,7 +282,7 @@ mod tests {
         };
         store.create_drawer(&drawer).await.expect("create drawer");
 
-        let drawers = store.list_drawers(room.id).await.expect("list");
+        let drawers = store.list_drawers(Some(room.id)).await.expect("list");
         assert_eq!(drawers.len(), 1);
         assert_eq!(drawers[0].id, drawer.id);
         assert_eq!(drawers[0].content, "hello palace");
@@ -398,7 +404,7 @@ mod tests {
             .expect("create beta drawer");
 
         let hits = store
-            .lexical_search("castle", 10, None, None)
+            .list_drawers_matching("castle", 10, None, None)
             .await
             .expect("search");
         assert_eq!(
@@ -442,7 +448,7 @@ mod tests {
             .expect("create beta drawer");
 
         let hits = store
-            .lexical_search("castle", 10, Some("alpha"), None)
+            .list_drawers_matching("castle", 10, Some("alpha"), None)
             .await
             .expect("wing-scoped search");
         assert_eq!(
@@ -477,7 +483,7 @@ mod tests {
             .expect("create notes drawer");
 
         let hits = store
-            .lexical_search("castle", 10, None, Some("notes"))
+            .list_drawers_matching("castle", 10, None, Some("notes"))
             .await
             .expect("room-scoped search");
         assert_eq!(
@@ -538,7 +544,7 @@ mod tests {
         // match count, the top hits are "loud"'s -- proving the score gap
         // is real, not an artifact of insertion order.
         let unscoped = store
-            .lexical_search("castle", 2, None, None)
+            .list_drawers_matching("castle", 2, None, None)
             .await
             .expect("unscoped search");
         assert_eq!(unscoped.len(), 2);
@@ -553,7 +559,7 @@ mod tests {
         // already-fetched unscoped page, this would come back empty -- the
         // top 2 rows fetched would already be "loud"'s.
         let scoped = store
-            .lexical_search("castle", 2, Some("quiet"), None)
+            .list_drawers_matching("castle", 2, Some("quiet"), None)
             .await
             .expect("wing-scoped search");
         assert_eq!(
@@ -804,165 +810,5 @@ mod tests {
             scoped.iter().all(|d| quiet_ids.contains(&d.id)),
             "expected only \"quiet\"'s drawers, got {scoped:?}"
         );
-    }
-
-    #[tokio::test]
-    async fn creating_an_entity_twice_with_the_same_name_and_kind_is_idempotent() {
-        let store = memory_store().await;
-        let first = store
-            .get_or_create_entity("Ada Lovelace", "person", serde_json::json!({}))
-            .await
-            .expect("create");
-        let second = store
-            .get_or_create_entity("Ada Lovelace", "person", serde_json::json!({}))
-            .await
-            .expect("get-or-create");
-        assert_eq!(first.id, second.id);
-    }
-
-    #[tokio::test]
-    async fn entity_kind_is_normalized_so_casing_does_not_fragment_the_graph() {
-        let store = memory_store().await;
-        let first = store
-            .get_or_create_entity("Ada Lovelace", "Person", serde_json::json!({}))
-            .await
-            .expect("create");
-        let second = store
-            .get_or_create_entity("Ada Lovelace", "person", serde_json::json!({}))
-            .await
-            .expect("get-or-create despite different casing");
-        assert_eq!(first.id, second.id);
-        assert_eq!(second.kind, "person");
-    }
-
-    #[tokio::test]
-    async fn an_empty_kind_or_predicate_is_rejected() {
-        let store = memory_store().await;
-        let entity_err = store
-            .get_or_create_entity("Ada Lovelace", "   ", serde_json::json!({}))
-            .await
-            .expect_err("blank kind must be rejected");
-        assert!(matches!(entity_err, crate::error::Error::EmptyLabel { .. }));
-
-        let alice = store
-            .get_or_create_entity("Alice", "person", serde_json::json!({}))
-            .await
-            .expect("alice");
-        let bob = store
-            .get_or_create_entity("Bob", "person", serde_json::json!({}))
-            .await
-            .expect("bob");
-        let relationship_err = store
-            .create_relationship(alice.id, bob.id, "", 1.0)
-            .await
-            .expect_err("blank predicate must be rejected");
-        assert!(matches!(
-            relationship_err,
-            crate::error::Error::EmptyLabel { .. }
-        ));
-    }
-
-    #[tokio::test]
-    async fn superseding_a_relationship_closes_the_old_edge_and_leaves_history_queryable() {
-        let store = memory_store().await;
-        let alice = store
-            .get_or_create_entity("Alice", "person", serde_json::json!({}))
-            .await
-            .expect("alice");
-        let acme = store
-            .get_or_create_entity("Acme", "organization", serde_json::json!({}))
-            .await
-            .expect("acme");
-
-        let original = store
-            .create_relationship(alice.id, acme.id, "employee_of", 0.9)
-            .await
-            .expect("create relationship");
-
-        let replacement = store
-            .supersede_relationship(
-                original.id,
-                crate::domain::NewRelationship {
-                    from: alice.id,
-                    to: acme.id,
-                    predicate: "former_employee_of".to_string(),
-                    confidence: 0.95,
-                },
-            )
-            .await
-            .expect("supersede");
-        assert_ne!(replacement.id, original.id);
-
-        let current = store
-            .list_relationships(alice.id, false)
-            .await
-            .expect("list current");
-        assert_eq!(
-            current.len(),
-            1,
-            "only the replacement should be current, got {current:?}"
-        );
-        assert_eq!(current[0].id, replacement.id);
-        assert_eq!(current[0].predicate, "former_employee_of");
-
-        let history = store
-            .list_relationships(alice.id, true)
-            .await
-            .expect("list including expired");
-        assert_eq!(
-            history.len(),
-            2,
-            "both the old and new edge should stay queryable, got {history:?}"
-        );
-        let old = history
-            .iter()
-            .find(|r| r.id == original.id)
-            .expect("original edge still present");
-        assert!(
-            old.valid_to.is_some(),
-            "the superseded edge must be closed, got {old:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn invalidating_a_relationship_sets_valid_to_without_creating_a_replacement() {
-        let store = memory_store().await;
-        let alice = store
-            .get_or_create_entity("Alice", "person", serde_json::json!({}))
-            .await
-            .expect("alice");
-        let acme = store
-            .get_or_create_entity("Acme", "organization", serde_json::json!({}))
-            .await
-            .expect("acme");
-        let relationship = store
-            .create_relationship(alice.id, acme.id, "employee_of", 0.9)
-            .await
-            .expect("create relationship");
-
-        store
-            .invalidate_relationship(relationship.id)
-            .await
-            .expect("invalidate");
-
-        let current = store
-            .list_relationships(alice.id, false)
-            .await
-            .expect("list current");
-        assert!(
-            current.is_empty(),
-            "an invalidated relationship must not read back as current, got {current:?}"
-        );
-
-        let history = store
-            .list_relationships(alice.id, true)
-            .await
-            .expect("list including expired");
-        assert_eq!(
-            history.len(),
-            1,
-            "invalidating must not create a replacement edge, got {history:?}"
-        );
-        assert!(history[0].valid_to.is_some());
     }
 }

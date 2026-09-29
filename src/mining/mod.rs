@@ -234,7 +234,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            store.list_all_drawers().await.unwrap().len(),
+            store.list_drawers(None).await.unwrap().len(),
             3,
             "each file must be mined exactly once across the replay"
         );

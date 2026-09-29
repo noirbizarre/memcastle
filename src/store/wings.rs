@@ -22,7 +22,7 @@ impl SurrealStore {
     /// database selection already provides that isolation — this row exists
     /// for display/status purposes (name, creation date), not as a join key
     /// anything else in this bootstrap depends on.
-    pub async fn ensure_palace(&self, default_name: &str) -> Result<Palace> {
+    pub async fn get_or_create_palace(&self, default_name: &str) -> Result<Palace> {
         let mut response = self
             .db
             .query("SELECT record::id(id) AS id, name, <string>created_at AS created_at FROM palace LIMIT 1")
@@ -52,7 +52,7 @@ impl SurrealStore {
 
     /// Find the wing named `name`, or create it under the palace singleton.
     pub async fn get_or_create_wing(&self, name: &str, description: Option<&str>) -> Result<Wing> {
-        let palace = self.ensure_palace("default").await?;
+        let palace = self.get_or_create_palace("default").await?;
 
         let mut response = self
             .db

@@ -21,7 +21,7 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-use crate::domain::{Job, JobEvent, JobId, JobKind, Priority};
+use crate::domain::{Job, JobEvent, JobId, JobKind, JobStatus, Priority};
 use crate::error::Result;
 use crate::store::SurrealStore;
 
@@ -107,7 +107,7 @@ impl Scheduler {
     ///
     /// Returns an error if the store cannot be read from or written to.
     pub async fn recover(&self) -> Result<()> {
-        let stuck = self.store.list_running_jobs().await?;
+        let stuck = self.store.list_jobs(Some(JobStatus::Running)).await?;
         for mut job in stuck {
             if job.attempt < job.max_attempts {
                 info!(job_id = %job.id, attempt = job.attempt, "recovering interrupted job to queued");

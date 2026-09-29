@@ -4,6 +4,14 @@
 //! to assign — that way a `Job`/`Drawer`/etc. has a stable identity before
 //! it is ever persisted, and the domain layer never has to ask `store` "what
 //! id did you give this?".
+//!
+//! **Who assigns ids and timestamps:** the caller does, for every plain
+//! create/update (`create_drawer`, `create_relationship`,
+//! `supersede_relationship`, `invalidate_relationship`, `save_job`) — so a
+//! job handler can derive an id from (job, item index) and replay safely, and
+//! a test can pin a time. The one exception is `get_or_create_*`
+//! (palace, wing, room, entity), where only the store knows whether a create
+//! will happen at all, so it mints the id and creation time when it does.
 
 use std::{fmt, str::FromStr};
 

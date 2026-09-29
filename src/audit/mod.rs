@@ -151,7 +151,7 @@ pub(crate) async fn find_orphan_drawers(store: &SurrealStore) -> Result<Vec<Orph
         }
     }
 
-    let drawers = store.list_all_drawers().await?;
+    let drawers = store.list_drawers(None).await?;
     Ok(drawers
         .into_iter()
         .filter(|drawer| !known_rooms.contains(&drawer.room))
@@ -202,7 +202,7 @@ async fn build_report(
         .filter(|j| j.status == JobStatus::Running && j.id != self_job_id)
         .count() as u64;
 
-    let drawers = store.list_all_drawers().await?;
+    let drawers = store.list_drawers(None).await?;
 
     let mut orphan_drawers = Vec::new();
     let mut dangling_provenance_drawers = Vec::new();
@@ -236,7 +236,7 @@ async fn build_report(
             // that wing's drawers count.
             Some(Some(resolved)) => wing_of_drawer == Some(resolved),
             // A scope was requested but no such wing exists: nothing is
-            // in scope, same as `lexical_search`'s handling of a typo'd
+            // in scope, same as `list_drawers_matching`'s handling of a typo'd
             // wing name — not an error, just an empty result.
             Some(None) => false,
         };

@@ -5,7 +5,7 @@
 //! wing/room scope (issue #10). Semantic/vector search, temporal filtering,
 //! graph-aware retrieval, and hybrid ranking are later phases (#42): the
 //! reason this is its own module rather than `app` calling
-//! `store::lexical_search` directly is so those phases add functions here
+//! `store::list_drawers_matching` directly is so those phases add functions here
 //! (and combine their results, reusing the same scope parameters) without
 //! `app` or the interfaces above it changing shape.
 
@@ -30,5 +30,5 @@ pub async fn lexical_search(
     wing: Option<&str>,
     room: Option<&str>,
 ) -> Result<Vec<SearchHit>> {
-    store.lexical_search(query, limit, wing, room).await
+    store.list_drawers_matching(query, limit, wing, room).await
 }

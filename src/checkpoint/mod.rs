@@ -24,6 +24,8 @@
 //! module's own tests, by calling [`run`] twice against a forced pause
 //! rather than racing wall-clock time against a live scheduler.
 
+use chrono::Utc;
+
 use crate::domain::{
     CheckpointDestination, CheckpointPayload, Drawer, DrawerId, FactMutation, Job, NewRelationship,
     Provenance, RelationshipId, RoomId,
@@ -136,7 +138,16 @@ async fn apply_fact_mutation(
             confidence,
         } => {
             store
-                .create_relationship_with_id(edge_id, *subject, *object, predicate, *confidence)
+                .create_relationship(
+                    edge_id,
+                    NewRelationship {
+                        from: *subject,
+                        to: *object,
+                        predicate: predicate.clone(),
+                        confidence: *confidence,
+                    },
+                    Utc::now(),
+                )
                 .await?;
         }
         FactMutation::Supersede {
@@ -147,7 +158,7 @@ async fn apply_fact_mutation(
             confidence,
         } => {
             store
-                .supersede_relationship_with_id(
+                .supersede_relationship(
                     *relationship_id,
                     edge_id,
                     NewRelationship {
@@ -156,11 +167,14 @@ async fn apply_fact_mutation(
                         predicate: predicate.clone(),
                         confidence: *confidence,
                     },
+                    Utc::now(),
                 )
                 .await?;
         }
         FactMutation::Invalidate { relationship_id } => {
-            store.invalidate_relationship(*relationship_id).await?;
+            store
+                .invalidate_relationship(*relationship_id, Utc::now())
+                .await?;
         }
     }
     Ok(())
@@ -225,7 +239,14 @@ mod tests {
             .get_or_create_room(general.id, "entries", None)
             .await
             .unwrap();
-        assert_eq!(store.list_drawers(general_room.id).await.unwrap().len(), 1);
+        assert_eq!(
+            store
+                .list_drawers(Some(general_room.id))
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
 
         let preferences = store.get_or_create_wing("preferences", None).await.unwrap();
         let preferences_room = store
@@ -233,7 +254,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            store.list_drawers(preferences_room.id).await.unwrap().len(),
+            store
+                .list_drawers(Some(preferences_room.id))
+                .await
+                .unwrap()
+                .len(),
             1
         );
 
@@ -242,7 +267,7 @@ mod tests {
             .get_or_create_room(diary.id, "diary", None)
             .await
             .unwrap();
-        let diary_drawers = store.list_drawers(diary_room.id).await.unwrap();
+        let diary_drawers = store.list_drawers(Some(diary_room.id)).await.unwrap();
         assert_eq!(diary_drawers.len(), 1);
         assert_eq!(diary_drawers[0].source.agent.as_deref(), Some("test-agent"));
     }
@@ -273,7 +298,7 @@ mod tests {
             .unwrap();
         assert!(
             store
-                .list_drawers(default_room.id)
+                .list_drawers(Some(default_room.id))
                 .await
                 .unwrap()
                 .is_empty(),
@@ -286,7 +311,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            store.list_drawers(project_foo_room.id).await.unwrap().len(),
+            store
+                .list_drawers(Some(project_foo_room.id))
+                .await
+                .unwrap()
+                .len(),
             1,
             "the item must land in the overridden wing instead"
         );
@@ -343,7 +372,16 @@ mod tests {
             .await
             .expect("acme");
         let relationship = store
-            .create_relationship(alice.id, acme.id, "employee_of", 0.9)
+            .create_relationship(
+                RelationshipId::new(),
+                NewRelationship {
+                    from: alice.id,
+                    to: acme.id,
+                    predicate: "employee_of".to_string(),
+                    confidence: 0.9,
+                },
+                Utc::now(),
+            )
             .await
             .expect("create relationship");
 
@@ -410,7 +448,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            store.list_drawers(room.id).await.unwrap().is_empty(),
+            store.list_drawers(Some(room.id)).await.unwrap().is_empty(),
             "no item should have been processed before the pause check fired"
         );
     }
@@ -466,7 +504,7 @@ mod tests {
             .get_or_create_room(general.id, "entries", None)
             .await
             .unwrap();
-        let drawers = store.list_drawers(room.id).await.unwrap();
+        let drawers = store.list_drawers(Some(room.id)).await.unwrap();
         assert_eq!(
             drawers.len(),
             payload.items.len(),
@@ -521,7 +559,7 @@ mod tests {
             .expect("replayed attempt");
 
         assert_eq!(
-            store.list_all_drawers().await.unwrap().len(),
+            store.list_drawers(None).await.unwrap().len(),
             payload.items.len(),
             "a replayed item must not be stored twice"
         );
@@ -548,7 +586,16 @@ mod tests {
             .await
             .unwrap();
         let old = store
-            .create_relationship(a.id, b.id, "knows", 0.5)
+            .create_relationship(
+                RelationshipId::new(),
+                NewRelationship {
+                    from: a.id,
+                    to: b.id,
+                    predicate: "knows".to_string(),
+                    confidence: 0.5,
+                },
+                Utc::now(),
+            )
             .await
             .unwrap();
         let mut superseding = item(CheckpointDestination::General, "now they are friends");

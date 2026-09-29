@@ -115,25 +115,28 @@ impl SurrealStore {
         Ok(())
     }
 
-    /// List every drawer filed under `room`, newest first.
-    pub async fn list_drawers(&self, room: RoomId) -> Result<Vec<Drawer>> {
-        let sql = format!(
-            "SELECT {DRAWER_COLUMNS} FROM drawer WHERE room = $room ORDER BY created_at DESC"
-        );
-        let mut response = self.db.query(sql).bind(("room", room.to_string())).await?;
-        super::take_rows(&mut response, 0)
-    }
-
-    /// List every drawer in the palace, across every room, newest first.
+    /// List the drawers filed under `room`, newest first — or, with `None`,
+    /// every drawer in the palace across every room.
     ///
-    /// Deliberately unscoped — unlike every other drawer read in this file,
-    /// which takes a `room`/`wing` filter — because `audit::run` needs a
-    /// palace-wide view regardless of its own optional wing scope: orphan
-    /// and dangling-provenance detection would silently miss real findings
+    /// The unscoped form exists because `audit::run` needs a palace-wide view
+    /// regardless of its own optional wing scope: orphan and
+    /// dangling-provenance detection would silently miss real findings
     /// outside whatever scope was requested (see that module's doc comment).
-    pub async fn list_all_drawers(&self) -> Result<Vec<Drawer>> {
-        let sql = format!("SELECT {DRAWER_COLUMNS} FROM drawer ORDER BY created_at DESC");
-        let mut response = self.db.query(sql).await?;
+    /// Same optional-filter idiom as [`Self::list_jobs`], and one method
+    /// rather than a scoped/unscoped pair that could drift apart.
+    pub async fn list_drawers(&self, room: Option<RoomId>) -> Result<Vec<Drawer>> {
+        let sql = format!(
+            "SELECT {DRAWER_COLUMNS} FROM drawer WHERE $room = NULL OR room = $room \
+             ORDER BY created_at DESC"
+        );
+        let room = room.map(|room| room.to_string());
+        let mut response = self
+            .db
+            .query(sql)
+            // `bindable`, not `.bind()` directly: see `list_jobs` on why a
+            // native `None` would be `NONE` and never match `= NULL`.
+            .bind(("room", super::bindable(&room)?))
+            .await?;
         super::take_rows(&mut response, 0)
     }
 
@@ -151,7 +154,8 @@ impl SurrealStore {
         Ok(counts.into_iter().next().map_or(0, |c| c.count))
     }
 
-    /// Lexical (BM25 full-text) search over drawer content — the "basic
+    /// List drawers whose content matches `query`, best first: lexical (BM25
+    /// full-text) search over drawer content — the "basic
     /// working search path" this bootstrap establishes. Semantic and hybrid
     /// ranking are later phases layered on top of the same `drawer` table.
     ///
@@ -166,7 +170,7 @@ impl SurrealStore {
     /// method fetching an unscoped page and filtering it in Rust, which
     /// would let an out-of-scope but higher-scoring hit crowd a requested
     /// scope's matches out of a capped result set.
-    pub async fn lexical_search(
+    pub async fn list_drawers_matching(
         &self,
         query: &str,
         limit: u32,
@@ -204,7 +208,7 @@ impl SurrealStore {
     /// are always scoped to one identity — the whole point of issue #13's
     /// design is that two identities sharing a wing/room never see each
     /// other's entries — so `agent` is a required equality filter, not an
-    /// optional scope like `lexical_search`'s wing/room. Being a plain
+    /// optional scope like `list_drawers_matching`'s wing/room. Being a plain
     /// `&str` (not `Option<&str>`), it binds directly rather than through
     /// `bindable`'s `$x = NULL` idiom.
     pub async fn list_diary_drawers(
@@ -238,7 +242,7 @@ impl SurrealStore {
     /// already sets `provenance.job_id` on every drawer it writes, so
     /// this needs no new write path, only this read-side query). Same
     /// "scope pushed into SurrealQL before `ORDER BY`/`LIMIT`" idiom as
-    /// `lexical_search` — see that method's doc comment for why fetching
+    /// `list_drawers_matching` — see that method's doc comment for why fetching
     /// unscoped and filtering in Rust would be wrong here too.
     pub async fn list_checkpoint_originated_drawers(
         &self,

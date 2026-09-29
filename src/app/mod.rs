@@ -142,7 +142,7 @@ impl AppServices {
     ///
     /// Returns an error if the store cannot be read.
     pub async fn status(&self, mode: MemoryMode) -> Result<StatusReport> {
-        let palace = self.store.ensure_palace("default").await?;
+        let palace = self.store.get_or_create_palace("default").await?;
         let drawer_count = self.store.count_drawers().await?;
         let queued = self.store.list_jobs(Some(JobStatus::Queued)).await?.len() as u64;
         let running = self.store.list_jobs(Some(JobStatus::Running)).await?.len() as u64;
@@ -514,7 +514,7 @@ impl AppServices {
     /// recall-oriented primitive the task brief's vocabulary calls for
     /// (issue #14 / §14 — "MemCastle should expose excellent primitives for
     /// `recall(...)`/`search(...)`"), wired to exactly the same scoped
-    /// `lexical_search` underneath — a future divergence (e.g.
+    /// `list_drawers_matching` underneath — a future divergence (e.g.
     /// recall-specific reranking) has a name to hang off, not a reason to
     /// duplicate logic today. MemCastle does not itself force a
     /// search-before-answer protocol; enforcing that discipline is an
