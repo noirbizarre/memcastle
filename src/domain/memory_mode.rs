@@ -86,14 +86,17 @@ impl MemoryMode {
         }
     }
 
-    /// Whether this mode permits `search`/`recall`/`wake_up`/`diary_read`.
+    /// Whether this mode permits `search`/`recall`/`wake_up`/`diary_read`
+    /// and the job reads (`jobs list`/`show`), which can expose memory
+    /// content — see ADR-007.
     #[must_use]
     pub fn allows_read(self) -> bool {
         !matches!(self, Self::Disabled)
     }
 
     /// Whether this mode permits `checkpoint`/`emergency_checkpoint`/
-    /// `diary_write`.
+    /// `diary_write`, and submitting `mine` or an applied (non-dry-run)
+    /// `repair`, which also write memory content — see ADR-007.
     #[must_use]
     pub fn allows_write(self) -> bool {
         matches!(self, Self::Full)

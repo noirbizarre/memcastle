@@ -200,7 +200,7 @@ impl Config {
                 }
             }
         };
-        config.apply_env_overrides();
+        config.apply_env_overrides()?;
         config.validate()?;
         Ok(config)
     }
@@ -212,36 +212,43 @@ impl Config {
     }
 
     /// Apply `MEMCASTLE_*` overrides, for container/server deployments where
-    /// a config file is inconvenient. Silently ignores a malformed override
-    /// rather than failing the whole load — `validate` catches the result
-    /// either way, with a clearer message about what's actually wrong.
-    fn apply_env_overrides(&mut self) {
-        if let Ok(path) = std::env::var("MEMCASTLE_PALACE_PATH") {
+    /// a config file is inconvenient.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Config`] naming the variable when a numeric or
+    /// address override does not parse. Ignoring it instead would silently
+    /// keep the file/default value — a typo'd `MEMCASTLE_BIND` would start
+    /// the daemon on the wrong port with nothing to explain why — and
+    /// `validate` cannot catch that, since it only ever sees the value that
+    /// survived.
+    fn apply_env_overrides(&mut self) -> Result<()> {
+        self.apply_overrides_from(|name| std::env::var(name).ok())
+    }
+
+    /// The testable part of [`Config::apply_env_overrides`]: `lookup` stands
+    /// in for the process environment so tests need not mutate it (which is
+    /// process-wide and races with other tests).
+    fn apply_overrides_from(&mut self, lookup: impl Fn(&str) -> Option<String>) -> Result<()> {
+        if let Some(path) = lookup("MEMCASTLE_PALACE_PATH") {
             self.palace.path = PathBuf::from(path);
         }
-        if let Ok(bind) = std::env::var("MEMCASTLE_BIND")
-            && let Ok(addr) = bind.parse()
-        {
-            self.server.bind = addr;
+        if let Some(bind) = lookup("MEMCASTLE_BIND") {
+            self.server.bind = parse_override("MEMCASTLE_BIND", &bind)?;
         }
-        if let Ok(level) = std::env::var("MEMCASTLE_LOG") {
+        if let Some(level) = lookup("MEMCASTLE_LOG") {
             self.logging.level = level;
         }
-        if let Ok(n) = std::env::var("MEMCASTLE_JOBS_MAX_CONCURRENCY")
-            && let Ok(n) = n.parse()
-        {
-            self.jobs.max_concurrency = n;
+        if let Some(n) = lookup("MEMCASTLE_JOBS_MAX_CONCURRENCY") {
+            self.jobs.max_concurrency = parse_override("MEMCASTLE_JOBS_MAX_CONCURRENCY", &n)?;
         }
-        if let Ok(n) = std::env::var("MEMCASTLE_JOBS_DRAIN_TIMEOUT_SECS")
-            && let Ok(n) = n.parse()
-        {
-            self.jobs.drain_timeout_secs = n;
+        if let Some(n) = lookup("MEMCASTLE_JOBS_DRAIN_TIMEOUT_SECS") {
+            self.jobs.drain_timeout_secs = parse_override("MEMCASTLE_JOBS_DRAIN_TIMEOUT_SECS", &n)?;
         }
-        if let Ok(n) = std::env::var("MEMCASTLE_JOBS_LEASE_TTL_SECS")
-            && let Ok(n) = n.parse()
-        {
-            self.jobs.lease_ttl_secs = n;
+        if let Some(n) = lookup("MEMCASTLE_JOBS_LEASE_TTL_SECS") {
+            self.jobs.lease_ttl_secs = parse_override("MEMCASTLE_JOBS_LEASE_TTL_SECS", &n)?;
         }
+        Ok(())
     }
 
     /// The `tracing` filter directive this run should log with.
@@ -317,6 +324,18 @@ impl Config {
     }
 }
 
+/// Parse one environment override, naming the variable and the offending value
+/// on failure so the user knows which of several `MEMCASTLE_*` variables to fix.
+fn parse_override<T>(name: &str, raw: &str) -> Result<T>
+where
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    raw.trim()
+        .parse()
+        .map_err(|e| Error::config(format!("{name}={raw:?} is not valid: {e}")))
+}
+
 /// `~/.memcastle/default` (or `%USERPROFILE%\.memcastle\default`), the default palace
 /// directory when nothing more specific is configured.
 fn default_palace_dir() -> PathBuf {
@@ -355,6 +374,56 @@ mod tests {
             Config::resolve_log_filter("memcastle=debug", true, Some("trace".to_string()), 2),
             "memcastle=debug"
         );
+    }
+
+    fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name| {
+            pairs
+                .iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| (*value).to_string())
+        }
+    }
+
+    #[test]
+    fn a_well_formed_environment_override_replaces_the_default() {
+        let mut config = Config::default();
+        config
+            .apply_overrides_from(env(&[
+                ("MEMCASTLE_BIND", "127.0.0.1:9999"),
+                ("MEMCASTLE_JOBS_MAX_CONCURRENCY", "7"),
+            ]))
+            .unwrap();
+        assert_eq!(config.server.bind.port(), 9999);
+        assert_eq!(config.jobs.max_concurrency, 7);
+    }
+
+    #[test]
+    fn a_malformed_bind_override_is_an_error_naming_the_variable() {
+        let mut config = Config::default();
+        let err = config
+            .apply_overrides_from(env(&[("MEMCASTLE_BIND", "garbage")]))
+            .unwrap_err();
+        assert!(matches!(err, Error::Config { .. }));
+        assert!(
+            err.to_string().contains("MEMCASTLE_BIND"),
+            "the message must name the variable: {err}"
+        );
+    }
+
+    #[test]
+    fn a_malformed_numeric_override_is_an_error_not_a_silent_default() {
+        for name in [
+            "MEMCASTLE_JOBS_MAX_CONCURRENCY",
+            "MEMCASTLE_JOBS_DRAIN_TIMEOUT_SECS",
+            "MEMCASTLE_JOBS_LEASE_TTL_SECS",
+        ] {
+            let mut config = Config::default();
+            let err = config
+                .apply_overrides_from(env(&[(name, "abc")]))
+                .unwrap_err();
+            assert!(err.to_string().contains(name), "{name}: {err}");
+        }
     }
 
     #[test]

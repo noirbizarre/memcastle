@@ -1,10 +1,11 @@
 //! The daemon composition root: wires storage, the job scheduler, and the
 //! HTTP/MCP listeners together, and owns graceful shutdown.
 //!
-//! This is the *only* place that constructs a [`SurrealStore`] and a
-//! [`Scheduler`] — everything else (api, mcp, the CLI's non-`serve`
-//! commands) only ever sees them through [`AppServices`] or, for the CLI,
-//! through [`crate::client::DaemonClient`] talking to this process over
+//! This is the *only* place the daemon constructs a [`SurrealStore`] and a
+//! [`Scheduler`] (`memcastle migrate` opens a store too, but only to run
+//! migrations, never to serve) — everything else (api, mcp, the CLI's
+//! client commands) only ever sees them through [`AppServices`] or, for the
+//! CLI, through [`crate::client::DaemonClient`] talking to this process over
 //! HTTP.
 
 pub mod lifecycle;

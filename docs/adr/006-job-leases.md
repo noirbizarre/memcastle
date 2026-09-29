@@ -30,7 +30,8 @@ A running job is held by a lease that its daemon renews, and everything that cou
 - **Recovery goes by lease when the store is shared.**
   An embedded store is exclusive, so startup recovery still re-queues every `Running` job at once
   (the file lock proves the previous owner is gone, and waiting out a lease would delay every restart).
-  A remote store is shared, so recovery, and a reaper running alongside the heartbeat,
+  A remote store is shared, so recovery, and a reaper running alongside the heartbeat
+  (which runs on every daemon, and simply finds nothing to reap on an embedded store),
   re-queue only jobs whose lease has expired and that the reaping daemon is not itself running.
   The write that re-queues is guarded on the lease still being the one that was read,
   so a lease renewed a moment ago is not reaped from under its owner.

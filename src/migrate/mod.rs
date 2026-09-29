@@ -218,14 +218,14 @@ async fn apply_pending(
 /// [`status`], parameterized over an explicit migration list — see
 /// `run_with`'s doc comment for why.
 ///
-/// Deliberately does **not** also call `SurrealStore::check_schema` (a
-/// SurrealKit dry-run): on a genuinely fresh palace whose tables have never
-/// been synced for real even once, SurrealKit's dry-run diff tries to
-/// introspect a `SCHEMAFULL` target that doesn't exist yet and errors
-/// (confirmed empirically against `surrealkit` 1.0.0-beta.2) — a `--status`
-/// call must never fail on exactly the palace state it exists to describe.
-/// MemCastle's own watermark is a plain read with no such caveat; the
-/// schema side stays SurrealKit's alone to report, via its own tooling.
+/// Deliberately reports only MemCastle's own watermark, not the schema
+/// state: a SurrealKit dry-run diff on a genuinely fresh palace, whose tables
+/// have never been synced for real even once, tries to introspect a
+/// `SCHEMAFULL` target that doesn't exist yet and errors (confirmed
+/// empirically against `surrealkit` 1.0.0-beta.2) — a `--status` call must
+/// never fail on exactly the palace state it exists to describe. The
+/// watermark is a plain read with no such caveat; the schema side stays
+/// SurrealKit's alone to report, via its own tooling.
 async fn status_with(
     store: &SurrealStore,
     migrations: &[DataMigration],

@@ -52,8 +52,9 @@ Status: complete — every issue below is done.
 issue for full reasoning):
 
 - `pi-palace` routes every MemPalace write through its daemon's job queue to
-  dodge a multi-process file-lock race. MemCastle already has one process, one
-  writer (AGENTS.md invariant #4) — that specific race doesn't exist here.
+  dodge a multi-process file-lock race. An embedded MemCastle palace already
+  has one process, one writer (AGENTS.md invariant #4), and a remote one is
+  protected by job leases (ADR-006) — that specific race doesn't exist here.
   Checkpoint is a job for durability/priority/restart-survival, not lock
   avoidance; diary stays a direct, fast `AppServices` call (#12, #13).
 - MemCastle's single-SurrealDB design is explicitly meant to avoid needing a
@@ -79,7 +80,7 @@ phase makes it a thin MemCastle adapter instead of a fork. Depends on Phase 1.
 | [#24](https://github.com/noirbizarre/memcastle/issues/24) | Port emergency checkpoint before context compaction |
 | [#25](https://github.com/noirbizarre/memcastle/issues/25) | Author and inject the search-before-answer skill |
 | [#26](https://github.com/noirbizarre/memcastle/issues/26) | Port daily background mining trigger |
-| [#27](https://github.com/noirbizarre/memcastle/issues/27) | Implement explicit memory modes (full/read-only/off) |
+| [#27](https://github.com/noirbizarre/memcastle/issues/27) | Implement explicit memory modes (full/read-only/disabled) |
 | [#28](https://github.com/noirbizarre/memcastle/issues/28) | Port palace-audit-equivalent manual command (scoped down) |
 | [#29](https://github.com/noirbizarre/memcastle/issues/29) | Persistent MCP connection for the session |
 | [#30](https://github.com/noirbizarre/memcastle/issues/30) | Actionable, classified failure handling UX |

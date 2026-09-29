@@ -12,7 +12,8 @@
 //! against the embedded and a future remote backend, and a CAS over a plain
 //! row is the smallest surface that does. (`claim_next_job` in `store::jobs`
 //! takes no database-level lock either, but for a different reason: its
-//! safety comes from the single sequential dispatcher.) Two distinct `WHERE` shapes are
+//! write is guarded on `status = 'queued'`, so when several daemons race for
+//! one job exactly one write matches.) Two distinct `WHERE` shapes are
 //! used depending on whether the lock currently looks free or held-but-
 //! stale: comparing a *bound* parameter against an absent (`NONE`) field
 //! silently never matches (binding `Option::None` produces SurrealDB's

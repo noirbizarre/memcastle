@@ -92,7 +92,7 @@ pub enum Error {
 
     /// `memcastle migrate --check` found migrations that have not been
     /// applied.
-    #[error("{count} migration(s) pending: {versions}")]
+    #[error("{count} migration(s) pending: {pending}")]
     #[diagnostic(
         code(memcastle::migrate::pending),
         help(
@@ -102,8 +102,8 @@ pub enum Error {
     MigrationsPending {
         /// How many migrations are pending.
         count: usize,
-        /// The pending versions, for display.
-        versions: String,
+        /// The names of the pending migration steps, for display.
+        pending: String,
     },
 
     /// A SurrealDB operation failed.
@@ -133,7 +133,7 @@ pub enum Error {
         message: String,
     },
 
-    /// SurrealKit's schema `Sync` (or its `dry_run` check) failed. MemCastle
+    /// SurrealKit's schema `Sync` failed. MemCastle
     /// delegates all schema management to SurrealKit (see
     /// `docs/adr/004-versioned-database-migrations.md`) rather than
     /// reimplementing schema diffing, so this wraps whatever SurrealKit
@@ -196,7 +196,7 @@ pub enum Error {
     #[diagnostic(
         code(memcastle::jobs::invalid_transition),
         help(
-            "valid transitions: queued->running, running->paused, paused->queued, running->completed, running->failed, failed->queued (retry), queued|paused|running->cancelled"
+            "valid transitions: queued->running, running->paused, paused->queued, running->completed, running->failed, running->queued (crash recovery), failed->queued (retry), queued|paused|running->cancelled"
         )
     )]
     InvalidJobTransition {
@@ -428,6 +428,30 @@ impl Error {
         Self::InvalidJobId { raw: raw.into() }
     }
 
+    /// Parse a job id a caller supplied, raising [`Error::InvalidJobId`] for
+    /// one that is not shaped like a job id. The one parser REST, MCP and the
+    /// CLI share, so the same mistake gets the same diagnostic everywhere.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidJobId`] if `raw` is not a job id.
+    pub fn parse_job_id(raw: &str) -> Result<crate::domain::JobId> {
+        raw.parse().map_err(|_| Self::invalid_job_id(raw))
+    }
+
+    /// Parse a job status filter a caller supplied, raising
+    /// [`Error::InvalidInput`] (naming `status` and the accepted values)
+    /// for an unknown one. Shared by REST, MCP and the CLI for the same reason
+    /// as [`Error::parse_job_id`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidInput`] if `raw` is not a job status.
+    pub fn parse_job_status(raw: &str) -> Result<crate::domain::JobStatus> {
+        raw.parse()
+            .map_err(|message: String| Self::invalid_input("status", message))
+    }
+
     /// Build an [`Error::NotImplemented`].
     pub fn not_implemented(feature: impl Into<String>) -> Self {
         Self::NotImplemented {
@@ -551,7 +575,7 @@ mod tests {
             Error::not_implemented("memcastle wings"),
             Error::MigrationsPending {
                 count: 1,
-                versions: "[2]".to_string(),
+                pending: "canonical-timestamps".to_string(),
             },
             Error::Store {
                 source: surrealdb::Error::internal("boom".to_string()),

@@ -25,6 +25,10 @@ impl IntoResponse for ApiError {
             | Error::InvalidBasedOnJob { .. }
             | Error::EmptyLabel { .. } => StatusCode::BAD_REQUEST,
             Error::ModeForbidden { .. } => StatusCode::FORBIDDEN,
+            // The request is fine; the job's recorded state (Running, but with
+            // no worker) is what conflicts with it, and a restart resolves it.
+            // A 500 would blame the daemon for something the caller can fix.
+            Error::JobOrphaned { .. } => StatusCode::CONFLICT,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         let body = self.0.body();
@@ -96,6 +100,12 @@ mod tests {
         );
         let code = Error::invalid_job_id("nope").body().code.unwrap();
         assert!(log.contains(&code), "{log}");
+    }
+
+    #[test]
+    fn an_orphaned_job_is_a_conflict_the_caller_can_resolve_not_a_server_fault() {
+        let response = ApiError::from(Error::JobOrphaned { id: "x".into() }).into_response();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
     }
 
     #[test]

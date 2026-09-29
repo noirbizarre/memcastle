@@ -1,4 +1,4 @@
-//! The HTTP API: health, status, and job inspection/control.
+//! The HTTP API: health, status, search/recall/wake-up/diary, job inspection/control and shutdown.
 //!
 //! Every handler is a deserialize -> call one `AppServices` method ->
 //! serialize sandwich — no business logic lives here. This is also where
@@ -6,12 +6,11 @@
 //! `memcastle serve` to shut down gracefully (see `server::lifecycle`).
 
 mod error;
+mod extract;
 mod mode;
 
-use std::str::FromStr;
-
 use axum::Router;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Json};
 use axum::routing::{get, post};
 use serde::Deserialize;
@@ -19,6 +18,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::app::{AppServices, WakeUpBudget};
 use crate::domain::{JobId, JobKind, JobStatus, MiningSource};
+
+use extract::{ApiJson, ApiQuery};
 
 pub use error::ApiError;
 pub use mode::ModeHeader;
@@ -63,6 +64,10 @@ async fn status(
 
 #[derive(Debug, Deserialize)]
 struct SearchParams {
+    /// `query` is accepted as an alias: MCP and the CLI call this `query`, and
+    /// a REST caller guessing the same name should not get a missing-parameter
+    /// error for it.
+    #[serde(alias = "query")]
     q: String,
     #[serde(default = "default_search_limit")]
     limit: u32,
@@ -78,7 +83,7 @@ fn default_search_limit() -> u32 {
 
 async fn search(
     State(state): State<ApiState>,
-    Query(params): Query<SearchParams>,
+    ApiQuery(params): ApiQuery<SearchParams>,
     ModeHeader(mode): ModeHeader,
 ) -> Result<impl IntoResponse, ApiError> {
     Ok(Json(
@@ -97,6 +102,8 @@ async fn search(
 
 #[derive(Debug, Deserialize)]
 struct RecallParams {
+    /// `query` is accepted as an alias, as for search.
+    #[serde(alias = "query")]
     q: String,
     #[serde(default = "default_search_limit")]
     limit: u32,
@@ -106,7 +113,7 @@ struct RecallParams {
 
 async fn recall(
     State(state): State<ApiState>,
-    Query(params): Query<RecallParams>,
+    ApiQuery(params): ApiQuery<RecallParams>,
     ModeHeader(mode): ModeHeader,
 ) -> Result<impl IntoResponse, ApiError> {
     Ok(Json(
@@ -129,7 +136,7 @@ struct WakeUpParams {
 
 async fn wake_up(
     State(state): State<ApiState>,
-    Query(params): Query<WakeUpParams>,
+    ApiQuery(params): ApiQuery<WakeUpParams>,
     ModeHeader(mode): ModeHeader,
 ) -> Result<impl IntoResponse, ApiError> {
     let budget = WakeUpBudget::from_options(params.max_items, params.max_bytes);
@@ -159,7 +166,7 @@ struct DiaryWriteBody {
 async fn diary_write(
     State(state): State<ApiState>,
     ModeHeader(mode): ModeHeader,
-    Json(body): Json<DiaryWriteBody>,
+    ApiJson(body): ApiJson<DiaryWriteBody>,
 ) -> Result<impl IntoResponse, ApiError> {
     Ok(Json(
         state
@@ -189,7 +196,7 @@ fn default_diary_limit() -> u32 {
 
 async fn diary_read(
     State(state): State<ApiState>,
-    Query(params): Query<DiaryReadParams>,
+    ApiQuery(params): ApiQuery<DiaryReadParams>,
     ModeHeader(mode): ModeHeader,
 ) -> Result<impl IntoResponse, ApiError> {
     Ok(Json(
@@ -208,7 +215,7 @@ struct ListJobsParams {
 async fn list_jobs(
     State(state): State<ApiState>,
     ModeHeader(mode): ModeHeader,
-    Query(params): Query<ListJobsParams>,
+    ApiQuery(params): ApiQuery<ListJobsParams>,
 ) -> Result<impl IntoResponse, ApiError> {
     let status = params.status.map(|s| parse_status(&s)).transpose()?;
     Ok(Json(state.app.list_jobs(status, mode).await?))
@@ -229,13 +236,13 @@ struct SubmitJobBody {
 }
 
 fn default_requested_by() -> String {
-    "http".to_string()
+    crate::domain::channel::HTTP.to_string()
 }
 
 async fn submit_job(
     State(state): State<ApiState>,
     ModeHeader(mode): ModeHeader,
-    Json(body): Json<SubmitJobBody>,
+    ApiJson(body): ApiJson<SubmitJobBody>,
 ) -> Result<impl IntoResponse, ApiError> {
     let job = match body.kind {
         JobKind::Mine { source, wing } => {
@@ -248,17 +255,10 @@ async fn submit_job(
         }
         JobKind::Demo { steps } => state.app.submit_demo(steps, &body.requested_by).await?,
         JobKind::Checkpoint { payload } => {
-            if body.emergency {
-                state
-                    .app
-                    .emergency_checkpoint(payload, &body.requested_by, mode)
-                    .await?
-            } else {
-                state
-                    .app
-                    .checkpoint(payload, &body.requested_by, mode)
-                    .await?
-            }
+            state
+                .app
+                .checkpoint_with_urgency(payload, body.emergency, &body.requested_by, mode)
+                .await?
         }
         JobKind::Audit { scope } => {
             // Not gated by `mode` — same reasoning as `Mine` above (see
@@ -293,11 +293,10 @@ async fn pause_job(
     State(state): State<ApiState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let result = state.app.pause_job(parse_job_id(&id)?).await?;
-    // "requested", not "paused": pausing is cooperative, so the job stops
-    // at its next check (every handler has one, audit and repair included)
-    // rather than at the instant of the request.
-    Ok(Json(result))
+    // The answer says "requested", not "paused": pausing is cooperative, so the
+    // job stops at its next check (every handler has one, audit and repair
+    // included) rather than at the instant of the request.
+    Ok(Json(state.app.pause_job(parse_job_id(&id)?).await?))
 }
 
 async fn resume_job(
@@ -330,10 +329,9 @@ async fn shutdown_now(State(state): State<ApiState>) -> impl IntoResponse {
 }
 
 fn parse_job_id(raw: &str) -> Result<JobId, ApiError> {
-    JobId::from_str(raw).map_err(|_| ApiError::from(crate::Error::invalid_job_id(raw)))
+    Ok(crate::Error::parse_job_id(raw)?)
 }
 
 fn parse_status(raw: &str) -> Result<JobStatus, ApiError> {
-    raw.parse()
-        .map_err(|message: String| ApiError::from(crate::Error::invalid_input("status", message)))
+    Ok(crate::Error::parse_job_status(raw)?)
 }

@@ -93,8 +93,6 @@ miette = { version = "7", features = ["fancy"] }
 
 # CLI
 clap = { version = "4", features = ["derive", "env", "wrap_help"] }
-console = "0.16"
-demand = "2"
 
 # Configuration & serialisation
 serde = { version = "1", features = ["derive"] }
@@ -103,9 +101,10 @@ toml = "1.1.6"
 chrono = { version = "0.4.45", features = ["serde"] }
 uuid = { version = "1.26.1", features = ["v4", "serde"] }
 
-# Async runtime. `process`/`signal` back the daemon's graceful-shutdown and
-# `restart` respawn paths; the rest is the baseline every module needs.
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "time", "process", "sync"] }
+# Async runtime. `signal` backs the daemon's graceful shutdown; the rest is the
+# baseline every module needs. (`restart` respawns through `std::process`, so
+# tokio's `process` feature is a dev-dependency only, for the subprocess tests.)
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }
 tokio-util = "0.7.19"
 
 # Storage. `kv-surrealkv` is the embedded engine — pure Rust, so the default
@@ -136,7 +135,6 @@ surrealkit = { version = "1.0.0-beta.2", default-features = false }
 
 # HTTP API + MCP-over-HTTP share one axum router.
 axum = "0.8.9"
-tower = "0.5.3"
 # The request-trace layer on the shared router, so REST and MCP are both logged.
 tower-http = { version = "0.6", default-features = false, features = ["trace"] }
 reqwest = { version = "0.13.5", features = ["json", "query"] }
@@ -156,11 +154,15 @@ assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
 insta = { version = "1", features = ["filters"] }
-rstest = "0.27"
-pretty_assertions = "1"
 # Only `tests/concurrency.rs` needs this (`join_all` over many simulated
 # clients) — not a real dependency, so it stays out of `[dependencies]`.
 futures = "0.3.34"
+
+# The integration tests spawn the `memcastle` binary as a subprocess and need
+# tokio's `process` for that; the daemon itself never does.
+[dev-dependencies.tokio]
+version = "1.53.1"
+features = ["process"]
 
 # `kv-mem` for fast in-memory storage tests; unions with the `kv-surrealkv`
 # feature above (Cargo merges features across dependency kinds), so tests can

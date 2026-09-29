@@ -119,15 +119,41 @@ entry = '''bash -c '! grep -rnP --include=*.rs "(?<![A-Za-z0-9_])(crate|memcastl
 files = '^src/(main\.rs|cli\.rs|client/|mcp/|api/)'
 pass_filenames = false
 
-# AGENTS.md invariant #4: one daemon per palace, one writer — a store is only
-# ever constructed by `server::run` or the `migrate` command in `main.rs`
-# (the same documented exception as invariant #1). Nothing else may open the
-# embedded SurrealKV path, since a second opener would either fail on the
-# file lock or, on the remote backend, become a second writer.
+# AGENTS.md invariant #4: one daemon per embedded palace, one writer — a store
+# is only ever constructed by `server::run` or the `migrate` command in
+# `main.rs` (the same documented exception as invariant #1). Nothing else may
+# open the embedded SurrealKV path, since a second opener would either fail on
+# the file lock or, on the remote backend, bypass the lease/fencing that keeps
+# several daemons safe (ADR-006).
 [[repos.hooks]]
 id = "single-writer"
 name = "only server::run and `migrate` construct a SurrealStore"
 language = "system"
 entry = '''bash -c '! grep -rnP --include=*.rs "SurrealStore::connect\(|surrealkv:" src | grep -vP "^src/(server/|store/|main\.rs:)" | grep -vP "^\S+:\d+:\s*//"' '''
+files = '^src/.*\.rs$'
+pass_filenames = false
+
+# AGENTS.md invariant #2: `Job::apply` is the only thing that assigns
+# `job.status`. Without this a handler could set a status directly and skip the
+# lease/timestamp bookkeeping the state machine centralises. The pattern is `=`
+# not followed by another `=`, so comparisons pass; the state machine's own
+# file (and its tests, which seed a status to walk every transition) is exempt.
+[[repos.hooks]]
+id = "job-status-only-via-apply"
+name = "only domain::job assigns Job.status"
+language = "system"
+entry = '''bash -c '! grep -rnP --include=*.rs "\.status\s*=[^=]" src tests | grep -vP "^src/domain/job\.rs:" | grep -vP "^\S+:\d+:\s*//"' '''
+files = '^(src|tests)/.*\.rs$'
+pass_filenames = false
+
+# AGENTS.md invariant #5: schema management is SurrealKit's. Schema lives in
+# `database/schema/*.surql` and is applied through `Sync`/`embed_schema!()`, so
+# Rust code has no business issuing DDL — that would be a hand-rolled schema
+# engine growing back. Comments may still mention the statements.
+[[repos.hooks]]
+id = "no-hand-rolled-ddl"
+name = "schema DDL lives in database/schema, not in Rust"
+language = "system"
+entry = '''bash -c '! grep -rniP --include=*.rs "(DEFINE|REMOVE|ALTER)\s+(TABLE|FIELD|INDEX|EVENT|ANALYZER)|INFO\s+FOR\s+(DB|TABLE)" src | grep -vP "^\S+:\d+:\s*//"' '''
 files = '^src/.*\.rs$'
 pass_filenames = false

@@ -1,10 +1,11 @@
 //! Proves multiple clients can hit the same daemon/store concurrently
-//! without corrupting state — the concurrency invariant the architecture
-//! doc calls out explicitly.
+//! without corrupting state — the invariant that one daemon serves many
+//! agent sessions at once (see `docs/architecture.md`, "The core idea", and
+//! ADR-002's tests of memory-mode isolation).
 
 mod common;
 
-use common::{TestDaemon, get_job, wait_for_job_status};
+use common::{TestDaemon, get_job, wait_for_all_jobs_completed, wait_for_job_status};
 use futures::future::join_all;
 
 #[tokio::test]
@@ -64,32 +65,6 @@ async fn concurrent_job_submissions_and_reads_all_land_correctly() {
     );
 
     daemon.shutdown().await;
-}
-
-async fn wait_for_all_jobs_completed(
-    client: &reqwest::Client,
-    base_url: &str,
-    expected: usize,
-) -> Vec<memcastle::domain::Job> {
-    for _ in 0..300 {
-        let jobs: Vec<memcastle::domain::Job> = client
-            .get(format!("{base_url}/api/jobs"))
-            .send()
-            .await
-            .expect("request")
-            .json()
-            .await
-            .expect("json");
-        if jobs.len() == expected
-            && jobs
-                .iter()
-                .all(|job| job.status == memcastle::domain::JobStatus::Completed)
-        {
-            return jobs;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    panic!("not every job reached Completed within 30s");
 }
 
 #[tokio::test]

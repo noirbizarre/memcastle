@@ -8,7 +8,7 @@ every tool is pinned to an exact build in `mise.lock`, so a local run and a CI r
 ```bash
 mise install          # the tools
 prek install          # the Git hooks
-mise run ci           # everything CI runs
+mise run ci           # the local equivalent of CI's lint, test and docs steps
 ```
 
 Rust itself is not managed by mise: `rust-toolchain.toml` pins the channel, and rustup installs it.
@@ -18,21 +18,28 @@ CI uses `dtolnay/rust-toolchain` because it needs per-job components and cross-c
 
 | Command | What it does |
 |---|---|
+| `mise run default` | Format, lint, build and test |
 | `mise run build` | Build the binary |
 | `mise run cli` | Run `memcastle` from source (passes flags through) |
+| `mise run setup` | Install `memcastle` into `~/.cargo/bin` |
 | `mise run test` | Run the tests (accepts nextest selectors) |
 | `mise run cover` | Run the tests with coverage |
 | `mise run format` | Format |
+| `mise run format:check` | Check the formatting without rewriting |
 | `mise run lint` | Clippy, warnings denied |
 | `mise run lint:actions` | actionlint over the workflows |
 | `mise run lint:md` | markdownlint over AGENTS.md, CONTRIBUTING.md, README.md and docs/ |
 | `mise run spell` | typos |
+| `mise run guards` | The architecture guard hooks (`store-isolation`, `single-writer`, `job-status-only-via-apply`, `no-hand-rolled-ddl`) over the whole tree |
 | `mise run snapshots` | Review pending insta snapshots |
-| `mise run check` | Everything that does not modify the working tree |
+| `mise run check` | Every lint, the guards and the tests, without modifying the working tree |
 | `mise run ci` | `check` plus the documentation build |
 | `mise run docs` | Serve the documentation locally |
+| `mise run docs:build` | Build the documentation |
 | `mise run changelog` | Preview the changelog for unreleased commits |
 | `mise run release` | Show the version the next release would take |
+| `mise run ship:validate` | Check the release setup against what gh-ship requires |
+| `mise run tpl:check` | Has the template moved? Exits 1 if merging it would change anything |
 | `mise run tpl:update` | Bring the rendered template ref up to date |
 | `mise run tpl:diff` | Show what merging the template would change |
 
@@ -81,7 +88,7 @@ That means the repository needs:
 The toolchain, hooks, CI and release workflows come from [rust.tpl](https://github.com/noirbizarre/rust.tpl):
 
 ```bash
-git tpl status         # is there a template update pending?
+mise run tpl:check     # is there a template update pending?
 mise run tpl:update    # advance refs/tpl/<id> — HEAD, index and worktree untouched
 mise run tpl:diff      # read what merging it would change
 git tpl merge          # take it
@@ -93,6 +100,7 @@ Requires git-tpl, which `mise install` provides (it is pinned in `mise.toml`'s `
 installed from a prebuilt release archive rather than compiled).
 
 Files carrying template-owned content — `mise.toml`, `prek.toml`, `Cargo.toml` —
-end with a `# --- project-specific ---` marker. Add below it;
+end with a `# --- project-specific ...` marker (`project-specific tasks` in `mise.toml`, `project-specific hooks` in `prek.toml`).
+Add below it;
 Git's 3-way merge then preserves your additions across updates.
 A fix that belongs to every project belongs in the template, not here.

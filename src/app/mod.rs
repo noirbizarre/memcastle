@@ -127,10 +127,28 @@ pub struct WakeUpContext {
 /// `pause_requested` and `cancel_requested` are *requests*, not outcomes:
 /// stopping is cooperative, so the job may still be running when this comes
 /// back (and, if the daemon dies first, is stopped by recovery instead).
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct JobControlResult {
-    /// `pause_requested`, `resumed`, `cancel_requested` or `retried`.
-    pub status: &'static str,
+    /// What the request left the job heading for.
+    pub status: JobControlStatus,
+}
+
+/// The answers a job-control request can give, serialized as the
+/// `snake_case` words callers already read (`pause_requested`, `resumed`,
+/// `cancel_requested`, `retried`). A closed enum rather than a `&'static str`
+/// so `client::DaemonClient` can deserialize the daemon's answer into the same
+/// type instead of handing callers an untyped `serde_json::Value`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobControlStatus {
+    /// A pause was asked for; the job stops at its next check.
+    PauseRequested,
+    /// A paused job was put back in the queue.
+    Resumed,
+    /// A cancel was asked for; a running job stops at its next check.
+    CancelRequested,
+    /// A failed job was put back in the queue.
+    Retried,
 }
 
 /// The application services shared by every interface. Cheap to clone
@@ -241,7 +259,23 @@ impl AppServices {
         limit: u32,
         mode: MemoryMode,
     ) -> Result<Vec<SearchHit>> {
-        Self::require_read(mode, "search")?;
+        self.gated_search("search", query, wing, room, limit, mode)
+            .await
+    }
+
+    /// The gated search both `search` and `recall` run, taking the caller's
+    /// own name so a rejected `recall` says `recall`, not the `search` it
+    /// never asked for (the same reason `submit_checkpoint` takes one).
+    async fn gated_search(
+        &self,
+        operation: &'static str,
+        query: &str,
+        wing: Option<&str>,
+        room: Option<&str>,
+        limit: u32,
+        mode: MemoryMode,
+    ) -> Result<Vec<SearchHit>> {
+        Self::require_read(mode, operation)?;
         let limit = limit.min(MAX_READ_LIMIT);
         crate::search::lexical_search(&self.store, query, limit, wing, room).await
     }
@@ -258,7 +292,8 @@ impl AppServices {
     ///
     /// # Errors
     ///
-    /// Returns an error if the job cannot be persisted, or
+    /// Returns an error if the job cannot be persisted,
+    /// [`Error::InvalidInput`] if `path` is relative, or
     /// [`Error::ModeForbidden`] if `mode` doesn't permit writes.
     pub async fn submit_mine(
         &self,
@@ -268,6 +303,21 @@ impl AppServices {
         mode: MemoryMode,
     ) -> Result<Job> {
         Self::require_write(mode, "mine")?;
+        // Validated here, like `submit_repair`'s `based_on_job`: a relative path
+        // would be resolved against the *daemon's* working directory, not the
+        // caller's, and mine the wrong tree or fail minutes later as a job.
+        // `has_root` as well as `is_absolute` so `/data` is accepted on Windows,
+        // where it has a root but no drive.
+        if !(path.is_absolute() || path.has_root()) {
+            return Err(Error::invalid_input(
+                "path",
+                format!(
+                    "`{}` is relative; give an absolute path, since the daemon resolves it \
+                     against its own working directory",
+                    path.display()
+                ),
+            ));
+        }
         self.scheduler
             .submit(
                 JobKind::Mine {
@@ -331,6 +381,28 @@ impl AppServices {
             .await
     }
 
+    /// Submit a checkpoint at [`Priority::Critical`] when `emergency` is set
+    /// and [`Priority::High`] otherwise. The one place that choice is made, so
+    /// REST and MCP (which both take an `emergency` flag) do not each branch
+    /// on it and drift apart.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::checkpoint`] and [`Self::emergency_checkpoint`].
+    pub async fn checkpoint_with_urgency(
+        &self,
+        payload: CheckpointPayload,
+        emergency: bool,
+        requested_by: &str,
+        mode: MemoryMode,
+    ) -> Result<Job> {
+        if emergency {
+            self.emergency_checkpoint(payload, requested_by, mode).await
+        } else {
+            self.checkpoint(payload, requested_by, mode).await
+        }
+    }
+
     /// Submit an emergency checkpoint at [`Priority::Critical`] — preempts
     /// every other queued job, for save-before-crash situations.
     ///
@@ -364,8 +436,8 @@ impl AppServices {
     /// which already anticipates this). **Not** gated by [`MemoryMode`]:
     /// like `submit_mine`/`submit_demo`, this is an administrative/
     /// daemon-level operation, not a session-scoped memory read — see
-    /// `domain::MemoryMode`'s module doc, which already lists Audit as
-    /// administrative pending a future reclassification.
+    /// `domain::MemoryMode`'s module doc, and ADR-002 for why leaving
+    /// `Audit` ungated is provisional rather than a settled boundary.
     ///
     /// # Errors
     ///
@@ -464,7 +536,7 @@ impl AppServices {
     pub async fn pause_job(&self, id: JobId) -> Result<JobControlResult> {
         self.scheduler.request_pause(id).await?;
         Ok(JobControlResult {
-            status: "pause_requested",
+            status: JobControlStatus::PauseRequested,
         })
     }
 
@@ -475,7 +547,9 @@ impl AppServices {
     /// Returns an error if the job doesn't exist or isn't paused.
     pub async fn resume_job(&self, id: JobId) -> Result<JobControlResult> {
         self.scheduler.resume(id).await?;
-        Ok(JobControlResult { status: "resumed" })
+        Ok(JobControlResult {
+            status: JobControlStatus::Resumed,
+        })
     }
 
     /// Cancel a queued, paused, or running job.
@@ -487,7 +561,7 @@ impl AppServices {
     pub async fn cancel_job(&self, id: JobId) -> Result<JobControlResult> {
         self.scheduler.request_cancel(id).await?;
         Ok(JobControlResult {
-            status: "cancel_requested",
+            status: JobControlStatus::CancelRequested,
         })
     }
 
@@ -498,7 +572,9 @@ impl AppServices {
     /// Returns an error if the job doesn't exist or isn't failed.
     pub async fn retry_job(&self, id: JobId) -> Result<JobControlResult> {
         self.scheduler.retry(id).await?;
-        Ok(JobControlResult { status: "retried" })
+        Ok(JobControlResult {
+            status: JobControlStatus::Retried,
+        })
     }
 
     /// Persist a diary entry for `agent_identity`, filed as a drawer under
@@ -618,7 +694,8 @@ impl AppServices {
         limit: u32,
         mode: MemoryMode,
     ) -> Result<Vec<SearchHit>> {
-        self.search(query, wing, None, limit, mode).await
+        self.gated_search("recall", query, wing, None, limit, mode)
+            .await
     }
 
     /// Build an agent's session-start context: its most recent diary entry
@@ -960,6 +1037,44 @@ mod tests {
             }
             other => panic!("expected Error::ModeForbidden, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn a_rejected_recall_names_recall_not_the_search_it_delegates_to() {
+        let app = test_app().await;
+
+        match app.recall("anything", None, 5, MemoryMode::Disabled).await {
+            Err(crate::Error::ModeForbidden { operation, .. }) => assert_eq!(operation, "recall"),
+            other => panic!("expected Error::ModeForbidden, got {other:?}"),
+        }
+        match app
+            .search("anything", None, None, 5, MemoryMode::Disabled)
+            .await
+        {
+            Err(crate::Error::ModeForbidden { operation, .. }) => assert_eq!(operation, "search"),
+            other => panic!("expected Error::ModeForbidden, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn mining_a_relative_path_is_rejected_at_submission_not_as_a_failed_job() {
+        let app = test_app().await;
+
+        let result = app
+            .submit_mine("some/relative/dir".into(), None, "test", MemoryMode::Full)
+            .await;
+
+        match result {
+            Err(crate::Error::InvalidInput { field, .. }) => assert_eq!(field, "path"),
+            other => panic!("expected Error::InvalidInput for `path`, got {other:?}"),
+        }
+        assert!(
+            app.list_jobs(None, MemoryMode::Full)
+                .await
+                .expect("list")
+                .is_empty(),
+            "a rejected submission must not leave a job behind"
+        );
     }
 
     #[test]

@@ -122,7 +122,7 @@ pub struct AuditParams {
 pub async fn run(ctx: &JobContext, job: &mut Job, params: AuditParams) -> Result<JobOutcome> {
     let AuditParams { scope } = params;
     let store = ctx.store();
-    if let Some(stop) = stop_requested(ctx) {
+    if let Some(stop) = ctx.stop_requested() {
         return Ok(stop);
     }
 
@@ -148,18 +148,6 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: AuditParams) -> Result
     job.result = Some(bindable(&report)?);
 
     Ok(JobOutcome::Completed)
-}
-
-/// Whether the job has been asked to stop, and how: cancel outranks pause,
-/// matching every other handler (a cancelled job never resumes).
-fn stop_requested(ctx: &JobContext) -> Option<JobOutcome> {
-    if ctx.is_cancelled() {
-        Some(JobOutcome::Cancelled)
-    } else if ctx.should_pause() {
-        Some(JobOutcome::Paused)
-    } else {
-        None
-    }
 }
 
 /// How a scan ended: with a report, or cut short by a cancel or pause.
@@ -213,7 +201,7 @@ async fn build_report(
     let mut room_wing: HashMap<RoomId, WingId> = HashMap::new();
     let mut wing_id_by_name: HashMap<&str, WingId> = HashMap::new();
     for wing in &wings {
-        if let Some(stop) = stop_requested(ctx) {
+        if let Some(stop) = ctx.stop_requested() {
             return Ok(Scan::Stopped(stop));
         }
         wing_id_by_name.insert(wing.name.as_str(), wing.id);
@@ -228,7 +216,7 @@ async fn build_report(
     // unscoped — see the loop below.
     let scope_wing_id = scope.map(|name| wing_id_by_name.get(name).copied());
 
-    if let Some(stop) = stop_requested(ctx) {
+    if let Some(stop) = ctx.stop_requested() {
         return Ok(Scan::Stopped(stop));
     }
     let jobs = store.list_jobs(None).await?;
@@ -242,7 +230,7 @@ async fn build_report(
         .filter(|j| j.status == JobStatus::Running && j.id != self_job_id)
         .count() as u64;
 
-    if let Some(stop) = stop_requested(ctx) {
+    if let Some(stop) = ctx.stop_requested() {
         return Ok(Scan::Stopped(stop));
     }
     let drawers = store.list_drawers(None).await?;
@@ -254,7 +242,7 @@ async fn build_report(
 
     for (index, drawer) in drawers.iter().enumerate() {
         if index % CHECK_EVERY == 0
-            && let Some(stop) = stop_requested(ctx)
+            && let Some(stop) = ctx.stop_requested()
         {
             return Ok(Scan::Stopped(stop));
         }

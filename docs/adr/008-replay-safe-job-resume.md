@@ -14,7 +14,8 @@ With the original design that duplicated it:
 - a replayed `add` fact opened a second current edge for the same fact.
 
 Resume after a crash is not an edge case: `Scheduler::recover` (see the [architecture](../architecture.md))
-re-queues every job left `Running`, a shutdown re-queues in-flight jobs, and a lease that lapses
+re-queues every job left `Running` (on a remote palace, only those whose lease has expired),
+a shutdown re-queues in-flight jobs, and a lease that lapses
 ([ADR-006](006-job-leases.md)) hands a job to another daemon that starts from the last checkpoint.
 
 ## Decision

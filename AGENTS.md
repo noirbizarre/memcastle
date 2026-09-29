@@ -20,25 +20,33 @@ Each of these should be enforced by a hook or a test. An invariant nothing check
 
 1. **The CLI has no business logic MCP/HTTP can't reuse** —
    every subcommand except `serve`/`daemon`/`migrate` only calls `client::DaemonClient`, never `store` or `jobs`
-   directly. `migrate` is a second, narrow exception alongside `serve`: it connects to storage directly (via
+   directly. (`restart` also manages the daemon *process* — it reads the registry file via `server::lifecycle`
+   and respawns `serve` — but touches neither `store` nor `jobs`.)
+   `migrate` is a second, narrow exception alongside `serve`: it connects to storage directly (via
    `crate::migrate::run`/`status`, the same runner `serve` calls on every startup) because migration must work
    without, and before, a daemon exists — see `docs/adr/004-versioned-database-migrations.md`.
    Enforced by the `prek` `store-isolation` hook: it greps `main.rs`, `cli.rs`, `client/`, `mcp/` and `api/`
    for any `crate::`/`memcastle::` `store` or `jobs` import, allowing only `main.rs`'s `SurrealStore` import for `migrate`.
 2. **Job status only changes through `domain::Job::apply`** — no other code assigns `job.status` directly.
-   Enforced by `domain::job`'s unit tests (every transition, including the rejected ones).
+   Enforced by `domain::job`'s table-driven test over every (status, event) pair, including the rejected ones,
+   and by the prek `job-status-only-via-apply` hook, which fails on any `.status =` assignment outside `domain/job.rs`.
 3. **The job queue is durable, the scheduler is only the execution mechanism** —
    a job's state survives a daemon restart.
    Enforced by `jobs::Scheduler::recover`, its per-state unit tests in `jobs::tests`,
    and `tests/persistence.rs` (SIGKILL a daemon mid-job, restart, the job resumes).
-4. **One daemon per palace, one writer** — `store` is only ever constructed by `server::run` or the `migrate`
+4. **One daemon per embedded palace, one writer** — `store` is only ever constructed by `server::run` or the `migrate`
    CLI command (the same second exception as (1)); nothing else opens the embedded SurrealKV path directly.
+   SurrealKV's file lock enforces the single writer for an embedded palace.
+   A remote palace may be shared by several daemons; job leases and fencing keep that safe
+   (see `docs/adr/006-job-leases.md`).
    Enforced by the prek `single-writer` hook: `SurrealStore::connect` and the `surrealkv:` endpoint
    may only appear under `server/`, `store/` and in `main.rs`.
 5. **Schema management is SurrealKit's, not MemCastle's** — `database/schema/*.surql` is applied through
    SurrealKit's `Sync`/`embed_schema!()` (`store::mod`), never a hand-rolled schema-diff/versioning engine.
    MemCastle owns only its own application data-migration steps and version watermark
    (`crate::migrate`, `store::migration_state`) — see `docs/adr/004-versioned-database-migrations.md`.
+   Enforced by the prek `no-hand-rolled-ddl` hook: no `DEFINE`/`REMOVE`/`ALTER` DDL or `INFO FOR` statement
+   may appear in Rust code under `src/` (comments excepted).
 
 ## Layout
 
@@ -84,6 +92,8 @@ The name should say what would be broken if it failed.
 **Markdown prose uses semantic linefeeds.** One sentence per line; only wrap inside a sentence, at a clause boundary,
 when it would otherwise exceed the 120-column limit `.markdownlint-cli2.yaml` enforces.
 This keeps a diff scoped to the sentence that actually changed.
+The rule applies to the linted documents (`AGENTS.md`, `CONTRIBUTING.md`, `README.md` and `docs/`);
+`PLAN.md`, `integrations/README.md` and `skills/README.md` are working documents outside that lint scope.
 
 ## Commits
 
@@ -103,13 +113,17 @@ See CONTRIBUTING.md.
 mise run ci
 ```
 
-Formatting, Clippy, spelling, workflow and Markdown linting, tests and the documentation build. Same as CI.
+Formatting, Clippy, spelling, workflow and Markdown linting, the architecture guard hooks, tests
+and the documentation build.
+This is the local equivalent of CI's lint and test steps; CI additionally runs every prek hook, coverage on three
+operating systems and `gh ship validate`.
 
 ## This repository is generated from a template
 
 The toolchain, hooks, CI and release workflows come from [rust.tpl](https://github.com/noirbizarre/rust.tpl)
 and are updated with `git tpl update`.
-Files carrying template-owned content end with a `# --- project-specific ---` marker: add below it, never above.
+Files carrying template-owned content end with a `# --- project-specific ...` marker
+(`mise.toml`, `prek.toml`, `Cargo.toml` and a few more): add below it, never above.
 
 Changing template-owned content here fixes it in one repository. Changing it in the template fixes it in all of them —
 prefer that.

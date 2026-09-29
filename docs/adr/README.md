@@ -7,21 +7,26 @@ The point is not the decision; it is the alternatives that were rejected and why
 A record that only states the outcome saves nobody the argument.
 
 A decision is changed by writing a new ADR that supersedes the old one, never by editing the old one.
+The one allowed edit is an *amendment*: a dated note at the end of a record, or a pointer in its Status,
+for a change that leaves the decision standing (a mechanism that moved, or a list that grew).
 The history is the value.
 
 ## Format
 
 `NNN-kebab-case-title.md`, numbered in the order written, with the sections:
 
-- **Status** — Proposed, Accepted, or Superseded by ADR-NNN
+- **Status** — Proposed, Accepted, Superseded by ADR-NNN, or Accepted with a pointer to the ADR that amends it
 - **Context** — the forces in play, before any decision
 - **Decision** — what was decided
+- **Alternatives rejected** — what else was on the table and why it lost; a record whose alternatives are
+  argued in its Context, or that is about scope, may say so there or use **Non-goals** instead
 - **Consequences** — what this costs, including what it makes harder
 
 ## Index
 
 - [ADR-001](001-surrealkv-embedded-storage-engine.md) — SurrealKV as the only embedded storage engine in Phase 1
 - [ADR-002](002-memory-mode-session-scoping.md) — memory mode is per-session/per-request, never daemon-global
+  (gated operations amended by ADR-007)
 - [ADR-003](003-checkpoint-as-a-durable-job.md) — checkpoint is a durable job; diary writes are a direct call
 - [ADR-004](004-versioned-database-migrations.md) — versioned MemCastle data migrations,
   decoupled from the SurrealDB engine and storage backend

@@ -161,6 +161,76 @@ async fn an_unknown_status_filter_is_a_400_invalid_input() {
 }
 
 #[tokio::test]
+async fn a_missing_query_parameter_is_a_400_with_the_shared_error_body() {
+    let daemon = TestDaemon::start().await;
+
+    // `/api/search` requires `q`; axum's stock extractor would answer with a
+    // plain-text 400 that no client could read a code or help line from.
+    let (status, body) = get_error(&daemon.base_url, "/api/search").await;
+
+    assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "memcastle::input::invalid");
+    assert!(
+        body["help"].is_string(),
+        "an error body must say what to do: {body}"
+    );
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn search_accepts_query_as_an_alias_for_q() {
+    let daemon = TestDaemon::start().await;
+
+    // MCP and the CLI call the parameter `query`; a REST caller using the same
+    // name must reach the search, not be told a parameter is missing.
+    for param in ["q", "query"] {
+        let response = reqwest::Client::new()
+            .get(format!("{}/api/search?{param}=anything", daemon.base_url))
+            .send()
+            .await
+            .expect("request");
+        assert!(
+            response.status().is_success(),
+            "`{param}`: {}",
+            response.status()
+        );
+    }
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_malformed_job_submission_is_a_400_with_the_shared_error_body() {
+    let daemon = TestDaemon::start().await;
+    let client = reqwest::Client::new();
+
+    for payload in [
+        // An unknown job type, and a known one missing its required field.
+        serde_json::json!({ "type": "no-such-kind" }),
+        serde_json::json!({ "type": "demo" }),
+        // A repair whose `based_on_job` is not a UUID.
+        serde_json::json!({ "type": "repair", "based_on_job": "not-a-uuid" }),
+    ] {
+        let response = client
+            .post(format!("{}/api/jobs", daemon.base_url))
+            .json(&payload)
+            .send()
+            .await
+            .expect("request");
+        let status = response.status();
+        let body: serde_json::Value = response.json().await.expect("json error body");
+
+        assert_eq!(
+            status,
+            reqwest::StatusCode::BAD_REQUEST,
+            "{payload}: {body}"
+        );
+        assert_eq!(body["code"], "memcastle::input::invalid", "{payload}");
+        assert!(body["help"].is_string(), "{payload}: {body}");
+    }
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
 async fn pausing_a_finished_job_is_a_400_invalid_transition_not_a_404() {
     let daemon = TestDaemon::start().await;
     let client = reqwest::Client::new();

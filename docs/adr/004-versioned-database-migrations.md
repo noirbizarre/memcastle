@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted; implemented in #44.
+Accepted
 
 ## Context
 

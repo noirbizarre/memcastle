@@ -26,7 +26,8 @@ fn serve_help_documents_the_daemon_alias() {
         .unwrap()
         .args(["serve", "--help"])
         .assert()
-        .success();
+        .success()
+        .stdout(contains("daemon"));
 }
 
 #[test]
@@ -38,7 +39,10 @@ fn status_without_a_reachable_daemon_fails_clearly() {
         .env("MEMCASTLE_BIND", "127.0.0.1:1")
         .arg("status")
         .assert()
-        .failure();
+        .failure()
+        // The diagnostic code, not just a non-zero exit: "no daemon" must be
+        // reported as such, not as a generic connection error.
+        .stderr(contains("memcastle::client::not_running"));
 }
 
 #[test]

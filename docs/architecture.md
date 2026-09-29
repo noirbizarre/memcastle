@@ -23,7 +23,8 @@ opens its own SQLite connections, and reloads an embedding model from scratch.
 `mempalace-rs` in particular pairs SQLite (metadata) with a separate `usearch` HNSW index,
 kept in sync only by best-effort,
 which is the root cause of an entire "watchdog / auto-repair / re-embed everything" subsystem in that codebase.
-MemCastle avoids that failure category by construction: one store, one writer process, no second index file to desync.
+MemCastle avoids that failure category by construction: one store, one writer process per embedded palace
+(a remote palace's several daemons are kept safe by job leases, see ADR-006), no second index file to desync.
 
 ## Layers
 
@@ -41,6 +42,9 @@ cli / mcp / api          <- interfaces (thin: parse, dispatch, serialize)
 Every subcommand except `serve`/`daemon`/`migrate` is a thin `client::DaemonClient` HTTP call —
 `memcastle mine ./project` submits a job over HTTP
 exactly the way an MCP tool call or a future web dashboard would, rather than mining anything itself.
+`restart` adds only process management on top of that:
+it reads the daemon's registry file (`server::lifecycle`) to know when the old daemon is really gone,
+then respawns `serve` — it never touches `store` or `jobs`.
 `serve`/`daemon` is the one command with real work:
 it *is* the composition root (`server::run`) that owns the store, the scheduler, and the HTTP/MCP listeners.
 `migrate` is a second, narrow exception: it connects to storage directly through `crate::migrate`,
@@ -59,8 +63,10 @@ which dispatches on a connection string's scheme at runtime:
 The rest of the codebase never branches on which backend is active —
 `config::StoreConfig` picks one, `Backend` carries it, `SurrealStore::connect` is the only place that cares.
 SurrealKV (pure Rust) is the only embedded backend Phase 1 compiles —
-see [ADR-001](adr/001-surrealkv-embedded-storage-engine.md). Server-side storage is out of scope for Phase 1 entirely —
-no RocksDB build variant is kept around speculatively for a server deployment model that doesn't exist yet;
+see [ADR-001](adr/001-surrealkv-embedded-storage-engine.md).
+Connecting to a remote instance already works, and several daemons may share one (see [ADR-006](adr/006-job-leases.md)).
+What is out of scope for Phase 1 is choosing and building a server-side storage engine of our own:
+no RocksDB build variant is kept around speculatively for a deployment model that doesn't need it yet;
 that choice is deferred until it does.
 
 Every read and write is hand-written SurrealQL (`db.query(...).bind(...)`)
@@ -196,7 +202,8 @@ See [ADR-002](adr/002-memory-mode-session-scoping.md) for the full rationale and
 
 ## Memory primitives: recall, wake_up, diary
 
-- `AppServices::recall` is `search` under a recall-oriented name (task brief §14's vocabulary) —
+- `AppServices::recall` is `search` under a recall-oriented name
+  (the original project brief's vocabulary; the brief itself is not kept in this repository) —
   the same scoped `lexical_search` underneath, never paraphrasing or truncating a `Drawer.content`.
   It exists as a name to hang a future recall-specific reranking off, not a reason to duplicate logic today;
   MemCastle itself does not enforce a search-before-answer protocol — that discipline is an integration/skill's job.
@@ -285,8 +292,9 @@ The budget is `Job::max_attempts` (3), and what it counts is `Job::recovery_atte
 or a shutdown re-queue, so a job that was merely paused twice is not one crash from failing.
 With an embedded palace, where SurrealKV's file lock admits only one daemon, every `Running` job is a dead predecessor's
 and is recovered at startup.
-With a remote palace only jobs whose lease has expired are, both at startup and periodically,
-so a second daemon cannot steal a live one's work.
+With a remote palace only jobs whose lease has expired are, so a second daemon cannot steal a live one's work.
+Startup recovery is that lease check, and a reaper running alongside the heartbeat repeats it periodically;
+the reaper also runs on an embedded palace, where it simply never finds anything to reap.
 `Queued` jobs need no recovery, and `Paused` jobs are deliberately left paused until someone resumes them.
 A pause or cancel request does not depend on the in-memory `JobControl` surviving:
 `request_pause`/`request_cancel` write `pause_requested`/`cancel_requested` on the `Running` job record

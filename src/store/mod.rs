@@ -387,6 +387,55 @@ mod tests {
         assert_eq!(fetched.status, crate::domain::JobStatus::Completed);
     }
 
+    #[tokio::test]
+    async fn a_status_guarded_save_refuses_to_overwrite_a_job_that_moved_on() {
+        use crate::domain::{JobEvent, JobStatus};
+
+        let store = memory_store().await;
+        let job = crate::domain::Job::new(
+            crate::domain::JobKind::Demo { steps: 1 },
+            crate::domain::Priority::Normal,
+            "test",
+        );
+        store.save_job(&job).await.expect("save queued");
+
+        // A stale copy, read while the job was still queued, is turned into a
+        // cancellation...
+        let mut stale = store.get_job(job.id).await.expect("get").expect("present");
+        stale.apply(JobEvent::Cancel).expect("cancel from queued");
+
+        // ...but a worker claims the job before that copy is saved.
+        store
+            .claim_next_job("worker-1", chrono::Duration::seconds(30))
+            .await
+            .expect("claim")
+            .expect("claimed");
+
+        let saved = store
+            .save_job_if_status(&stale, JobStatus::Queued)
+            .await
+            .expect("guarded save");
+
+        assert!(!saved, "the guard must report that nothing was written");
+        let stored = store.get_job(job.id).await.expect("get").expect("present");
+        assert_eq!(
+            stored.status,
+            JobStatus::Running,
+            "the claim must not be clobbered by the stale cancellation"
+        );
+        assert_eq!(stored.lease_owner.as_deref(), Some("worker-1"));
+
+        // With the status still as expected, the same save goes through.
+        let mut fresh = stored.clone();
+        fresh.apply(JobEvent::Complete).expect("complete");
+        assert!(
+            store
+                .save_job_if_status(&fresh, JobStatus::Running)
+                .await
+                .expect("guarded save")
+        );
+    }
+
     // Regression test for a 3.x driver behaviour change: binding
     // `Option::None` through `serde_json::Value` produces SurrealDB's
     // `NULL` (a real value), not its `NONE` (absence) -- so the "no filter"

@@ -25,7 +25,7 @@ use rmcp::{ErrorData as McpError, ServerHandler, schemars, tool, tool_handler, t
 use tokio_util::sync::CancellationToken;
 
 use crate::app::{AppServices, WakeUpBudget};
-use crate::domain::{CheckpointPayload, Job, JobId, JobStatus, MemoryMode};
+use crate::domain::{CheckpointPayload, Job, MemoryMode};
 use crate::error::Error;
 
 /// The MCP tool surface. Cheap to clone (holds only `AppServices`, itself
@@ -224,13 +224,7 @@ struct SetModeArgs {
 
 /// What every job and drawer written through this surface records as the
 /// channel it came through (`Job::requested_by`, `provenance.requested_by`).
-const CHANNEL: &str = "mcp";
-
-/// Parse a job id a caller supplied, as the same diagnostic REST and the CLI
-/// raise for one that is not shaped like a job id.
-fn parse_job_id(raw: &str) -> crate::Result<JobId> {
-    raw.parse().map_err(|_| Error::invalid_job_id(raw))
-}
+const CHANNEL: &str = crate::domain::channel::MCP;
 
 /// The one place a tool's outcome becomes an MCP result, so every tool
 /// reports success and failure the same way.
@@ -288,7 +282,7 @@ impl McpTools {
     /// Read the `mcp-session-id` header rmcp's streamable-HTTP transport
     /// sets on every request after the initialize handshake — the only way
     /// to identify "which session is this" from inside a tool handler (see
-    /// `McpTools::modes`'s doc comment).
+    /// `McpTools::mode`'s doc comment).
     ///
     /// `None` when the header is absent or empty: a request with no session
     /// has no identity, and must not be given one by falling back to `""`,
@@ -463,17 +457,16 @@ impl McpTools {
                 );
             }
         };
-        let job = if args.emergency {
-            self.app.emergency_checkpoint(payload, CHANNEL, mode).await
-        } else {
-            self.app.checkpoint(payload, CHANNEL, mode).await
-        };
+        let job = self
+            .app
+            .checkpoint_with_urgency(payload, args.emergency, CHANNEL, mode)
+            .await;
         tool_result("memcastle_checkpoint", job)
     }
 
     #[tool(
         description = "Submit a read-only palace consistency audit; returns the job id \
-                        immediately — poll memcastle_jobs_list or GET /api/jobs/{id} for the \
+                        immediately — poll memcastle_job_get for the \
                         report, which lands in the job's `result` field once completed"
     )]
     async fn memcastle_audit(
@@ -537,7 +530,11 @@ impl McpTools {
     ) -> Result<CallToolResult, McpError> {
         let mode = self.mode_for(&parts);
         let job = async {
-            let based_on_job = args.based_on_job.as_deref().map(parse_job_id).transpose()?;
+            let based_on_job = args
+                .based_on_job
+                .as_deref()
+                .map(Error::parse_job_id)
+                .transpose()?;
             self.app
                 .submit_repair(args.dry_run, based_on_job, CHANNEL, mode)
                 .await
@@ -560,10 +557,7 @@ impl McpTools {
             let status = args
                 .status
                 .as_deref()
-                .map(|raw| {
-                    raw.parse::<JobStatus>()
-                        .map_err(|message| Error::invalid_input("status", message))
-                })
+                .map(Error::parse_job_status)
                 .transpose()?;
             self.app.list_jobs(status, mode).await
         }
@@ -581,7 +575,7 @@ impl McpTools {
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
         let mode = self.mode_for(&parts);
-        let job = async { self.app.get_job(parse_job_id(&args.id)?, mode).await }.await;
+        let job = async { self.app.get_job(Error::parse_job_id(&args.id)?, mode).await }.await;
         tool_result("memcastle_job_get", job)
     }
 
@@ -593,7 +587,7 @@ impl McpTools {
         &self,
         Parameters(args): Parameters<JobIdArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let result = async { self.app.pause_job(parse_job_id(&args.id)?).await }.await;
+        let result = async { self.app.pause_job(Error::parse_job_id(&args.id)?).await }.await;
         tool_result("memcastle_job_pause", result)
     }
 
@@ -602,7 +596,7 @@ impl McpTools {
         &self,
         Parameters(args): Parameters<JobIdArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let result = async { self.app.resume_job(parse_job_id(&args.id)?).await }.await;
+        let result = async { self.app.resume_job(Error::parse_job_id(&args.id)?).await }.await;
         tool_result("memcastle_job_resume", result)
     }
 
@@ -614,7 +608,7 @@ impl McpTools {
         &self,
         Parameters(args): Parameters<JobIdArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let result = async { self.app.cancel_job(parse_job_id(&args.id)?).await }.await;
+        let result = async { self.app.cancel_job(Error::parse_job_id(&args.id)?).await }.await;
         tool_result("memcastle_job_cancel", result)
     }
 
@@ -625,7 +619,7 @@ impl McpTools {
         &self,
         Parameters(args): Parameters<JobIdArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let result = async { self.app.retry_job(parse_job_id(&args.id)?).await }.await;
+        let result = async { self.app.retry_job(Error::parse_job_id(&args.id)?).await }.await;
         tool_result("memcastle_job_retry", result)
     }
 }
@@ -680,6 +674,7 @@ pub fn service(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{JobId, JobStatus};
 
     /// The `Parts` of a request carrying `session` as its `mcp-session-id`,
     /// or none at all.
