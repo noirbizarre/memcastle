@@ -58,6 +58,10 @@ Or download a binary for your platform from the [latest release](https://github.
 memcastle --help
 ```
 
+Configuration follows the Unix XDG layout on Linux and macOS (`~/.config/memcastle/config.toml`,
+palace data in `~/.local/share/memcastle/`);
+see [the configuration guide](https://noirbizarre.github.io/memcastle/configuration/).
+
 ## Documentation
 
 <https://noirbizarre.github.io/memcastle/>

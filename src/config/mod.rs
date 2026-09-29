@@ -1,10 +1,15 @@
 //! Typed, validated configuration.
 //!
 //! Load order: hardcoded defaults -> optional TOML file -> `MEMCASTLE_*`
-//! environment overrides -> [`Config::validate`]. Deliberately hand-rolled
-//! rather than pulled in from a config-framework crate — there are five
-//! sections of settings, and a framework's abstraction cost would outweigh what it
-//! saves here.
+//! environment overrides -> command-line [`Overrides`] -> [`Config::validate`].
+//! Deliberately hand-rolled rather than pulled in from a config-framework
+//! crate — there are five sections of settings, and a framework's abstraction
+//! cost would outweigh what it saves here.
+//!
+//! Default file locations follow the Unix XDG convention on Linux and macOS
+//! alike; see [`paths`].
+
+pub mod paths;
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -13,6 +18,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::store::Backend;
+
+/// Settings given on the command line, the highest-precedence layer.
+///
+/// Kept separate from `cli` (which only defines argument types) so that
+/// every command builds the same [`Config`] from the same inputs: a
+/// `--palace` that only `serve` honoured would leave `status` looking for
+/// the daemon of a different palace.
+#[derive(Debug, Clone, Default)]
+pub struct Overrides {
+    /// `--palace`: replaces `palace.path`.
+    pub palace: Option<PathBuf>,
+    /// `--bind`: replaces `server.bind`.
+    pub bind: Option<SocketAddr>,
+}
 
 /// Where the palace's own data lives, distinct from `store` (which is where
 /// its *content* lives) so a future multi-palace-per-machine setup has
@@ -180,29 +199,42 @@ pub struct Config {
 }
 
 impl Config {
-    /// Load configuration: defaults, then `path` (or the default config file
-    /// location, if `path` is `None` and it exists), then `MEMCASTLE_*`
-    /// environment overrides, then validation.
+    /// Load configuration: defaults, then `path` (or the default config file,
+    /// `$XDG_CONFIG_HOME/memcastle/config.toml`, if `path` is `None` and it
+    /// exists), then `MEMCASTLE_*` environment overrides, then the
+    /// command-line `overrides`, then validation.
+    ///
+    /// An explicit `path` must exist (naming a file that is not there is a
+    /// typo, and silently using defaults would hide it); the default file is
+    /// optional.
     ///
     /// # Errors
     ///
     /// Returns [`Error::Config`] if a config file exists but fails to parse,
     /// or if the resolved configuration fails [`Config::validate`].
-    pub fn load(path: Option<&Path>) -> Result<Self> {
+    pub fn load(path: Option<&Path>, overrides: &Overrides) -> Result<Self> {
         let mut config = match path {
             Some(path) => Self::from_file(path)?,
-            None => {
-                let default_path = default_config_file();
-                if default_path.is_file() {
-                    Self::from_file(&default_path)?
-                } else {
-                    Self::default()
-                }
-            }
+            None => match paths::default_config_file() {
+                Some(default_path) if default_path.is_file() => Self::from_file(&default_path)?,
+                _ => Self::default(),
+            },
         };
         config.apply_env_overrides()?;
+        config.apply_cli_overrides(overrides);
         config.validate()?;
         Ok(config)
+    }
+
+    /// Apply the command-line layer, which outranks the environment so that a
+    /// one-off flag beats a value exported in the shell profile.
+    fn apply_cli_overrides(&mut self, overrides: &Overrides) {
+        if let Some(palace) = &overrides.palace {
+            self.palace.path.clone_from(palace);
+        }
+        if let Some(bind) = overrides.bind {
+            self.server.bind = bind;
+        }
     }
 
     fn from_file(path: &Path) -> Result<Self> {
@@ -301,6 +333,18 @@ impl Config {
     ///
     /// Returns [`Error::Config`] describing the first invariant violated.
     pub fn validate(&self) -> Result<()> {
+        // A relative palace path means different directories for a daemon and
+        // the client started from another working directory, so the client
+        // would never find the daemon's registry. It also happens when no
+        // home directory exists to derive the XDG default from.
+        if !self.palace.path.is_absolute() {
+            return Err(Error::config(format!(
+                "palace.path {:?} is not an absolute path; set it to one with `--palace`, \
+                 MEMCASTLE_PALACE_PATH or `palace.path` in the config file, \
+                 or set HOME or XDG_DATA_HOME so the default can be derived",
+                self.palace.path.display().to_string()
+            )));
+        }
         if self.jobs.max_concurrency == 0 {
             return Err(Error::config("jobs.max_concurrency must be at least 1"));
         }
@@ -336,20 +380,10 @@ where
         .map_err(|e| Error::config(format!("{name}={raw:?} is not valid: {e}")))
 }
 
-/// `~/.memcastle/default` (or `%USERPROFILE%\.memcastle\default`), the default palace
-/// directory when nothing more specific is configured.
+/// `$XDG_DATA_HOME/memcastle/default` (`~/.local/share/memcastle/default`), the
+/// default palace directory when nothing more specific is configured.
 fn default_palace_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".memcastle")
-        .join("default")
-}
-
-fn default_config_file() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".memcastle")
-        .join("config.toml")
+    paths::default_palace_dir()
 }
 
 #[cfg(test)]
@@ -437,6 +471,68 @@ mod tests {
     #[test]
     fn defaults_validate_successfully() {
         Config::default().validate().unwrap();
+    }
+
+    #[test]
+    fn a_relative_palace_path_is_rejected_with_the_way_to_fix_it() {
+        let mut config = Config::default();
+        config.palace.path = PathBuf::from("relative/palace");
+        let err = config.validate().unwrap_err();
+        assert!(matches!(err, Error::Config { .. }));
+        let message = err.to_string();
+        assert!(
+            message.contains("--palace") && message.contains("MEMCASTLE_PALACE_PATH"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn the_command_line_outranks_the_environment_which_outranks_the_file() {
+        let root = tempfile::tempdir().unwrap();
+        let (file, env_path, flag) = (
+            root.path().join("file"),
+            root.path().join("env"),
+            root.path().join("flag"),
+        );
+        let mut config: Config = toml::from_str(&format!(
+            "[palace]\npath = {:?}\n[server]\nbind = \"127.0.0.1:1111\"",
+            file.display().to_string()
+        ))
+        .unwrap();
+        assert_eq!(config.palace.path, file, "the file outranks the default");
+
+        config
+            .apply_overrides_from(env(&[
+                ("MEMCASTLE_PALACE_PATH", &env_path.display().to_string()),
+                ("MEMCASTLE_BIND", "127.0.0.1:2222"),
+            ]))
+            .unwrap();
+        assert_eq!(config.palace.path, env_path);
+        assert_eq!(config.server.bind.port(), 2222);
+
+        config.apply_cli_overrides(&Overrides {
+            palace: Some(flag.clone()),
+            bind: Some("127.0.0.1:3333".parse().unwrap()),
+        });
+        assert_eq!(config.palace.path, flag);
+        assert_eq!(config.server.bind.port(), 3333);
+    }
+
+    #[test]
+    fn absent_command_line_overrides_leave_the_loaded_values_alone() {
+        let mut config = Config::default();
+        let before = config.clone();
+        config.apply_cli_overrides(&Overrides::default());
+        assert_eq!(config.palace.path, before.palace.path);
+        assert_eq!(config.server.bind, before.server.bind);
+    }
+
+    #[test]
+    fn an_explicit_config_file_that_does_not_exist_is_an_error() {
+        let root = tempfile::tempdir().unwrap();
+        let err =
+            Config::load(Some(&root.path().join("nope.toml")), &Overrides::default()).unwrap_err();
+        assert!(matches!(err, Error::Io { .. }), "{err}");
     }
 
     #[test]

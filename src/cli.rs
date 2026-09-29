@@ -26,9 +26,18 @@ pub struct Cli {
     #[arg(long, global = true, env = "MEMCASTLE_MODE")]
     pub mode: Option<memcastle::domain::MemoryMode>,
 
-    /// Path to a config file. Defaults to `~/.memcastle/config.toml` if it exists.
+    /// Path to a config file. Defaults to `$XDG_CONFIG_HOME/memcastle/config.toml`
+    /// (`~/.config/memcastle/config.toml`) if it exists.
     #[arg(long, global = true, env = "MEMCASTLE_CONFIG")]
     pub config: Option<PathBuf>,
+
+    /// The palace directory to use, overriding `palace.path` and
+    /// `MEMCASTLE_PALACE_PATH`. Defaults to `$XDG_DATA_HOME/memcastle/default`
+    /// (`~/.local/share/memcastle/default`). Must be an absolute path.
+    /// Deliberately not bound to the environment variable here: that one is
+    /// applied by the config loader, one layer below this flag.
+    #[arg(long, global = true, value_name = "PATH")]
+    pub palace: Option<PathBuf>,
 
     /// The subcommand to run.
     #[command(subcommand)]
@@ -53,8 +62,8 @@ pub enum Command {
     Stop,
     /// Stop the daemon, then start a fresh one and wait until it is serving
     /// (best-effort; for supervised deployments, prefer restarting through
-    /// your process manager). `--config` and `--bind` are passed on to the
-    /// new daemon.
+    /// your process manager). `--config`, `--bind` and the resolved
+    /// `--palace` are passed on to the new daemon.
     Restart(ServeArgs),
     /// Search palace drawer content.
     Search(SearchArgs),

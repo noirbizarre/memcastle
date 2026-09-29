@@ -26,10 +26,13 @@ pub struct RuntimeInfo {
 }
 
 /// Where the registry file for `palace_path` lives:
-/// `~/.memcastle/run/<sha256(canonical path)[..16]>/daemon.json`. Keyed by
-/// the palace's canonical path (not its configured, possibly-relative one)
-/// so two configs that name the same directory differently still agree on
-/// one file.
+/// `$XDG_STATE_HOME/memcastle/run/<sha256(canonical path)[..16]>/daemon.json`
+/// (`~/.local/state/memcastle/run/...` by default). Keyed by the palace's
+/// canonical path (not its configured, possibly-relative one) so two configs
+/// that name the same directory differently still agree on one file.
+/// It lives in the state directory, not beside the palace, because it is
+/// runtime metadata rather than palace data: copying or backing up a palace
+/// must not carry a stale daemon record along.
 #[must_use]
 pub fn registry_path(palace_path: &Path) -> PathBuf {
     let canonical =
@@ -37,10 +40,7 @@ pub fn registry_path(palace_path: &Path) -> PathBuf {
     let digest = crate::domain::sha256_hex(canonical.display().to_string().as_bytes());
     let short = &digest[..16];
 
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".memcastle")
-        .join("run")
+    crate::config::paths::run_dir()
         .join(short)
         .join("daemon.json")
 }

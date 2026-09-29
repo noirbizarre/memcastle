@@ -56,7 +56,7 @@ src/
 ├── cli.rs      argument types only
 ├── lib.rs      module wiring
 ├── error.rs    the crate's error type
-├── config/     typed configuration (defaults -> file -> env -> validate)
+├── config/     typed configuration (defaults -> file -> env -> CLI -> validate) and Unix XDG paths
 ├── domain/     Palace/Wing/Room/Drawer/Job, checkpoint payloads, entities, memory modes — pure types, no I/O
 ├── store/      SurrealDB connection and repository methods (schema is applied from `database/schema/`)
 ├── migrate/    versioned data migrations and the version watermark, run before serving
