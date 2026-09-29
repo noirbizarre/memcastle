@@ -50,11 +50,7 @@ pub struct CheckpointParams {
 pub async fn run(ctx: &JobContext, job: &mut Job, params: CheckpointParams) -> Result<JobOutcome> {
     let CheckpointParams { payload } = params;
     let store = ctx.store();
-    let start = job
-        .checkpoint
-        .get("next_index")
-        .and_then(serde_json::Value::as_u64)
-        .map_or(0, |n| n as usize);
+    let start = JobContext::resume_index(job, "next_index");
 
     for (index, item) in payload.items.iter().enumerate().skip(start) {
         if ctx.is_cancelled() {

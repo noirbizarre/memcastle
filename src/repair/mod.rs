@@ -109,7 +109,7 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: RepairParams) -> Resul
         based_on_job,
     } = params;
     let store = ctx.store();
-    if let Some(stop) = stop_requested(ctx) {
+    if let Some(stop) = ctx.stop_requested() {
         return Ok(stop);
     }
 
@@ -173,18 +173,6 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: RepairParams) -> Resul
     })
 }
 
-/// Whether the job has been asked to stop, and how: cancel outranks pause,
-/// matching every other handler (a cancelled job never resumes).
-fn stop_requested(ctx: &JobContext) -> Option<JobOutcome> {
-    if ctx.is_cancelled() {
-        Some(JobOutcome::Cancelled)
-    } else if ctx.should_pause() {
-        Some(JobOutcome::Paused)
-    } else {
-        None
-    }
-}
-
 /// Plan (dry run) or apply the removal of each orphan, returning the actions
 /// taken and, if the loop stopped early, why (`Cancelled` or `Paused`).
 ///
@@ -205,7 +193,7 @@ async fn plan_or_apply(
         // A dry run deletes nothing and does no I/O per item, so there is
         // nothing to protect and no time to save by stopping it early.
         if !dry_run {
-            if let Some(stop) = stop_requested(ctx) {
+            if let Some(stop) = ctx.stop_requested() {
                 return Ok((actions, Some(stop)));
             }
             store.delete_drawer(orphan.drawer_id).await?;

@@ -124,6 +124,34 @@ impl JobContext {
         self.control.cancel.is_cancelled()
     }
 
+    /// Whether the job has been asked to stop, and how: cancel outranks
+    /// pause (a cancelled job never resumes). For a handler with nothing to
+    /// checkpoint before stopping; one that must save its position first
+    /// checks [`Self::is_cancelled`] and [`Self::should_pause`] itself.
+    #[must_use]
+    pub fn stop_requested(&self) -> Option<super::JobOutcome> {
+        if self.is_cancelled() {
+            Some(super::JobOutcome::Cancelled)
+        } else if self.should_pause() {
+            Some(super::JobOutcome::Paused)
+        } else {
+            None
+        }
+    }
+
+    /// The position an index-based handler resumes from: the number stored
+    /// under `key` in `job`'s checkpoint, or zero for a job that never
+    /// checkpointed. Read here, beside [`Self::checkpoint_at`] which writes
+    /// it, so every handler parses the resume state the same way and a huge
+    /// stored value saturates instead of silently truncating.
+    #[must_use]
+    pub fn resume_index(job: &Job, key: &str) -> usize {
+        job.checkpoint
+            .get(key)
+            .and_then(Value::as_u64)
+            .map_or(0, |n| usize::try_from(n).unwrap_or(usize::MAX))
+    }
+
     /// Persist `job`'s current progress and checkpoint without changing its
     /// status — a handler calls this after every unit of work, so a crash
     /// mid-run loses at most one unit, not the whole job.

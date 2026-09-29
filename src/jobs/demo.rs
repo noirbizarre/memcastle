@@ -27,11 +27,9 @@ pub(super) async fn run(ctx: &JobContext, job: &mut Job, params: DemoParams) -> 
     // Resume from wherever the last checkpoint left off, rather than
     // restarting at zero — this is what makes `Paused -> Queued -> Running`
     // a real resumption instead of a silent do-over.
-    let start = job
-        .checkpoint
-        .get("next_step")
-        .and_then(serde_json::Value::as_u64)
-        .map_or(0, |n| n as u32);
+    // Saturating, not truncating: a stored step past `u32::MAX` must end the
+    // loop, not wrap around to a small number and redo work.
+    let start = u32::try_from(JobContext::resume_index(job, "next_step")).unwrap_or(u32::MAX);
 
     for step in start..steps {
         if ctx.is_cancelled() {

@@ -125,11 +125,7 @@ async fn mine_directory(
         "files".to_string()
     };
 
-    let start = job
-        .checkpoint
-        .get("next_index")
-        .and_then(serde_json::Value::as_u64)
-        .map_or(0, |n| n as usize);
+    let start = JobContext::resume_index(job, "next_index");
 
     for (index, file) in files.iter().enumerate().skip(start) {
         if ctx.is_cancelled() {
