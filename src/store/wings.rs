@@ -91,7 +91,7 @@ impl SurrealStore {
             .query("CREATE type::record('palace', $id) SET name = $name, created_at = <datetime>$created_at")
             .bind(("id", palace.id.to_string()))
             .bind(("name", palace.name.clone()))
-            .bind(("created_at", palace.created_at.to_rfc3339()))
+            .bind(("created_at", super::stored(palace.created_at)))
             .await?
             .check()?;
         Ok(palace)
@@ -133,7 +133,7 @@ impl SurrealStore {
             .bind(("palace", wing.palace.to_string()))
             .bind(("name", wing.name.clone()))
             .bind(("description", wing.description.clone()))
-            .bind(("created_at", wing.created_at.to_rfc3339()))
+            .bind(("created_at", super::stored(wing.created_at)))
             .await?
             .check()?;
         Ok(wing)
@@ -166,7 +166,7 @@ impl SurrealStore {
             .bind(("wing", room.wing.to_string()))
             .bind(("name", room.name.clone()))
             .bind(("description", room.description.clone()))
-            .bind(("created_at", room.created_at.to_rfc3339()))
+            .bind(("created_at", super::stored(room.created_at)))
             .await?
             .check()?;
         Ok(room)

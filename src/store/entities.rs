@@ -181,7 +181,7 @@ impl SurrealStore {
                  COMMIT TRANSACTION;",
             )
             .bind(("old_id", old_id.to_string()))
-            .bind(("now", replacement.valid_from.to_rfc3339()))
+            .bind(("now", super::stored(replacement.valid_from)))
             .bind(("new_id", replacement.id.to_string()))
             .bind(("from", replacement.from.to_string()))
             .bind(("to", replacement.to.to_string()))
@@ -212,7 +212,7 @@ impl SurrealStore {
                 "UPDATE type::record('relates_to', $id) SET valid_to = $valid_to WHERE !valid_to",
             )
             .bind(("id", id.to_string()))
-            .bind(("valid_to", at.to_rfc3339()))
+            .bind(("valid_to", super::stored(at)))
             .await?
             .check()?;
         Ok(())
@@ -268,10 +268,10 @@ impl SurrealStore {
             .bind(("to", relationship.to.to_string()))
             .bind(("predicate", relationship.predicate.clone()))
             .bind(("confidence", relationship.confidence))
-            .bind(("valid_from", relationship.valid_from.to_rfc3339()))
+            .bind(("valid_from", super::stored(relationship.valid_from)))
             .bind((
                 "valid_to",
-                relationship.valid_to.map(|dt| dt.to_rfc3339()),
+                relationship.valid_to.map(super::stored),
             ))
             .await?
             .check()?;

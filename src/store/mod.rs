@@ -12,6 +12,10 @@
 //! when absent. Callers own ids and timestamps, except inside
 //! `get_or_create_*` — see `domain::ids` for why.
 //!
+//! Timestamps are written only through [`stored`], in one canonical string
+//! form; `docs/adr/005-timestamp-representation.md` records why some columns
+//! are `datetime` and the optional ones `option<string>`.
+//!
 //! Every write and read goes through hand-written SurrealQL with explicit
 //! `<datetime>`/`<string>` casts rather than the SDK's typed `create`/
 //! `select` helpers or its `Datetime`/`RecordId` wrapper types. That costs
@@ -46,6 +50,7 @@ mod drawers;
 mod entities;
 mod jobs;
 mod migration_state;
+mod timestamps;
 mod wings;
 
 use std::path::PathBuf;
@@ -71,6 +76,22 @@ pub use drawers::SearchHit;
 pub(crate) fn bindable<T: serde::Serialize>(value: &T) -> Result<serde_json::Value> {
     serde_json::to_value(value)
         .map_err(|source| Error::serialization("a value bound for storage", source))
+}
+
+/// The one form a timestamp is written to the database in: UTC, nine
+/// fractional digits, a `Z` suffix — `2026-09-29T14:22:47.123456789Z`.
+///
+/// Fixed width and fixed offset, so comparing two stored strings
+/// lexicographically is the same as comparing the instants, which is what
+/// makes the `option<string>` timestamp columns safe to `ORDER BY` or range
+/// over; `DateTime::to_rfc3339`'s variable precision and `+00:00` suffix are
+/// not (`...47.5+00:00` sorts after `...47.25+00:00` lexically only by
+/// accident of digit count). Nanoseconds because that is what `datetime`
+/// columns hold, so nothing is truncated on the way in. Every timestamp write
+/// in this module goes through here — see
+/// `docs/adr/005-timestamp-representation.md`.
+pub(crate) fn stored(at: chrono::DateTime<chrono::Utc>) -> String {
+    at.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
 }
 
 /// Whether `error` is SurrealDB reporting a write conflict — two transactions
@@ -849,5 +870,19 @@ mod tests {
             scoped.iter().all(|d| quiet_ids.contains(&d.id)),
             "expected only \"quiet\"'s drawers, got {scoped:?}"
         );
+    }
+
+    #[test]
+    fn stored_timestamps_are_fixed_width_utc_so_lexical_order_is_chronological() {
+        use chrono::{TimeZone, Utc};
+        let earlier = Utc.with_ymd_and_hms(2026, 1, 2, 3, 4, 5).unwrap();
+        // Half a second later: `to_rfc3339` would print `05.5+00:00`, which
+        // sorts *before* a `05+00:00` neighbour by digit count alone.
+        let later = earlier + chrono::Duration::milliseconds(500);
+
+        assert_eq!(stored(earlier), "2026-01-02T03:04:05.000000000Z");
+        assert_eq!(stored(later), "2026-01-02T03:04:05.500000000Z");
+        assert!(stored(earlier) < stored(later));
+        assert_eq!(stored(earlier).len(), stored(later).len());
     }
 }

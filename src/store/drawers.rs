@@ -51,10 +51,10 @@ impl SurrealStore {
             .bind(("tags", drawer.tags.clone()))
             .bind(("embedding", drawer.embedding.clone()))
             .bind(("provenance", super::bindable(&drawer.provenance)?))
-            .bind(("valid_from", drawer.valid_from.to_rfc3339()))
-            .bind(("valid_to", drawer.valid_to.map(|dt| dt.to_rfc3339())))
-            .bind(("created_at", drawer.created_at.to_rfc3339()))
-            .bind(("updated_at", drawer.updated_at.to_rfc3339()))
+            .bind(("valid_from", super::stored(drawer.valid_from)))
+            .bind(("valid_to", drawer.valid_to.map(super::stored)))
+            .bind(("created_at", super::stored(drawer.created_at)))
+            .bind(("updated_at", super::stored(drawer.updated_at)))
             .await?
             // `.await` alone only reports transport-level failures; a
             // rejected `SET` (e.g. a schema mismatch) would otherwise fail

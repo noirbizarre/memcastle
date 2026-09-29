@@ -49,9 +49,9 @@ impl SurrealStore {
             .bind(("kind", super::bindable(&job.kind)?))
             .bind(("status", super::bindable(&job.status)?))
             .bind(("priority", i32::from(job.priority)))
-            .bind(("created_at", job.created_at.to_rfc3339()))
-            .bind(("started_at", job.started_at.map(|dt| dt.to_rfc3339())))
-            .bind(("completed_at", job.completed_at.map(|dt| dt.to_rfc3339())))
+            .bind(("created_at", super::stored(job.created_at)))
+            .bind(("started_at", job.started_at.map(super::stored)))
+            .bind(("completed_at", job.completed_at.map(super::stored)))
             .bind(("requested_by", job.requested_by.clone()))
             .bind(("progress", super::bindable(&job.progress)?))
             .bind(("attempt", job.attempt))
@@ -63,7 +63,7 @@ impl SurrealStore {
             .bind(("lease_owner", job.lease_owner.clone()))
             .bind((
                 "lease_expires_at",
-                job.lease_expires_at.map(|dt| dt.to_rfc3339()),
+                job.lease_expires_at.map(super::stored),
             ))
             .await?
             // `.await` alone only reports transport failures, not a

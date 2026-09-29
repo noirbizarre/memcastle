@@ -25,3 +25,5 @@ The history is the value.
 - [ADR-003](003-checkpoint-as-a-durable-job.md) — checkpoint is a durable job; diary writes are a direct call
 - [ADR-004](004-versioned-database-migrations.md) — versioned MemCastle data migrations,
   decoupled from the SurrealDB engine and storage backend
+- [ADR-005](005-timestamp-representation.md) — timestamps are `datetime` when required,
+  canonical RFC 3339 strings when optional

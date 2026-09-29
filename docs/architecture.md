@@ -66,6 +66,8 @@ that choice is deferred until it does.
 Every read and write is hand-written SurrealQL (`db.query(...).bind(...)`)
 rather than the SDK's typed `create`/`select` helpers:
 datetimes cross the boundary as RFC3339 strings with explicit `<datetime>`/`<string>` casts,
+in one canonical form written only by `store::stored` (why optional timestamps are strings, and why they are safe to
+compare, is [ADR-005](adr/005-timestamp-representation.md)),
 and a record's own `id` is always projected out via `record::id(id)`.
 That trades some verbosity for depending on only the smallest, most stable part of the driver's API —
 its typed surface (`bind`/`take`'s `SurrealValue` requirement, the `Datetime`/`RecordId` wrapper types)
@@ -88,8 +90,9 @@ Two migration shapes, kept deliberately separate, both driven by one `crate::mig
   backfill. Gated by a MemCastle-owned version watermark (`migration_state` table, defined as one
   of the schema files above but read/written exclusively by `store::migration_state` — never
   SurrealKit's own bookkeeping), so each step runs exactly once. Each step lives in its own submodule of
-  `crate::migrate`; the first (`diary-provenance`, version 1) rewrites legacy diary drawers' `provenance.requested_by`
-  (see below).
+  `crate::migrate`: `diary-provenance` (version 1) rewrites legacy diary drawers' `provenance.requested_by`
+  (see below), and `canonical-timestamps` (version 2) rewrites optional timestamps into one form
+  ([ADR-005](adr/005-timestamp-representation.md)).
 
 `crate::migrate::run(&store)` is the one runner both entry points call — normal daemon startup
 (`server::run`) and the explicit `memcastle migrate` (`--check`, `--status`) command, which connects

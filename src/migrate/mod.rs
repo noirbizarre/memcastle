@@ -21,6 +21,7 @@
 //!   runs exactly once.
 
 mod diary_provenance;
+mod timestamps;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -74,11 +75,18 @@ pub struct DataMigration {
 /// Every data migration shipped so far, in release order. This is where the
 /// next one gets appended, never inserted before an existing entry and never
 /// edited in place once released. Each step lives in its own submodule.
-const DATA_MIGRATIONS: &[DataMigration] = &[DataMigration {
-    version: 1,
-    name: "diary-provenance",
-    apply: diary_provenance::apply,
-}];
+const DATA_MIGRATIONS: &[DataMigration] = &[
+    DataMigration {
+        version: 1,
+        name: "diary-provenance",
+        apply: diary_provenance::apply,
+    },
+    DataMigration {
+        version: 2,
+        name: "canonical-timestamps",
+        apply: timestamps::apply,
+    },
+];
 
 /// What [`run`] actually did.
 #[derive(Debug, Clone, Serialize, Deserialize)]
