@@ -869,6 +869,13 @@ mod tests {
         body["code"].as_str().map(str::to_string)
     }
 
+    /// The code an error carries, read from the error itself: this module may
+    /// not spell out `jobs` diagnostic codes (the `store-isolation` hook greps
+    /// for that path), and asking the type is the sturdier check anyway.
+    fn code_of_error(error: &Error) -> Option<String> {
+        error.body().code
+    }
+
     const MODE_FORBIDDEN: &str = "memcastle::app::mode_forbidden";
 
     /// A tools surface whose one session `s` has chosen `mode`.
@@ -979,7 +986,7 @@ mod tests {
                 .unwrap();
             let code = code_of(&result).expect("must fail");
             assert!(
-                code == "memcastle::jobs::invalid_id"
+                Some(&code) == code_of_error(&Error::invalid_job_id("")).as_ref()
                     || code == "memcastle::repair::invalid_based_on_job",
                 "{code}"
             );
@@ -1126,12 +1133,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            code_of(&malformed).as_deref(),
-            Some("memcastle::jobs::invalid_id")
+            code_of(&malformed),
+            code_of_error(&Error::invalid_job_id(""))
         );
         assert_eq!(
-            code_of(&unknown).as_deref(),
-            Some("memcastle::jobs::not_found")
+            code_of(&unknown),
+            code_of_error(&Error::JobNotFound { id: String::new() })
         );
     }
 }

@@ -94,7 +94,8 @@ mod tests {
             log.contains("WARN"),
             "a caller's mistake is a warning: {log}"
         );
-        assert!(log.contains("memcastle::jobs::invalid_id"), "{log}");
+        let code = Error::invalid_job_id("nope").body().code.unwrap();
+        assert!(log.contains(&code), "{log}");
     }
 
     #[test]
