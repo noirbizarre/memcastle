@@ -87,8 +87,9 @@ Two migration shapes, kept deliberately separate, both driven by one `crate::mig
   changes that can't be expressed as additive schema sync — a rename, reshape, split/merge, or
   backfill. Gated by a MemCastle-owned version watermark (`migration_state` table, defined as one
   of the schema files above but read/written exclusively by `store::migration_state` — never
-  SurrealKit's own bookkeeping), so each step runs exactly once. Empty today: nothing shipped yet
-  has needed one.
+  SurrealKit's own bookkeeping), so each step runs exactly once. Each step lives in its own submodule of
+  `crate::migrate`; the first (`diary-provenance`, version 1) rewrites legacy diary drawers' `provenance.requested_by`
+  (see below).
 
 `crate::migrate::run(&store)` is the one runner both entry points call — normal daemon startup
 (`server::run`) and the explicit `memcastle migrate` (`--check`, `--status`) command, which connects
@@ -113,6 +114,11 @@ Palace
 A `Drawer`'s `content` is immutable once written;
 provenance (`source`, `provenance.requested_by`, `provenance.job_id`), tags, an optional `embedding`,
 and a `valid_from`/`valid_to` pair travel alongside it.
+Provenance has one meaning for every writer (diary, mining, checkpoint):
+`provenance.requested_by` is the **channel** the write came through (`cli`, `http`, `mcp`),
+and `source.agent` is the **agent identity** behind it, or absent when no agent is involved (mining).
+Diary drawers written before this rule carry the agent in both fields;
+migration 1 rewrites their `requested_by` to `unknown`, because the channel was never recorded.
 `domain::entity` (`Entity`, `Relationship`) defines a bi-temporal knowledge-graph shape,
 and `store::entities` is schema-**wired**: create/supersede/invalidate/list-relationships operations exist
 and are exercised today by `checkpoint::run`'s optional `fact` mutation.

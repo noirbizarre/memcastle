@@ -429,7 +429,7 @@ impl McpTools {
         let mode = self.mode_for(&parts);
         match self
             .app
-            .diary_write(&args.agent_identity, &args.wing, args.content, mode)
+            .diary_write(&args.agent_identity, &args.wing, args.content, "mcp", mode)
             .await
         {
             Ok(drawer) => {

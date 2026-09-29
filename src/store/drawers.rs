@@ -140,6 +140,35 @@ impl SurrealStore {
         super::take_rows(&mut response, 0)
     }
 
+    /// Rewrite the `provenance.requested_by` of drawers written by the old
+    /// diary path, which stored the agent identity there instead of the
+    /// channel (see [`crate::domain::Provenance`]), to `channel`. Returns how
+    /// many were rewritten.
+    ///
+    /// Only for `crate::migrate`. A legacy diary drawer is one with no
+    /// producing job, an agent in `source.agent`, and `requested_by` equal to
+    /// that agent; a genuine channel name is never rewritten, and a drawer
+    /// already carrying `channel` no longer matches, so re-running is a
+    /// no-op.
+    pub(crate) async fn rewrite_legacy_diary_requested_by(&self, channel: &str) -> Result<u64> {
+        let mut response = self
+            .db
+            .query(
+                // Truthiness (`!x`, `x`) rather than `= NULL`: a `None` may be
+                // stored as `NONE` or `NULL` — see `entities`'s module doc.
+                "UPDATE drawer SET provenance.requested_by = $channel \
+                 WHERE !provenance.job_id AND source.agent \
+                   AND provenance.requested_by = source.agent \
+                   AND provenance.requested_by NOT IN ['cli', 'http', 'mcp'] \
+                 RETURN record::id(id) AS id",
+            )
+            .bind(("channel", channel.to_string()))
+            .await?
+            .check()?;
+        let rows: Vec<serde_json::Value> = response.take(0)?;
+        Ok(rows.len() as u64)
+    }
+
     /// The total number of drawers in the palace, for status reporting.
     pub async fn count_drawers(&self) -> Result<u64> {
         #[derive(Deserialize)]

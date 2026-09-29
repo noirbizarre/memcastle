@@ -182,9 +182,14 @@ impl DaemonClient {
         content: String,
     ) -> Result<Drawer> {
         self.send(
-            self.http.post(format!("{}/api/diary", self.base_url)).json(
-                &json!({ "agent_identity": agent_identity, "wing": wing, "content": content }),
-            ),
+            self.http
+                .post(format!("{}/api/diary", self.base_url))
+                .json(&json!({
+                    "agent_identity": agent_identity,
+                    "wing": wing,
+                    "content": content,
+                    "requested_by": "cli",
+                })),
         )
         .await
     }

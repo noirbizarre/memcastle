@@ -734,4 +734,29 @@ mod tests {
         assert_eq!(drawers.len(), 1, "only the unfinished item may be written");
         assert_eq!(drawers[0].content, "still to do");
     }
+
+    #[tokio::test]
+    async fn a_checkpointed_drawer_records_the_channel_as_requested_by_and_the_item_agent_as_source()
+     {
+        let store = memory_store().await;
+        let payload = CheckpointPayload {
+            items: vec![item(CheckpointDestination::General, "a note")],
+        };
+        let mut job = Job::new(
+            JobKind::Checkpoint {
+                payload: payload.clone(),
+            },
+            Priority::High,
+            "http",
+        );
+        let ctx = ctx_for(&store, &job, JobControl::default());
+
+        run(&ctx, &mut job, CheckpointParams { payload })
+            .await
+            .expect("run");
+
+        let drawers = store.list_drawers(None).await.unwrap();
+        assert_eq!(drawers[0].provenance.requested_by, "http");
+        assert_eq!(drawers[0].source.agent.as_deref(), Some("test-agent"));
+    }
 }

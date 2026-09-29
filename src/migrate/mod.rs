@@ -20,6 +20,8 @@
 //!   gated by the watermark `store::migration_state` tracks, so each one
 //!   runs exactly once.
 
+mod diary_provenance;
+
 use std::future::Future;
 use std::pin::Pin;
 
@@ -69,11 +71,14 @@ pub struct DataMigration {
     pub apply: MigrationFn,
 }
 
-/// Every data migration shipped so far, in release order. Empty today —
-/// nothing shipped yet has needed a reshape (see ADR-004's Context) — but
-/// this is where the next one gets appended, never inserted before an
-/// existing entry and never edited in place once released.
-const DATA_MIGRATIONS: &[DataMigration] = &[];
+/// Every data migration shipped so far, in release order. This is where the
+/// next one gets appended, never inserted before an existing entry and never
+/// edited in place once released. Each step lives in its own submodule.
+const DATA_MIGRATIONS: &[DataMigration] = &[DataMigration {
+    version: 1,
+    name: "diary-provenance",
+    apply: diary_provenance::apply,
+}];
 
 /// What [`run`] actually did.
 #[derive(Debug, Clone, Serialize, Deserialize)]

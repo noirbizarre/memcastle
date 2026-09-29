@@ -477,6 +477,10 @@ impl AppServices {
     /// forces this through the scheduler the way checkpoint/mining are
     /// (see issue #13 / `PLAN.md`'s design note).
     ///
+    /// `requested_by` is the channel the write came through (`"cli"`,
+    /// `"http"`, `"mcp"`), recorded as `provenance.requested_by`; the agent
+    /// identity goes in `source.agent`. See [`crate::domain::Provenance`].
+    ///
     /// # Errors
     ///
     /// Returns an error if the store write fails, or [`Error::ModeForbidden`]
@@ -486,6 +490,7 @@ impl AppServices {
         agent_identity: &str,
         wing: &str,
         content: String,
+        requested_by: &str,
         mode: MemoryMode,
     ) -> Result<Drawer> {
         Self::require_write(mode, "diary_write")?;
@@ -502,11 +507,16 @@ impl AppServices {
             Source {
                 kind: SourceKind::Manual,
                 uri: None,
+                // Who wrote it: the agent identity, as every writer records it.
                 agent: Some(agent_identity.to_string()),
             },
             vec![],
             Provenance {
-                requested_by: agent_identity.to_string(),
+                // Through which channel it arrived (`cli`, `http`, `mcp`) —
+                // the same meaning mining and checkpoint give this field.
+                // Writing the identity here too is what made "who asked"
+                // unqueryable across writers.
+                requested_by: requested_by.to_string(),
                 job_id: None,
             },
         );
@@ -722,6 +732,7 @@ mod tests {
                 "agent-a",
                 "project-x",
                 "went well today".to_string(),
+                "test",
                 MemoryMode::Full,
             )
             .await
@@ -744,6 +755,7 @@ mod tests {
             "agent-a",
             "shared-wing",
             "a's entry".to_string(),
+            "test",
             MemoryMode::Full,
         )
         .await
@@ -752,6 +764,7 @@ mod tests {
             "agent-b",
             "shared-wing",
             "b's entry".to_string(),
+            "test",
             MemoryMode::Full,
         )
         .await
@@ -787,6 +800,7 @@ mod tests {
             "agent-a",
             "project-x",
             "line one\nline two, verbatim — no paraphrasing".to_string(),
+            "test",
             MemoryMode::Full,
         )
         .await
@@ -845,6 +859,7 @@ mod tests {
             "agent-a",
             "project-x",
             "day one".to_string(),
+            "test",
             MemoryMode::Full,
         )
         .await
@@ -878,6 +893,7 @@ mod tests {
             "agent-a",
             "project-x",
             "should not appear".to_string(),
+            "test",
             MemoryMode::Full,
         )
         .await
@@ -1060,6 +1076,7 @@ mod tests {
                 "agent-a",
                 "project-x",
                 "should never be written".to_string(),
+                "test",
                 MemoryMode::Disabled,
             )
             .await;
@@ -1106,6 +1123,7 @@ mod tests {
             "agent-a",
             "project-x",
             "written while full".to_string(),
+            "test",
             MemoryMode::Full,
         )
         .await
@@ -1116,6 +1134,7 @@ mod tests {
                 "agent-a",
                 "project-x",
                 "should be rejected".to_string(),
+                "test",
                 MemoryMode::ReadOnly,
             )
             .await;
@@ -1289,9 +1308,15 @@ mod tests {
         let app = test_app().await;
         let extra = 5;
         for i in 0..(MAX_READ_LIMIT + extra) {
-            app.diary_write("agent-a", "wing", format!("entry {i}"), MemoryMode::Full)
-                .await
-                .expect("diary write");
+            app.diary_write(
+                "agent-a",
+                "wing",
+                format!("entry {i}"),
+                "test",
+                MemoryMode::Full,
+            )
+            .await
+            .expect("diary write");
         }
         let entries = app
             .diary_read("agent-a", "wing", u32::MAX, MemoryMode::Full)
@@ -1384,5 +1409,24 @@ mod tests {
         // The test scheduler is never started, so both stay queued.
         assert_eq!(status.jobs_queued, 2);
         assert_eq!(status.jobs_running, 0);
+    }
+
+    #[tokio::test]
+    async fn a_diary_entry_records_the_channel_as_requested_by_and_the_agent_as_source() {
+        let app = test_app().await;
+
+        let drawer = app
+            .diary_write(
+                "agent-a",
+                "wing",
+                "note".to_string(),
+                "mcp",
+                MemoryMode::Full,
+            )
+            .await
+            .expect("diary write");
+
+        assert_eq!(drawer.provenance.requested_by, "mcp");
+        assert_eq!(drawer.source.agent.as_deref(), Some("agent-a"));
     }
 }

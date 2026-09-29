@@ -300,4 +300,35 @@ mod tests {
         assert_eq!(drawers.len(), 1, "only the last file was still to mine");
         assert_eq!(drawers[0].content, "contents of c.txt");
     }
+
+    #[tokio::test]
+    async fn a_mined_drawer_records_the_channel_as_requested_by_and_no_agent() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "contents").unwrap();
+        let source = MiningSource::Directory {
+            path: dir.path().to_path_buf(),
+        };
+        let mut job = Job::new(
+            JobKind::Mine {
+                source: source.clone(),
+                wing: None,
+            },
+            Priority::Background,
+            "cli",
+        );
+        job.apply(crate::domain::JobEvent::Claim).unwrap();
+        let ctx = JobContext::new(job.id, JobControl::default(), store.clone());
+
+        run(&ctx, &mut job, MiningParams { source, wing: None })
+            .await
+            .unwrap();
+
+        let drawers = store.list_drawers(None).await.unwrap();
+        assert_eq!(drawers[0].provenance.requested_by, "cli");
+        assert_eq!(
+            drawers[0].source.agent, None,
+            "mining has no agent identity"
+        );
+    }
 }

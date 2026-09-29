@@ -149,6 +149,11 @@ struct DiaryWriteBody {
     wing: String,
     /// The entry's content.
     content: String,
+    /// The channel this write came through, recorded as
+    /// `provenance.requested_by` — `"http"` unless a caller says otherwise
+    /// (the CLI sends `"cli"`).
+    #[serde(default = "default_requested_by")]
+    requested_by: String,
 }
 
 async fn diary_write(
@@ -159,7 +164,13 @@ async fn diary_write(
     Ok(Json(
         state
             .app
-            .diary_write(&body.agent_identity, &body.wing, body.content, mode)
+            .diary_write(
+                &body.agent_identity,
+                &body.wing,
+                body.content,
+                &body.requested_by,
+                mode,
+            )
             .await?,
     ))
 }

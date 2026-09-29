@@ -255,7 +255,11 @@ pub struct Job {
     pub started_at: Option<DateTime<Utc>>,
     /// When it reached a terminal status.
     pub completed_at: Option<DateTime<Utc>>,
-    /// Which interface submitted this (`"cli"`, `"mcp"`, `"http"`).
+    /// The channel that submitted this job: `"cli"`, `"mcp"` or `"http"`.
+    /// The CLI and MCP tools send their own name; over HTTP it is whatever
+    /// the caller put in `requested_by`, defaulting to `"http"`, and is
+    /// recorded verbatim. It becomes `provenance.requested_by` on every
+    /// drawer the job writes.
     pub requested_by: String,
     /// How far along it is.
     pub progress: JobProgress,
