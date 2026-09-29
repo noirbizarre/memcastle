@@ -241,7 +241,23 @@ impl AppServices {
         limit: u32,
         mode: MemoryMode,
     ) -> Result<Vec<SearchHit>> {
-        Self::require_read(mode, "search")?;
+        self.gated_search("search", query, wing, room, limit, mode)
+            .await
+    }
+
+    /// The gated search both `search` and `recall` run, taking the caller's
+    /// own name so a rejected `recall` says `recall`, not the `search` it
+    /// never asked for (the same reason `submit_checkpoint` takes one).
+    async fn gated_search(
+        &self,
+        operation: &'static str,
+        query: &str,
+        wing: Option<&str>,
+        room: Option<&str>,
+        limit: u32,
+        mode: MemoryMode,
+    ) -> Result<Vec<SearchHit>> {
+        Self::require_read(mode, operation)?;
         let limit = limit.min(MAX_READ_LIMIT);
         crate::search::lexical_search(&self.store, query, limit, wing, room).await
     }
@@ -258,7 +274,8 @@ impl AppServices {
     ///
     /// # Errors
     ///
-    /// Returns an error if the job cannot be persisted, or
+    /// Returns an error if the job cannot be persisted,
+    /// [`Error::InvalidInput`] if `path` is relative, or
     /// [`Error::ModeForbidden`] if `mode` doesn't permit writes.
     pub async fn submit_mine(
         &self,
@@ -268,6 +285,21 @@ impl AppServices {
         mode: MemoryMode,
     ) -> Result<Job> {
         Self::require_write(mode, "mine")?;
+        // Validated here, like `submit_repair`'s `based_on_job`: a relative path
+        // would be resolved against the *daemon's* working directory, not the
+        // caller's, and mine the wrong tree or fail minutes later as a job.
+        // `has_root` as well as `is_absolute` so `/data` is accepted on Windows,
+        // where it has a root but no drive.
+        if !(path.is_absolute() || path.has_root()) {
+            return Err(Error::invalid_input(
+                "path",
+                format!(
+                    "`{}` is relative; give an absolute path, since the daemon resolves it \
+                     against its own working directory",
+                    path.display()
+                ),
+            ));
+        }
         self.scheduler
             .submit(
                 JobKind::Mine {
@@ -618,7 +650,8 @@ impl AppServices {
         limit: u32,
         mode: MemoryMode,
     ) -> Result<Vec<SearchHit>> {
-        self.search(query, wing, None, limit, mode).await
+        self.gated_search("recall", query, wing, None, limit, mode)
+            .await
     }
 
     /// Build an agent's session-start context: its most recent diary entry
@@ -960,6 +993,44 @@ mod tests {
             }
             other => panic!("expected Error::ModeForbidden, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn a_rejected_recall_names_recall_not_the_search_it_delegates_to() {
+        let app = test_app().await;
+
+        match app.recall("anything", None, 5, MemoryMode::Disabled).await {
+            Err(crate::Error::ModeForbidden { operation, .. }) => assert_eq!(operation, "recall"),
+            other => panic!("expected Error::ModeForbidden, got {other:?}"),
+        }
+        match app
+            .search("anything", None, None, 5, MemoryMode::Disabled)
+            .await
+        {
+            Err(crate::Error::ModeForbidden { operation, .. }) => assert_eq!(operation, "search"),
+            other => panic!("expected Error::ModeForbidden, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn mining_a_relative_path_is_rejected_at_submission_not_as_a_failed_job() {
+        let app = test_app().await;
+
+        let result = app
+            .submit_mine("some/relative/dir".into(), None, "test", MemoryMode::Full)
+            .await;
+
+        match result {
+            Err(crate::Error::InvalidInput { field, .. }) => assert_eq!(field, "path"),
+            other => panic!("expected Error::InvalidInput for `path`, got {other:?}"),
+        }
+        assert!(
+            app.list_jobs(None, MemoryMode::Full)
+                .await
+                .expect("list")
+                .is_empty(),
+            "a rejected submission must not leave a job behind"
+        );
     }
 
     #[test]
