@@ -685,9 +685,15 @@ mod tests {
             "test",
         );
         let ctx = JobContext::new(job.id, JobControl::default(), store.clone());
-        crate::checkpoint::run(store, &ctx, &mut job, &payload)
-            .await
-            .expect("checkpoint run");
+        crate::checkpoint::run(
+            &ctx,
+            &mut job,
+            crate::checkpoint::CheckpointParams {
+                payload: payload.clone(),
+            },
+        )
+        .await
+        .expect("checkpoint run");
     }
 
     #[tokio::test]

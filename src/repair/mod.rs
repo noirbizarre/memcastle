@@ -84,6 +84,14 @@ pub struct RepairReport {
     pub generated_at: DateTime<Utc>,
 }
 
+/// What a `Repair` job needs, gathered from its [`crate::domain::JobKind`].
+pub struct RepairParams {
+    /// Report what would be removed without removing it.
+    pub dry_run: bool,
+    /// Narrow the repair to what this completed audit also found.
+    pub based_on_job: Option<JobId>,
+}
+
 /// Run a repair: plan (and, unless `dry_run`, apply) the orphan-drawer
 /// removals currently found in the palace, optionally narrowed to what a
 /// prior audit job also found.
@@ -94,13 +102,12 @@ pub struct RepairReport {
 /// `based_on_job` doesn't resolve to any job, or if it resolves to a job
 /// that isn't a completed [`crate::domain::JobKind::Audit`] (see
 /// [`Error::InvalidBasedOnJob`]).
-pub async fn run(
-    store: &SurrealStore,
-    ctx: &JobContext,
-    job: &mut Job,
-    dry_run: bool,
-    based_on_job: Option<JobId>,
-) -> Result<JobOutcome> {
+pub async fn run(ctx: &JobContext, job: &mut Job, params: RepairParams) -> Result<JobOutcome> {
+    let RepairParams {
+        dry_run,
+        based_on_job,
+    } = params;
+    let store = ctx.store();
     // No per-unit work to chunk (see the module doc) — a single check up
     // front is the only cooperative-cancel point this handler needs.
     if ctx.is_cancelled() {
@@ -329,9 +336,16 @@ mod tests {
         for dry_run in [true, false] {
             let mut job = repair_job(dry_run, None);
             let ctx = ctx_for(&store, &job, JobControl::default());
-            let outcome = run(&store, &ctx, &mut job, dry_run, None)
-                .await
-                .expect("run");
+            let outcome = run(
+                &ctx,
+                &mut job,
+                RepairParams {
+                    dry_run,
+                    based_on_job: None,
+                },
+            )
+            .await
+            .expect("run");
             assert_eq!(outcome, JobOutcome::Completed);
 
             let report = report_of(&job);
@@ -349,7 +363,16 @@ mod tests {
 
         let mut job = repair_job(true, None);
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&store, &ctx, &mut job, true, None).await.expect("run");
+        run(
+            &ctx,
+            &mut job,
+            RepairParams {
+                dry_run: true,
+                based_on_job: None,
+            },
+        )
+        .await
+        .expect("run");
 
         let report = report_of(&job);
         assert_eq!(report.actions.len(), 1);
@@ -373,7 +396,16 @@ mod tests {
 
         let mut job = repair_job(false, None);
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&store, &ctx, &mut job, false, None).await.expect("run");
+        run(
+            &ctx,
+            &mut job,
+            RepairParams {
+                dry_run: false,
+                based_on_job: None,
+            },
+        )
+        .await
+        .expect("run");
 
         let report = report_of(&job);
         assert_eq!(report.actions.len(), 1);
@@ -386,9 +418,13 @@ mod tests {
 
         let mut audit_job = Job::new(JobKind::Audit { scope: None }, Priority::Normal, "test");
         let audit_ctx = ctx_for(&store, &audit_job, JobControl::default());
-        crate::audit::run(&store, &audit_ctx, &mut audit_job, None)
-            .await
-            .expect("audit run");
+        crate::audit::run(
+            &audit_ctx,
+            &mut audit_job,
+            crate::audit::AuditParams { scope: None },
+        )
+        .await
+        .expect("audit run");
         let audit_report: crate::audit::AuditReport =
             serde_json::from_value(audit_job.result.expect("audit must set a result"))
                 .expect("audit result must deserialize");
@@ -407,9 +443,13 @@ mod tests {
 
         let mut audit_job = Job::new(JobKind::Audit { scope: None }, Priority::Normal, "test");
         let audit_ctx = ctx_for(&store, &audit_job, JobControl::default());
-        crate::audit::run(&store, &audit_ctx, &mut audit_job, None)
-            .await
-            .expect("audit run");
+        crate::audit::run(
+            &audit_ctx,
+            &mut audit_job,
+            crate::audit::AuditParams { scope: None },
+        )
+        .await
+        .expect("audit run");
         // `audit::run` only mutates its in-memory `Job`; persisting it is
         // normally `Scheduler::execute`'s job after the handler returns —
         // `load_audited_orphan_ids` reads it back via `store.get_job`, so
@@ -422,9 +462,16 @@ mod tests {
 
         let mut job = repair_job(true, Some(audit_job.id));
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&store, &ctx, &mut job, true, Some(audit_job.id))
-            .await
-            .expect("run");
+        run(
+            &ctx,
+            &mut job,
+            RepairParams {
+                dry_run: true,
+                based_on_job: Some(audit_job.id),
+            },
+        )
+        .await
+        .expect("run");
 
         let report = report_of(&job);
         assert_eq!(
@@ -447,9 +494,16 @@ mod tests {
 
         let mut job = repair_job(true, Some(never_saved));
         let ctx = ctx_for(&store, &job, JobControl::default());
-        let error = run(&store, &ctx, &mut job, true, Some(never_saved))
-            .await
-            .expect_err("must reject an id that doesn't resolve");
+        let error = run(
+            &ctx,
+            &mut job,
+            RepairParams {
+                dry_run: true,
+                based_on_job: Some(never_saved),
+            },
+        )
+        .await
+        .expect_err("must reject an id that doesn't resolve");
         assert!(matches!(error, Error::JobNotFound { .. }));
     }
 
@@ -461,9 +515,16 @@ mod tests {
 
         let mut job = repair_job(true, Some(demo_job.id));
         let ctx = ctx_for(&store, &job, JobControl::default());
-        let error = run(&store, &ctx, &mut job, true, Some(demo_job.id))
-            .await
-            .expect_err("must reject a non-audit job kind");
+        let error = run(
+            &ctx,
+            &mut job,
+            RepairParams {
+                dry_run: true,
+                based_on_job: Some(demo_job.id),
+            },
+        )
+        .await
+        .expect_err("must reject a non-audit job kind");
         assert!(matches!(error, Error::InvalidBasedOnJob { .. }));
     }
 }

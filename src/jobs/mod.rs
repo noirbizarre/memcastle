@@ -302,20 +302,36 @@ impl Scheduler {
         let ctx = JobContext::new(job.id, control.clone(), self.store.clone());
 
         let outcome = match job.kind.clone() {
-            JobKind::Demo { steps } => demo::run(&self.store, &ctx, &mut job, steps).await,
+            JobKind::Demo { steps } => demo::run(&ctx, &mut job, demo::DemoParams { steps }).await,
             JobKind::Mine { source, wing } => {
-                crate::mining::run(&self.store, &ctx, &mut job, &source, wing.as_deref()).await
+                crate::mining::run(&ctx, &mut job, crate::mining::MiningParams { source, wing })
+                    .await
             }
             JobKind::Checkpoint { payload } => {
-                crate::checkpoint::run(&self.store, &ctx, &mut job, &payload).await
+                crate::checkpoint::run(
+                    &ctx,
+                    &mut job,
+                    crate::checkpoint::CheckpointParams { payload },
+                )
+                .await
             }
             JobKind::Audit { scope } => {
-                crate::audit::run(&self.store, &ctx, &mut job, scope.as_deref()).await
+                crate::audit::run(&ctx, &mut job, crate::audit::AuditParams { scope }).await
             }
             JobKind::Repair {
                 dry_run,
                 based_on_job,
-            } => crate::repair::run(&self.store, &ctx, &mut job, dry_run, based_on_job).await,
+            } => {
+                crate::repair::run(
+                    &ctx,
+                    &mut job,
+                    crate::repair::RepairParams {
+                        dry_run,
+                        based_on_job,
+                    },
+                )
+                .await
+            }
         };
 
         self.controls.remove(&job.id);

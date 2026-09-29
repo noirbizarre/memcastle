@@ -84,6 +84,14 @@ impl JobContext {
         self.job_id
     }
 
+    /// The store this job runs against — handlers reach it through their
+    /// context rather than taking it as a separate argument, so every handler
+    /// has the same `run(ctx, job, params)` shape.
+    #[must_use]
+    pub fn store(&self) -> &SurrealStore {
+        &self.store
+    }
+
     /// Whether a pause has been requested. A handler should check this
     /// between discrete units of work (files mined, steps taken, ...).
     #[must_use]

@@ -56,16 +56,23 @@ const MAX_FILES: usize = 2_000;
 /// # Errors
 ///
 /// Returns an error if `source` cannot be read, or if a store write fails.
-pub async fn run(
-    store: &SurrealStore,
-    ctx: &JobContext,
-    job: &mut Job,
-    source: &MiningSource,
-    wing: Option<&str>,
-) -> Result<JobOutcome> {
+pub async fn run(ctx: &JobContext, job: &mut Job, params: MiningParams) -> Result<JobOutcome> {
+    let MiningParams { source, wing } = params;
+    let store = ctx.store();
     match source {
-        MiningSource::Directory { path } => mine_directory(store, ctx, job, path, wing).await,
+        MiningSource::Directory { path } => {
+            mine_directory(store, ctx, job, &path, wing.as_deref()).await
+        }
     }
+}
+
+/// What a `Mine` job needs, gathered from its [`crate::domain::JobKind`].
+pub struct MiningParams {
+    /// Where to mine from.
+    pub source: MiningSource,
+    /// The wing to file drawers under (defaults to one named after the
+    /// source).
+    pub wing: Option<String>,
 }
 
 /// Mine `path` into `wing` (or a wing named after `path`'s final component),
@@ -221,22 +228,76 @@ mod tests {
         job.apply(crate::domain::JobEvent::Claim).unwrap();
 
         let ctx = JobContext::new(job.id, JobControl::default(), store.clone());
-        run(&store, &ctx, &mut job, &source, Some("docs"))
-            .await
-            .unwrap();
+        run(
+            &ctx,
+            &mut job,
+            MiningParams {
+                source: source.clone(),
+                wing: Some("docs".to_string()),
+            },
+        )
+        .await
+        .unwrap();
 
         // Crash: every drawer was written, but the saved checkpoint predates
         // them, so the resumed attempt walks the same files again.
         job.checkpoint = json!({});
         let ctx = JobContext::new(job.id, JobControl::default(), store.clone());
-        run(&store, &ctx, &mut job, &source, Some("docs"))
-            .await
-            .unwrap();
+        run(
+            &ctx,
+            &mut job,
+            MiningParams {
+                source: source.clone(),
+                wing: Some("docs".to_string()),
+            },
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             store.list_drawers(None).await.unwrap().len(),
             3,
             "each file must be mined exactly once across the replay"
         );
+    }
+
+    /// `{"next_index": N}` is persisted in job records already on disk, so a
+    /// handler refactor must keep reading exactly that shape.
+    #[tokio::test]
+    async fn a_checkpoint_persisted_in_the_current_format_resumes_past_the_finished_files() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(dir.path().join(name), format!("contents of {name}")).unwrap();
+        }
+        let source = MiningSource::Directory {
+            path: dir.path().to_path_buf(),
+        };
+        let mut job = Job::new(
+            JobKind::Mine {
+                source: source.clone(),
+                wing: Some("docs".to_string()),
+            },
+            Priority::Background,
+            "test",
+        );
+        job.apply(crate::domain::JobEvent::Claim).unwrap();
+        job.checkpoint = json!({ "next_index": 2 });
+
+        let ctx = JobContext::new(job.id, JobControl::default(), store.clone());
+        run(
+            &ctx,
+            &mut job,
+            MiningParams {
+                source,
+                wing: Some("docs".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let drawers = store.list_drawers(None).await.unwrap();
+        assert_eq!(drawers.len(), 1, "only the last file was still to mine");
+        assert_eq!(drawers[0].content, "contents of c.txt");
     }
 }

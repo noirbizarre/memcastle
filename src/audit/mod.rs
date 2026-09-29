@@ -94,6 +94,12 @@ pub struct AuditReport {
     pub generated_at: DateTime<Utc>,
 }
 
+/// What an `Audit` job needs, gathered from its [`crate::domain::JobKind`].
+pub struct AuditParams {
+    /// Narrow the embedding-count fields to this wing, by name.
+    pub scope: Option<String>,
+}
+
 /// Run a read-only consistency audit, optionally narrowing the
 /// embedding-count fields to one wing by name.
 ///
@@ -102,19 +108,16 @@ pub struct AuditReport {
 /// Returns an error if the store cannot be read, or if the report fails to
 /// serialize (effectively never — see [`AuditReport`]'s fields, all plain
 /// serializable types).
-pub async fn run(
-    store: &SurrealStore,
-    ctx: &JobContext,
-    job: &mut Job,
-    scope: Option<&str>,
-) -> Result<JobOutcome> {
+pub async fn run(ctx: &JobContext, job: &mut Job, params: AuditParams) -> Result<JobOutcome> {
+    let AuditParams { scope } = params;
+    let store = ctx.store();
     // No per-unit work to chunk (see the module doc) — a single check up
     // front is the only cooperative-cancel point this handler needs.
     if ctx.is_cancelled() {
         return Ok(JobOutcome::Cancelled);
     }
 
-    let report = build_report(store, scope, job.id).await?;
+    let report = build_report(store, scope.as_deref(), job.id).await?;
 
     job.progress = JobProgress {
         current: 1,
@@ -292,7 +295,9 @@ mod tests {
         let mut job = audit_job(None);
         let ctx = ctx_for(&store, &job, JobControl::default());
 
-        let outcome = run(&store, &ctx, &mut job, None).await.expect("run");
+        let outcome = run(&ctx, &mut job, AuditParams { scope: None })
+            .await
+            .expect("run");
         assert_eq!(outcome, JobOutcome::Completed);
 
         let report = report_of(&job);
@@ -337,7 +342,9 @@ mod tests {
 
         let mut job = audit_job(None);
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&store, &ctx, &mut job, None).await.expect("run");
+        run(&ctx, &mut job, AuditParams { scope: None })
+            .await
+            .expect("run");
 
         let report = report_of(&job);
         assert_eq!(report.orphan_drawers.len(), 1);
@@ -385,7 +392,9 @@ mod tests {
 
         let mut job = audit_job(None);
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&store, &ctx, &mut job, None).await.expect("run");
+        run(&ctx, &mut job, AuditParams { scope: None })
+            .await
+            .expect("run");
 
         let report = report_of(&job);
         assert!(
@@ -421,7 +430,9 @@ mod tests {
 
         let mut job = audit_job(None);
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&store, &ctx, &mut job, None).await.expect("run");
+        run(&ctx, &mut job, AuditParams { scope: None })
+            .await
+            .expect("run");
 
         let report = report_of(&job);
         assert_eq!(report.stuck_failed_jobs, 1);
@@ -436,7 +447,9 @@ mod tests {
 
         let mut job = audit_job(None);
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&store, &ctx, &mut job, None).await.expect("run");
+        run(&ctx, &mut job, AuditParams { scope: None })
+            .await
+            .expect("run");
 
         let report = report_of(&job);
         assert_eq!(report.running_jobs, 1);
@@ -475,9 +488,15 @@ mod tests {
                 "test",
             );
             let ctx = JobContext::new(seed_job.id, JobControl::default(), store.clone());
-            crate::checkpoint::run(store, &ctx, &mut seed_job, &payload)
-                .await
-                .expect("seed checkpoint run");
+            crate::checkpoint::run(
+                &ctx,
+                &mut seed_job,
+                crate::checkpoint::CheckpointParams {
+                    payload: payload.clone(),
+                },
+            )
+            .await
+            .expect("seed checkpoint run");
         }
         seed(&store, "project-x", "in scope").await;
         seed(&store, "project-y", "out of scope").await;
@@ -513,9 +532,15 @@ mod tests {
 
         let mut job = audit_job(Some("project-x".to_string()));
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&store, &ctx, &mut job, Some("project-x"))
-            .await
-            .expect("run");
+        run(
+            &ctx,
+            &mut job,
+            AuditParams {
+                scope: Some("project-x".to_string()),
+            },
+        )
+        .await
+        .expect("run");
 
         let report = report_of(&job);
         assert_eq!(
@@ -533,9 +558,15 @@ mod tests {
         // error and not a silent fallback to unscoped.
         let mut unknown_scope_job = audit_job(Some("no-such-wing".to_string()));
         let ctx = ctx_for(&store, &unknown_scope_job, JobControl::default());
-        run(&store, &ctx, &mut unknown_scope_job, Some("no-such-wing"))
-            .await
-            .expect("run");
+        run(
+            &ctx,
+            &mut unknown_scope_job,
+            AuditParams {
+                scope: Some("no-such-wing".to_string()),
+            },
+        )
+        .await
+        .expect("run");
         let report = report_of(&unknown_scope_job);
         assert_eq!(report.total_drawers_in_scope, 0);
     }
