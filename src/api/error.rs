@@ -26,7 +26,8 @@ impl IntoResponse for ApiError {
             Error::InvalidJobTransition { .. }
             | Error::InvalidInput { .. }
             | Error::InvalidJobId { .. }
-            | Error::InvalidBasedOnJob { .. } => StatusCode::BAD_REQUEST,
+            | Error::InvalidBasedOnJob { .. }
+            | Error::EmptyLabel { .. } => StatusCode::BAD_REQUEST,
             Error::ModeForbidden { .. } => StatusCode::FORBIDDEN,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };

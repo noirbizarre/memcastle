@@ -63,7 +63,8 @@ pub use drawers::SearchHit;
 /// (`JobStatus`) and plain collections (`Vec`, `Option`) are unaffected and
 /// don't need this.
 pub(crate) fn bindable<T: serde::Serialize>(value: &T) -> Result<serde_json::Value> {
-    serde_json::to_value(value).map_err(|source| Error::store_malformed(source.to_string()))
+    serde_json::to_value(value)
+        .map_err(|source| Error::serialization("a value bound for storage", source))
 }
 
 /// Deserialize the query results at `index` into `Vec<T>`.

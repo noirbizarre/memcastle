@@ -16,7 +16,7 @@ mod palace;
 
 pub use checkpoint::{CheckpointDestination, CheckpointItem, CheckpointPayload, FactMutation};
 pub use drawer::{Drawer, Provenance, Source, SourceKind, content_hash, sha256_hex};
-pub use entity::{Entity, NewRelationship, Relationship, normalize_label};
+pub use entity::{Entity, NewRelationship, Relationship, normalize_label, require_label};
 pub use ids::{DrawerId, EntityId, JobId, PalaceId, RelationshipId, RoomId, WingId};
 pub use job::{
     InvalidPriority, Job, JobEvent, JobKind, JobProgress, JobStatus, MiningSource, Priority,

@@ -14,13 +14,21 @@ pub type Result<T> = std::result::Result<T, Error>;
 ///
 /// Diagnostic codes are `memcastle::<module>::<kind>`. A code is a public
 /// identifier users grep for, so renaming one is a breaking change.
+///
+/// `<module>` names the part of the system the user is dealing with, and
+/// `<kind>` says what is wrong with it: a condition (`invalid`, `malformed`,
+/// `not_found`, `locked`, `pending`, `forbidden`-style words), or `failed` /
+/// `<thing>_failed` when an operation itself broke. The
+/// `every_error_variant_has_a_well_shaped_unique_code_and_a_help_line` test
+/// is the enforced reference: it checks every variant's code against this
+/// shape.
 #[derive(Debug, Error, Diagnostic)]
 #[non_exhaustive]
 pub enum Error {
     /// Reading or writing a file failed.
     #[error("failed to access `{path}`")]
     #[diagnostic(
-        code(memcastle::error::io),
+        code(memcastle::io::failed),
         help("check that the path exists and that this user may read and write it")
     )]
     Io {
@@ -100,7 +108,7 @@ pub enum Error {
     /// A SurrealDB operation failed.
     #[error("storage backend error")]
     #[diagnostic(
-        code(memcastle::store::backend),
+        code(memcastle::store::backend_failed),
         help(
             "for an embedded palace, check that no other memcastle process holds it (`memcastle status`); for a remote one, check its URL and credentials"
         )
@@ -143,12 +151,28 @@ pub enum Error {
     /// was empty or whitespace-only after normalization.
     #[error("{field} must not be empty")]
     #[diagnostic(
-        code(memcastle::store::empty_label),
+        code(memcastle::domain::empty_label),
         help("give the entity/relationship a short, descriptive label")
     )]
     EmptyLabel {
         /// Which field was rejected (`"kind"` or `"predicate"`).
         field: String,
+    },
+
+    /// A value could not be turned into (or out of) its JSON form. Kept apart
+    /// from [`Error::StoreMalformed`], whose help sends the user to migrations
+    /// and `memcastle audit` — advice that is wrong for, say, a registry file
+    /// or a tool response that failed to serialize.
+    #[error("failed to serialize {what}: {message}")]
+    #[diagnostic(
+        code(memcastle::serialization::failed),
+        help("this is a bug in memcastle: please report it with the command that triggered it")
+    )]
+    Serialization {
+        /// What was being serialized.
+        what: String,
+        /// The serializer's message.
+        message: String,
     },
 
     /// A job transition was rejected by the state machine.
@@ -195,11 +219,16 @@ pub enum Error {
         message: String,
     },
 
-    /// A request to a running daemon failed.
+    /// A request reached (or tried to reach) the daemon and failed in
+    /// transport: a timeout, a dropped connection, an undecodable reply.
+    /// A refused connection is [`Error::DaemonNotRunning`] instead, so this
+    /// help does not claim the daemon is down — it may well be up and slow.
     #[error("request to the daemon failed: {message}")]
     #[diagnostic(
-        code(memcastle::client::request),
-        help("is the daemon running? try `memcastle serve`")
+        code(memcastle::client::request_failed),
+        help(
+            "the daemon may be overloaded or restarting; retry, and check `memcastle status` and the daemon's log"
+        )
     )]
     Client {
         /// What went wrong.
@@ -211,7 +240,7 @@ pub enum Error {
     /// cause instead of collapsing every rejection into "is the daemon
     /// running?", which is plainly false when it just replied.
     #[error("the daemon rejected the request ({status}{code}): {message}")]
-    #[diagnostic(code(memcastle::client::remote))]
+    #[diagnostic(code(memcastle::client::remote_rejected))]
     Remote {
         /// The HTTP status the daemon answered with.
         status: u16,
@@ -233,10 +262,25 @@ pub enum Error {
     )]
     DaemonNotRunning,
 
+    /// A job is recorded as `Running` but nothing in this daemon is running
+    /// it. Distinct from [`Error::Server`], whose help is about the bind
+    /// address and would send the user to the wrong place.
+    #[error("job {id} is marked running but has no worker")]
+    #[diagnostic(
+        code(memcastle::jobs::orphaned),
+        help(
+            "restart the daemon (`memcastle restart`): startup recovery re-queues jobs left running"
+        )
+    )]
+    JobOrphaned {
+        /// The orphaned job.
+        id: String,
+    },
+
     /// The HTTP server failed to bind or serve.
     #[error("server error: {message}")]
     #[diagnostic(
-        code(memcastle::server::failure),
+        code(memcastle::server::failed),
         help(
             "check that the bind address is free, or pick another with `--bind` or MEMCASTLE_BIND"
         )
@@ -363,10 +407,11 @@ impl Error {
         }
     }
 
-    /// Build an [`Error::Client`] from a message.
-    pub fn client(message: impl Into<String>) -> Self {
-        Self::Client {
-            message: message.into(),
+    /// Build an [`Error::Serialization`].
+    pub fn serialization(what: impl Into<String>, message: impl ToString) -> Self {
+        Self::Serialization {
+            what: what.into(),
+            message: message.to_string(),
         }
     }
 
@@ -436,12 +481,14 @@ mod tests {
 
     use super::*;
 
-    /// AGENTS.md: a diagnostic must say what to do. Every variant a user can
-    /// realistically hit without a wrapped source error to explain it needs
-    /// a `help`, and a code in the `memcastle::` namespace.
-    #[test]
-    fn user_facing_errors_carry_a_help_line_and_a_memcastle_code() {
-        let errors = [
+    /// One sample of every variant. The exhaustive `match` in
+    /// [`covered`] has no wildcard arm, so adding a variant fails to compile
+    /// until it is listed there — and the reminder beside it says to add a
+    /// sample here, which is what puts the new code under the tests below.
+    fn samples() -> Vec<Error> {
+        vec![
+            Error::io("/nowhere", std::io::Error::other("denied")),
+            Error::config("bad"),
             Error::invalid_input("status", "unknown"),
             Error::invalid_job_id("nope"),
             Error::not_implemented("memcastle wings"),
@@ -449,20 +496,116 @@ mod tests {
                 count: 1,
                 versions: "[2]".to_string(),
             },
+            Error::Store {
+                source: surrealdb::Error::internal("boom".to_string()),
+            },
+            Error::store_malformed("bad row"),
+            Error::schema_sync("bad define"),
+            Error::EmptyLabel {
+                field: "kind".to_string(),
+            },
+            Error::serialization("a thing", "nope"),
+            Error::InvalidJobTransition {
+                id: "x".to_string(),
+                from: "Queued".to_string(),
+                event: "Pause".to_string(),
+            },
             Error::JobNotFound {
                 id: "x".to_string(),
             },
+            Error::InvalidBasedOnJob {
+                id: "x".to_string(),
+                message: "nope".to_string(),
+            },
+            Error::Client {
+                message: "timeout".to_string(),
+            },
+            Error::remote(400, Some("memcastle::x::y"), "nope", None),
+            Error::DaemonNotRunning,
+            Error::JobOrphaned {
+                id: "x".to_string(),
+            },
             Error::server("boom"),
-            Error::store_malformed("bad row"),
-            Error::io("/nowhere", std::io::Error::other("denied")),
-        ];
-        for error in errors {
-            let code = error.code().map(|c| c.to_string()).unwrap_or_default();
+            Error::ModeForbidden {
+                operation: "checkpoint".to_string(),
+                mode: crate::domain::MemoryMode::Disabled,
+            },
+            Error::migration_locked("someone"),
+            Error::migration_failed(1, "step", "boom"),
+        ]
+    }
+
+    /// Compile-time guard that [`samples`] lists every variant: no wildcard.
+    /// When this stops compiling, add the new variant here *and* a sample.
+    fn covered(error: &Error) {
+        match error {
+            Error::Io { .. }
+            | Error::Config { .. }
+            | Error::InvalidInput { .. }
+            | Error::InvalidJobId { .. }
+            | Error::NotImplemented { .. }
+            | Error::MigrationsPending { .. }
+            | Error::Store { .. }
+            | Error::StoreMalformed { .. }
+            | Error::SchemaSync { .. }
+            | Error::EmptyLabel { .. }
+            | Error::Serialization { .. }
+            | Error::InvalidJobTransition { .. }
+            | Error::JobNotFound { .. }
+            | Error::InvalidBasedOnJob { .. }
+            | Error::Client { .. }
+            | Error::Remote { .. }
+            | Error::DaemonNotRunning
+            | Error::JobOrphaned { .. }
+            | Error::Server { .. }
+            | Error::ModeForbidden { .. }
+            | Error::MigrationLocked { .. }
+            | Error::MigrationFailed { .. } => {}
+        }
+    }
+
+    /// The single reference for the `memcastle::<module>::<kind>` shape:
+    /// exactly three segments, lowercase snake_case, so a code is greppable
+    /// and a new one cannot drift from the convention.
+    fn assert_code_shape(code: &str) {
+        let segments: Vec<&str> = code.split("::").collect();
+        assert_eq!(
+            segments.len(),
+            3,
+            "`{code}` is not memcastle::<module>::<kind>"
+        );
+        assert_eq!(
+            segments[0], "memcastle",
+            "`{code}` is not in the memcastle namespace"
+        );
+        for segment in &segments[1..] {
             assert!(
-                code.starts_with("memcastle::"),
-                "bad code on {error:?}: {code}"
+                !segment.is_empty()
+                    && segment
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                "`{code}` has a segment that is not lower snake_case"
             );
-            assert!(error.help().is_some(), "{code} has no help line");
+        }
+    }
+
+    /// AGENTS.md: a diagnostic must say what to do. Every variant carries a
+    /// code of the documented shape, unique across the enum, and a help line
+    /// (`Remote` forwards the daemon's own, so it may legitimately have none).
+    #[test]
+    fn every_error_variant_has_a_well_shaped_unique_code_and_a_help_line() {
+        let mut seen = std::collections::HashSet::new();
+        for error in samples() {
+            covered(&error);
+            let code = error.code().map(|c| c.to_string()).unwrap_or_default();
+            assert_code_shape(&code);
+            assert!(
+                seen.insert(code.clone()),
+                "`{code}` is used by two variants"
+            );
+            if !matches!(error, Error::Remote { .. }) {
+                assert!(error.help().is_some(), "{code} has no help line");
+            }
         }
     }
 

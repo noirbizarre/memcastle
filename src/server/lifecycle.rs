@@ -57,7 +57,7 @@ pub fn write(palace_path: &Path, info: &RuntimeInfo) -> Result<()> {
             .map_err(|source| Error::io(parent.display().to_string(), source))?;
     }
     let json = serde_json::to_string_pretty(info)
-        .map_err(|source| Error::store_malformed(source.to_string()))?;
+        .map_err(|source| Error::serialization("the daemon registry file", source))?;
     std::fs::write(&path, json).map_err(|source| Error::io(path.display().to_string(), source))
 }
 

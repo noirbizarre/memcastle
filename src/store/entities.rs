@@ -22,9 +22,9 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::domain::{
-    Entity, EntityId, NewRelationship, Relationship, RelationshipId, normalize_label,
+    Entity, EntityId, NewRelationship, Relationship, RelationshipId, require_label,
 };
-use crate::error::{Error, Result};
+use crate::error::Result;
 
 use super::SurrealStore;
 
@@ -39,27 +39,19 @@ const RELATIONSHIP_COLUMNS: &str = "record::id(id) AS id, record::id(in) AS from
      record::id(out) AS to, predicate, confidence, \
      <string>valid_from AS valid_from, valid_to";
 
-/// Reject an empty (post-[`normalize_label`]) label with a diagnostic that
-/// names the field, instead of silently storing `""`.
-fn required_label(field: &'static str, raw: &str) -> Result<String> {
-    normalize_label(raw).ok_or(Error::EmptyLabel {
-        field: field.to_string(),
-    })
-}
-
 impl SurrealStore {
     /// Find the entity named `name` of kind `kind`, or create it.
     ///
     /// `kind` is normalized (trimmed, lowercased) before either half of the
     /// get-or-create runs, so `"Person"` and `"person"` resolve to the same
-    /// entity — see [`normalize_label`].
+    /// entity — see [`crate::domain::normalize_label`].
     pub async fn get_or_create_entity(
         &self,
         name: &str,
         kind: &str,
         properties: Value,
     ) -> Result<Entity> {
-        let kind = required_label("kind", kind)?;
+        let kind = require_label("kind", kind)?;
 
         let mut response = self
             .db
@@ -125,7 +117,7 @@ impl SurrealStore {
         predicate: &str,
         confidence: f32,
     ) -> Result<Relationship> {
-        let predicate = required_label("predicate", predicate)?;
+        let predicate = require_label("predicate", predicate)?;
         let relationship = Relationship {
             id,
             from,
@@ -186,7 +178,7 @@ impl SurrealStore {
         new_id: RelationshipId,
         new: NewRelationship,
     ) -> Result<Relationship> {
-        let predicate = required_label("predicate", &new.predicate)?;
+        let predicate = require_label("predicate", &new.predicate)?;
         let replacement = Relationship {
             id: new_id,
             from: new.from,

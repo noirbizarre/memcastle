@@ -206,8 +206,11 @@ async fn load_audited_orphan_ids(
         id: audit_id.to_string(),
         message: "the referenced audit has no result yet — it may not have completed".to_string(),
     })?;
-    let report: crate::audit::AuditReport = serde_json::from_value(result)
-        .map_err(|source| Error::store_malformed(source.to_string()))?;
+    let report: crate::audit::AuditReport =
+        serde_json::from_value(result).map_err(|source| Error::InvalidBasedOnJob {
+            id: audit_id.to_string(),
+            message: format!("its result is not a readable audit report: {source}"),
+        })?;
     Ok(report
         .orphan_drawers
         .into_iter()

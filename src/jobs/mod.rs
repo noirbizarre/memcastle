@@ -170,9 +170,7 @@ impl Scheduler {
         job.apply(JobEvent::Pause)?;
         // Only reachable if a record says `Running` with no worker behind it,
         // which `recover` clears before the API can be reached.
-        Err(crate::Error::server(format!(
-            "job {id} is marked running but has no worker; restart the daemon to recover it"
-        )))
+        Err(crate::Error::JobOrphaned { id: id.to_string() })
     }
 
     /// Request that a job stop. For a running job this is cooperative
