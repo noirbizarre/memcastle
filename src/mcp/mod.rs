@@ -457,11 +457,10 @@ impl McpTools {
                 );
             }
         };
-        let job = if args.emergency {
-            self.app.emergency_checkpoint(payload, CHANNEL, mode).await
-        } else {
-            self.app.checkpoint(payload, CHANNEL, mode).await
-        };
+        let job = self
+            .app
+            .checkpoint_with_urgency(payload, args.emergency, CHANNEL, mode)
+            .await;
         tool_result("memcastle_checkpoint", job)
     }
 

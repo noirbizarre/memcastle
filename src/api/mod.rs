@@ -64,6 +64,10 @@ async fn status(
 
 #[derive(Debug, Deserialize)]
 struct SearchParams {
+    /// `query` is accepted as an alias: MCP and the CLI call this `query`, and
+    /// a REST caller guessing the same name should not get a missing-parameter
+    /// error for it.
+    #[serde(alias = "query")]
     q: String,
     #[serde(default = "default_search_limit")]
     limit: u32,
@@ -98,6 +102,8 @@ async fn search(
 
 #[derive(Debug, Deserialize)]
 struct RecallParams {
+    /// `query` is accepted as an alias, as for search.
+    #[serde(alias = "query")]
     q: String,
     #[serde(default = "default_search_limit")]
     limit: u32,
@@ -249,17 +255,10 @@ async fn submit_job(
         }
         JobKind::Demo { steps } => state.app.submit_demo(steps, &body.requested_by).await?,
         JobKind::Checkpoint { payload } => {
-            if body.emergency {
-                state
-                    .app
-                    .emergency_checkpoint(payload, &body.requested_by, mode)
-                    .await?
-            } else {
-                state
-                    .app
-                    .checkpoint(payload, &body.requested_by, mode)
-                    .await?
-            }
+            state
+                .app
+                .checkpoint_with_urgency(payload, body.emergency, &body.requested_by, mode)
+                .await?
         }
         JobKind::Audit { scope } => {
             // Not gated by `mode` — same reasoning as `Mine` above (see
@@ -294,11 +293,10 @@ async fn pause_job(
     State(state): State<ApiState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let result = state.app.pause_job(parse_job_id(&id)?).await?;
-    // "requested", not "paused": pausing is cooperative, so the job stops
-    // at its next check (every handler has one, audit and repair included)
-    // rather than at the instant of the request.
-    Ok(Json(result))
+    // The answer says "requested", not "paused": pausing is cooperative, so the
+    // job stops at its next check (every handler has one, audit and repair
+    // included) rather than at the instant of the request.
+    Ok(Json(state.app.pause_job(parse_job_id(&id)?).await?))
 }
 
 async fn resume_job(

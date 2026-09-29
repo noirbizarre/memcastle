@@ -8,16 +8,49 @@
 
 use std::net::SocketAddr;
 use std::path::Path;
+use std::time::Duration;
 
 use serde::de::DeserializeOwned;
 use serde_json::json;
 
-use crate::app::{StatusReport, WakeUpBudget, WakeUpContext};
+use crate::app::{JobControlResult, StatusReport, WakeUpBudget, WakeUpContext};
 use crate::domain::channel::CLI as CHANNEL;
 use crate::domain::{CheckpointPayload, Drawer, Job, JobId, JobStatus, MemoryMode};
 use crate::error::{Error, Result};
 use crate::search::SearchHit;
 use crate::server::lifecycle;
+
+/// How long a connection attempt may take. A daemon on this machine answers
+/// in microseconds, so a longer wait means nothing is listening (or a firewall
+/// is swallowing the packets) and should read as "not running", not a hang.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long any one request may take. Every daemon call returns promptly
+/// (jobs run in the background and are polled), so this only ever fires on a
+/// daemon that is wedged; without it the CLI would hang on it forever, and
+/// [`Error::Client`]'s "a timeout" would be a failure that could not happen.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Build the one HTTP client every call goes through, optionally stamping the
+/// `X-MemCastle-Mode` header on each request.
+fn http_client(mode: Option<MemoryMode>) -> reqwest::Client {
+    let mut builder = reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(REQUEST_TIMEOUT);
+    if let Some(mode) = mode {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::HeaderName::from_static(MemoryMode::HEADER),
+            reqwest::header::HeaderValue::from_static(mode.as_str()),
+        );
+        builder = builder.default_headers(headers);
+    }
+    builder
+        .build()
+        // Only fails if the TLS backend cannot initialise, which
+        // `reqwest::Client::new()` would have panicked on just the same.
+        .expect("build the HTTP client")
+}
 
 /// A client for one running daemon, discovered via the registry file for
 /// `palace_path` (falling back to the configured bind address if no live
@@ -39,7 +72,7 @@ impl DaemonClient {
             .unwrap_or_else(|| configured_bind.to_string());
         Self {
             base_url: format!("http://{bind_addr}"),
-            http: reqwest::Client::new(),
+            http: http_client(None),
         }
     }
 
@@ -48,18 +81,7 @@ impl DaemonClient {
     /// session in that mode. Without it a client runs as `Full`.
     #[must_use]
     pub fn with_mode(mut self, mode: MemoryMode) -> Self {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            reqwest::header::HeaderName::from_static(MemoryMode::HEADER),
-            reqwest::header::HeaderValue::from_static(mode.as_str()),
-        );
-        self.http = reqwest::Client::builder()
-            .default_headers(headers)
-            .build()
-            // Only fails if the TLS backend cannot initialise, which
-            // `reqwest::Client::new()` in `discover` would have panicked on
-            // first.
-            .expect("build the HTTP client");
+        self.http = http_client(Some(mode));
         self
     }
 
@@ -343,9 +365,9 @@ impl DaemonClient {
     /// # Errors
     ///
     /// Returns an error if the request fails; on success, the daemon's own
-    /// answer (`{"status": "pause_requested"}`), so every caller reports it
+    /// answer ([`crate::app::JobControlStatus::PauseRequested`]), so every caller reports it
     /// in the daemon's words instead of inventing its own.
-    pub async fn pause_job(&self, id: JobId) -> Result<serde_json::Value> {
+    pub async fn pause_job(&self, id: JobId) -> Result<JobControlResult> {
         self.send(
             self.http
                 .post(format!("{}/api/jobs/{id}/pause", self.base_url)),
@@ -358,7 +380,7 @@ impl DaemonClient {
     /// # Errors
     ///
     /// Returns an error if the request fails.
-    pub async fn resume_job(&self, id: JobId) -> Result<serde_json::Value> {
+    pub async fn resume_job(&self, id: JobId) -> Result<JobControlResult> {
         self.send(
             self.http
                 .post(format!("{}/api/jobs/{id}/resume", self.base_url)),
@@ -371,7 +393,7 @@ impl DaemonClient {
     /// # Errors
     ///
     /// Returns an error if the request fails.
-    pub async fn cancel_job(&self, id: JobId) -> Result<serde_json::Value> {
+    pub async fn cancel_job(&self, id: JobId) -> Result<JobControlResult> {
         self.send(
             self.http
                 .post(format!("{}/api/jobs/{id}/cancel", self.base_url)),
@@ -384,7 +406,7 @@ impl DaemonClient {
     /// # Errors
     ///
     /// Returns an error if the request fails.
-    pub async fn retry_job(&self, id: JobId) -> Result<serde_json::Value> {
+    pub async fn retry_job(&self, id: JobId) -> Result<JobControlResult> {
         self.send(
             self.http
                 .post(format!("{}/api/jobs/{id}/retry", self.base_url)),

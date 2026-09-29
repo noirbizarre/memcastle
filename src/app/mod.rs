@@ -127,10 +127,28 @@ pub struct WakeUpContext {
 /// `pause_requested` and `cancel_requested` are *requests*, not outcomes:
 /// stopping is cooperative, so the job may still be running when this comes
 /// back (and, if the daemon dies first, is stopped by recovery instead).
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct JobControlResult {
-    /// `pause_requested`, `resumed`, `cancel_requested` or `retried`.
-    pub status: &'static str,
+    /// What the request left the job heading for.
+    pub status: JobControlStatus,
+}
+
+/// The answers a job-control request can give, serialized as the
+/// `snake_case` words callers already read (`pause_requested`, `resumed`,
+/// `cancel_requested`, `retried`). A closed enum rather than a `&'static str`
+/// so `client::DaemonClient` can deserialize the daemon's answer into the same
+/// type instead of handing callers an untyped `serde_json::Value`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobControlStatus {
+    /// A pause was asked for; the job stops at its next check.
+    PauseRequested,
+    /// A paused job was put back in the queue.
+    Resumed,
+    /// A cancel was asked for; a running job stops at its next check.
+    CancelRequested,
+    /// A failed job was put back in the queue.
+    Retried,
 }
 
 /// The application services shared by every interface. Cheap to clone
@@ -363,6 +381,28 @@ impl AppServices {
             .await
     }
 
+    /// Submit a checkpoint at [`Priority::Critical`] when `emergency` is set
+    /// and [`Priority::High`] otherwise. The one place that choice is made, so
+    /// REST and MCP (which both take an `emergency` flag) do not each branch
+    /// on it and drift apart.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::checkpoint`] and [`Self::emergency_checkpoint`].
+    pub async fn checkpoint_with_urgency(
+        &self,
+        payload: CheckpointPayload,
+        emergency: bool,
+        requested_by: &str,
+        mode: MemoryMode,
+    ) -> Result<Job> {
+        if emergency {
+            self.emergency_checkpoint(payload, requested_by, mode).await
+        } else {
+            self.checkpoint(payload, requested_by, mode).await
+        }
+    }
+
     /// Submit an emergency checkpoint at [`Priority::Critical`] — preempts
     /// every other queued job, for save-before-crash situations.
     ///
@@ -496,7 +536,7 @@ impl AppServices {
     pub async fn pause_job(&self, id: JobId) -> Result<JobControlResult> {
         self.scheduler.request_pause(id).await?;
         Ok(JobControlResult {
-            status: "pause_requested",
+            status: JobControlStatus::PauseRequested,
         })
     }
 
@@ -507,7 +547,9 @@ impl AppServices {
     /// Returns an error if the job doesn't exist or isn't paused.
     pub async fn resume_job(&self, id: JobId) -> Result<JobControlResult> {
         self.scheduler.resume(id).await?;
-        Ok(JobControlResult { status: "resumed" })
+        Ok(JobControlResult {
+            status: JobControlStatus::Resumed,
+        })
     }
 
     /// Cancel a queued, paused, or running job.
@@ -519,7 +561,7 @@ impl AppServices {
     pub async fn cancel_job(&self, id: JobId) -> Result<JobControlResult> {
         self.scheduler.request_cancel(id).await?;
         Ok(JobControlResult {
-            status: "cancel_requested",
+            status: JobControlStatus::CancelRequested,
         })
     }
 
@@ -530,7 +572,9 @@ impl AppServices {
     /// Returns an error if the job doesn't exist or isn't failed.
     pub async fn retry_job(&self, id: JobId) -> Result<JobControlResult> {
         self.scheduler.retry(id).await?;
-        Ok(JobControlResult { status: "retried" })
+        Ok(JobControlResult {
+            status: JobControlStatus::Retried,
+        })
     }
 
     /// Persist a diary entry for `agent_identity`, filed as a drawer under

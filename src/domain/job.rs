@@ -289,7 +289,9 @@ pub struct Job {
     pub kind: JobKind,
     /// Current lifecycle status.
     pub status: JobStatus,
-    /// Higher runs first, among otherwise-equal jobs.
+    /// Higher runs first, always: a higher-priority job is claimed before any
+    /// lower-priority one however long the latter has waited. Only equal
+    /// priorities are claimed oldest first.
     pub priority: Priority,
     /// When the job was submitted.
     pub created_at: DateTime<Utc>,

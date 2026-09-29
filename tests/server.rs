@@ -178,6 +178,27 @@ async fn a_missing_query_parameter_is_a_400_with_the_shared_error_body() {
 }
 
 #[tokio::test]
+async fn search_accepts_query_as_an_alias_for_q() {
+    let daemon = TestDaemon::start().await;
+
+    // MCP and the CLI call the parameter `query`; a REST caller using the same
+    // name must reach the search, not be told a parameter is missing.
+    for param in ["q", "query"] {
+        let response = reqwest::Client::new()
+            .get(format!("{}/api/search?{param}=anything", daemon.base_url))
+            .send()
+            .await
+            .expect("request");
+        assert!(
+            response.status().is_success(),
+            "`{param}`: {}",
+            response.status()
+        );
+    }
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_malformed_job_submission_is_a_400_with_the_shared_error_body() {
     let daemon = TestDaemon::start().await;
     let client = reqwest::Client::new();
