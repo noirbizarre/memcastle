@@ -2,7 +2,8 @@
 
 ## Prerequisites
 
-- The toolchain pinned in `rust-toolchain.toml`, installed via `mise` — run `mise install` once.
+- Rust, via `rustup`, which installs the channel pinned in `rust-toolchain.toml` (mise does not manage Rust itself).
+- The remaining tools (nextest, prek, typos, ...) via `mise` — run `mise install` once.
 
 That's it — SurrealKV, the embedded storage engine, is pure Rust,
 so unlike the RocksDB backend this project used before #47,
@@ -83,5 +84,5 @@ The `single-writer` hook enforces the companion invariant, one daemon and one wr
 
 ## This repository is generated from a template
 
-See `AGENTS.md` for the `git tpl` workflow (`mise run tpl:diff`, `mise run tpl:update`)
-and where project-specific content goes so template updates keep merging cleanly.
+See `CONTRIBUTING.md` for the `git tpl` workflow (`mise run tpl:diff`, `mise run tpl:update`),
+and `AGENTS.md` for where project-specific content goes so template updates keep merging cleanly.
