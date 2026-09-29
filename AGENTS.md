@@ -8,6 +8,8 @@ MemCastle is **a long-running memory server, not a CLI process that happens to e
 One daemon serves one palace; `memcastle serve`/`daemon` is the only command that does real work locally —
 every other subcommand (`status`, `search`, `mine`, `jobs ...`) is a thin HTTP client to that daemon,
 so a web dashboard could do everything the CLI does by calling the same API.
+The one exception is `memcastle migrate`, which touches storage directly because it must work before a daemon
+exists (see invariant 1).
 Storage is unified in SurrealDB (embedded SurrealKV for local dev, remote for server deployments) —
 never a second datastore, never a separate vector index file to fall out of sync.
 See `docs/architecture.md` for the full rationale, including what this deliberately does *not* do yet.
@@ -42,24 +44,28 @@ Each of these should be enforced by a hook or a test. An invariant nothing check
 
 ```text
 src/
-├── main.rs     the memcastle binary: parses Cli, dispatches, nothing else
+├── main.rs     the memcastle binary: parses Cli, dispatches (and hosts `migrate`'s direct storage access)
 ├── cli.rs      argument types only
 ├── lib.rs      module wiring
 ├── error.rs    the crate's error type
 ├── config/     typed configuration (defaults -> file -> env -> validate)
-├── domain/     Palace/Wing/Room/Drawer/Job — pure types, no I/O
-├── store/      SurrealDB connection, schema, and repository methods
-├── jobs/       the scheduler: claiming, dispatch, cooperative pause/cancel
+├── domain/     Palace/Wing/Room/Drawer/Job, checkpoint payloads, entities, memory modes — pure types, no I/O
+├── store/      SurrealDB connection and repository methods (schema is applied from `database/schema/`)
+├── migrate/    versioned data migrations and the version watermark, run before serving
+├── jobs/       the scheduler: claiming, dispatch, cooperative pause/cancel, crash recovery
 ├── mining/     the mining job handler
+├── checkpoint/ the checkpoint job handler (durable, resumable memory writes)
+├── audit/      the audit job handler (read-only consistency report)
+├── repair/     the repair job handler (narrow, dry-run-first fixes)
 ├── search/     the search abstraction (lexical today; semantic later)
 ├── app/        application services — the one layer cli/mcp/api call into
 ├── server/     the daemon composition root + lifecycle (registry file)
 ├── mcp/        MCP tool surface, over HTTP
-├── api/        the REST API (health/status/jobs/search)
+├── api/        the REST API (health/status/jobs/search/recall/wake-up/diary/shutdown)
 └── client/     the CLI's HTTP client for a running daemon
 ```
 
-Dependencies point inward: `cli / mcp / api -> app -> domain (+ store/jobs/search traits) -> store`.
+Dependencies point inward: `cli / mcp / api -> app -> domain + store/jobs/search -> store`.
 Nothing in `domain` knows SurrealDB exists; nothing in `cli`/`mcp`/`api` knows `store` exists.
 
 ## Style

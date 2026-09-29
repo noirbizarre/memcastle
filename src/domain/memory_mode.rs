@@ -35,10 +35,10 @@
 //! session-scoped memory operation, and is never gated by `MemoryMode`: a
 //! disabled session can still see daemon/job state and submit background
 //! work. This resolves the "explicit daemon operations vs automatic memory
-//! operations" boundary the task brief calls out (§22-26) without waiting
-//! on `Audit`/`Repair` (issues #16/#17) to exist — those, too, remain
-//! available regardless of mode unless a future issue explicitly
-//! reclassifies one of them as session-scoped.
+//! operations" boundary the task brief calls out (§22-26). `Audit` and
+//! `Repair` are daemon operations too, so they remain available regardless
+//! of mode unless a future issue explicitly reclassifies one of them as
+//! session-scoped.
 
 use serde::{Deserialize, Serialize};
 

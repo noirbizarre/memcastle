@@ -5,8 +5,9 @@
 //! the in-memory scheduler is only the execution mechanism.** Every status
 //! change goes through [`crate::domain::Job::apply`] and is persisted before
 //! this module considers it real; a crash loses at most the in-flight
-//! `JobControl` handles (recreated on restart by [`Scheduler::recover`]),
-//! never the job records themselves.
+//! `JobControl` handles — and with them any pause or cancel request not yet
+//! honoured — never the job records themselves. [`Scheduler::recover`]
+//! re-queues whatever was `Running`, and the job resumes from its checkpoint.
 
 mod control;
 mod demo;
@@ -48,8 +49,8 @@ const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 /// A unique-enough label for this scheduler instance, recorded as
 /// `lease_owner` on jobs it claims. Not load-bearing for correctness (see
-/// the module doc on why single-dispatcher claiming needs no distributed
-/// lock) — it exists so a job record is self-describing when inspected.
+/// `docs/architecture.md` on why single-dispatcher claiming needs no
+/// distributed lock) — it exists so a job record is self-describing when inspected.
 fn worker_id() -> String {
     format!("memcastle-{}", std::process::id())
 }

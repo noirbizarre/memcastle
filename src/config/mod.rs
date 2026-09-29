@@ -3,7 +3,7 @@
 //! Load order: hardcoded defaults -> optional TOML file -> `MEMCASTLE_*`
 //! environment overrides -> [`Config::validate`]. Deliberately hand-rolled
 //! rather than pulled in from a config-framework crate — there are five
-//! settings, and a framework's abstraction cost would outweigh what it
+//! sections of settings, and a framework's abstraction cost would outweigh what it
 //! saves here.
 
 use std::net::SocketAddr;
@@ -34,8 +34,7 @@ impl Default for PalaceConfig {
 }
 
 /// Backend selection, as read from configuration (before being turned into
-/// `store::Backend`, which additionally requires an owned password string
-/// resolved from its own source — see [`StoreConfig::into_backend`]).
+/// `store::Backend`) — see [`StoreConfig::into_backend`].
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum StoreConfig {
@@ -50,9 +49,9 @@ pub enum StoreConfig {
         namespace: String,
         /// Database to select.
         database: String,
-        /// Root (or namespace/database) username.
+        /// Root username (only root sign-in is supported today).
         username: String,
-        /// Root (or namespace/database) password.
+        /// Root password.
         password: String,
     },
 }
@@ -219,7 +218,7 @@ impl Config {
     }
 }
 
-/// `~/.memcastle` (or `%USERPROFILE%\.memcastle`), the default palace
+/// `~/.memcastle/default` (or `%USERPROFILE%\.memcastle\default`), the default palace
 /// directory when nothing more specific is configured.
 fn default_palace_dir() -> PathBuf {
     dirs::home_dir()

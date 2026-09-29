@@ -22,8 +22,9 @@ tools. It must never:
 - fork the memory model per ecosystem.
 
 The one deliberate exception: **deciding what's worth remembering** (which
-words in a conversation become a checkpoint item, and which destination bucket
-— preference / project / diary / fact — each belongs to) requires the
+words in a conversation become a checkpoint item, and which destination —
+preference / project / diary / general, plus an optional fact mutation — each
+belongs to) requires the
 integration's own model and full conversation context, which MemCastle does not
 have. MemCastle persists whatever already-classified payload it's given; it
 does not classify.

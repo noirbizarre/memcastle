@@ -42,7 +42,7 @@ use crate::store::SurrealStore;
 /// # Errors
 ///
 /// Returns an error if a store write fails, or if a `fact` mutation is
-/// rejected (e.g. an empty predicate — see `store::entities::EmptyLabel`).
+/// rejected (e.g. an empty predicate — see `crate::Error::EmptyLabel`).
 pub async fn run(
     store: &SurrealStore,
     ctx: &JobContext,

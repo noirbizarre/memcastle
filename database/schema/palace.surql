@@ -36,8 +36,8 @@ DEFINE FIELD IF NOT EXISTS content_hash ON TABLE drawer TYPE string;
 -- path — writing `{kind: ..., uri: ..., agent: ...}` would persist as `{}`.
 -- `FLEXIBLE` opts a field's *contents* out of that enforcement while the
 -- table around it stays SCHEMAFULL. Applies to every nested-object field
--- below (`provenance`, `kind`, `progress`, `properties`) for the same
--- reason.
+-- below (`source`, `provenance`, `kind`, `progress`, `checkpoint`, `result`,
+-- `properties`) for the same reason.
 DEFINE FIELD IF NOT EXISTS source ON TABLE drawer TYPE object FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS tags ON TABLE drawer TYPE array<string>;
 DEFINE FIELD IF NOT EXISTS tags.* ON TABLE drawer TYPE string;
@@ -62,8 +62,9 @@ DEFINE INDEX IF NOT EXISTS drawer_content_search ON TABLE drawer
     FIELDS content FULLTEXT ANALYZER drawer_text BM25 HIGHLIGHTS;
 
 -- Knowledge-graph tables, wired by `store::entities` (create/supersede/
--- invalidate/list relationships). Mining/MCP still don't populate them —
--- real extraction is #40's deliberate future work, not an oversight.
+-- invalidate/list relationships). The only populator is a checkpoint item's
+-- optional `fact` mutation; mining doesn't extract entities yet — that is
+-- #40's deliberate future work, not an oversight.
 DEFINE TABLE IF NOT EXISTS entity SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS name ON TABLE entity TYPE string;
 DEFINE FIELD IF NOT EXISTS kind ON TABLE entity TYPE string;
@@ -98,7 +99,7 @@ DEFINE FIELD IF NOT EXISTS progress ON TABLE job TYPE object FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS attempt ON TABLE job TYPE int;
 DEFINE FIELD IF NOT EXISTS max_attempts ON TABLE job TYPE int;
 DEFINE FIELD IF NOT EXISTS checkpoint ON TABLE job TYPE object FLEXIBLE;
--- A report-producing job's final output (currently only `Audit`, see
+-- A report-producing job's final output (`Audit` and `Repair`, see
 -- `domain::job::Job::result`'s doc comment for why this is a separate field
 -- from `checkpoint` rather than a reuse of it). `option<object>`, not
 -- `object`: unlike `checkpoint` (always present, defaulted to `{}`), most

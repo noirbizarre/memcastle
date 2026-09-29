@@ -25,9 +25,10 @@ skills/
                              decision made, a problem solved, a discovery, an
                              expressed preference) versus what to skip
                              (mechanical actions, trivial detail), and how to
-                             classify it into a destination bucket
-                             (preference / project / diary / fact) before
-                             calling MemCastle's checkpoint operation.
+                             classify it into a destination
+                             (preference / project / diary / general, plus an
+                             optional fact mutation) before calling
+                             MemCastle's checkpoint operation.
 
   wake-up/                  How to use a MemCastle wake-up context once
                              injected: treat it as established fact, don't

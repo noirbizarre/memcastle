@@ -13,7 +13,7 @@
 //! dispatches on `domain::MiningSource`, today's only variant
 //! (`Directory`) routing to [`mine_directory`] below. Adding a source kind
 //! means adding a `MiningSource` variant (`domain::job`) and a matching arm
-//! here — `jobs::execute`'s dispatch, which just forwards `JobKind::Mine`'s
+//! here — `Scheduler::execute`'s dispatch, which just forwards `JobKind::Mine`'s
 //! fields through unchanged, never needs to change.
 
 use std::path::{Path, PathBuf};
@@ -48,8 +48,10 @@ const SKIP_DIRS: &[&str] = &[
 const MAX_FILE_BYTES: u64 = 256 * 1024;
 
 /// A hard ceiling on how many files one mining job will file, so pointing it
-/// at an enormous tree fails predictably (a job stuck for hours with no
-/// visible progress is worse than one that stops early with a clear count).
+/// at an enormous tree finishes in bounded time (a job stuck for hours with no
+/// visible progress is worse than one that stops early). Files beyond the
+/// ceiling are silently not mined: the progress total is capped at this
+/// value, not the tree's real size.
 const MAX_FILES: usize = 2_000;
 
 /// Mine `source` into `wing`, checking in with `ctx` between units of work

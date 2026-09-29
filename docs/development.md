@@ -46,11 +46,17 @@ see `config::Config` for the full list of settings and their environment-variabl
 - **Unit tests** live next to the code they test (`domain::job`'s state machine, `config`'s validation,
   `store`'s migrations/persistence — the storage tests use SurrealDB's in-memory engine for speed, plus one test
   against a real SurrealKV directory to prove data survives a reconnect).
-- **Integration tests** (`tests/`) start a real daemon in-process against a tempdir palace and an OS-assigned port:
-  - `tests/server.rs` — health, status, graceful shutdown.
+- **Integration tests** (`tests/`) run against a tempdir palace and an OS-assigned port.
+  Most start the daemon in-process (`tests/common`'s `TestDaemon`); the ones that need a real process boundary
+  (SurrealKV's file lock is not released within one process) spawn the `memcastle` binary instead:
+  - `tests/server.rs` — health, status, graceful shutdown, retry (in-process).
   - `tests/concurrency.rs` — many simulated clients submitting jobs and reading status at once,
-    proving the shared store stays consistent.
-  - `tests/cli.rs` — the binary's argument parsing and its behaviour with no daemon reachable.
+    proving the shared store stays consistent (in-process).
+  - `tests/memory_mode.rs`, `tests/mcp_memory_mode.rs` — per-request and per-MCP-session memory modes (in-process).
+  - `tests/audit.rs`, `tests/repair.rs` — the audit and repair job kinds end to end (in-process).
+  - `tests/persistence.rs` — data and job state survive a daemon restart, including a SIGKILL mid-job (subprocess).
+  - `tests/migrate.rs` — `memcastle migrate` and its `--check`/`--status` modes (subprocess).
+  - `tests/cli.rs` — the binary's argument parsing and its behaviour with no daemon reachable (subprocess).
 
 Run a subset with nextest's filter syntax, e.g.:
 

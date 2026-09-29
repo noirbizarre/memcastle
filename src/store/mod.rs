@@ -3,8 +3,8 @@
 //! One connection type (`Surreal<Any>`, via `engine::any`) for both embedded
 //! and remote deployments — the rest of the codebase never branches on which
 //! backend is active. Repository methods live in the sibling modules
-//! (`wings`, `drawers`, `jobs`, `entities`) as `impl SurrealStore` blocks;
-//! this file only owns connecting and schema sync.
+//! (`wings`, `drawers`, `jobs`, `entities`, `migration_state`) as `impl SurrealStore`
+//! blocks; this file only owns connecting and schema sync.
 //!
 //! Every write and read goes through hand-written SurrealQL with explicit
 //! `<datetime>`/`<string>` casts rather than the SDK's typed `create`/
@@ -102,9 +102,9 @@ pub enum Backend {
         namespace: String,
         /// The database to select after connecting.
         database: String,
-        /// Root (or namespace/database) username.
+        /// Root username (`connect` always signs in as root).
         username: String,
-        /// Root (or namespace/database) password.
+        /// Root password.
         password: String,
     },
 }
@@ -122,7 +122,8 @@ impl Backend {
     }
 }
 
-/// A connected, migrated handle to one palace's storage.
+/// A connected handle to one palace's storage. Connecting does not migrate —
+/// see [`SurrealStore::connect`].
 #[derive(Clone)]
 pub struct SurrealStore {
     db: Surreal<Any>,

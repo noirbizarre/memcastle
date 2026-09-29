@@ -2,9 +2,9 @@
 //! handler.
 //!
 //! Deliberately not "kill the task": a handler only stops between discrete
-//! units of work, of its own accord, after checkpointing — see the
-//! `jobs` module doc and `domain::job`'s doc comment on why pause is
-//! cooperative rather than a process kill.
+//! units of work, of its own accord, after checkpointing — see
+//! `docs/architecture.md` ("Pause and cancel are cooperative") for why pause
+//! is cooperative rather than a process kill.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

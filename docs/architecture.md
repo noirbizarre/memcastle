@@ -80,7 +80,7 @@ Two migration shapes, kept deliberately separate, both driven by one `crate::mig
   `database/schema/migration_state.surql`), embedded into the binary via SurrealKit's
   `embed_schema!()` macro and applied through its `Sync` builder
   (`store::mod`'s `SurrealStore::sync_schema`). SurrealKit — not MemCastle — owns diffing,
-  content-hash tracking (in its own `__entity` metadata table), and pruning; MemCastle does not
+  content-hash tracking (in its own `__entity`/`__rollout` metadata tables), and pruning; MemCastle does not
   implement a parallel schema-diff/versioning engine. SurrealKit's `Rollout` API is available for a
   future staged/expand-contract schema change, but nothing shipped yet has needed one.
 - **Data.** An ordered, immutable list of versioned Rust steps (`crate::migrate::DataMigration`) for

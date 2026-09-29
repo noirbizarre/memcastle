@@ -10,6 +10,14 @@ See [Architecture](architecture.md) for the full design, and [Development](devel
 
 ## Installation
 
+```bash
+brew install noirbizarre/homebrew-tap/memcastle
+```
+
+```bash
+paru -S memcastle-bin  # or your AUR helper of choice
+```
+
 Or download a binary for your platform from the [latest release](https://github.com/noirbizarre/memcastle/releases/latest).
 
 ## Usage

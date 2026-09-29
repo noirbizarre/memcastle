@@ -34,7 +34,7 @@ pub enum JobStatus {
 /// Where a mining job reads its source material from — the seam Phase 5
 /// slots a non-filesystem reader (e.g. a Pi/OpenCode session-transcript
 /// reader) behind. `JobKind::Mine`'s shape (`source`, `wing`) never changes
-/// when a variant is added here, so neither `jobs::execute`'s dispatch nor
+/// when a variant is added here, so neither `Scheduler::execute`'s dispatch nor
 /// the wire format's `"type": "mine"` tag needs to change either — adding a
 /// source kind means adding a variant here and a matching arm in
 /// `mining::run`, nothing more.
@@ -148,7 +148,7 @@ pub enum JobEvent {
     Complete,
     /// The handler hit an unrecoverable error.
     Fail,
-    /// A caller (or crash recovery) is withdrawing the job.
+    /// A caller is withdrawing the job.
     Cancel,
     /// A caller has asked for a `Failed` job to run again. Distinct from
     /// `Resume` even though both land on `Queued`: `Retry` additionally
@@ -247,7 +247,7 @@ pub struct Job {
     pub started_at: Option<DateTime<Utc>>,
     /// When it reached a terminal status.
     pub completed_at: Option<DateTime<Utc>>,
-    /// Who asked for this (`"cli"`, `"mcp:<client>"`, `"http"`).
+    /// Which interface submitted this (`"cli"`, `"mcp"`, `"http"`).
     pub requested_by: String,
     /// How far along it is.
     pub progress: JobProgress,
@@ -265,8 +265,7 @@ pub struct Job {
     /// itself — carries here.
     pub checkpoint: Value,
     /// The final output of a job whose whole point is to produce a report —
-    /// currently only [`JobKind::Audit`] (and, per that issue's design
-    /// decision, the future `Repair`). Deliberately a separate field from
+    /// [`JobKind::Audit`] and [`JobKind::Repair`]. Deliberately a separate field from
     /// [`Self::checkpoint`], not a reuse of it: `checkpoint` is documented
     /// as handler-defined *resume* state, and stuffing a final report in
     /// there would be exactly the "abuse of a field's stated purpose" this

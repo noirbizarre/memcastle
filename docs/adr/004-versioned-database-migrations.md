@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, implemented in #44.
+Accepted.
 
 ## Context
 
@@ -40,7 +40,7 @@ this embedding scenario would be needless duplication and a maintenance burden w
     that can't be expressed as additive schema sync — a rename, reshape, split/merge, or backfill. These are
     MemCastle's own, deterministic, and resumable/idempotent where practical, and must never silently destroy
     canonical memory.
-- One `MigrationRunner` (`crate::migrate::run`/`status`), used identically by two entry points: normal daemon
+- One runner (`crate::migrate::run`/`status`), used identically by two entry points: normal daemon
   startup (`server::run`), and an explicit `memcastle migrate` (`--check`, `--status`) CLI command. The CLI command
   connects to storage directly, the same narrow exception `serve` already is to "the CLI only calls
   `client::DaemonClient`" — migration must work without, and before, a daemon exists. Both entry points call the

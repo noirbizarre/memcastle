@@ -25,7 +25,8 @@ pub struct Source {
     pub kind: SourceKind,
     /// A file path, URI, or other locator, when applicable.
     pub uri: Option<String>,
-    /// The client/agent that requested the write (`"cli"`, `"mcp:opencode"`, ...).
+    /// The agent that made the write, when known — e.g. a checkpoint item's
+    /// or diary entry's `agent_identity`.
     pub agent: Option<String>,
 }
 

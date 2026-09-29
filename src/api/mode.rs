@@ -58,9 +58,9 @@ mod tests {
     use axum::body::Body;
     use axum::http::Request;
 
-    /// `ApiError` has no `Debug` impl (it wraps `crate::Error`, which isn't
-    /// one either) — extract the mode with an explicit `match` rather than
-    /// `.expect()`/`.unwrap()`, which both require `E: Debug`.
+    /// `ApiError` has no `Debug` impl — extract the mode with an explicit
+    /// `match` rather than `.expect()`/`.unwrap()`, which both require
+    /// `E: Debug`.
     async fn extract_ok(request: Request<Body>) -> MemoryMode {
         let (mut parts, _body) = request.into_parts();
         match ModeHeader::from_request_parts(&mut parts, &()).await {
