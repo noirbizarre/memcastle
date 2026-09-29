@@ -16,13 +16,14 @@ use miette::MietteHandlerOpts;
 mod cli;
 
 use cli::{
-    AuditArgs, CheckpointArgs, Cli, Command, DiaryCommand, JobsCommand, MineArgs, RecallArgs,
-    RepairArgs, SearchArgs, WakeUpArgs,
+    AuditArgs, CheckpointArgs, Cli, Command, DiaryCommand, JobsCommand, MigrateArgs, MineArgs,
+    RecallArgs, RepairArgs, SearchArgs, WakeUpArgs,
 };
 use memcastle::app::WakeUpBudget;
 use memcastle::client::DaemonClient;
 use memcastle::config::Config;
 use memcastle::domain::JobId;
+use memcastle::store::SurrealStore;
 use memcastle::{Error, Result};
 
 /// Not `#[tokio::main]`: that runs the runtime's `block_on` — and so, for
@@ -82,6 +83,7 @@ async fn run(args: Cli) -> Result<()> {
             }
             memcastle::server::run(config).await
         }
+        Command::Migrate(args) => cmd_migrate(&config, args).await,
         Command::Status => cmd_status(&config).await,
         Command::Stop => cmd_stop(&config).await,
         Command::Restart => cmd_restart(&config).await,
@@ -116,6 +118,32 @@ fn print_json(value: &impl serde::Serialize) {
 async fn cmd_status(config: &Config) -> Result<()> {
     let status = client(config).status().await?;
     print_json(&status);
+    Ok(())
+}
+
+/// Connects to storage directly, like `Command::Serve` — a second,
+/// narrow exception to "every non-`serve` subcommand only calls
+/// `DaemonClient`" (see `memcastle::migrate`'s module doc), since migration
+/// must work without, and before, a daemon exists.
+async fn cmd_migrate(config: &Config, args: MigrateArgs) -> Result<()> {
+    let backend = config.store.clone().into_backend(&config.palace.path);
+    let store = SurrealStore::connect(&backend).await?;
+
+    if args.check || args.status {
+        let status = memcastle::migrate::status(&store).await?;
+        print_json(&status);
+        if args.check && !status.pending.is_empty() {
+            return Err(Error::config(format!(
+                "{} migration(s) pending: {:?}",
+                status.pending.len(),
+                status.pending
+            )));
+        }
+        return Ok(());
+    }
+
+    let report = memcastle::migrate::run(&store).await?;
+    print_json(&report);
     Ok(())
 }
 

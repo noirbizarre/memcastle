@@ -17,7 +17,10 @@ See `docs/architecture.md` for the full rationale, including what this deliberat
 Each of these should be enforced by a hook or a test. An invariant nothing checks is a comment, and it will be violated.
 
 1. **The CLI has no business logic MCP/HTTP can't reuse** —
-   every subcommand except `serve`/`daemon` only calls `client::DaemonClient`, never `store` or `jobs` directly.
+   every subcommand except `serve`/`daemon`/`migrate` only calls `client::DaemonClient`, never `store` or `jobs`
+   directly. `migrate` is a second, narrow exception alongside `serve`: it connects to storage directly (via
+   `crate::migrate::run`/`status`, the same runner `serve` calls on every startup) because migration must work
+   without, and before, a daemon exists — see `docs/adr/004-versioned-database-migrations.md`.
    Enforced by the `prek` architecture-guard hook (grep for `crate::store` outside `store`/`app`/`server`)
    and by `tests/cli.rs`.
 2. **Job status only changes through `domain::Job::apply`** — no other code assigns `job.status` directly.
@@ -25,8 +28,13 @@ Each of these should be enforced by a hook or a test. An invariant nothing check
 3. **The job queue is durable, the scheduler is only the execution mechanism** —
    a job's state survives a daemon restart.
    Enforced by `jobs::Scheduler::recover` and its exercise in `tests/server.rs`.
-4. **One daemon per palace, one writer** — `store` is only ever constructed by `server::run`;
-   nothing else opens the embedded SurrealKV path directly. Enforced by the same architecture-guard hook as (1).
+4. **One daemon per palace, one writer** — `store` is only ever constructed by `server::run` or the `migrate`
+   CLI command (the same second exception as (1)); nothing else opens the embedded SurrealKV path directly.
+   Enforced by the same architecture-guard hook as (1).
+5. **Schema management is SurrealKit's, not MemCastle's** — `database/schema/*.surql` is applied through
+   SurrealKit's `Sync`/`embed_schema!()` (`store::mod`), never a hand-rolled schema-diff/versioning engine.
+   MemCastle owns only its own application data-migration steps and version watermark
+   (`crate::migrate`, `store::migration_state`) — see `docs/adr/004-versioned-database-migrations.md`.
 
 ## Layout
 

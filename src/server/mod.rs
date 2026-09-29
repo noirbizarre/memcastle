@@ -35,6 +35,20 @@ pub async fn run(config: Config) -> Result<()> {
     let backend = config.store.clone().into_backend(&config.palace.path);
     let store = SurrealStore::connect(&backend).await?;
 
+    // The exact same runner `memcastle migrate` calls directly (see
+    // `main.rs`'s `cmd_migrate`) — a failed migration propagates via `?`
+    // here and the daemon never reaches the scheduler or the listener, so
+    // it fails closed rather than serving a partially migrated database.
+    let report = crate::migrate::run(&store).await?;
+    if !report.applied.is_empty() {
+        info!(
+            from = report.from_version,
+            to = report.to_version,
+            applied = ?report.applied,
+            "applied pending migrations"
+        );
+    }
+
     let scheduler = Arc::new(Scheduler::new(store.clone(), config.jobs.max_concurrency));
     scheduler.recover().await?;
 

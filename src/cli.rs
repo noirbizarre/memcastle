@@ -33,6 +33,11 @@ pub enum Command {
     /// the same long-running server.
     #[command(alias = "daemon")]
     Serve(ServeArgs),
+    /// Bring this palace's data up to date, or just report on it — the
+    /// exact same runner `serve` uses on every startup, never a second
+    /// migration system. Connects to storage directly, like `serve`; does
+    /// not require (and does not talk to) a running daemon.
+    Migrate(MigrateArgs),
     /// Report daemon health and job counts.
     Status,
     /// Ask a running daemon to shut down gracefully.
@@ -84,6 +89,19 @@ pub struct ServeArgs {
     /// Override the configured HTTP bind address.
     #[arg(long)]
     pub bind: Option<SocketAddr>,
+}
+
+/// Arguments for `memcastle migrate`.
+#[derive(Debug, Args)]
+pub struct MigrateArgs {
+    /// Report the current/pending version without applying anything, then
+    /// exit with an error if any migration is pending — for CI/ops
+    /// scripts that just want to know whether a migration is needed.
+    #[arg(long, conflicts_with = "status")]
+    pub check: bool,
+    /// Report the current/pending version without applying anything.
+    #[arg(long, conflicts_with = "check")]
+    pub status: bool,
 }
 
 /// Arguments for `memcastle search`.
