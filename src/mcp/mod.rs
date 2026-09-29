@@ -25,7 +25,8 @@ use rmcp::{ErrorData as McpError, ServerHandler, schemars, tool, tool_handler, t
 use tokio_util::sync::CancellationToken;
 
 use crate::app::{AppServices, WakeUpBudget};
-use crate::domain::{CheckpointPayload, MemoryMode};
+use crate::domain::{CheckpointPayload, Job, MemoryMode};
+use crate::error::Error;
 
 /// The MCP tool surface. Cheap to clone (holds only `AppServices`, itself
 /// cheap to clone, one small shared slot, and the macro-generated router).
@@ -192,6 +193,51 @@ struct SetModeArgs {
     mode: String,
 }
 
+/// What every job and drawer written through this surface records as the
+/// channel it came through (`Job::requested_by`, `provenance.requested_by`).
+const CHANNEL: &str = "mcp";
+
+/// The one place a tool's outcome becomes an MCP result, so every tool
+/// reports success and failure the same way.
+///
+/// A success is the value as pretty JSON — and a value that cannot be
+/// serialized is a failure ([`Error::Serialization`]), not an empty string
+/// the caller would take for "no results". A failure is the same
+/// [`crate::error::ErrorBody`] the REST API serves, with the diagnostic code
+/// and help, so an integration can act on it instead of parsing prose.
+///
+/// Each call is traced at `debug`, and each failure at `warn`, with the tool
+/// and the code: the MCP transport otherwise leaves no record of what was
+/// asked or refused.
+fn tool_result<T: serde::Serialize>(
+    tool: &'static str,
+    result: crate::Result<T>,
+) -> Result<CallToolResult, McpError> {
+    let outcome = result.and_then(|value| {
+        serde_json::to_string_pretty(&value)
+            .map_err(|source| Error::serialization(format!("the `{tool}` response"), source))
+    });
+    Ok(match outcome {
+        Ok(text) => {
+            tracing::debug!(tool, "mcp tool call succeeded");
+            CallToolResult::success(vec![ContentBlock::text(text)])
+        }
+        Err(error) => {
+            let body = error.body();
+            tracing::warn!(
+                tool,
+                error = %error,
+                code = body.code.as_deref().unwrap_or("-"),
+                "mcp tool call failed"
+            );
+            // `ErrorBody` is three optional strings; serializing it cannot
+            // fail, but if it somehow did the plain message still gets out.
+            let text = serde_json::to_string_pretty(&body).unwrap_or_else(|_| error.to_string());
+            CallToolResult::error(vec![ContentBlock::text(text)])
+        }
+    })
+}
+
 #[tool_router]
 impl McpTools {
     /// Wrap `app` as an MCP tool surface.
@@ -240,6 +286,33 @@ impl McpTools {
         }
     }
 
+    /// Record `mode` for the session `parts` belongs to. Refused without one:
+    /// there is nothing to remember it under, and accepting it would be a lie
+    /// (the next call would still run as `Full`).
+    fn set_mode(
+        &self,
+        mode: &str,
+        parts: &http::request::Parts,
+    ) -> crate::Result<serde_json::Value> {
+        let mode: MemoryMode = mode
+            .parse()
+            .map_err(|message: String| Error::invalid_input("mode", message))?;
+        let Some(session_id) = Self::session_id(parts) else {
+            return Err(Error::invalid_input(
+                "mcp-session-id",
+                "memcastle_set_mode needs an MCP session, and this request has none, so the \
+                 mode cannot be remembered for later calls; use a client that keeps an MCP \
+                 session open, or send `X-MemCastle-Mode` over REST",
+            ));
+        };
+        *self
+            .mode
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(SessionMode { session_id, mode });
+        Ok(serde_json::json!({ "mode": mode }))
+    }
+
     #[tool(
         description = "Set this MCP session's memory mode (full/read_only/disabled); call once \
                         at session start — every other tool call on this session uses whatever \
@@ -250,34 +323,7 @@ impl McpTools {
         Parameters(args): Parameters<SetModeArgs>,
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
-        let mode: MemoryMode =
-            match serde_json::from_value(serde_json::Value::String(args.mode.clone())) {
-                Ok(mode) => mode,
-                Err(_) => {
-                    return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                        "unknown memory mode `{}` (expected full, read_only, or disabled)",
-                        args.mode
-                    ))]));
-                }
-            };
-        let Some(session_id) = Self::session_id(&parts) else {
-            // Nothing to remember it under. Accepting it would be a lie (the
-            // next call would still run as `Full`), and remembering it under
-            // a shared empty id would let one client change another's mode.
-            return Ok(CallToolResult::error(vec![ContentBlock::text(
-                "memcastle_set_mode needs an MCP session, and this request has no \
-                 `mcp-session-id` header, so the mode cannot be remembered for later calls; \
-                 use a client that keeps an MCP session open, or send `X-MemCastle-Mode` over REST",
-            )]));
-        };
-        *self
-            .mode
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some(SessionMode { session_id, mode });
-        Ok(CallToolResult::success(vec![ContentBlock::text(format!(
-            "memory mode set to {mode:?}"
-        ))]))
+        tool_result("memcastle_set_mode", self.set_mode(&args.mode, &parts))
     }
 
     #[tool(
@@ -288,15 +334,7 @@ impl McpTools {
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
         let mode = self.mode_for(&parts);
-        match self.app.status(mode).await {
-            Ok(status) => {
-                let text = serde_json::to_string_pretty(&status).unwrap_or_default();
-                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
-            }
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
-                error.to_string(),
-            )])),
-        }
+        tool_result("memcastle_status", self.app.status(mode).await)
     }
 
     #[tool(description = "Lexically search palace drawer content")]
@@ -306,7 +344,7 @@ impl McpTools {
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
         let mode = self.mode_for(&parts);
-        match self
+        let hits = self
             .app
             .search(
                 &args.query,
@@ -315,16 +353,8 @@ impl McpTools {
                 args.limit,
                 mode,
             )
-            .await
-        {
-            Ok(hits) => {
-                let text = serde_json::to_string_pretty(&hits).unwrap_or_default();
-                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
-            }
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
-                error.to_string(),
-            )])),
-        }
+            .await;
+        tool_result("memcastle_search", hits)
     }
 
     #[tool(
@@ -338,19 +368,11 @@ impl McpTools {
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
         let mode = self.mode_for(&parts);
-        match self
+        let hits = self
             .app
             .recall(&args.query, args.wing.as_deref(), args.limit, mode)
-            .await
-        {
-            Ok(hits) => {
-                let text = serde_json::to_string_pretty(&hits).unwrap_or_default();
-                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
-            }
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
-                error.to_string(),
-            )])),
-        }
+            .await;
+        tool_result("memcastle_recall", hits)
     }
 
     #[tool(
@@ -365,19 +387,11 @@ impl McpTools {
     ) -> Result<CallToolResult, McpError> {
         let mode = self.mode_for(&parts);
         let budget = WakeUpBudget::from_options(args.max_items, args.max_bytes);
-        match self
+        let context = self
             .app
             .wake_up(&args.agent_identity, args.wing.as_deref(), budget, mode)
-            .await
-        {
-            Ok(context) => {
-                let text = serde_json::to_string_pretty(&context).unwrap_or_default();
-                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
-            }
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
-                error.to_string(),
-            )])),
-        }
+            .await;
+        tool_result("memcastle_wake_up", context)
     }
 
     #[tool(description = "Submit a mining job for a directory; returns the job id immediately")]
@@ -386,21 +400,12 @@ impl McpTools {
         Parameters(args): Parameters<MineArgs>,
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
-        let requested_by = "mcp";
         let mode = self.mode_for(&parts);
-        match self
+        let job = self
             .app
-            .submit_mine(args.path.into(), args.wing, requested_by, mode)
-            .await
-        {
-            Ok(job) => {
-                let text = serde_json::to_string_pretty(&job).unwrap_or_default();
-                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
-            }
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
-                error.to_string(),
-            )])),
-        }
+            .submit_mine(args.path.into(), args.wing, CHANNEL, mode)
+            .await;
+        tool_result("memcastle_mine", job)
     }
 
     #[tool(
@@ -416,29 +421,19 @@ impl McpTools {
         let mode = self.mode_for(&parts);
         let payload: CheckpointPayload = match serde_json::from_value(args.payload) {
             Ok(payload) => payload,
-            Err(error) => {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(
-                    error.to_string(),
-                )]));
+            Err(source) => {
+                return tool_result::<Job>(
+                    "memcastle_checkpoint",
+                    Err(Error::invalid_input("payload", source.to_string())),
+                );
             }
         };
-        let requested_by = "mcp";
-        let result = if args.emergency {
-            self.app
-                .emergency_checkpoint(payload, requested_by, mode)
-                .await
+        let job = if args.emergency {
+            self.app.emergency_checkpoint(payload, CHANNEL, mode).await
         } else {
-            self.app.checkpoint(payload, requested_by, mode).await
+            self.app.checkpoint(payload, CHANNEL, mode).await
         };
-        match result {
-            Ok(job) => {
-                let text = serde_json::to_string_pretty(&job).unwrap_or_default();
-                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
-            }
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
-                error.to_string(),
-            )])),
-        }
+        tool_result("memcastle_checkpoint", job)
     }
 
     #[tool(
@@ -450,16 +445,10 @@ impl McpTools {
         &self,
         Parameters(args): Parameters<AuditArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let requested_by = "mcp";
-        match self.app.submit_audit(args.scope, requested_by).await {
-            Ok(job) => {
-                let text = serde_json::to_string_pretty(&job).unwrap_or_default();
-                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
-            }
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
-                error.to_string(),
-            )])),
-        }
+        tool_result(
+            "memcastle_audit",
+            self.app.submit_audit(args.scope, CHANNEL).await,
+        )
     }
 
     #[tool(
@@ -471,19 +460,17 @@ impl McpTools {
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
         let mode = self.mode_for(&parts);
-        match self
+        let drawer = self
             .app
-            .diary_write(&args.agent_identity, &args.wing, args.content, "mcp", mode)
-            .await
-        {
-            Ok(drawer) => {
-                let text = serde_json::to_string_pretty(&drawer).unwrap_or_default();
-                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
-            }
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
-                error.to_string(),
-            )])),
-        }
+            .diary_write(
+                &args.agent_identity,
+                &args.wing,
+                args.content,
+                CHANNEL,
+                mode,
+            )
+            .await;
+        tool_result("memcastle_diary_write", drawer)
     }
 
     #[tool(
@@ -495,19 +482,11 @@ impl McpTools {
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
         let mode = self.mode_for(&parts);
-        match self
+        let entries = self
             .app
             .diary_read(&args.agent_identity, &args.wing, args.limit, mode)
-            .await
-        {
-            Ok(entries) => {
-                let text = serde_json::to_string_pretty(&entries).unwrap_or_default();
-                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
-            }
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
-                error.to_string(),
-            )])),
-        }
+            .await;
+        tool_result("memcastle_diary_read", entries)
     }
 
     #[tool(description = "List jobs known to the daemon")]
@@ -516,15 +495,7 @@ impl McpTools {
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
         let mode = self.mode_for(&parts);
-        match self.app.list_jobs(None, mode).await {
-            Ok(jobs) => {
-                let text = serde_json::to_string_pretty(&jobs).unwrap_or_default();
-                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
-            }
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
-                error.to_string(),
-            )])),
-        }
+        tool_result("memcastle_jobs_list", self.app.list_jobs(None, mode).await)
     }
 }
 
@@ -656,5 +627,88 @@ mod tests {
         let result = set_mode(&tools, Some(""), "disabled").await;
 
         assert_eq!(result.is_error, Some(true));
+    }
+
+    fn text_of(result: &CallToolResult) -> String {
+        serde_json::to_value(&result.content)
+            .unwrap()
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|part| part["text"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn a_failed_tool_call_reports_the_diagnostic_code_and_help_as_json() {
+        let error = Error::ModeForbidden {
+            operation: "checkpoint".to_string(),
+            mode: MemoryMode::ReadOnly,
+        };
+
+        let result = tool_result::<()>("memcastle_checkpoint", Err(error)).unwrap();
+
+        assert_eq!(result.is_error, Some(true));
+        let body: serde_json::Value = serde_json::from_str(&text_of(&result)).expect("json body");
+        assert_eq!(body["code"], "memcastle::app::mode_forbidden");
+        assert!(
+            body["help"].is_string(),
+            "the body must say what to do: {body}"
+        );
+        assert!(body["error"].as_str().unwrap().contains("checkpoint"));
+    }
+
+    #[test]
+    fn a_value_that_cannot_be_serialized_is_an_error_not_an_empty_success() {
+        struct Broken;
+        impl serde::Serialize for Broken {
+            fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
+                Err(serde::ser::Error::custom("nope"))
+            }
+        }
+
+        let result = tool_result("memcastle_status", Ok(Broken)).unwrap();
+
+        assert_eq!(
+            result.is_error,
+            Some(true),
+            "an empty string would read as 'no results'"
+        );
+        let body: serde_json::Value = serde_json::from_str(&text_of(&result)).unwrap();
+        assert_eq!(body["code"], "memcastle::serialization::failed");
+    }
+
+    #[test]
+    fn a_successful_tool_call_is_the_value_as_pretty_json() {
+        let result = tool_result("memcastle_status", Ok(vec![1, 2])).unwrap();
+
+        assert_ne!(result.is_error, Some(true));
+        assert_eq!(
+            serde_json::from_str::<Vec<i32>>(&text_of(&result)).unwrap(),
+            [1, 2]
+        );
+    }
+
+    #[tokio::test]
+    async fn set_mode_reports_the_name_it_accepts_not_the_debug_form() {
+        let tools = tools().await;
+
+        let result = set_mode(&tools, Some("s1"), "read_only").await;
+
+        let body: serde_json::Value = serde_json::from_str(&text_of(&result)).unwrap();
+        assert_eq!(body["mode"], "read_only");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_mode_is_an_input_error_that_lists_the_valid_ones() {
+        let tools = tools().await;
+
+        let result = set_mode(&tools, Some("s1"), "readonly").await;
+
+        assert_eq!(result.is_error, Some(true));
+        let body: serde_json::Value = serde_json::from_str(&text_of(&result)).unwrap();
+        assert_eq!(body["code"], "memcastle::input::invalid");
+        assert!(body["error"].as_str().unwrap().contains("read_only"));
     }
 }

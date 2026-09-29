@@ -119,16 +119,18 @@ fn client(config: &Config) -> DaemonClient {
     DaemonClient::discover(&config.palace.path, config.server.bind)
 }
 
-fn print_json(value: &impl serde::Serialize) {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(value).unwrap_or_default()
-    );
+/// Print `value` as pretty JSON — or fail loudly. A serialization error used
+/// to print an empty line and exit 0, which a script reads as "no results".
+fn print_json(value: &impl serde::Serialize) -> Result<()> {
+    let text = serde_json::to_string_pretty(value)
+        .map_err(|source| Error::serialization("the command's output", source))?;
+    println!("{text}");
+    Ok(())
 }
 
 async fn cmd_status(config: &Config) -> Result<()> {
     let status = client(config).status().await?;
-    print_json(&status);
+    print_json(&status)?;
     Ok(())
 }
 
@@ -142,7 +144,7 @@ async fn cmd_migrate(config: &Config, args: MigrateArgs) -> Result<()> {
 
     if args.check || args.status {
         let status = memcastle::migrate::status(&store).await?;
-        print_json(&status);
+        print_json(&status)?;
         if args.check && !status.pending.is_empty() {
             return Err(Error::MigrationsPending {
                 count: status.pending.len(),
@@ -153,13 +155,12 @@ async fn cmd_migrate(config: &Config, args: MigrateArgs) -> Result<()> {
     }
 
     let report = memcastle::migrate::run(&store).await?;
-    print_json(&report);
+    print_json(&report)?;
     Ok(())
 }
 
 async fn cmd_stop(config: &Config) -> Result<()> {
-    client(config).shutdown().await?;
-    println!("shutdown requested");
+    print_json(&client(config).shutdown().await?)?;
     Ok(())
 }
 
@@ -195,7 +196,7 @@ async fn cmd_search(config: &Config, args: SearchArgs) -> Result<()> {
             args.limit,
         )
         .await?;
-    print_json(&hits);
+    print_json(&hits)?;
     Ok(())
 }
 
@@ -203,7 +204,7 @@ async fn cmd_recall(config: &Config, args: RecallArgs) -> Result<()> {
     let hits = client(config)
         .recall(&args.query, args.wing.as_deref(), args.limit)
         .await?;
-    print_json(&hits);
+    print_json(&hits)?;
     Ok(())
 }
 
@@ -212,13 +213,13 @@ async fn cmd_wake_up(config: &Config, args: WakeUpArgs) -> Result<()> {
     let context = client(config)
         .wake_up(&args.agent_identity, args.wing.as_deref(), budget)
         .await?;
-    print_json(&context);
+    print_json(&context)?;
     Ok(())
 }
 
 async fn cmd_mine(config: &Config, args: MineArgs) -> Result<()> {
     let job = client(config).submit_mine(args.path, args.wing).await?;
-    print_json(&job);
+    print_json(&job)?;
     Ok(())
 }
 
@@ -245,13 +246,13 @@ async fn cmd_checkpoint(config: &Config, args: CheckpointArgs) -> Result<()> {
     let payload: memcastle::domain::CheckpointPayload = serde_json::from_str(&raw)
         .map_err(|source| Error::invalid_input("checkpoint payload", source.to_string()))?;
     let job = client(config).checkpoint(payload, args.emergency).await?;
-    print_json(&job);
+    print_json(&job)?;
     Ok(())
 }
 
 async fn cmd_audit(config: &Config, args: AuditArgs) -> Result<()> {
     let job = client(config).submit_audit(args.scope).await?;
-    print_json(&job);
+    print_json(&job)?;
     Ok(())
 }
 
@@ -262,7 +263,7 @@ async fn cmd_repair(config: &Config, args: RepairArgs) -> Result<()> {
     let job = client(config)
         .submit_repair(!args.apply, based_on_job)
         .await?;
-    print_json(&job);
+    print_json(&job)?;
     Ok(())
 }
 
@@ -275,7 +276,7 @@ async fn cmd_diary(config: &Config, command: DiaryCommand) -> Result<()> {
             content,
         } => {
             let drawer = daemon.diary_write(&agent_identity, &wing, content).await?;
-            print_json(&drawer);
+            print_json(&drawer)?;
         }
         DiaryCommand::Read {
             agent_identity,
@@ -283,7 +284,7 @@ async fn cmd_diary(config: &Config, command: DiaryCommand) -> Result<()> {
             limit,
         } => {
             let entries = daemon.diary_read(&agent_identity, &wing, limit).await?;
-            print_json(&entries);
+            print_json(&entries)?;
         }
     }
     Ok(())
@@ -294,24 +295,20 @@ async fn cmd_jobs(config: &Config, command: JobsCommand) -> Result<()> {
     match command {
         JobsCommand::List { status } => {
             let status = status.map(|s| parse_status(&s)).transpose()?;
-            print_json(&daemon.list_jobs(status).await?);
+            print_json(&daemon.list_jobs(status).await?)?;
         }
-        JobsCommand::Show { id } => print_json(&daemon.get_job(parse_job_id(&id)?).await?),
+        JobsCommand::Show { id } => print_json(&daemon.get_job(parse_job_id(&id)?).await?)?,
         JobsCommand::Pause { id } => {
-            daemon.pause_job(parse_job_id(&id)?).await?;
-            println!("pause requested");
+            print_json(&daemon.pause_job(parse_job_id(&id)?).await?)?;
         }
         JobsCommand::Resume { id } => {
-            daemon.resume_job(parse_job_id(&id)?).await?;
-            println!("resumed");
+            print_json(&daemon.resume_job(parse_job_id(&id)?).await?)?;
         }
         JobsCommand::Cancel { id } => {
-            daemon.cancel_job(parse_job_id(&id)?).await?;
-            println!("cancel requested");
+            print_json(&daemon.cancel_job(parse_job_id(&id)?).await?)?;
         }
         JobsCommand::Retry { id } => {
-            daemon.retry_job(parse_job_id(&id)?).await?;
-            println!("retried");
+            print_json(&daemon.retry_job(parse_job_id(&id)?).await?)?;
         }
         JobsCommand::Demo { steps } => {
             // The daemon has no "submit a demo job" REST endpoint of its
@@ -319,7 +316,7 @@ async fn cmd_jobs(config: &Config, command: JobsCommand) -> Result<()> {
             // with a `demo` kind — reuse the same generic endpoint the
             // `mine` command uses, just with a different JSON body.
             let job: memcastle::domain::Job = daemon.demo(steps).await?;
-            print_json(&job);
+            print_json(&job)?;
         }
     }
     Ok(())

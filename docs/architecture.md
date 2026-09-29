@@ -363,6 +363,18 @@ A stdio bridge for clients that only support spawning a local subprocess is real
 but explicitly deferred, future work (see below) —
 tool logic itself never touches a transport type, so adding one is additive when it's needed.
 
+**One error and logging surface.**
+Whichever way a failure is reached, it is the same `{error, code, help}` (`Error::body`):
+the REST API serves it as the response body, every MCP tool returns it as the text of an error result
+(all through one `mcp::tool_result` helper, which also turns a value that fails to serialize into an error
+instead of an empty success), and the CLI renders the daemon's own `code` and `help` from it.
+The CLI prints the daemon's JSON for job control (`{"status": "pause_requested"}`) rather than wording of its own,
+and fails, rather than printing nothing, if it cannot serialize its output.
+Logging follows the same shape: a `tower-http` trace layer on the shared router records every request and response
+(REST and MCP) at `debug`, `api::ApiError` logs a rejected request at `warn` and a server failure at `error`,
+each with its diagnostic code, and every MCP tool call is traced at `debug` (a failed one at `warn`).
+Set `logging.level` (or `MEMCASTLE_LOG`) to `debug` to see the request lines.
+
 ## Non-goals for this bootstrap
 
 Deliberately out of scope, and each is structurally possible without rework given the module boundaries above:

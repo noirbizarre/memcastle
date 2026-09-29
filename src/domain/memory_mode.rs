@@ -65,6 +65,18 @@ pub enum MemoryMode {
 }
 
 impl MemoryMode {
+    /// The name this mode goes by everywhere it is spelled out: the
+    /// `X-MemCastle-Mode` header, `memcastle_set_mode`'s argument, the CLI's
+    /// `--mode`, and every message that reports it.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::ReadOnly => "read_only",
+            Self::Disabled => "disabled",
+        }
+    }
+
     /// Whether this mode permits `search`/`recall`/`wake_up`/`diary_read`.
     #[must_use]
     pub fn allows_read(self) -> bool {
@@ -76,6 +88,27 @@ impl MemoryMode {
     #[must_use]
     pub fn allows_write(self) -> bool {
         matches!(self, Self::Full)
+    }
+}
+
+impl std::fmt::Display for MemoryMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for MemoryMode {
+    type Err = String;
+
+    /// Parse the names [`MemoryMode::as_str`] produces; anything else says
+    /// what was expected, so no caller has to re-word it.
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        [Self::Full, Self::ReadOnly, Self::Disabled]
+            .into_iter()
+            .find(|mode| mode.as_str() == raw)
+            .ok_or_else(|| {
+                format!("unknown memory mode `{raw}` (expected full, read_only or disabled)")
+            })
     }
 }
 
@@ -130,5 +163,22 @@ mod tests {
             serde_json::to_value(MemoryMode::Disabled).unwrap(),
             serde_json::json!("disabled")
         );
+    }
+
+    #[test]
+    fn every_mode_round_trips_through_its_name() {
+        for mode in [MemoryMode::Full, MemoryMode::ReadOnly, MemoryMode::Disabled] {
+            assert_eq!(mode.as_str().parse::<MemoryMode>(), Ok(mode));
+            assert_eq!(mode.to_string(), mode.as_str());
+            // The serde name is the same word, so the header, the tool
+            // argument and the API JSON cannot disagree.
+            assert_eq!(serde_json::to_value(mode).unwrap(), mode.as_str());
+        }
+    }
+
+    #[test]
+    fn an_unknown_mode_name_lists_what_is_accepted() {
+        let error = "readonly".parse::<MemoryMode>().unwrap_err();
+        assert!(error.contains("read_only"), "{error}");
     }
 }

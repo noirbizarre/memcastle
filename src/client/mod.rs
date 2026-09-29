@@ -300,10 +300,7 @@ impl DaemonClient {
     pub async fn list_jobs(&self, status: Option<JobStatus>) -> Result<Vec<Job>> {
         let mut request = self.http.get(format!("{}/api/jobs", self.base_url));
         if let Some(status) = status {
-            request = request.query(&[(
-                "status",
-                serde_json::to_value(status).unwrap_or_default().as_str(),
-            )]);
+            request = request.query(&[("status", status.as_str())]);
         }
         self.send(request).await
     }
@@ -322,14 +319,15 @@ impl DaemonClient {
     ///
     /// # Errors
     ///
-    /// Returns an error if the request fails.
-    pub async fn pause_job(&self, id: JobId) -> Result<()> {
-        self.send::<serde_json::Value>(
+    /// Returns an error if the request fails; on success, the daemon's own
+    /// answer (`{"status": "pause_requested"}`), so every caller reports it
+    /// in the daemon's words instead of inventing its own.
+    pub async fn pause_job(&self, id: JobId) -> Result<serde_json::Value> {
+        self.send(
             self.http
                 .post(format!("{}/api/jobs/{id}/pause", self.base_url)),
         )
         .await
-        .map(drop)
     }
 
     /// Resume a paused job.
@@ -337,13 +335,12 @@ impl DaemonClient {
     /// # Errors
     ///
     /// Returns an error if the request fails.
-    pub async fn resume_job(&self, id: JobId) -> Result<()> {
-        self.send::<serde_json::Value>(
+    pub async fn resume_job(&self, id: JobId) -> Result<serde_json::Value> {
+        self.send(
             self.http
                 .post(format!("{}/api/jobs/{id}/resume", self.base_url)),
         )
         .await
-        .map(drop)
     }
 
     /// Cancel a job.
@@ -351,13 +348,12 @@ impl DaemonClient {
     /// # Errors
     ///
     /// Returns an error if the request fails.
-    pub async fn cancel_job(&self, id: JobId) -> Result<()> {
-        self.send::<serde_json::Value>(
+    pub async fn cancel_job(&self, id: JobId) -> Result<serde_json::Value> {
+        self.send(
             self.http
                 .post(format!("{}/api/jobs/{id}/cancel", self.base_url)),
         )
         .await
-        .map(drop)
     }
 
     /// Retry a failed job.
@@ -365,13 +361,12 @@ impl DaemonClient {
     /// # Errors
     ///
     /// Returns an error if the request fails.
-    pub async fn retry_job(&self, id: JobId) -> Result<()> {
-        self.send::<serde_json::Value>(
+    pub async fn retry_job(&self, id: JobId) -> Result<serde_json::Value> {
+        self.send(
             self.http
                 .post(format!("{}/api/jobs/{id}/retry", self.base_url)),
         )
         .await
-        .map(drop)
     }
 
     /// Ask the daemon to shut down gracefully.
@@ -379,9 +374,8 @@ impl DaemonClient {
     /// # Errors
     ///
     /// Returns an error if the request fails.
-    pub async fn shutdown(&self) -> Result<()> {
-        self.send::<serde_json::Value>(self.http.post(format!("{}/api/shutdown", self.base_url)))
+    pub async fn shutdown(&self) -> Result<serde_json::Value> {
+        self.send(self.http.post(format!("{}/api/shutdown", self.base_url)))
             .await
-            .map(drop)
     }
 }

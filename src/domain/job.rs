@@ -31,6 +31,23 @@ pub enum JobStatus {
     Cancelled,
 }
 
+impl JobStatus {
+    /// The name this status goes by on the wire and in the CLI/API filters
+    /// (`?status=running`) — the same word serde uses, without a
+    /// serialization round trip that could fail.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Paused => "paused",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
 /// Where a mining job reads its source material from — the seam Phase 5
 /// slots a non-filesystem reader (e.g. a Pi/OpenCode session-transcript
 /// reader) behind. `JobKind::Mine`'s shape (`source`, `wing`) never changes
@@ -755,5 +772,19 @@ mod tests {
                 wing: Some(ref w)
             } if w == "docs"
         ));
+    }
+
+    #[test]
+    fn a_status_name_is_the_word_serde_uses() {
+        for status in [
+            JobStatus::Queued,
+            JobStatus::Running,
+            JobStatus::Paused,
+            JobStatus::Completed,
+            JobStatus::Failed,
+            JobStatus::Cancelled,
+        ] {
+            assert_eq!(serde_json::to_value(status).unwrap(), status.as_str());
+        }
     }
 }

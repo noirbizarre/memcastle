@@ -370,3 +370,29 @@ async fn a_closed_sessions_mode_does_not_carry_over_to_the_next_session() {
     second.cancel().await.expect("close session");
     daemon.shutdown().await;
 }
+
+/// The whole point of one error surface: an integration talking MCP gets the
+/// same `code` and `help` a REST caller gets, not just prose.
+#[tokio::test]
+async fn an_mcp_mode_rejection_carries_the_diagnostic_code_and_help() {
+    let daemon = TestDaemon::start().await;
+    let client = connect(&daemon.base_url).await;
+    set_mode(&client, "read_only").await;
+
+    let (failed, text) = call_text(&client, "memcastle_checkpoint", checkpoint_args(false)).await;
+
+    assert!(failed, "a read-only session may not checkpoint");
+    let body: serde_json::Value = serde_json::from_str(&text).expect("the error is JSON");
+    assert_eq!(body["code"], "memcastle::app::mode_forbidden");
+    assert!(body["help"].is_string(), "{body}");
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("checkpoint"),
+        "{body}"
+    );
+
+    client.cancel().await.expect("close session");
+    daemon.shutdown().await;
+}

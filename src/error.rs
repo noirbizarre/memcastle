@@ -5,6 +5,7 @@
 //! what to do about it.
 
 use miette::Diagnostic;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// The crate's result type.
@@ -358,7 +359,32 @@ pub enum Error {
     },
 }
 
+/// What every interface reports about a failure: the message, and the two
+/// things the message alone does not carry — the diagnostic `code` users grep
+/// for and the `help` that says what to do. The REST API serves it as the
+/// body of an error response and MCP as the text of an error result, so a
+/// failure reads the same whichever way it was reached.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ErrorBody {
+    /// The message.
+    pub error: String,
+    /// The diagnostic code, `memcastle::<module>::<kind>`.
+    pub code: Option<String>,
+    /// What to do about it.
+    pub help: Option<String>,
+}
+
 impl Error {
+    /// This error as the body every interface reports — see [`ErrorBody`].
+    #[must_use]
+    pub fn body(&self) -> ErrorBody {
+        ErrorBody {
+            error: self.to_string(),
+            code: self.code().map(|code| code.to_string()),
+            help: self.help().map(|help| help.to_string()),
+        }
+    }
+
     /// Build an [`Error::Io`] with path context.
     pub fn io(path: impl Into<String>, source: std::io::Error) -> Self {
         Self::Io {
@@ -641,5 +667,14 @@ mod tests {
             "input help must not blame the config: {input}"
         );
         assert!(config.contains("config file"));
+    }
+
+    #[test]
+    fn an_error_body_carries_the_message_the_code_and_the_help() {
+        let body = Error::invalid_job_id("nope").body();
+
+        assert!(body.error.contains("nope"));
+        assert_eq!(body.code.as_deref(), Some("memcastle::jobs::invalid_id"));
+        assert!(body.help.is_some());
     }
 }
