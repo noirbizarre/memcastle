@@ -60,10 +60,16 @@ mise run test -- --filter-expr 'test(job)'
 ## The architecture guard
 
 The non-negotiable invariant in `AGENTS.md` — "the CLI has no business logic MCP/HTTP can't reuse" —
-is enforced by a `prek` hook that greps `src/cli.rs`, `src/mcp/`, and `src/api/` for a direct `crate::store` import.
+is enforced by the `store-isolation` `prek` hook.
+It greps `src/main.rs`, `src/cli.rs`, `src/client/`, `src/mcp/` and `src/api/`
+for a direct `store` or `jobs` import (including grouped `use crate::{store::..}` imports).
+The one allowed exception is `main.rs`'s `SurrealStore` import, which `memcastle migrate` needs.
 If you find yourself wanting to import `store` from one of those,
 the fix is almost always to add a method to `app::AppServices` instead,
 so the same capability becomes available to every interface at once.
+
+The `single-writer` hook enforces the companion invariant, one daemon and one writer per palace:
+`SurrealStore::connect` may only be called from `src/server/`, `src/store/` and `src/main.rs` (for `migrate`).
 
 ## This repository is generated from a template
 

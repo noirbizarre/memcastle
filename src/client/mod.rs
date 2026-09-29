@@ -15,7 +15,7 @@ use crate::app::{StatusReport, WakeUpBudget, WakeUpContext};
 use crate::domain::{CheckpointPayload, Drawer, Job, JobId, JobStatus};
 use crate::error::{Error, Result};
 use crate::server::lifecycle;
-use crate::store::SearchHit;
+use crate::search::SearchHit;
 
 /// A client for one running daemon, discovered via the registry file for
 /// `palace_path` (falling back to the configured bind address if no live

@@ -21,8 +21,8 @@ Each of these should be enforced by a hook or a test. An invariant nothing check
    directly. `migrate` is a second, narrow exception alongside `serve`: it connects to storage directly (via
    `crate::migrate::run`/`status`, the same runner `serve` calls on every startup) because migration must work
    without, and before, a daemon exists — see `docs/adr/004-versioned-database-migrations.md`.
-   Enforced by the `prek` architecture-guard hook (grep for `crate::store` outside `store`/`app`/`server`)
-   and by `tests/cli.rs`.
+   Enforced by the `prek` `store-isolation` hook: it greps `main.rs`, `cli.rs`, `client/`, `mcp/` and `api/`
+   for any `crate::`/`memcastle::` `store` or `jobs` import, allowing only `main.rs`'s `SurrealStore` import for `migrate`.
 2. **Job status only changes through `domain::Job::apply`** — no other code assigns `job.status` directly.
    Enforced by `domain::job`'s unit tests (every transition, including the rejected ones).
 3. **The job queue is durable, the scheduler is only the execution mechanism** —
@@ -31,7 +31,8 @@ Each of these should be enforced by a hook or a test. An invariant nothing check
    and `tests/persistence.rs` (SIGKILL a daemon mid-job, restart, the job resumes).
 4. **One daemon per palace, one writer** — `store` is only ever constructed by `server::run` or the `migrate`
    CLI command (the same second exception as (1)); nothing else opens the embedded SurrealKV path directly.
-   Enforced by the same architecture-guard hook as (1).
+   Enforced by the prek `single-writer` hook: `SurrealStore::connect` and the `surrealkv:` endpoint
+   may only appear under `server/`, `store/` and in `main.rs`.
 5. **Schema management is SurrealKit's, not MemCastle's** — `database/schema/*.surql` is applied through
    SurrealKit's `Sync`/`embed_schema!()` (`store::mod`), never a hand-rolled schema-diff/versioning engine.
    MemCastle owns only its own application data-migration steps and version watermark
