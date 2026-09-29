@@ -357,9 +357,10 @@ impl AppServices {
     ///
     /// # Errors
     ///
-    /// Returns an error if the job cannot be persisted, or
+    /// Returns an error if the job cannot be persisted,
     /// [`Error::ModeForbidden`] if this is an applied repair and `mode`
-    /// doesn't permit writes.
+    /// doesn't permit writes, or [`Error::InvalidBasedOnJob`] if
+    /// `based_on_job` is not a completed audit job (no job is created).
     pub async fn submit_repair(
         &self,
         dry_run: bool,
@@ -369,6 +370,12 @@ impl AppServices {
     ) -> Result<Job> {
         if !dry_run {
             Self::require_write(mode, "repair")?;
+        }
+        // Validated here, not only when the handler runs: otherwise a typo'd
+        // id is accepted with a 200 and surfaces as a failed job minutes
+        // later. The handler re-checks (the audit may vanish in between).
+        if let Some(audit_id) = based_on_job {
+            crate::repair::load_audited_orphan_ids(&self.store, audit_id).await?;
         }
         self.scheduler
             .submit(

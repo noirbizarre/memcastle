@@ -52,7 +52,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::audit::OrphanDrawer;
-use crate::domain::{DrawerId, Job, JobId, JobKind, JobProgress};
+use crate::domain::{DrawerId, Job, JobId, JobKind, JobProgress, JobStatus};
 use crate::error::{Error, Result};
 use crate::jobs::{JobContext, JobOutcome};
 use crate::store::{SurrealStore, bindable};
@@ -193,20 +193,37 @@ async fn plan_or_apply(
 /// Errors are caller-facing mistakes (a typo'd id, a `Mine`/`Demo` job's id
 /// passed by accident, an audit that's still running), not storage
 /// failures — see [`Error::InvalidBasedOnJob`].
-async fn load_audited_orphan_ids(
+///
+/// `pub(crate)` because `AppServices::submit_repair` runs the very same
+/// validation at submission, so a bad `based_on_job` is refused before a job
+/// exists; the handler repeats it as defence in depth, since the audit can
+/// vanish or change between submission and run.
+pub(crate) async fn load_audited_orphan_ids(
     store: &SurrealStore,
     audit_id: JobId,
 ) -> Result<HashSet<DrawerId>> {
     let audit_job = store
         .get_job(audit_id)
         .await?
-        .ok_or_else(|| Error::JobNotFound {
+        .ok_or_else(|| Error::InvalidBasedOnJob {
             id: audit_id.to_string(),
+            message: "no job has this id".to_string(),
         })?;
     if !matches!(audit_job.kind, JobKind::Audit { .. }) {
         return Err(Error::InvalidBasedOnJob {
             id: audit_id.to_string(),
             message: "must reference an audit job, not another job kind".to_string(),
+        });
+    }
+    // A `Failed`/`Cancelled` audit may still carry a partial `result`; only a
+    // finished one is a complete report to narrow a destructive repair by.
+    if audit_job.status != JobStatus::Completed {
+        return Err(Error::InvalidBasedOnJob {
+            id: audit_id.to_string(),
+            message: format!(
+                "the referenced audit is {:?}, not Completed",
+                audit_job.status
+            ),
         });
     }
     let result = audit_job.result.ok_or_else(|| Error::InvalidBasedOnJob {
@@ -450,10 +467,13 @@ mod tests {
         )
         .await
         .expect("audit run");
-        // `audit::run` only mutates its in-memory `Job`; persisting it is
-        // normally `Scheduler::execute`'s job after the handler returns —
-        // `load_audited_orphan_ids` reads it back via `store.get_job`, so
-        // the fixture must persist it itself here.
+        // `audit::run` only mutates its in-memory `Job`; finishing and
+        // persisting it is normally `Scheduler::execute`'s job after the
+        // handler returns — `load_audited_orphan_ids` reads it back via
+        // `store.get_job` and requires it `Completed`, so the fixture must do
+        // both itself here.
+        audit_job.apply(crate::domain::JobEvent::Claim).unwrap();
+        audit_job.apply(crate::domain::JobEvent::Complete).unwrap();
         store.save_job(&audit_job).await.expect("save audit job");
 
         // Orphan B appears only after the audit ran — a live scan would
@@ -504,7 +524,10 @@ mod tests {
         )
         .await
         .expect_err("must reject an id that doesn't resolve");
-        assert!(matches!(error, Error::JobNotFound { .. }));
+        assert!(
+            matches!(error, Error::InvalidBasedOnJob { .. }),
+            "an unknown based_on_job is the documented InvalidBasedOnJob, got {error:?}"
+        );
     }
 
     #[tokio::test]
@@ -526,5 +549,24 @@ mod tests {
         .await
         .expect_err("must reject a non-audit job kind");
         assert!(matches!(error, Error::InvalidBasedOnJob { .. }));
+    }
+
+    #[tokio::test]
+    async fn a_based_on_job_that_has_not_completed_is_rejected() {
+        let store = memory_store().await;
+        let mut audit_job = Job::new(JobKind::Audit { scope: None }, Priority::Normal, "test");
+        // A result is present, but the audit was cancelled: not a report to
+        // trust for a destructive repair.
+        audit_job.apply(crate::domain::JobEvent::Cancel).unwrap();
+        audit_job.result = Some(serde_json::json!({}));
+        store.save_job(&audit_job).await.expect("save audit job");
+
+        let error = load_audited_orphan_ids(&store, audit_job.id)
+            .await
+            .expect_err("must reject an audit that did not complete");
+        assert!(
+            matches!(error, Error::InvalidBasedOnJob { .. }),
+            "{error:?}"
+        );
     }
 }
