@@ -45,7 +45,7 @@ exactly the way an MCP tool call or a future web dashboard would, rather than mi
 it *is* the composition root (`server::run`) that owns the store, the scheduler, and the HTTP/MCP listeners.
 `migrate` is a second, narrow exception: it connects to storage directly through `crate::migrate`,
 the same runner `serve` calls on every startup, because migration must work before a daemon exists
-(see `docs/adr/004-versioned-database-migrations.md`).
+(see [ADR-004](adr/004-versioned-database-migrations.md)).
 
 `app::AppServices` is the one seam every interface (`api`, `mcp`, and `server::run` itself) calls through.
 Nothing under `api`/`mcp`/`cli`/`client` reaches into `store` or `jobs` directly —
@@ -59,7 +59,7 @@ which dispatches on a connection string's scheme at runtime:
 The rest of the codebase never branches on which backend is active —
 `config::StoreConfig` picks one, `Backend` carries it, `SurrealStore::connect` is the only place that cares.
 SurrealKV (pure Rust) is the only embedded backend Phase 1 compiles —
-see `docs/adr/001-surrealkv-embedded-storage-engine.md`. Server-side storage is out of scope for Phase 1 entirely —
+see [ADR-001](adr/001-surrealkv-embedded-storage-engine.md). Server-side storage is out of scope for Phase 1 entirely —
 no RocksDB build variant is kept around speculatively for a server deployment model that doesn't exist yet;
 that choice is deferred until it does.
 
@@ -103,7 +103,7 @@ up anything the release also shipped) → release the lock. A failed migration f
 rather than serving a partially migrated database; the watermark stays at the last step that
 succeeded, so a later, corrected run resumes instead of replaying. `SurrealStore::connect` itself
 does not sync schema or migrate — that's this explicit step, not an implicit side effect of opening
-a connection. See `docs/adr/004-versioned-database-migrations.md` for the full design.
+a connection. See [ADR-004](adr/004-versioned-database-migrations.md) for the full design.
 
 ### Domain model
 
@@ -173,6 +173,9 @@ What stays ungated is genuinely administrative:
 they need a job id, which a session that cannot list jobs never learns),
 `submit_demo` (touches no palace content), `submit_audit` and a dry-run `submit_repair` (they only report).
 
+Which operation belongs in which row is decided by what it reads or writes, not by its name:
+[ADR-007](adr/007-memory-mode-gate-follows-data-access.md) records the rule and why job reads are gated.
+
 Enforcement is centralized in `app::AppServices` (`require_read`/`require_write`, checked before any store contact) —
 `api` and `mcp` only *extract* a `MemoryMode` and pass it down, never independently deciding what's allowed:
 
@@ -189,7 +192,7 @@ Enforcement is centralized in `app::AppServices` (`require_read`/`require_write`
   A call with no session id has nothing to remember a mode under:
   it runs as `Full` without caching, and `memcastle_set_mode` on it is an error.
 
-See `docs/adr/002-memory-mode-session-scoping.md` for the full rationale and rejected alternatives.
+See [ADR-002](adr/002-memory-mode-session-scoping.md) for the full rationale and rejected alternatives.
 
 ## Memory primitives: recall, wake_up, diary
 
@@ -208,7 +211,7 @@ See `docs/adr/002-memory-mode-session-scoping.md` for the full rationale and rej
 - `AppServices::diary_write`/`diary_read` persist/read an agent's journal entries
   as drawers filed under a fixed per-wing `"diary"` room,
   keyed by a caller-supplied `agent_identity` string that MemCastle stores and retrieves faithfully but never validates.
-  See `docs/adr/003-checkpoint-as-a-durable-job.md` for why this is a direct, synchronous call rather than a job.
+  See [ADR-003](adr/003-checkpoint-as-a-durable-job.md) for why this is a direct, synchronous call rather than a job.
 
 All four are gated by `MemoryMode` exactly like `search` — see the mode table above.
 
@@ -272,6 +275,7 @@ A handler writes an item's records first and saves the checkpoint after, so a cr
 makes the resumed attempt redo that item.
 Mining and checkpoint therefore derive each drawer's id (and each new fact edge's id) from the job id and item index
 and skip a record that already exists, so the replay lands on the same record instead of storing a second copy.
+See [ADR-008](adr/008-replay-safe-job-resume.md).
 
 **Crash recovery** (`Scheduler::recover`, run once at daemon startup):
 any job left `Running` by an unclean shutdown is re-queued if its crash-recovery budget allows,
@@ -311,7 +315,7 @@ a checkpoint item is never only a graph mutation with no drawer to audit it.
 Unlike `jobs::demo`, there is deliberately no artificial per-item delay:
 an emergency checkpoint's entire purpose is saving state before a crash,
 so synthetic latency would work against the feature.
-See `docs/adr/003-checkpoint-as-a-durable-job.md` for why this runs as a job at all while diary writes (above) don't.
+See [ADR-003](adr/003-checkpoint-as-a-durable-job.md) for why this runs as a job at all while diary writes (above) don't.
 
 **`JobKind::Audit`** (`src/audit`) is a read-only palace consistency report,
 scoped to what's structurally possible given the single-SurrealDB design described above —
@@ -351,6 +355,7 @@ The wait is bounded by `jobs.drain_timeout_secs` (default 10, env `MEMCASTLE_JOB
 a job that does not stop in time — one stuck inside a single long unit of work —
 is left `Running` and re-queued by `Scheduler::recover` on the next start.
 The daemon then removes its registry file and exits.
+See [ADR-009](adr/009-shutdown-drains-jobs.md) for why shutdown drains rather than waits or kills.
 
 The registry file (`~/.memcastle/run/<hash of the canonical palace path>/daemon.json`)
 is **operational metadata, never the source of truth** for "is a daemon running" —
