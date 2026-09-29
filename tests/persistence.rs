@@ -139,6 +139,102 @@ async fn checkpoint_drawers_survive_a_daemon_restart_against_the_same_palace() {
     }
 }
 
+/// Invariant #3 at the process boundary: a job left `Running` by a daemon
+/// that died uncleanly (SIGKILL — no shutdown hook runs) is picked up by
+/// the next daemon's `server::run` -> `Scheduler::recover` and finished.
+///
+/// Lives here rather than in `tests/server.rs` because seeding a `Running`
+/// row needs the palace's SurrealKV lock, which an in-process test cannot
+/// take back after a `Surreal` handle drops (see `store::tests`); a second
+/// real process is the only way to have "the previous owner is gone".
+#[tokio::test]
+async fn a_job_running_when_the_daemon_is_killed_is_recovered_and_finished_after_restart() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let palace = dir.path().join("palace");
+    let bin = cargo_bin("memcastle");
+    let client = reqwest::Client::new();
+
+    // Round 1: start a demo job long enough (150ms/step) to still be
+    // `Running` when we kill the process, then SIGKILL it mid-flight.
+    let job_id = {
+        let (mut child, info) = spawn_daemon_and_wait(&bin, &palace).await;
+        let base = format!("http://{}", info.bind_addr);
+
+        let submitted: serde_json::Value = client
+            .post(format!("{base}/api/jobs"))
+            .json(&serde_json::json!({ "type": "demo", "steps": 400, "requested_by": "test" }))
+            .send()
+            .await
+            .expect("submit demo job")
+            .error_for_status()
+            .expect("demo job accepted")
+            .json()
+            .await
+            .expect("job json");
+        let id = submitted["id"].as_str().expect("job id").to_string();
+
+        // Wait for real progress, so the checkpoint the recovered job
+        // resumes from is provably non-empty.
+        wait_for_job(&client, &base, &id, |job| {
+            job["status"] == "running" && job["progress"]["current"].as_u64().unwrap_or(0) >= 2
+        })
+        .await;
+
+        child.kill().await.expect("SIGKILL the daemon");
+        // `kill` reaps the process; the registry file it never got to
+        // remove would otherwise make the next spawn look already-live on
+        // platforms where liveness is not probed.
+        memcastle::server::lifecycle::remove(&palace);
+        id
+    };
+
+    // Round 2: a new daemon on the same palace must not leave the job
+    // stranded in `Running` — it is requeued, re-claimed (attempt 2) and
+    // resumed past the steps already done.
+    let (mut child, info) = spawn_daemon_and_wait(&bin, &palace).await;
+    let base = format!("http://{}", info.bind_addr);
+    let job = wait_for_job(&client, &base, &job_id, |job| {
+        job["attempt"].as_u64().unwrap_or(0) >= 2
+    })
+    .await;
+    assert!(
+        job["progress"]["current"].as_u64().unwrap_or(0) >= 2,
+        "a recovered job must resume from its checkpoint, not restart: {job}"
+    );
+    assert!(
+        matches!(
+            job["status"].as_str(),
+            Some("running" | "queued" | "completed")
+        ),
+        "a recovered job must be back in the queue's normal flow: {job}"
+    );
+
+    stop_daemon(&bin, &palace, &mut child).await;
+}
+
+async fn wait_for_job(
+    client: &reqwest::Client,
+    base: &str,
+    id: &str,
+    mut done: impl FnMut(&serde_json::Value) -> bool,
+) -> serde_json::Value {
+    for _ in 0..600 {
+        let job: serde_json::Value = client
+            .get(format!("{base}/api/jobs/{id}"))
+            .send()
+            .await
+            .expect("get job")
+            .json()
+            .await
+            .expect("job json");
+        if done(&job) {
+            return job;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("job {id} never reached the expected state within 60s");
+}
+
 /// Spawn `memcastle serve` against `palace` and wait for it to register —
 /// i.e. for its listener to actually be up, not just the OS process to
 /// exist.

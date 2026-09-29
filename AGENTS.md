@@ -27,7 +27,8 @@ Each of these should be enforced by a hook or a test. An invariant nothing check
    Enforced by `domain::job`'s unit tests (every transition, including the rejected ones).
 3. **The job queue is durable, the scheduler is only the execution mechanism** —
    a job's state survives a daemon restart.
-   Enforced by `jobs::Scheduler::recover` and its exercise in `tests/server.rs`.
+   Enforced by `jobs::Scheduler::recover`, its per-state unit tests in `jobs::tests`,
+   and `tests/persistence.rs` (SIGKILL a daemon mid-job, restart, the job resumes).
 4. **One daemon per palace, one writer** — `store` is only ever constructed by `server::run` or the `migrate`
    CLI command (the same second exception as (1)); nothing else opens the embedded SurrealKV path directly.
    Enforced by the same architecture-guard hook as (1).

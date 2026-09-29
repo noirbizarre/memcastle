@@ -436,6 +436,39 @@ mod tests {
     }
 
     #[test]
+    fn crash_recovery_is_rejected_from_every_status_but_running() {
+        // Only a `Running` job can have been interrupted by a crash;
+        // re-queuing anything else would resurrect finished work or
+        // silently un-pause a job the user paused.
+        let terminal_or_idle: [fn(&mut Job); 5] = [
+            |_| {},
+            |job| {
+                job.apply(JobEvent::Claim).unwrap();
+                job.apply(JobEvent::Pause).unwrap();
+            },
+            |job| {
+                job.apply(JobEvent::Claim).unwrap();
+                job.apply(JobEvent::Complete).unwrap();
+            },
+            |job| {
+                job.apply(JobEvent::Claim).unwrap();
+                job.apply(JobEvent::Fail).unwrap();
+            },
+            |job| job.apply(JobEvent::Cancel).unwrap(),
+        ];
+        for seed in terminal_or_idle {
+            let mut job = demo_job();
+            seed(&mut job);
+            let before = job.status;
+            assert!(job.apply(JobEvent::RecoverToQueued).is_err());
+            assert_eq!(
+                job.status, before,
+                "a rejected transition must not mutate state"
+            );
+        }
+    }
+
+    #[test]
     fn a_failed_job_can_be_retried_to_queued() {
         let mut job = demo_job();
         job.apply(JobEvent::Claim).unwrap();

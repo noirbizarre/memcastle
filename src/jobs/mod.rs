@@ -275,3 +275,137 @@ impl Scheduler {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::JobStatus;
+
+    async fn scheduler() -> Scheduler {
+        Scheduler::new(SurrealStore::connect_memory_for_tests().await, 1)
+    }
+
+    /// Persist a demo job driven into `status` purely through
+    /// `Job::apply` — the tests seed state the same way production reaches
+    /// it, so a seeded record can never be one the state machine forbids.
+    async fn seed(scheduler: &Scheduler, status: JobStatus, attempt: u32) -> Job {
+        let mut job = Job::new(JobKind::Demo { steps: 1 }, Priority::Normal, "test");
+        match status {
+            JobStatus::Queued => {}
+            JobStatus::Running => job.apply(JobEvent::Claim).unwrap(),
+            JobStatus::Paused => {
+                job.apply(JobEvent::Claim).unwrap();
+                job.apply(JobEvent::Pause).unwrap();
+            }
+            JobStatus::Completed => {
+                job.apply(JobEvent::Claim).unwrap();
+                job.apply(JobEvent::Complete).unwrap();
+            }
+            JobStatus::Failed => {
+                job.apply(JobEvent::Claim).unwrap();
+                job.apply(JobEvent::Fail).unwrap();
+            }
+            JobStatus::Cancelled => job.apply(JobEvent::Cancel).unwrap(),
+        }
+        job.attempt = attempt;
+        job.checkpoint = serde_json::json!({ "next_step": 7 });
+        scheduler.store.save_job(&job).await.unwrap();
+        job
+    }
+
+    async fn reload(scheduler: &Scheduler, job: &Job) -> Job {
+        scheduler.store.get_job(job.id).await.unwrap().unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_running_job_with_attempts_left_is_requeued_with_its_checkpoint_intact() {
+        let scheduler = scheduler().await;
+        let job = seed(&scheduler, JobStatus::Running, 1).await;
+
+        scheduler.recover().await.unwrap();
+
+        let recovered = reload(&scheduler, &job).await;
+        assert_eq!(recovered.status, JobStatus::Queued);
+        assert_eq!(
+            recovered.checkpoint,
+            serde_json::json!({ "next_step": 7 }),
+            "a requeued job must resume from its checkpoint, not restart"
+        );
+        assert_eq!(
+            recovered.attempt, 1,
+            "recovery itself must not spend an attempt"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_running_job_that_exhausted_its_attempts_is_failed_with_an_explanation() {
+        let scheduler = scheduler().await;
+        let job = seed(&scheduler, JobStatus::Running, 3).await;
+
+        scheduler.recover().await.unwrap();
+
+        let recovered = reload(&scheduler, &job).await;
+        assert_eq!(recovered.status, JobStatus::Failed);
+        assert!(
+            recovered
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("exhausted attempt budget")),
+            "a failed recovery must say why: {:?}",
+            recovered.error
+        );
+        assert!(recovered.completed_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn recovery_leaves_every_job_that_was_not_running_untouched() {
+        let scheduler = scheduler().await;
+        let mut untouched = Vec::new();
+        for status in [
+            JobStatus::Queued,
+            JobStatus::Paused,
+            JobStatus::Completed,
+            JobStatus::Failed,
+            JobStatus::Cancelled,
+        ] {
+            untouched.push((status, seed(&scheduler, status, 1).await));
+        }
+
+        scheduler.recover().await.unwrap();
+
+        for (status, job) in untouched {
+            assert_eq!(
+                reload(&scheduler, &job).await.status,
+                status,
+                "recover must not touch a {status:?} job (a paused job stays paused until someone resumes it)"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_requeued_job_is_claimable_after_recovery() {
+        let scheduler = scheduler().await;
+        let job = seed(&scheduler, JobStatus::Running, 1).await;
+
+        scheduler.recover().await.unwrap();
+        let claimed = scheduler
+            .store
+            .claim_next_job("test-worker")
+            .await
+            .unwrap()
+            .expect("the recovered job must be claimable");
+
+        assert_eq!(claimed.id, job.id);
+        assert_eq!(
+            claimed.attempt, 2,
+            "the re-claim is the job's second attempt"
+        );
+    }
+
+    #[tokio::test]
+    async fn recovering_with_nothing_stuck_is_a_no_op() {
+        let scheduler = scheduler().await;
+        scheduler.recover().await.unwrap();
+        assert!(scheduler.store.list_jobs(None).await.unwrap().is_empty());
+    }
+}
