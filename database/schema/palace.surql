@@ -98,6 +98,10 @@ DEFINE FIELD IF NOT EXISTS requested_by ON TABLE job TYPE string;
 DEFINE FIELD IF NOT EXISTS progress ON TABLE job TYPE object FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS attempt ON TABLE job TYPE int;
 DEFINE FIELD IF NOT EXISTS max_attempts ON TABLE job TYPE int;
+-- Crash recoveries survived; what `max_attempts` budgets (`attempt` only
+-- counts claims). `option<int>`, read back as `?? 0`: rows written before it
+-- existed have spent no recoveries, so they need no backfill.
+DEFINE FIELD IF NOT EXISTS recovery_attempts ON TABLE job TYPE option<int>;
 DEFINE FIELD IF NOT EXISTS checkpoint ON TABLE job TYPE object FLEXIBLE;
 -- A report-producing job's final output (`Audit` and `Repair`, see
 -- `domain::job::Job::result`'s doc comment for why this is a separate field

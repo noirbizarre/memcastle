@@ -11,8 +11,8 @@
 //! - **Fail jobs stuck beyond a stale-lease/attempt-budget heuristic** —
 //!   deliberately **dropped as redundant**, not merely deferred:
 //!   `jobs::Scheduler::recover` already runs at every daemon startup and
-//!   fails any crash-recovered `Running` job whose `attempt` has reached
-//!   `max_attempts` (see that function's doc comment). There is no lease
+//!   fails any crash-recovered `Running` job whose `recovery_attempts` has
+//!   reached `max_attempts` (see that function's doc comment). There is no lease
 //!   TTL yet (`domain::Job::lease_expires_at` is unpopulated — see
 //!   `crate::audit`'s module doc), so there is no live signal this handler
 //!   could use to find *additional* stuck jobs while the daemon stays up.

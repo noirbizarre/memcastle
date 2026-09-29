@@ -259,10 +259,21 @@ pub struct Job {
     pub requested_by: String,
     /// How far along it is.
     pub progress: JobProgress,
-    /// How many times a worker has claimed this job.
+    /// How many times a worker has claimed this job. Informational: it grows
+    /// on every claim — including the one after a user's resume or a
+    /// shutdown re-queue — so it says how often the job *started*, and is
+    /// deliberately not what the failure budget counts.
     pub attempt: u32,
-    /// The attempt budget — beyond this, a crash-recovered `Running` job
-    /// goes to `Failed` instead of back to `Queued`.
+    /// How many times a daemon crash has been recovered from while this job
+    /// was `Running`. This, not [`Self::attempt`], is what
+    /// [`Self::max_attempts`] budgets.
+    #[serde(default)]
+    pub recovery_attempts: u32,
+    /// The crash-recovery budget: once [`Self::recovery_attempts`] reaches
+    /// this, a crash-recovered `Running` job goes to `Failed` instead of back
+    /// to `Queued`. Pauses, resumes, shutdown re-queues and retries do not
+    /// spend it. (Named `max_attempts` because the column predates the
+    /// split; renaming a persisted field is not worth a migration.)
     pub max_attempts: u32,
     /// Opaque, handler-defined resumption state (e.g. `{"next_index": 3}`).
     ///
@@ -321,6 +332,7 @@ impl Job {
             requested_by: requested_by.into(),
             progress: JobProgress::default(),
             attempt: 0,
+            recovery_attempts: 0,
             max_attempts: 3,
             // An empty object, not `Value::Null`: the store schema requires
             // `checkpoint` to always be an object (handlers read specific
@@ -571,15 +583,17 @@ mod tests {
     }
 
     #[test]
-    fn a_job_record_written_before_stop_requests_existed_still_deserializes() {
+    fn a_job_record_written_before_the_newer_fields_existed_still_deserializes() {
         let mut value = serde_json::to_value(demo_job()).unwrap();
         let object = value.as_object_mut().unwrap();
         object.remove("pause_requested");
         object.remove("cancel_requested");
+        object.remove("recovery_attempts");
 
         let job: Job = serde_json::from_value(value).unwrap();
 
         assert!(!job.pause_requested && !job.cancel_requested);
+        assert_eq!(job.recovery_attempts, 0);
     }
 
     #[test]

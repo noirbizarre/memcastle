@@ -17,7 +17,7 @@ use super::SurrealStore;
 /// for why datetimes are cast to strings and `id` through `record::id()`.
 const JOB_COLUMNS: &str = "record::id(id) AS id, kind, status, priority, \
      <string>created_at AS created_at, started_at, completed_at, requested_by, progress, \
-     attempt, max_attempts, checkpoint, result, error, lease_owner, lease_expires_at, \
+     attempt, recovery_attempts ?? 0 AS recovery_attempts, max_attempts, checkpoint, result, error, lease_owner, lease_expires_at, \
      pause_requested ?? false AS pause_requested, cancel_requested ?? false AS cancel_requested";
 
 impl SurrealStore {
@@ -34,7 +34,8 @@ impl SurrealStore {
                  kind = $kind, status = $status, priority = $priority, \
                  created_at = <datetime>$created_at, started_at = $started_at, \
                  completed_at = $completed_at, requested_by = $requested_by, \
-                 progress = $progress, attempt = $attempt, max_attempts = $max_attempts, \
+                 progress = $progress, attempt = $attempt, \
+                 recovery_attempts = $recovery_attempts, max_attempts = $max_attempts, \
                  checkpoint = $checkpoint, result = $result, error = $error, \
                  lease_owner = $lease_owner, lease_expires_at = $lease_expires_at, \
                  pause_requested = IF $status = 'running' { pause_requested ?? false } ELSE { false }, \
@@ -50,6 +51,7 @@ impl SurrealStore {
             .bind(("requested_by", job.requested_by.clone()))
             .bind(("progress", super::bindable(&job.progress)?))
             .bind(("attempt", job.attempt))
+            .bind(("recovery_attempts", job.recovery_attempts))
             .bind(("max_attempts", job.max_attempts))
             .bind(("checkpoint", job.checkpoint.clone()))
             .bind(("result", job.result.clone()))

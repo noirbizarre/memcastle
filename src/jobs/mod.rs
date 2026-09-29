@@ -102,7 +102,8 @@ impl Scheduler {
     /// Recover jobs left `Running` by a daemon that stopped uncleanly.
     ///
     /// Each is re-queued (to be picked up and resumed from its last
-    /// checkpoint) if its attempt budget allows, or marked `Failed`
+    /// checkpoint) if its crash-recovery budget (`Job::max_attempts`,
+    /// counted in `Job::recovery_attempts`) allows, or marked `Failed`
     /// otherwise — a job is never silently forgotten.
     ///
     /// # Errors
@@ -121,13 +122,32 @@ impl Scheduler {
             } else if job.pause_requested {
                 info!(job_id = %job.id, "recovering a job the user had paused");
                 job.apply(JobEvent::Pause)?;
-            } else if job.attempt < job.max_attempts {
-                info!(job_id = %job.id, attempt = job.attempt, "recovering interrupted job to queued");
-                job.apply(JobEvent::RecoverToQueued)?;
             } else {
-                warn!(job_id = %job.id, attempt = job.attempt, "interrupted job exhausted its attempt budget");
-                job.error = Some("exhausted attempt budget after an unclean restart".to_string());
-                job.apply(JobEvent::Fail)?;
+                // Only a crash spends the budget. `attempt` also counts the
+                // claims that follow a user's resume or a shutdown re-queue,
+                // which are not failures: charging those made a job that had
+                // merely been paused twice one crash from being failed.
+                job.recovery_attempts += 1;
+                if job.recovery_attempts < job.max_attempts {
+                    info!(
+                        job_id = %job.id,
+                        recoveries = job.recovery_attempts,
+                        "recovering interrupted job to queued"
+                    );
+                    job.apply(JobEvent::RecoverToQueued)?;
+                } else {
+                    warn!(
+                        job_id = %job.id,
+                        recoveries = job.recovery_attempts,
+                        "interrupted job exhausted its crash-recovery budget"
+                    );
+                    job.error = Some(format!(
+                        "exhausted its crash-recovery budget: the daemon stopped uncleanly \
+                         {} times while this job was running",
+                        job.recovery_attempts
+                    ));
+                    job.apply(JobEvent::Fail)?;
+                }
             }
             self.store.save_job(&job).await?;
         }
@@ -425,6 +445,13 @@ mod tests {
         job
     }
 
+    /// Pretend `job` has already survived `recoveries` daemon crashes.
+    async fn set_recoveries(scheduler: &Scheduler, job: &Job, recoveries: u32) {
+        let mut job = reload(scheduler, job).await;
+        job.recovery_attempts = recoveries;
+        scheduler.store.save_job(&job).await.unwrap();
+    }
+
     async fn reload(scheduler: &Scheduler, job: &Job) -> Job {
         scheduler.store.get_job(job.id).await.unwrap().unwrap()
     }
@@ -450,9 +477,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_running_job_that_exhausted_its_attempts_is_failed_with_an_explanation() {
+    async fn a_running_job_whose_crash_budget_is_spent_is_failed_with_an_explanation() {
         let scheduler = scheduler().await;
-        let job = seed(&scheduler, JobStatus::Running, 3).await;
+        let job = seed(&scheduler, JobStatus::Running, 1).await;
+        // Two earlier crashes were survived; this is the third.
+        set_recoveries(&scheduler, &job, 2).await;
 
         scheduler.recover().await.unwrap();
 
@@ -462,7 +491,7 @@ mod tests {
             recovered
                 .error
                 .as_deref()
-                .is_some_and(|e| e.contains("exhausted attempt budget")),
+                .is_some_and(|e| e.contains("exhausted its crash-recovery budget")),
             "a failed recovery must say why: {:?}",
             recovered.error
         );
@@ -751,5 +780,87 @@ mod tests {
             .unwrap();
 
         assert_eq!(reload(&scheduler, &job).await.status, JobStatus::Paused);
+    }
+
+    #[tokio::test]
+    async fn a_job_resumed_or_requeued_many_times_still_survives_one_crash() {
+        let scheduler = scheduler().await;
+        // Ten claims by a worker, none of them a crash: pauses that were
+        // resumed and shutdown re-queues. `attempt` far past `max_attempts`.
+        let job = seed(&scheduler, JobStatus::Running, 10).await;
+
+        scheduler.recover().await.unwrap();
+
+        let recovered = reload(&scheduler, &job).await;
+        assert_eq!(
+            recovered.status,
+            JobStatus::Queued,
+            "claims that were not crashes must not count against the budget"
+        );
+        assert_eq!(recovered.recovery_attempts, 1);
+        assert_eq!(
+            recovered.attempt, 10,
+            "recovery does not touch the claim count"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_user_resume_and_a_shutdown_requeue_do_not_spend_the_crash_budget() {
+        let scheduler = scheduler().await;
+        let mut job = seed(&scheduler, JobStatus::Queued, 0).await;
+        for _ in 0..5 {
+            let claimed = scheduler
+                .store
+                .claim_next_job("test-worker")
+                .await
+                .unwrap()
+                .expect("claimable");
+            job = claimed;
+            // Pause then resume, exactly what the user path and the
+            // shutdown re-queue both do.
+            job.apply(JobEvent::Pause).unwrap();
+            job.apply(JobEvent::Resume).unwrap();
+            scheduler.store.save_job(&job).await.unwrap();
+        }
+        assert_eq!(job.attempt, 5, "five claims");
+        assert_eq!(job.recovery_attempts, 0);
+    }
+
+    #[tokio::test]
+    async fn a_job_that_crashes_max_attempts_times_is_failed_with_the_reason_recorded() {
+        let scheduler = scheduler().await;
+        let job = seed(&scheduler, JobStatus::Queued, 0).await;
+
+        for crash in 1..=job.max_attempts {
+            let claimed = scheduler
+                .store
+                .claim_next_job("test-worker")
+                .await
+                .unwrap()
+                .expect("claimable until the budget is spent");
+            assert_eq!(claimed.id, job.id);
+            // The daemon dies while it runs, and the next one recovers it.
+            scheduler.recover().await.unwrap();
+
+            let after = reload(&scheduler, &job).await;
+            assert_eq!(after.recovery_attempts, crash);
+            if crash < job.max_attempts {
+                assert_eq!(
+                    after.status,
+                    JobStatus::Queued,
+                    "crash {crash} is survivable"
+                );
+            } else {
+                assert_eq!(after.status, JobStatus::Failed);
+                assert!(
+                    after
+                        .error
+                        .as_deref()
+                        .is_some_and(|e| e.contains("3 times")),
+                    "the failure must say how many crashes: {:?}",
+                    after.error
+                );
+            }
+        }
     }
 }

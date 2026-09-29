@@ -14,8 +14,9 @@
 //!   longer exists. Should always be empty today — jobs are never deleted —
 //!   kept as a real check anyway so it doesn't silently break if that ever
 //!   changes.
-//! - Stuck failed jobs: `Failed` jobs whose `attempt` has reached
-//!   `max_attempts`, which will never auto-recover via `Scheduler::recover`.
+//! - Stuck failed jobs: `Failed` jobs whose `recovery_attempts` has reached
+//!   `max_attempts` (the crash-recovery budget), which will never
+//!   auto-recover via `Scheduler::recover`.
 //! - Running jobs: a plain count, informational only — there is no lease
 //!   TTL yet to judge any of them "stale" (see `domain::Job::lease_expires_at`'s
 //!   doc comment), so this is a cross-check number, not a defect signal.
@@ -198,7 +199,7 @@ async fn build_report(
     let existing_job_ids: HashSet<JobId> = jobs.iter().map(|j| j.id).collect();
     let stuck_failed_jobs = jobs
         .iter()
-        .filter(|j| j.status == JobStatus::Failed && j.attempt >= j.max_attempts)
+        .filter(|j| j.status == JobStatus::Failed && j.recovery_attempts >= j.max_attempts)
         .count() as u64;
     let running_jobs = jobs
         .iter()
@@ -418,13 +419,13 @@ mod tests {
         let mut recoverable = Job::new(JobKind::Demo { steps: 1 }, Priority::Normal, "test");
         recoverable.apply(crate::domain::JobEvent::Claim).unwrap();
         recoverable.apply(crate::domain::JobEvent::Fail).unwrap();
-        assert!(recoverable.attempt < recoverable.max_attempts);
+        assert!(recoverable.recovery_attempts < recoverable.max_attempts);
         store.save_job(&recoverable).await.unwrap();
 
         // A Failed job that has exhausted its attempt budget.
         let mut exhausted = Job::new(JobKind::Demo { steps: 1 }, Priority::Normal, "test");
         exhausted.apply(crate::domain::JobEvent::Claim).unwrap();
-        exhausted.attempt = exhausted.max_attempts;
+        exhausted.recovery_attempts = exhausted.max_attempts;
         exhausted.apply(crate::domain::JobEvent::Fail).unwrap();
         store.save_job(&exhausted).await.unwrap();
 

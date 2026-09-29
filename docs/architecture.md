@@ -202,7 +202,7 @@ All four are gated by `MemoryMode` exactly like `search` — see the mode table 
 
 > The queue state is durable; the in-memory scheduler is only the execution mechanism.
 
-`domain::Job` is a plain record (`id`, `kind`, `status`, `priority`, timestamps, `progress`, `attempt`/`max_attempts`,
+`domain::Job` is a plain record (`id`, `kind`, `status`, `priority`, timestamps, `progress`, `attempt`/`recovery_attempts`/`max_attempts`,
 `checkpoint`, `error`, lease fields, and any pending `pause_requested`/`cancel_requested`) persisted in SurrealDB.
 Its status only ever changes through `Job::apply(event)`, an explicit transition table
 (any `(status, event)` pair not listed here is rejected with a `TransitionError`):
@@ -214,7 +214,7 @@ paused   -> queued     (resumed)
 running  -> completed
 running  -> failed
 queued | paused | running -> cancelled
-running  -> queued     (crash recovery, attempt budget permitting)
+running  -> queued     (crash recovery, crash-recovery budget permitting)
 failed   -> queued     (retry; clears the error, keeps the checkpoint)
 ```
 
@@ -251,8 +251,11 @@ Mining and checkpoint therefore derive each drawer's id (and each new fact edge'
 and skip a record that already exists, so the replay lands on the same record instead of storing a second copy.
 
 **Crash recovery** (`Scheduler::recover`, run once at daemon startup):
-any job left `Running` by an unclean shutdown is re-queued if its attempt budget allows,
-or marked `Failed` otherwise — never silently forgotten.
+any job left `Running` by an unclean shutdown is re-queued if its crash-recovery budget allows,
+or marked `Failed` (with the reason recorded) otherwise — never silently forgotten.
+The budget is `Job::max_attempts` (3), and what it counts is `Job::recovery_attempts`: crashes survived, and nothing else.
+`Job::attempt` is a separate, informational count of every claim, including the one after a user's resume
+or a shutdown re-queue, so a job that was merely paused twice is not one crash from failing.
 `Queued` jobs need no recovery, and `Paused` jobs are deliberately left paused until someone resumes them.
 A pause or cancel request does not depend on the in-memory `JobControl` surviving:
 `request_pause`/`request_cancel` write `pause_requested`/`cancel_requested` on the `Running` job record
