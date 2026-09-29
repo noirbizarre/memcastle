@@ -38,3 +38,4 @@ The history is the value.
   reads or writes, not its method name
 - [ADR-008](008-replay-safe-job-resume.md) — resuming a job is replay-safe
 - [ADR-009](009-shutdown-drains-jobs.md) — shutdown drains running jobs and hands them back to the queue
+- [ADR-010](010-unix-xdg-paths.md) — configuration, data and state follow the Unix XDG layout on Linux and macOS

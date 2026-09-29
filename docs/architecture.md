@@ -365,7 +365,8 @@ is left `Running` and re-queued by `Scheduler::recover` on the next start.
 The daemon then removes its registry file and exits.
 See [ADR-009](adr/009-shutdown-drains-jobs.md) for why shutdown drains rather than waits or kills.
 
-The registry file (`~/.memcastle/run/<hash of the canonical palace path>/daemon.json`)
+The registry file (`$XDG_STATE_HOME/memcastle/run/<hash of the canonical palace path>/daemon.json`,
+by default under `~/.local/state`; see [Configuration](configuration.md))
 is **operational metadata, never the source of truth** for "is a daemon running" —
 that question is always answered by a live HTTP request.
 The file's PID is checked with a liveness probe before it's trusted at all;
