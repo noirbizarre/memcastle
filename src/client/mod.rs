@@ -52,6 +52,26 @@ fn http_client(mode: Option<MemoryMode>) -> reqwest::Client {
         .expect("build the HTTP client")
 }
 
+/// The address to dial for a daemon listening on `bind_addr`.
+///
+/// A daemon bound to a wildcard address (`0.0.0.0`, `::`) listens on every
+/// interface, but the wildcard itself is not something a client can connect
+/// to on every platform; loopback always reaches it. Anything that does not
+/// parse as a socket address is passed through untouched.
+fn connectable(bind_addr: &str) -> String {
+    match bind_addr.parse::<SocketAddr>() {
+        Ok(mut addr) if addr.ip().is_unspecified() => {
+            addr.set_ip(if addr.is_ipv4() {
+                std::net::Ipv4Addr::LOCALHOST.into()
+            } else {
+                std::net::Ipv6Addr::LOCALHOST.into()
+            });
+            addr.to_string()
+        }
+        _ => bind_addr.to_string(),
+    }
+}
+
 /// A client for one running daemon, discovered via the registry file for
 /// `palace_path` (falling back to the configured bind address if no live
 /// registry entry exists — see `server::lifecycle`'s doc comment on why
@@ -71,7 +91,7 @@ impl DaemonClient {
             .map(|info| info.bind_addr)
             .unwrap_or_else(|| configured_bind.to_string());
         Self {
-            base_url: format!("http://{bind_addr}"),
+            base_url: format!("http://{}", connectable(&bind_addr)),
             http: http_client(None),
         }
     }
@@ -422,5 +442,22 @@ impl DaemonClient {
     pub async fn shutdown(&self) -> Result<serde_json::Value> {
         self.send(self.http.post(format!("{}/api/shutdown", self.base_url)))
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::connectable;
+
+    #[test]
+    fn a_wildcard_listener_is_dialled_through_loopback() {
+        assert_eq!(connectable("0.0.0.0:8420"), "127.0.0.1:8420");
+        assert_eq!(connectable("[::]:8420"), "[::1]:8420");
+    }
+
+    #[test]
+    fn a_specific_listener_address_is_dialled_as_is() {
+        assert_eq!(connectable("192.168.1.5:9000"), "192.168.1.5:9000");
+        assert_eq!(connectable("127.0.0.1:8420"), "127.0.0.1:8420");
     }
 }

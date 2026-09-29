@@ -39,3 +39,5 @@ The history is the value.
 - [ADR-008](008-replay-safe-job-resume.md) — resuming a job is replay-safe
 - [ADR-009](009-shutdown-drains-jobs.md) — shutdown drains running jobs and hands them back to the queue
 - [ADR-010](010-unix-xdg-paths.md) — configuration, data and state follow the Unix XDG layout on Linux and macOS
+- [ADR-011](011-split-bind-address-and-port.md) — the listener's address and port are separate settings,
+  bound before the daemon does anything else

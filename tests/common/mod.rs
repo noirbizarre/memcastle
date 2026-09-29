@@ -42,7 +42,8 @@ impl TestDaemon {
         let mut config = Config::default();
         config.palace.path = palace_path.clone();
         config.jobs.max_concurrency = max_concurrency;
-        config.server.bind = "127.0.0.1:0".parse().expect("valid socket addr");
+        config.server.bind = "127.0.0.1".parse().expect("valid IP address");
+        config.server.port = 0;
 
         let handle = tokio::spawn(memcastle::server::run(config));
 

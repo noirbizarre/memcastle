@@ -13,6 +13,7 @@ fn isolated(root: &std::path::Path) -> Command {
         "MEMCASTLE_PALACE_PATH",
         "MEMCASTLE_CONFIG",
         "MEMCASTLE_BIND",
+        "MEMCASTLE_PORT",
         "MEMCASTLE_MODE",
     ] {
         cmd.env_remove(name);

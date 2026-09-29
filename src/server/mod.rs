@@ -22,15 +22,32 @@ use crate::error::{Error, Result};
 use crate::jobs::Scheduler;
 use crate::store::SurrealStore;
 
-/// Run the daemon in the foreground: connect storage, recover interrupted
-/// jobs, start the scheduler, then serve HTTP + MCP until a shutdown signal
-/// (SIGINT/SIGTERM, or `POST /api/shutdown`) arrives.
+/// Run the daemon in the foreground: bind the listener, connect storage,
+/// recover interrupted jobs, start the scheduler, then serve HTTP + MCP until
+/// a shutdown signal (SIGINT/SIGTERM, or `POST /api/shutdown`) arrives.
 ///
 /// # Errors
 ///
-/// Returns an error if storage can't be connected/migrated, the HTTP
-/// listener can't bind, or the registry file can't be written.
+/// Returns [`Error::ServerBind`] if the listener can't bind, or an error if
+/// storage can't be connected/migrated or the registry file can't be written.
 pub async fn run(config: Config) -> Result<()> {
+    // Bound first, before any side effect: a taken or invalid port is by far
+    // the most common startup failure, and discovering it after creating the
+    // palace directory, migrating, and recovering (re-queueing) jobs would
+    // leave a failed start having changed things. The listener just holds
+    // connections in its backlog until `axum::serve` below; the registry
+    // file, which clients discover the daemon by, is still written only once
+    // everything is ready.
+    let requested_addr = config.server.socket_addr();
+    let listener = tokio::net::TcpListener::bind(requested_addr)
+        .await
+        .map_err(|source| Error::server_bind(requested_addr, source))?;
+    // Not `requested_addr`: with port 0 the OS picks the port, and the
+    // registry must record the real one for clients to reach the daemon.
+    let actual_addr = listener
+        .local_addr()
+        .map_err(|source| Error::server_bind(requested_addr, source))?;
+
     std::fs::create_dir_all(&config.palace.path)
         .map_err(|source| Error::io(config.palace.path.display().to_string(), source))?;
 
@@ -88,15 +105,6 @@ pub async fn run(config: Config) -> Result<()> {
                     tower_http::trace::DefaultOnResponse::new().level(tracing::Level::DEBUG),
                 ),
         );
-
-    let listener = tokio::net::TcpListener::bind(config.server.bind)
-        .await
-        .map_err(|source| {
-            Error::server(format!("failed to bind {}: {source}", config.server.bind))
-        })?;
-    let actual_addr = listener
-        .local_addr()
-        .map_err(|source| Error::server(source.to_string()))?;
 
     lifecycle::write(
         &config.palace.path,

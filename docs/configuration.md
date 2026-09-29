@@ -64,7 +64,8 @@ Every key is optional, and a file may set only some of them.
 path = "/home/alice/.local/share/memcastle/default"
 
 [server]
-bind = "127.0.0.1:8420"
+bind = "127.0.0.1"
+port = 8420
 
 [logging]
 level = "info"
@@ -99,7 +100,8 @@ Keep secrets out of version control: put this file outside any repository, and r
 | Setting (TOML key) | Environment variable | Default |
 |---|---|---|
 | `palace.path` | `MEMCASTLE_PALACE_PATH` | `~/.local/share/memcastle/default` |
-| `server.bind` | `MEMCASTLE_BIND` | `127.0.0.1:8420` |
+| `server.bind` (an IP address) | `MEMCASTLE_BIND` | `127.0.0.1` |
+| `server.port` (0 to 65535) | `MEMCASTLE_PORT` | `8420` |
 | `logging.level` | `MEMCASTLE_LOG` | `info` |
 | `jobs.max_concurrency` | `MEMCASTLE_JOBS_MAX_CONCURRENCY` | `4` |
 | `jobs.drain_timeout_secs` (1 to 86400) | `MEMCASTLE_JOBS_DRAIN_TIMEOUT_SECS` | `10` |
@@ -121,9 +123,40 @@ Some variables are read by the command line rather than the config file:
 |---|---|---|
 | `--config <FILE>` | every command | the default config file location |
 | `--palace <PATH>` | every command | `palace.path`, `MEMCASTLE_PALACE_PATH` |
-| `--bind <ADDR>` | `serve`, `restart` | `server.bind`, `MEMCASTLE_BIND` |
+| `--bind <IP>` | `serve`, `restart` | `server.bind`, `MEMCASTLE_BIND` |
+| `--port <PORT>` | `serve`, `restart` | `server.port`, `MEMCASTLE_PORT` |
 | `--mode <MODE>` | client commands | the memory mode of the session |
 | `-v`, `-vv` | every command | the log level of memcastle itself |
+
+## The listener: address and port
+
+The daemon serves the REST API and MCP on one TCP listener, `127.0.0.1` port `8420` unless configured otherwise:
+
+```sh
+memcastle serve --bind 127.0.0.1 --port 8787
+```
+
+The address and the port are separate settings, so either can be changed alone.
+Each is chosen by, highest precedence first: the flag, the environment variable, the config file, the default.
+`serve`, `restart` and a supervisor such as systemd all start the daemon through the same path,
+so the same three sources work everywhere.
+Client commands (`status`, `search`, `jobs` and the rest) read the config file and the environment,
+but not the flags, so a daemon started on a non-default port with `--port` is found through its registry file.
+`restart` passes its `--bind` and `--port` on to the new daemon.
+
+`server.bind` is an IP address, IPv4 or IPv6, and not a host name.
+A `host:port` value, as `bind` accepted before the port became its own setting, is refused with a message naming the port
+setting to use instead.
+Port `0` asks the OS for a free port, which is useful for tests and scripts;
+the port actually chosen is in the daemon's registry file and its log.
+
+The default never listens on all network interfaces.
+The daemon has no authentication, so use a non-loopback address such as `0.0.0.0` only on a network you trust.
+
+The listener is bound before anything else happens.
+If the address is taken, needs privileges, or does not exist on this machine,
+the start fails with `memcastle::server::bind_failed`, naming the address and what to change,
+and has not created the palace, migrated it or touched its jobs.
 
 ## Not supported: other platforms' conventions
 
