@@ -101,9 +101,28 @@ impl SurrealStore {
         predicate: &str,
         confidence: f32,
     ) -> Result<Relationship> {
+        self.create_relationship_with_id(RelationshipId::new(), from, to, predicate, confidence)
+            .await
+    }
+
+    /// Like [`Self::create_relationship`], but under a caller-chosen id and
+    /// a no-op if that id already exists — the replay-safe form for a job
+    /// handler that derives the id from (job, item index). See
+    /// [`Self::create_drawer_once`] for why a replay must not duplicate.
+    ///
+    /// Returns the relationship as it now stands: the one just written, or
+    /// the one an earlier attempt already wrote.
+    pub async fn create_relationship_with_id(
+        &self,
+        id: RelationshipId,
+        from: EntityId,
+        to: EntityId,
+        predicate: &str,
+        confidence: f32,
+    ) -> Result<Relationship> {
         let predicate = required_label("predicate", predicate)?;
         let relationship = Relationship {
-            id: RelationshipId::new(),
+            id,
             from,
             to,
             predicate,
@@ -111,8 +130,30 @@ impl SurrealStore {
             valid_from: Utc::now(),
             valid_to: None,
         };
+        if self.relationship_exists(id).await? {
+            return Ok(relationship);
+        }
         self.relate(&relationship).await?;
         Ok(relationship)
+    }
+
+    /// Whether a `relates_to` edge with this id exists.
+    pub async fn relationship_exists(&self, id: RelationshipId) -> Result<bool> {
+        #[derive(Deserialize)]
+        struct IdRow {
+            #[allow(dead_code)]
+            id: String,
+        }
+        let mut response = self
+            .db
+            .query(
+                "SELECT record::id(id) AS id FROM relates_to \
+                 WHERE id = type::record('relates_to', $id)",
+            )
+            .bind(("id", id.to_string()))
+            .await?;
+        let rows: Vec<IdRow> = super::take_rows(&mut response, 0)?;
+        Ok(!rows.is_empty())
     }
 
     /// Close `old_id` (`valid_to = now`) and open a replacement edge for
@@ -125,9 +166,24 @@ impl SurrealStore {
         old_id: RelationshipId,
         new: NewRelationship,
     ) -> Result<Relationship> {
+        self.supersede_relationship_with_id(old_id, RelationshipId::new(), new)
+            .await
+    }
+
+    /// Like [`Self::supersede_relationship`], but the replacement gets a
+    /// caller-chosen id, and the whole supersede is skipped if that id
+    /// already exists — an earlier attempt already did it, and repeating it
+    /// would move the old edge's `valid_to` and open a duplicate current
+    /// edge. See [`Self::create_drawer_once`].
+    pub async fn supersede_relationship_with_id(
+        &self,
+        old_id: RelationshipId,
+        new_id: RelationshipId,
+        new: NewRelationship,
+    ) -> Result<Relationship> {
         let predicate = required_label("predicate", &new.predicate)?;
         let replacement = Relationship {
-            id: RelationshipId::new(),
+            id: new_id,
             from: new.from,
             to: new.to,
             predicate,
@@ -135,6 +191,9 @@ impl SurrealStore {
             valid_from: Utc::now(),
             valid_to: None,
         };
+        if self.relationship_exists(new_id).await? {
+            return Ok(replacement);
+        }
 
         self.db
             .query(
@@ -161,7 +220,12 @@ impl SurrealStore {
     /// replacement — the fact is retracted, not superseded by a new one.
     pub async fn invalidate_relationship(&self, id: RelationshipId) -> Result<()> {
         self.db
-            .query("UPDATE type::record('relates_to', $id) SET valid_to = $valid_to")
+            // `WHERE !valid_to`: only close an edge that is still open, so
+            // repeating an invalidate (a replayed job item) keeps the
+            // original close time instead of silently moving it forward.
+            .query(
+                "UPDATE type::record('relates_to', $id) SET valid_to = $valid_to WHERE !valid_to",
+            )
             .bind(("id", id.to_string()))
             .bind(("valid_to", Utc::now().to_rfc3339()))
             .await?

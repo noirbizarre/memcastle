@@ -129,7 +129,10 @@ async fn mine_directory(
             let content_hash = hex_encode(&hasher.finalize());
 
             let drawer = Drawer {
-                id: DrawerId::new(),
+                // Derived, not random: a crash between the write below and
+                // the checkpoint at the loop's end makes the resumed attempt
+                // redo this same file, and a fresh id would store it twice.
+                id: DrawerId::derive(job.id.0, &format!("mine-drawer:{index}")),
                 room: room.id,
                 content,
                 content_hash,
@@ -149,7 +152,7 @@ async fn mine_directory(
                 created_at: now,
                 updated_at: now,
             };
-            store.create_drawer(&drawer).await?;
+            store.create_drawer_once(&drawer).await?;
         }
 
         checkpoint_at(ctx, job, index + 1, files.len()).await?;
@@ -218,4 +221,51 @@ fn read_mineable(path: &Path) -> Option<String> {
     }
     let bytes = std::fs::read(path).ok()?;
     String::from_utf8(bytes).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{JobKind, Priority};
+    use crate::jobs::JobControl;
+
+    #[tokio::test]
+    async fn replaying_files_whose_checkpoint_was_never_saved_mines_no_duplicates() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(dir.path().join(name), format!("contents of {name}")).unwrap();
+        }
+        let source = MiningSource::Directory {
+            path: dir.path().to_path_buf(),
+        };
+        let mut job = Job::new(
+            JobKind::Mine {
+                source: source.clone(),
+                wing: Some("docs".to_string()),
+            },
+            Priority::Background,
+            "test",
+        );
+        job.apply(crate::domain::JobEvent::Claim).unwrap();
+
+        let ctx = JobContext::new(job.id, JobControl::default(), store.clone());
+        run(&store, &ctx, &mut job, &source, Some("docs"))
+            .await
+            .unwrap();
+
+        // Crash: every drawer was written, but the saved checkpoint predates
+        // them, so the resumed attempt walks the same files again.
+        job.checkpoint = json!({});
+        let ctx = JobContext::new(job.id, JobControl::default(), store.clone());
+        run(&store, &ctx, &mut job, &source, Some("docs"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store.list_all_drawers().await.unwrap().len(),
+            3,
+            "each file must be mined exactly once across the replay"
+        );
+    }
 }

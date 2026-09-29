@@ -241,6 +241,14 @@ A handler (`jobs::demo`, `mining::run`) is written as a loop over discrete units
 that checks `JobContext::should_pause`/`is_cancelled` between units,
 persists a `checkpoint` before stopping, and returns — the scheduler transitions its status afterward.
 Resuming a paused job re-reads that checkpoint and continues from there, not from zero.
+`Audit` and `Repair` never check for pause, so a pause request only *requests* one and they run to completion;
+an applied `Repair` does check for cancel before each delete.
+
+**Resuming is replay-safe.**
+A handler writes an item's records first and saves the checkpoint after, so a crash between the two
+makes the resumed attempt redo that item.
+Mining and checkpoint therefore derive each drawer's id (and each new fact edge's id) from the job id and item index
+and skip a record that already exists, so the replay lands on the same record instead of storing a second copy.
 
 **Crash recovery** (`Scheduler::recover`, run once at daemon startup):
 any job left `Running` by an unclean shutdown is re-queued if its attempt budget allows,

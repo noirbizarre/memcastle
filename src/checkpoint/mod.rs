@@ -30,7 +30,7 @@ use sha2::{Digest, Sha256};
 
 use crate::domain::{
     CheckpointDestination, CheckpointPayload, Drawer, DrawerId, FactMutation, Job, NewRelationship,
-    Provenance, RoomId,
+    Provenance, RelationshipId, RoomId,
 };
 use crate::error::Result;
 use crate::jobs::{JobContext, JobOutcome};
@@ -72,7 +72,10 @@ pub async fn run(
         let content_hash = hex_encode(&hasher.finalize());
 
         let drawer = Drawer {
-            id: DrawerId::new(),
+            // Derived, not random: a crash between the write below and the
+            // checkpoint at the loop's end makes the resumed attempt redo
+            // this same item, and a fresh id would store it twice.
+            id: DrawerId::derive(job.id.0, &format!("checkpoint-drawer:{index}")),
             room,
             content: item.content.clone(),
             content_hash,
@@ -88,10 +91,10 @@ pub async fn run(
             created_at: now,
             updated_at: now,
         };
-        store.create_drawer(&drawer).await?;
+        store.create_drawer_once(&drawer).await?;
 
         if let Some(fact) = &item.fact {
-            apply_fact_mutation(store, fact).await?;
+            apply_fact_mutation(store, job, index, fact).await?;
         }
 
         checkpoint_at(ctx, job, index + 1, payload.items.len()).await?;
@@ -125,7 +128,19 @@ async fn resolve_room(
 
 /// Apply one item's knowledge-graph mutation, dispatching to the
 /// corresponding `store::entities` operation.
-async fn apply_fact_mutation(store: &SurrealStore, fact: &FactMutation) -> Result<()> {
+///
+/// Replay-safe, like the drawer write before it: a new edge gets an id
+/// derived from (job, item index) and is skipped if it already exists, and
+/// invalidating an edge that is already closed changes nothing. Without
+/// that, resuming after a crash between this call and the checkpoint would
+/// open a second current edge for the same fact.
+async fn apply_fact_mutation(
+    store: &SurrealStore,
+    job: &Job,
+    index: usize,
+    fact: &FactMutation,
+) -> Result<()> {
+    let edge_id = RelationshipId::derive(job.id.0, &format!("checkpoint-edge:{index}"));
     match fact {
         FactMutation::Add {
             subject,
@@ -134,7 +149,7 @@ async fn apply_fact_mutation(store: &SurrealStore, fact: &FactMutation) -> Resul
             confidence,
         } => {
             store
-                .create_relationship(*subject, *object, predicate, *confidence)
+                .create_relationship_with_id(edge_id, *subject, *object, predicate, *confidence)
                 .await?;
         }
         FactMutation::Supersede {
@@ -145,8 +160,9 @@ async fn apply_fact_mutation(store: &SurrealStore, fact: &FactMutation) -> Resul
             confidence,
         } => {
             store
-                .supersede_relationship(
+                .supersede_relationship_with_id(
                     *relationship_id,
+                    edge_id,
                     NewRelationship {
                         from: *from,
                         to: *to,
@@ -484,5 +500,109 @@ mod tests {
             payload.items.len(),
             "every item must land exactly once across the simulated restart, got {drawers:?}"
         );
+    }
+
+    /// The crash window the checkpoint exists to bound: every write of an
+    /// item landed, but the process died before the job's `next_index` was
+    /// saved, so the resumed attempt replays the whole item.
+    #[tokio::test]
+    async fn replaying_items_whose_checkpoint_was_never_saved_writes_no_duplicates() {
+        let store = memory_store().await;
+        let subject = store
+            .create_entity("Alice", "person", json!({}))
+            .await
+            .unwrap();
+        let object = store
+            .create_entity("Rust", "language", json!({}))
+            .await
+            .unwrap();
+        let mut with_fact = item(CheckpointDestination::General, "alice likes rust");
+        with_fact.fact = Some(FactMutation::Add {
+            subject: subject.id,
+            predicate: "likes".to_string(),
+            object: object.id,
+            confidence: 1.0,
+        });
+        let payload = CheckpointPayload {
+            items: vec![with_fact, item(CheckpointDestination::General, "second")],
+        };
+        let mut job = Job::new(
+            JobKind::Checkpoint {
+                payload: payload.clone(),
+            },
+            Priority::High,
+            "test",
+        );
+        job.apply(crate::domain::JobEvent::Claim).unwrap();
+
+        let ctx = ctx_for(&store, &job, JobControl::default());
+        run(&store, &ctx, &mut job, &payload)
+            .await
+            .expect("first attempt");
+
+        // Crash: everything was written, but the saved checkpoint is from
+        // before any of it.
+        job.checkpoint = json!({});
+        let ctx = ctx_for(&store, &job, JobControl::default());
+        run(&store, &ctx, &mut job, &payload)
+            .await
+            .expect("replayed attempt");
+
+        assert_eq!(
+            store.list_all_drawers().await.unwrap().len(),
+            payload.items.len(),
+            "a replayed item must not be stored twice"
+        );
+        assert_eq!(
+            store
+                .list_relationships(subject.id, false)
+                .await
+                .unwrap()
+                .len(),
+            1,
+            "a replayed fact must not open a second current edge"
+        );
+    }
+
+    #[tokio::test]
+    async fn replaying_a_supersede_does_not_open_a_second_replacement_edge() {
+        let store = memory_store().await;
+        let a = store.create_entity("A", "thing", json!({})).await.unwrap();
+        let b = store.create_entity("B", "thing", json!({})).await.unwrap();
+        let old = store
+            .create_relationship(a.id, b.id, "knows", 0.5)
+            .await
+            .unwrap();
+        let mut superseding = item(CheckpointDestination::General, "now they are friends");
+        superseding.fact = Some(FactMutation::Supersede {
+            relationship_id: old.id,
+            from: a.id,
+            to: b.id,
+            predicate: "friends".to_string(),
+            confidence: 1.0,
+        });
+        let payload = CheckpointPayload {
+            items: vec![superseding],
+        };
+        let mut job = Job::new(
+            JobKind::Checkpoint {
+                payload: payload.clone(),
+            },
+            Priority::High,
+            "test",
+        );
+        job.apply(crate::domain::JobEvent::Claim).unwrap();
+
+        for _ in 0..2 {
+            job.checkpoint = json!({});
+            let ctx = ctx_for(&store, &job, JobControl::default());
+            run(&store, &ctx, &mut job, &payload)
+                .await
+                .expect("attempt");
+        }
+
+        let current = store.list_relationships(a.id, false).await.unwrap();
+        assert_eq!(current.len(), 1, "exactly one current edge: {current:?}");
+        assert_eq!(current[0].predicate, "friends");
     }
 }

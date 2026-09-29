@@ -64,6 +64,40 @@ impl SurrealStore {
         Ok(())
     }
 
+    /// Persist `drawer` unless a drawer with that id already exists,
+    /// returning whether it was written.
+    ///
+    /// For job handlers that derive a drawer's id from (job, item index): a
+    /// crash between this write and the job's checkpoint makes the resumed
+    /// attempt write the same item again, and this turns that replay into a
+    /// no-op instead of a duplicate. The check and the write are two
+    /// statements, which is safe only because one daemon owns the palace
+    /// and one worker runs a given job — the same single-writer assumption
+    /// `claim_next_job` documents.
+    pub async fn create_drawer_once(&self, drawer: &Drawer) -> Result<bool> {
+        if self.drawer_exists(drawer.id).await? {
+            return Ok(false);
+        }
+        self.create_drawer(drawer).await?;
+        Ok(true)
+    }
+
+    /// Whether a drawer with this id exists.
+    pub async fn drawer_exists(&self, id: DrawerId) -> Result<bool> {
+        #[derive(serde::Deserialize)]
+        struct IdRow {
+            #[allow(dead_code)]
+            id: String,
+        }
+        let mut response = self
+            .db
+            .query("SELECT record::id(id) AS id FROM drawer WHERE id = type::record('drawer', $id)")
+            .bind(("id", id.to_string()))
+            .await?;
+        let rows: Vec<IdRow> = super::take_rows(&mut response, 0)?;
+        Ok(!rows.is_empty())
+    }
+
     /// Permanently delete a drawer — the only deletion this store
     /// supports (see this module's doc comment: every other drawer write
     /// is a fresh `CREATE`, never an update or a delete). Introduced for

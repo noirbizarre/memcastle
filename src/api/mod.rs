@@ -292,6 +292,9 @@ async fn pause_job(
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
     state.app.pause_job(parse_job_id(&id)?).await?;
+    // "requested", not "paused": pausing is cooperative, and audit/repair
+    // never check for it (see `repair`'s module doc), so the job may simply
+    // run to completion.
     Ok(Json(serde_json::json!({ "status": "pause_requested" })))
 }
 
