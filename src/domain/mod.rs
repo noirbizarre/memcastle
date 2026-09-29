@@ -23,4 +23,4 @@ pub use job::{
     TransitionError,
 };
 pub use memory_mode::MemoryMode;
-pub use palace::{Palace, Room, Wing};
+pub use palace::{DEFAULT_PALACE_NAME, Palace, Room, Wing};

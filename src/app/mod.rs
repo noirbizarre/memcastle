@@ -145,19 +145,26 @@ impl AppServices {
     /// purely for observability (`status` is a daemon-level operation, not
     /// a memory operation — see `MemoryMode`'s doc comment) — never gated.
     ///
+    /// Strictly read-only: on a brand-new palace nothing has created the
+    /// palace record yet, and looking must not be what creates it, so the
+    /// name falls back to [`crate::domain::DEFAULT_PALACE_NAME`] until a write does.
+    ///
     /// # Errors
     ///
     /// Returns an error if the store cannot be read.
     pub async fn status(&self, mode: MemoryMode) -> Result<StatusReport> {
-        let palace = self.store.get_or_create_palace("default").await?;
+        let palace_name = self.store.get_palace().await?.map_or_else(
+            || crate::domain::DEFAULT_PALACE_NAME.to_string(),
+            |palace| palace.name,
+        );
         let drawer_count = self.store.count_drawers().await?;
-        let queued = self.store.list_jobs(Some(JobStatus::Queued)).await?.len() as u64;
-        let running = self.store.list_jobs(Some(JobStatus::Running)).await?.len() as u64;
-        let paused = self.store.list_jobs(Some(JobStatus::Paused)).await?.len() as u64;
+        let queued = self.store.count_jobs(Some(JobStatus::Queued)).await?;
+        let running = self.store.count_jobs(Some(JobStatus::Running)).await?;
+        let paused = self.store.count_jobs(Some(JobStatus::Paused)).await?;
         Ok(StatusReport {
             version: env!("CARGO_PKG_VERSION").to_string(),
             uptime_secs: (Utc::now() - self.started_at).num_seconds(),
-            palace_name: palace.name,
+            palace_name,
             drawer_count,
             jobs_queued: queued,
             jobs_running: running,
@@ -525,11 +532,15 @@ impl AppServices {
     ) -> Result<Vec<Drawer>> {
         Self::require_read(mode, "diary_read")?;
         let limit = limit.min(MAX_READ_LIMIT);
-        let wing_record = self.store.get_or_create_wing(wing, None).await?;
-        let room = self
-            .store
-            .get_or_create_room(wing_record.id, "diary", None)
-            .await?;
+        // Read-only lookups: a `ReadOnly` session reading a wing nobody has
+        // written to must not create that wing and its diary room. No wing or
+        // room simply means no entries.
+        let Some(wing_record) = self.store.get_wing(wing).await? else {
+            return Ok(Vec::new());
+        };
+        let Some(room) = self.store.get_room(wing_record.id, "diary").await? else {
+            return Ok(Vec::new());
+        };
         self.store
             .list_diary_drawers(room.id, agent_identity, limit)
             .await
@@ -1297,5 +1308,81 @@ mod tests {
             matches!(result, Err(Error::JobNotFound { .. })),
             "got {result:?}"
         );
+    }
+
+    /// What "byte-for-byte unchanged" means for the records these reads used
+    /// to create as a side effect.
+    async fn structure_of(store: &SurrealStore) -> (bool, usize, usize) {
+        let wings = store.list_wings().await.unwrap();
+        let mut rooms = 0;
+        for wing in &wings {
+            rooms += store.list_rooms(wing.id).await.unwrap().len();
+        }
+        (
+            store.get_palace().await.unwrap().is_some(),
+            wings.len(),
+            rooms,
+        )
+    }
+
+    #[tokio::test]
+    async fn read_only_reads_on_an_empty_palace_leave_the_store_unchanged() {
+        let (app, store) = test_app_with_store().await;
+        let before = structure_of(&store).await;
+        assert_eq!(before, (false, 0, 0));
+
+        for mode in [MemoryMode::ReadOnly, MemoryMode::Full] {
+            let diary = app
+                .diary_read("agent-a", "unknown-wing", 5, mode)
+                .await
+                .expect("diary read");
+            assert!(diary.is_empty());
+            let context = app
+                .wake_up(
+                    "agent-a",
+                    Some("unknown-wing"),
+                    WakeUpBudget::default(),
+                    mode,
+                )
+                .await
+                .expect("wake up");
+            assert!(context.diary.is_none() && context.recent_highlights.is_empty());
+            let status = app.status(mode).await.expect("status");
+            assert_eq!(status.palace_name, crate::domain::DEFAULT_PALACE_NAME);
+        }
+
+        assert_eq!(
+            structure_of(&store).await,
+            before,
+            "a read must not create the palace, wing or room it looked for"
+        );
+    }
+
+    #[tokio::test]
+    async fn reading_a_wing_that_exists_but_has_no_diary_room_creates_no_room() {
+        let (app, store) = test_app_with_store().await;
+        store.get_or_create_wing("project-x", None).await.unwrap();
+        let before = structure_of(&store).await;
+
+        let diary = app
+            .diary_read("agent-a", "project-x", 5, MemoryMode::ReadOnly)
+            .await
+            .expect("diary read");
+
+        assert!(diary.is_empty());
+        assert_eq!(structure_of(&store).await, before);
+    }
+
+    #[tokio::test]
+    async fn status_counts_jobs_by_status_without_fetching_them() {
+        let app = test_app().await;
+        app.submit_demo(1, "test").await.expect("submit");
+        app.submit_demo(1, "test").await.expect("submit");
+
+        let status = app.status(MemoryMode::Full).await.expect("status");
+
+        // The test scheduler is never started, so both stay queued.
+        assert_eq!(status.jobs_queued, 2);
+        assert_eq!(status.jobs_running, 0);
     }
 }

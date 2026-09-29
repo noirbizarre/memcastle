@@ -90,6 +90,28 @@ impl SurrealStore {
         super::take_rows(&mut response, 0)
     }
 
+    /// How many jobs there are, optionally only those in one status — a
+    /// `count()` in the database rather than fetching every row (each of which
+    /// carries its whole input and checkpoint) just to take `.len()`.
+    pub async fn count_jobs(&self, status: Option<JobStatus>) -> Result<u64> {
+        #[derive(serde::Deserialize)]
+        struct Count {
+            count: u64,
+        }
+        let mut response = self
+            .db
+            .query(
+                // `= NULL`, not `NONE`: see `list_jobs`.
+                "SELECT count() AS count FROM job WHERE $status = NULL OR status = $status \
+                 GROUP ALL",
+            )
+            .bind(("status", super::bindable(&status)?))
+            .await?;
+        let counts: Vec<Count> = super::take_rows(&mut response, 0)?;
+        // `GROUP ALL` over zero rows yields no row at all, not a zero one.
+        Ok(counts.into_iter().next().map_or(0, |c| c.count))
+    }
+
     /// Atomically claim the highest-priority, oldest queued job, if any.
     ///
     /// "Atomically" here means "through the single sequential dispatcher
