@@ -80,7 +80,7 @@ phase makes it a thin MemCastle adapter instead of a fork. Depends on Phase 1.
 | [#24](https://github.com/noirbizarre/memcastle/issues/24) | Port emergency checkpoint before context compaction |
 | [#25](https://github.com/noirbizarre/memcastle/issues/25) | Author and inject the search-before-answer skill |
 | [#26](https://github.com/noirbizarre/memcastle/issues/26) | Port daily background mining trigger |
-| [#27](https://github.com/noirbizarre/memcastle/issues/27) | Implement explicit memory modes (full/read-only/off) |
+| [#27](https://github.com/noirbizarre/memcastle/issues/27) | Implement explicit memory modes (full/read-only/disabled) |
 | [#28](https://github.com/noirbizarre/memcastle/issues/28) | Port palace-audit-equivalent manual command (scoped down) |
 | [#29](https://github.com/noirbizarre/memcastle/issues/29) | Persistent MCP connection for the session |
 | [#30](https://github.com/noirbizarre/memcastle/issues/30) | Actionable, classified failure handling UX |

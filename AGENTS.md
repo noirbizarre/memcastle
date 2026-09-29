@@ -21,7 +21,8 @@ Each of these should be enforced by a hook or a test. An invariant nothing check
 1. **The CLI has no business logic MCP/HTTP can't reuse** —
    every subcommand except `serve`/`daemon`/`migrate` only calls `client::DaemonClient`, never `store` or `jobs`
    directly. (`restart` also manages the daemon *process* — it reads the registry file via `server::lifecycle`
-   and respawns `serve` — but touches neither `store` nor `jobs`.) `migrate` is a second, narrow exception alongside `serve`: it connects to storage directly (via
+   and respawns `serve` — but touches neither `store` nor `jobs`.)
+   `migrate` is a second, narrow exception alongside `serve`: it connects to storage directly (via
    `crate::migrate::run`/`status`, the same runner `serve` calls on every startup) because migration must work
    without, and before, a daemon exists — see `docs/adr/004-versioned-database-migrations.md`.
    Enforced by the `prek` `store-isolation` hook: it greps `main.rs`, `cli.rs`, `client/`, `mcp/` and `api/`
@@ -91,6 +92,8 @@ The name should say what would be broken if it failed.
 **Markdown prose uses semantic linefeeds.** One sentence per line; only wrap inside a sentence, at a clause boundary,
 when it would otherwise exceed the 120-column limit `.markdownlint-cli2.yaml` enforces.
 This keeps a diff scoped to the sentence that actually changed.
+The rule applies to the linted documents (`AGENTS.md`, `CONTRIBUTING.md`, `README.md` and `docs/`);
+`PLAN.md`, `integrations/README.md` and `skills/README.md` are working documents outside that lint scope.
 
 ## Commits
 
@@ -119,7 +122,8 @@ operating systems and `gh ship validate`.
 
 The toolchain, hooks, CI and release workflows come from [rust.tpl](https://github.com/noirbizarre/rust.tpl)
 and are updated with `git tpl update`.
-Files carrying template-owned content end with a `# --- project-specific ---` marker: add below it, never above.
+Files carrying template-owned content end with a `# --- project-specific ...` marker
+(`mise.toml`, `prek.toml`, `Cargo.toml` and a few more): add below it, never above.
 
 Changing template-owned content here fixes it in one repository. Changing it in the template fixes it in all of them —
 prefer that.

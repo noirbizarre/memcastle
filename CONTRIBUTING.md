@@ -100,6 +100,7 @@ Requires git-tpl, which `mise install` provides (it is pinned in `mise.toml`'s `
 installed from a prebuilt release archive rather than compiled).
 
 Files carrying template-owned content — `mise.toml`, `prek.toml`, `Cargo.toml` —
-end with a `# --- project-specific ---` marker. Add below it;
+end with a `# --- project-specific ...` marker (`project-specific tasks` in `mise.toml`, `project-specific hooks` in `prek.toml`).
+Add below it;
 Git's 3-way merge then preserves your additions across updates.
 A fix that belongs to every project belongs in the template, not here.

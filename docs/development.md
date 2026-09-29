@@ -41,8 +41,30 @@ mise cli stop
 ```
 
 By default the palace lives under `~/.memcastle/default` and the daemon binds `127.0.0.1:8420`.
-Override either with `MEMCASTLE_PALACE_PATH` / `MEMCASTLE_BIND`, or a config file —
-see `config::Config` for the full list of settings and their environment-variable overrides.
+
+## Configuration
+
+Settings resolve in this order, later winning: built-in defaults, the config file, `MEMCASTLE_*` environment variables.
+The config file is `~/.memcastle/config.toml` when it exists, or the path given by `--config` / `MEMCASTLE_CONFIG`.
+A malformed environment override is an error naming the variable, never silently ignored.
+
+| Setting (TOML key) | Environment variable | Default |
+|---|---|---|
+| `palace.path` | `MEMCASTLE_PALACE_PATH` | `~/.memcastle/default` |
+| `server.bind` | `MEMCASTLE_BIND` | `127.0.0.1:8420` |
+| `logging.level` | `MEMCASTLE_LOG` | `info` |
+| `jobs.max_concurrency` | `MEMCASTLE_JOBS_MAX_CONCURRENCY` | `4` |
+| `jobs.drain_timeout_secs` (1 to 86400) | `MEMCASTLE_JOBS_DRAIN_TIMEOUT_SECS` | `10` |
+| `jobs.lease_ttl_secs` (3 to 86400) | `MEMCASTLE_JOBS_LEASE_TTL_SECS` | `30` |
+| `store.mode` (`embedded` or `remote`) | none | `embedded` |
+
+A remote store also needs `store.url`, `store.namespace`, `store.database`, `store.username` and `store.password`;
+they are file-only, so keep that file out of version control.
+
+Logging precedence, highest first: `MEMCASTLE_LOG`, `RUST_LOG`, the `-v`/`-vv` flags, then `logging.level`.
+The global `--mode` flag (or `MEMCASTLE_MODE`) runs a CLI command in a memory mode, see
+[the architecture](architecture.md#memory-mode-per-session-never-daemon-global).
+`config::Config` is the source of truth if this table ever drifts.
 
 ## Testing
 
