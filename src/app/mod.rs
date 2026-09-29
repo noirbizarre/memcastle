@@ -354,9 +354,10 @@ impl AppServices {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::Error::JobNotFound`] if the job isn't running.
-    pub fn pause_job(&self, id: JobId) -> Result<()> {
-        self.scheduler.request_pause(id)
+    /// Returns [`crate::Error::JobNotFound`] if the job doesn't exist, or
+    /// [`crate::Error::InvalidJobTransition`] if it isn't running.
+    pub async fn pause_job(&self, id: JobId) -> Result<()> {
+        self.scheduler.request_pause(id).await
     }
 
     /// Resume a paused job.

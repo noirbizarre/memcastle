@@ -138,22 +138,33 @@ impl Scheduler {
         Ok(job)
     }
 
-    /// Request that a running job pause at its next checkpoint. A no-op
-    /// error if the job isn't currently running — pausing a job that
-    /// hasn't started, or has already finished, isn't a legal transition
-    /// (see `domain::job`'s transition table).
+    /// Request that a running job pause at its next checkpoint. Pausing a
+    /// job that hasn't started, or has already finished, isn't a legal
+    /// transition (see `domain::job`'s transition table).
     ///
     /// # Errors
     ///
-    /// Returns [`crate::Error::JobNotFound`] if the job isn't running.
-    pub fn request_pause(&self, id: JobId) -> Result<()> {
-        match self.controls.get(&id) {
-            Some(control) => {
-                control.request_pause();
-                Ok(())
-            }
-            None => Err(crate::Error::JobNotFound { id: id.to_string() }),
+    /// Returns [`crate::Error::JobNotFound`] if no such job exists, and
+    /// [`crate::Error::InvalidJobTransition`] if it exists but isn't running
+    /// — "not found" would send the caller looking for a typo in the id
+    /// when the real answer is "this job is already finished".
+    pub async fn request_pause(&self, id: JobId) -> Result<()> {
+        if let Some(control) = self.controls.get(&id) {
+            control.request_pause();
+            return Ok(());
         }
+        let mut job = self
+            .store
+            .get_job(id)
+            .await?
+            .ok_or(crate::Error::JobNotFound { id: id.to_string() })?;
+        // Not running: let the state machine produce the precise rejection.
+        job.apply(JobEvent::Pause)?;
+        // Only reachable if a record says `Running` with no worker behind it,
+        // which `recover` clears before the API can be reached.
+        Err(crate::Error::server(format!(
+            "job {id} is marked running but has no worker; restart the daemon to recover it"
+        )))
     }
 
     /// Request that a job stop. For a running job this is cooperative
@@ -269,10 +280,16 @@ impl Scheduler {
         let claimed = self.store.claim_next_job(&self.worker).await;
         match claimed {
             Ok(Some(job)) => {
+                // Registered here, before the spawn, not inside `execute`:
+                // the job is already `Running` in the store, so a pause or
+                // cancel arriving in the gap would otherwise find no control
+                // and act on a record the worker is about to overwrite.
+                let control = JobControl::default();
+                self.controls.insert(job.id, control.clone());
                 let scheduler = Arc::clone(&self);
                 tokio::spawn(async move {
                     let _permit = permit; // held for the job's whole execution
-                    scheduler.execute(job).await;
+                    scheduler.execute(job, control).await;
                 });
             }
             Ok(None) => {} // nothing queued; permit is dropped, released
@@ -282,9 +299,7 @@ impl Scheduler {
         }
     }
 
-    async fn execute(&self, mut job: Job) {
-        let control = JobControl::default();
-        self.controls.insert(job.id, control.clone());
+    async fn execute(&self, mut job: Job, control: JobControl) {
         if self.shutting_down.load(Ordering::SeqCst) {
             // Claimed just as shutdown began: `drain` may already have
             // walked `controls` without seeing this job.
@@ -516,7 +531,7 @@ mod tests {
     async fn a_pause_the_user_asked_for_survives_a_shutdown() {
         let (scheduler, job, shutdown, handle) = running_scheduler_with_a_job_in_flight().await;
 
-        scheduler.request_pause(job.id).unwrap();
+        scheduler.request_pause(job.id).await.unwrap();
         shutdown.cancel();
         tokio::time::timeout(Duration::from_secs(5), handle)
             .await
@@ -551,6 +566,31 @@ mod tests {
         assert_eq!(reload(&scheduler, &job).await.status, JobStatus::Running);
         scheduler.recover().await.unwrap();
         assert_eq!(reload(&scheduler, &job).await.status, JobStatus::Queued);
+    }
+
+    #[tokio::test]
+    async fn pausing_a_job_that_is_not_running_is_an_invalid_transition_not_a_missing_job() {
+        let scheduler = scheduler().await;
+        let done = seed(&scheduler, JobStatus::Completed, 1).await;
+
+        let error = scheduler.request_pause(done.id).await.unwrap_err();
+
+        assert!(
+            matches!(error, crate::Error::InvalidJobTransition { .. }),
+            "the job exists, so the answer is 'wrong state', not 'not found': {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn pausing_a_job_that_does_not_exist_is_not_found() {
+        let scheduler = scheduler().await;
+
+        let error = scheduler.request_pause(JobId::new()).await.unwrap_err();
+
+        assert!(
+            matches!(error, crate::Error::JobNotFound { .. }),
+            "{error:?}"
+        );
     }
 
     #[tokio::test]

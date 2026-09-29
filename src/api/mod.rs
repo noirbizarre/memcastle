@@ -287,7 +287,7 @@ async fn pause_job(
     State(state): State<ApiState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    state.app.pause_job(parse_job_id(&id)?)?;
+    state.app.pause_job(parse_job_id(&id)?).await?;
     Ok(Json(serde_json::json!({ "status": "pause_requested" })))
 }
 
@@ -321,14 +321,14 @@ async fn shutdown_now(State(state): State<ApiState>) -> impl IntoResponse {
 }
 
 fn parse_job_id(raw: &str) -> Result<JobId, ApiError> {
-    JobId::from_str(raw).map_err(|_| {
-        ApiError::from(crate::Error::JobNotFound {
-            id: raw.to_string(),
-        })
-    })
+    JobId::from_str(raw).map_err(|_| ApiError::from(crate::Error::invalid_job_id(raw)))
 }
 
 fn parse_status(raw: &str) -> Result<JobStatus, ApiError> {
-    serde_json::from_value(serde_json::Value::String(raw.to_string()))
-        .map_err(|_| ApiError::from(crate::Error::config(format!("unknown job status `{raw}`"))))
+    serde_json::from_value(serde_json::Value::String(raw.to_string())).map_err(|_| {
+        ApiError::from(crate::Error::invalid_input(
+            "status",
+            format!("unknown job status `{raw}`"),
+        ))
+    })
 }

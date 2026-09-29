@@ -21,7 +21,10 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = match &self.0 {
             Error::JobNotFound { .. } => StatusCode::NOT_FOUND,
-            Error::InvalidJobTransition { .. } | Error::Config { .. } => StatusCode::BAD_REQUEST,
+            Error::InvalidJobTransition { .. }
+            | Error::InvalidInput { .. }
+            | Error::InvalidJobId { .. }
+            | Error::InvalidBasedOnJob { .. } => StatusCode::BAD_REQUEST,
             Error::ModeForbidden { .. } => StatusCode::FORBIDDEN,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
