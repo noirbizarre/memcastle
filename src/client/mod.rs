@@ -10,8 +10,13 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::time::Duration;
 
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::json;
+
+pub mod status;
+
+pub use status::StatusView;
 
 use crate::app::{JobControlResult, StatusReport, WakeUpBudget, WakeUpContext};
 use crate::domain::channel::CLI as CHANNEL;
@@ -78,7 +83,18 @@ fn connectable(bind_addr: &str) -> String {
 /// that file is a hint, not a guarantee).
 pub struct DaemonClient {
     base_url: String,
+    source: EndpointSource,
     http: reqwest::Client,
+}
+
+/// Where a [`DaemonClient`] got its address, so `status` can say so.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EndpointSource {
+    /// A live daemon's registry file — how a daemon started with `--port` is found.
+    Registry,
+    /// The configured `server.bind` and `server.port`.
+    Config,
 }
 
 impl DaemonClient {
@@ -87,13 +103,27 @@ impl DaemonClient {
     /// what [`Self::health`] is for.
     #[must_use]
     pub fn discover(palace_path: &Path, configured_bind: SocketAddr) -> Self {
-        let bind_addr = lifecycle::read_if_live(palace_path)
-            .map(|info| info.bind_addr)
-            .unwrap_or_else(|| configured_bind.to_string());
+        let (bind_addr, source) = match lifecycle::read_if_live(palace_path) {
+            Some(info) => (info.bind_addr, EndpointSource::Registry),
+            None => (configured_bind.to_string(), EndpointSource::Config),
+        };
         Self {
             base_url: format!("http://{}", connectable(&bind_addr)),
+            source,
             http: http_client(None),
         }
+    }
+
+    /// The base URL this client dials, e.g. `http://127.0.0.1:8420`.
+    #[must_use]
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    /// Whether the address came from the registry file or the configuration.
+    #[must_use]
+    pub fn endpoint_source(&self) -> EndpointSource {
+        self.source
     }
 
     /// Send `mode` as the `X-MemCastle-Mode` header on every request, so the

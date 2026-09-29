@@ -18,10 +18,10 @@ mod cli;
 
 use cli::{
     AuditArgs, CheckpointArgs, Cli, Command, DiaryCommand, JobsCommand, MigrateArgs, MineArgs,
-    RecallArgs, RepairArgs, SearchArgs, ServeArgs, WakeUpArgs,
+    RecallArgs, RepairArgs, SearchArgs, ServeArgs, StatusArgs, WakeUpArgs,
 };
 use memcastle::app::WakeUpBudget;
-use memcastle::client::DaemonClient;
+use memcastle::client::{DaemonClient, StatusView};
 use memcastle::config::{Config, Overrides};
 use memcastle::domain::MemoryMode;
 use memcastle::store::SurrealStore;
@@ -80,7 +80,7 @@ async fn async_main() -> ExitCode {
         Err(error) => Err(error),
     };
     match outcome {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(error) => {
             eprintln!("{:?}", miette::Report::new(error));
             ExitCode::FAILURE
@@ -103,15 +103,33 @@ fn overrides_from(args: &Cli) -> Overrides {
     }
 }
 
-async fn run(args: Cli, config: Config) -> Result<()> {
-    let mode = args.mode;
+/// Dispatch a command to its exit code. Only `status` has more than
+/// success/failure to say (see [`cmd_status`]), so it is split off here and
+/// every other command keeps returning a plain `Result<()>`.
+async fn run(args: Cli, config: Config) -> Result<ExitCode> {
     match args.command {
+        Command::Status(status) => cmd_status(&config, args.mode, &status).await,
+        command => run_command(command, args.mode, args.config.as_deref(), config)
+            .await
+            .map(|()| ExitCode::SUCCESS),
+    }
+}
+
+async fn run_command(
+    command: Command,
+    mode: Option<MemoryMode>,
+    config_file: Option<&std::path::Path>,
+    config: Config,
+) -> Result<()> {
+    match command {
         Command::Serve(_) => memcastle::server::run(config).await,
         Command::Migrate(args) => cmd_migrate(&config, args).await,
-        Command::Status => cmd_status(&config, mode).await,
+        // Handled by `run`, which needs the exit code; the arm exists only so
+        // this match stays exhaustive and a new command cannot be forgotten.
+        Command::Status(_) => Ok(()),
         Command::Stop => cmd_stop(&config, mode).await,
         Command::Restart(restart_args) => {
-            cmd_restart(&config, args.config.as_deref(), mode, restart_args).await
+            cmd_restart(&config, config_file, mode, restart_args).await
         }
         Command::Search(args) => cmd_search(&config, mode, args).await,
         Command::Recall(args) => cmd_recall(&config, mode, args).await,
@@ -148,10 +166,22 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_status(config: &Config, mode: Option<MemoryMode>) -> Result<()> {
-    let status = client(config, mode).status().await?;
-    print_json(&status)?;
-    Ok(())
+/// Report on the daemon, and exit with what the report means: 0 healthy,
+/// 1 degraded, 3 not running (see `memcastle::client::status`). A stopped
+/// daemon is a normal answer here rather than a `not_running` diagnostic, so
+/// the report (endpoint, palace, how to start) is printed on stdout.
+async fn cmd_status(
+    config: &Config,
+    mode: Option<MemoryMode>,
+    args: &StatusArgs,
+) -> Result<ExitCode> {
+    let view = StatusView::collect(&config.palace.path, config.server.socket_addr(), mode).await?;
+    if args.json {
+        print_json(&view)?;
+    } else {
+        println!("{}", view.render_human());
+    }
+    Ok(ExitCode::from(view.exit_code()))
 }
 
 /// Connects to storage directly, like `Command::Serve` — a second,

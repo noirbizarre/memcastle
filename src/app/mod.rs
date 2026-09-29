@@ -43,6 +43,68 @@ pub struct StatusReport {
     /// (see `MemoryMode`'s doc comment on daemon vs memory operations): a
     /// disabled session can still see "MemCastle: disabled" here.
     pub mode: MemoryMode,
+    // Everything below arrived after the fields above. `#[serde(default)]` so
+    // a newer CLI can still read an older daemon's report (and the reverse).
+    /// The daemon process's PID.
+    #[serde(default)]
+    pub pid: u32,
+    /// When the daemon started.
+    #[serde(default)]
+    pub started_at: DateTime<Utc>,
+    /// The address the daemon's listener is actually bound to (the real port
+    /// even when `0` was requested). Empty when the daemon did not say.
+    #[serde(default)]
+    pub bind_addr: String,
+    /// The palace directory being served. Empty when the daemon did not say.
+    #[serde(default)]
+    pub palace_path: String,
+    /// The datastore's health and migration state.
+    #[serde(default)]
+    pub datastore: DatastoreStatus,
+}
+
+/// The datastore section of a [`StatusReport`]: can the daemon reach its
+/// database right now, and is the database at the version this binary expects.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DatastoreStatus {
+    /// Whether a ping succeeded, and (when it did) the migration state was read.
+    pub ok: bool,
+    /// `embedded` or `remote`; empty when unknown.
+    pub backend: String,
+    /// Directory or credential-free URL of the datastore.
+    pub location: String,
+    /// Why `ok` is false, when it is.
+    pub error: Option<String>,
+    /// The migration watermark stored in the database.
+    pub migration_version: u32,
+    /// The newest migration this binary knows.
+    pub latest_version: u32,
+    /// Names of migrations not yet applied. A running daemon migrates before
+    /// serving, so this is normally empty; it is reported so a shared remote
+    /// palace migrated by a newer daemon is not silently served wrongly.
+    pub pending: Vec<String>,
+}
+
+impl DatastoreStatus {
+    /// Healthy means reachable *and* fully migrated.
+    #[must_use]
+    pub fn is_healthy(&self) -> bool {
+        self.ok && self.pending.is_empty()
+    }
+}
+
+/// Facts about how the daemon was started that the store and scheduler do not
+/// know. Set once by `server::run`, after the listener is bound.
+#[derive(Debug, Clone, Default)]
+pub struct RuntimeContext {
+    /// The listener's actual bound address.
+    pub bind_addr: String,
+    /// The served palace directory.
+    pub palace_path: String,
+    /// `embedded` or `remote`.
+    pub backend: String,
+    /// Directory or credential-free URL of the datastore.
+    pub location: String,
 }
 
 /// Bounds `AppServices::wake_up`'s output — deterministic and testable, no
@@ -160,6 +222,7 @@ pub struct AppServices {
     store: SurrealStore,
     scheduler: Arc<Scheduler>,
     started_at: DateTime<Utc>,
+    runtime: Arc<RuntimeContext>,
 }
 
 impl AppServices {
@@ -170,7 +233,15 @@ impl AppServices {
             store,
             scheduler,
             started_at: Utc::now(),
+            runtime: Arc::new(RuntimeContext::default()),
         }
+    }
+
+    /// Record how the daemon was started, for `status` to report.
+    #[must_use]
+    pub fn with_runtime(mut self, runtime: RuntimeContext) -> Self {
+        self.runtime = Arc::new(runtime);
+        self
     }
 
     /// An `AppServices` over a fresh in-memory store and an idle scheduler,
@@ -193,26 +264,59 @@ impl AppServices {
     ///
     /// # Errors
     ///
-    /// Returns an error if the store cannot be read.
+    /// Never returns an error for an unhealthy datastore: that is the very
+    /// thing being reported, so it comes back as `datastore.ok == false` with
+    /// zeroed counts. An error here would make the daemon look absent (a 500)
+    /// exactly when a caller most needs to know it is up but degraded.
+    ///
+    /// # Errors
+    ///
+    /// Currently infallible; the `Result` is kept so a future fallible
+    /// field does not change every caller.
     pub async fn status(&self, mode: MemoryMode) -> Result<StatusReport> {
-        let palace_name = self.store.get_palace().await?.map_or_else(
-            || crate::domain::DEFAULT_PALACE_NAME.to_string(),
-            |palace| palace.name,
-        );
-        let drawer_count = self.store.count_drawers().await?;
-        let queued = self.store.count_jobs(Some(JobStatus::Queued)).await?;
-        let running = self.store.count_jobs(Some(JobStatus::Running)).await?;
-        let paused = self.store.count_jobs(Some(JobStatus::Paused)).await?;
-        Ok(StatusReport {
+        let mut report = StatusReport {
             version: env!("CARGO_PKG_VERSION").to_string(),
             uptime_secs: (Utc::now() - self.started_at).num_seconds(),
-            palace_name,
-            drawer_count,
-            jobs_queued: queued,
-            jobs_running: running,
-            jobs_paused: paused,
+            palace_name: crate::domain::DEFAULT_PALACE_NAME.to_string(),
+            drawer_count: 0,
+            jobs_queued: 0,
+            jobs_running: 0,
+            jobs_paused: 0,
             mode,
-        })
+            pid: std::process::id(),
+            started_at: self.started_at,
+            bind_addr: self.runtime.bind_addr.clone(),
+            palace_path: self.runtime.palace_path.clone(),
+            datastore: DatastoreStatus {
+                backend: self.runtime.backend.clone(),
+                location: self.runtime.location.clone(),
+                ..DatastoreStatus::default()
+            },
+        };
+        match self.read_status_details(&mut report).await {
+            Ok(()) => report.datastore.ok = true,
+            Err(error) => report.datastore.error = Some(error.to_string()),
+        }
+        Ok(report)
+    }
+
+    /// Fill `report` from the store: ping, migration state, name and counts.
+    /// Split out so `status` has one place that turns any failure into a
+    /// degraded report.
+    async fn read_status_details(&self, report: &mut StatusReport) -> Result<()> {
+        self.store.ping().await?;
+        let migrations = crate::migrate::status(&self.store).await?;
+        report.datastore.migration_version = migrations.current_version;
+        report.datastore.latest_version = migrations.latest_version;
+        report.datastore.pending = migrations.pending;
+        if let Some(palace) = self.store.get_palace().await? {
+            report.palace_name = palace.name;
+        }
+        report.drawer_count = self.store.count_drawers().await?;
+        report.jobs_queued = self.store.count_jobs(Some(JobStatus::Queued)).await?;
+        report.jobs_running = self.store.count_jobs(Some(JobStatus::Running)).await?;
+        report.jobs_paused = self.store.count_jobs(Some(JobStatus::Paused)).await?;
+        Ok(())
     }
 
     /// Reject a read (`search`/`recall`/`wake_up`/`diary_read`) that
@@ -1438,6 +1542,70 @@ mod tests {
             .await
             .expect("status must never be gated by mode");
         assert_eq!(report.mode, MemoryMode::Disabled);
+    }
+
+    #[tokio::test]
+    async fn status_reports_a_migrated_reachable_datastore_as_healthy() {
+        let (app, store) = test_app_with_store().await;
+        crate::migrate::run(&store).await.expect("migrate");
+
+        let report = app.status(MemoryMode::Full).await.expect("status");
+
+        assert!(report.datastore.ok, "{:?}", report.datastore);
+        assert!(report.datastore.is_healthy());
+        assert!(report.datastore.pending.is_empty());
+        assert_eq!(
+            report.datastore.migration_version,
+            report.datastore.latest_version
+        );
+        assert!(report.datastore.error.is_none());
+        assert_eq!(report.pid, std::process::id());
+    }
+
+    #[tokio::test]
+    async fn status_flags_pending_migrations_as_unhealthy_without_failing_the_request() {
+        // The test store has its schema but never ran the data migrations, so
+        // it stands in for a shared palace a newer daemon has not migrated yet.
+        let app = test_app().await;
+
+        let report = app
+            .status(MemoryMode::Full)
+            .await
+            .expect("an unhealthy datastore is reported, not raised");
+
+        assert!(report.datastore.ok, "the datastore itself answered");
+        assert!(!report.datastore.pending.is_empty());
+        assert!(!report.datastore.is_healthy());
+    }
+
+    #[tokio::test]
+    async fn status_reports_the_runtime_context_the_daemon_was_started_with() {
+        let app = test_app().await.with_runtime(RuntimeContext {
+            bind_addr: "127.0.0.1:9999".into(),
+            palace_path: "/palace".into(),
+            backend: "embedded".into(),
+            location: "/palace/db".into(),
+        });
+
+        let report = app.status(MemoryMode::Full).await.expect("status");
+
+        assert_eq!(report.bind_addr, "127.0.0.1:9999");
+        assert_eq!(report.palace_path, "/palace");
+        assert_eq!(report.datastore.backend, "embedded");
+        assert_eq!(report.datastore.location, "/palace/db");
+    }
+
+    #[test]
+    fn a_report_from_an_older_daemon_still_deserializes() {
+        // A newer CLI must not fail on a daemon that predates the new fields.
+        let old = serde_json::json!({
+            "version": "0.0.9", "uptime_secs": 3, "palace_name": "p",
+            "drawer_count": 1, "jobs_queued": 0, "jobs_running": 0,
+            "jobs_paused": 0, "mode": "full"
+        });
+        let report: StatusReport = serde_json::from_value(old).expect("old shape");
+        assert_eq!(report.pid, 0);
+        assert!(!report.datastore.ok);
     }
 
     #[tokio::test]

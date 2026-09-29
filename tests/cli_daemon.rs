@@ -164,3 +164,64 @@ async fn mining_a_relative_path_works_when_the_daemon_runs_somewhere_else() {
 
     daemon.shutdown().await;
 }
+
+#[tokio::test]
+async fn status_against_a_healthy_daemon_prints_the_report_and_exits_zero() {
+    let daemon = TestDaemon::start().await;
+
+    let output = memcastle(&daemon)
+        .arg("status")
+        .output()
+        .await
+        .expect("run memcastle");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Exit 0 is the "healthy" half of the scripting contract.
+    assert_eq!(output.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("MemCastle is running"), "{stdout}");
+    assert!(stdout.contains(&daemon.base_url), "{stdout}");
+    assert!(
+        stdout.contains("from the daemon's registry file"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("/mcp"), "{stdout}");
+    assert!(
+        stdout.contains(&daemon.palace_path.display().to_string()),
+        "{stdout}"
+    );
+
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn status_json_reports_the_endpoint_palace_and_datastore_for_scripts() {
+    let daemon = TestDaemon::start().await;
+
+    let output = memcastle(&daemon)
+        .args(["status", "--json"])
+        .output()
+        .await
+        .expect("run memcastle");
+
+    assert_eq!(output.status.code(), Some(0));
+    let view: serde_json::Value = serde_json::from_slice(&output.stdout).expect("status as JSON");
+    assert_eq!(view["running"], true);
+    // The configured address is 8420; the daemon is on an OS-assigned port,
+    // so finding it proves the registry is what `status` follows.
+    assert_eq!(view["endpoint"], daemon.base_url.as_str());
+    assert_eq!(view["endpoint_source"], "registry");
+    assert_eq!(view["mcp_url"], format!("{}/mcp", daemon.base_url));
+    assert_eq!(view["registry"]["state"], "live");
+    assert_eq!(
+        view["palace_path"],
+        daemon.palace_path.display().to_string()
+    );
+    assert_eq!(view["daemon"]["datastore"]["ok"], true);
+    assert_eq!(view["daemon"]["datastore"]["backend"], "embedded");
+    assert_eq!(
+        view["daemon"]["datastore"]["pending"],
+        serde_json::json!([])
+    );
+
+    daemon.shutdown().await;
+}

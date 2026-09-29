@@ -186,6 +186,24 @@ impl Backend {
         matches!(self, Self::Remote { .. })
     }
 
+    /// A description of this backend that is safe to print or serve over the
+    /// API: the kind and where it lives, with no credentials. `Remote` carries
+    /// a root password, and a `status` response is read by anyone who can
+    /// reach the port, so the URL's userinfo (`user:pass@`) is dropped too.
+    #[must_use]
+    pub fn describe(&self) -> BackendInfo {
+        match self {
+            Self::Embedded { path } => BackendInfo {
+                kind: "embedded",
+                location: path.display().to_string(),
+            },
+            Self::Remote { url, .. } => BackendInfo {
+                kind: "remote",
+                location: strip_userinfo(url),
+            },
+        }
+    }
+
     /// The endpoint string `engine::any::connect` dispatches on.
     fn endpoint(&self) -> String {
         match self {
@@ -196,6 +214,32 @@ impl Backend {
             Self::Remote { url, .. } => url.clone(),
         }
     }
+}
+
+/// What [`Backend::describe`] reports: enough to answer "which datastore is
+/// this?" without carrying a secret.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendInfo {
+    /// `"embedded"` or `"remote"`.
+    pub kind: &'static str,
+    /// The directory (embedded) or credential-free URL (remote).
+    pub location: String,
+}
+
+/// `url` without any `user[:password]@` part of its authority. A URL with no
+/// scheme separator is returned untouched: it cannot carry userinfo the way
+/// `scheme://user:pass@host` does, and guessing would mangle it.
+fn strip_userinfo(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    // The authority ends at the first `/`, `?` or `#`; an `@` after that
+    // belongs to the path or query, not to userinfo.
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(authority_end);
+    // `rsplit` because a password may itself contain an unescaped `@`.
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    format!("{scheme}://{host}{tail}")
 }
 
 /// A connected handle to one palace's storage. Connecting does not migrate —
@@ -244,6 +288,21 @@ impl SurrealStore {
         db.use_ns(namespace).use_db(database).await?;
 
         Ok(Self { db })
+    }
+
+    /// Prove the datastore answers a query right now, touching no table.
+    /// `status` uses this to tell "the daemon is up" from "the daemon is up
+    /// but its database is not", which the static `/api/health` cannot.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::Error::Store`] if the connection is down or the
+    /// query fails.
+    pub async fn ping(&self) -> Result<()> {
+        // `.check()` because a failed statement arrives as a per-statement
+        // error inside an `Ok` response, which would read as healthy.
+        self.db.query("RETURN 1").await?.check()?;
+        Ok(())
     }
 
     /// Apply the embedded schema via SurrealKit's `Sync`. Idempotent:
@@ -298,6 +357,63 @@ mod tests {
         let store = memory_store().await;
         // Re-running must not error — every DEFINE is IF NOT EXISTS.
         store.sync_schema().await.expect("second sync_schema");
+    }
+
+    #[tokio::test]
+    async fn a_live_store_answers_a_ping() {
+        // `status` reports the datastore as healthy on the strength of this.
+        memory_store().await.ping().await.expect("ping");
+    }
+
+    fn remote(url: &str) -> Backend {
+        Backend::Remote {
+            url: url.to_string(),
+            namespace: "n".into(),
+            database: "d".into(),
+            username: "root".into(),
+            password: "hunter2".into(),
+        }
+    }
+
+    #[test]
+    fn a_remote_backend_description_never_carries_credentials() {
+        // The description is served on an unauthenticated endpoint.
+        for url in [
+            "ws://root:hunter2@db.example.com:8000",
+            "wss://root:hunter2@db.example.com/rpc",
+            "ws://root:p@ss@db.example.com:8000",
+        ] {
+            let info = remote(url).describe();
+            assert_eq!(info.kind, "remote");
+            assert!(!info.location.contains("hunter2"), "{}", info.location);
+            assert!(!info.location.contains("p@ss"), "{}", info.location);
+            assert!(!info.location.contains('@'), "{}", info.location);
+        }
+        assert_eq!(
+            remote("wss://root:x@db.example.com/rpc")
+                .describe()
+                .location,
+            "wss://db.example.com/rpc"
+        );
+    }
+
+    #[test]
+    fn an_at_sign_in_the_path_is_not_mistaken_for_userinfo() {
+        // Stripping up to the last `@` of the whole URL would eat the host.
+        assert_eq!(
+            remote("ws://db.example.com/a@b").describe().location,
+            "ws://db.example.com/a@b"
+        );
+    }
+
+    #[test]
+    fn an_embedded_backend_describes_its_directory() {
+        let info = Backend::Embedded {
+            path: PathBuf::from("/data/palace/db"),
+        }
+        .describe();
+        assert_eq!(info.kind, "embedded");
+        assert_eq!(info.location, "/data/palace/db");
     }
 
     // "Reopen the same SurrealKV path in the same process" is deliberately

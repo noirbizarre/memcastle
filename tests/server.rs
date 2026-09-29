@@ -44,6 +44,37 @@ async fn status_endpoint_reports_an_empty_freshly_created_palace() {
 }
 
 #[tokio::test]
+async fn status_endpoint_answers_where_the_daemon_listens_what_it_serves_and_whether_its_datastore_is_healthy()
+ {
+    let daemon = TestDaemon::start().await;
+    let client = reqwest::Client::new();
+
+    let status: memcastle::app::StatusReport = client
+        .get(format!("{}/api/status", daemon.base_url))
+        .send()
+        .await
+        .expect("request")
+        .json()
+        .await
+        .expect("json");
+
+    assert_eq!(
+        status.pid,
+        std::process::id(),
+        "the daemon runs in-process here"
+    );
+    // The real port, not the `0` that was requested.
+    assert_eq!(format!("http://{}", status.bind_addr), daemon.base_url);
+    assert_eq!(status.palace_path, daemon.palace_path.display().to_string());
+    assert!(status.datastore.is_healthy(), "{:?}", status.datastore);
+    assert_eq!(status.datastore.backend, "embedded");
+    assert!(status.datastore.location.starts_with(&status.palace_path));
+    assert!(status.datastore.pending.is_empty());
+
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
 async fn shutdown_request_stops_the_listener_and_removes_the_registry_file() {
     let daemon = TestDaemon::start().await;
     let palace_path = daemon.palace_path.clone();

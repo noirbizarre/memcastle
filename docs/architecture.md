@@ -175,7 +175,8 @@ and a read-only one could mutate the palace by submitting a mine.
 `ReadOnly` keeps job reads, since it can already read the same content through search.
 
 What stays ungated is genuinely administrative:
-`status` (counts and version, no content), job control (`pause_job`, `resume_job`, `cancel_job`, `retry_job` —
+`status` (counts, version, address and datastore health, no content),
+job control (`pause_job`, `resume_job`, `cancel_job`, `retry_job` —
 they need a job id, which a session that cannot list jobs never learns),
 `submit_demo` (touches no palace content), `submit_audit` and a dry-run `submit_repair` (they only report).
 
@@ -378,6 +379,17 @@ that question is always answered by a live HTTP request.
 The file's PID is checked with a liveness probe before it's trusted at all;
 a stale file from a crashed daemon is simply overwritten by the next one that starts.
 
+`memcastle status` is where those pieces are put in front of a person.
+It resolves the daemon the way every client does (a live registry file, then the configured address),
+asks `GET /api/status` and reports the endpoint and where it came from, the MCP URL, the palace, the datastore's
+health and migration state, the counts and what to run next.
+With no daemon it still reports, from the configuration and the registry file (which it calls `stale` when the
+recorded PID is gone), rather than failing.
+Its exit code is 0 for a healthy daemon, 1 for a degraded one and 3 for none, and `--json` prints the same report for
+scripts (see [ADR-012](adr/012-status-reports-a-stopped-daemon-and-exits-by-state.md)).
+The datastore section of `/api/status` comes from a ping and the migration watermark;
+an unhealthy datastore is reported there with HTTP 200, while `/api/health` stays a plain liveness check.
+
 ## MCP: another interface on the daemon, not a special process
 
 `mcp::McpTools` implements `rmcp::ServerHandler` and is mounted at `/mcp` on the *same* axum router as the REST API,
@@ -393,7 +405,7 @@ tool logic itself never touches a transport type, so adding one is additive when
 | Tool | Does | Gate |
 | --- | --- | --- |
 | `memcastle_set_mode` | choose this session's memory mode | — |
-| `memcastle_status` | daemon health and counts | ungated |
+| `memcastle_status` | daemon health, address, datastore state and counts | ungated |
 | `memcastle_search`, `memcastle_recall`, `memcastle_wake_up`, `memcastle_diary_read` | read memory | read |
 | `memcastle_diary_write`, `memcastle_checkpoint`, `memcastle_mine` | write memory | write |
 | `memcastle_audit` | submit a read-only audit | ungated |

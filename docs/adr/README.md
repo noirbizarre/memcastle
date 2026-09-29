@@ -41,3 +41,5 @@ The history is the value.
 - [ADR-010](010-unix-xdg-paths.md) — configuration, data and state follow the Unix XDG layout on Linux and macOS
 - [ADR-011](011-split-bind-address-and-port.md) — the listener's address and port are separate settings,
   bound before the daemon does anything else
+- [ADR-012](012-status-reports-a-stopped-daemon-and-exits-by-state.md) — `status` answers for a stopped daemon too,
+  and its exit code says which state it found

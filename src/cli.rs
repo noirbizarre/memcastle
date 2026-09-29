@@ -56,8 +56,11 @@ pub enum Command {
     /// migration system. Connects to storage directly, like `serve`; does
     /// not require (and does not talk to) a running daemon.
     Migrate(MigrateArgs),
-    /// Report daemon health and job counts.
-    Status,
+    /// Report whether the daemon is running, where it listens, which palace
+    /// it serves and whether its datastore is healthy and migrated.
+    /// Exit codes: 0 running and healthy, 1 running but degraded (or an
+    /// error), 3 not running.
+    Status(StatusArgs),
     /// Ask a running daemon to shut down gracefully.
     Stop,
     /// Stop the daemon, then start a fresh one and wait until it is serving
@@ -101,6 +104,14 @@ pub enum Command {
     Drawers,
     /// Maintenance operations (dedup, stale-data sweep, ...). Not yet implemented.
     Maintenance,
+}
+
+/// Arguments for `memcastle status`.
+#[derive(Debug, Args)]
+pub struct StatusArgs {
+    /// Print the report as JSON instead of text, for scripts.
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for `memcastle serve`.
