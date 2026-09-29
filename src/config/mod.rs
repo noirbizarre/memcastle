@@ -114,6 +114,14 @@ pub struct JobsConfig {
     /// you would rather wait than redo them; lower it if a supervisor kills
     /// the daemon sooner than this anyway.
     pub drain_timeout_secs: u64,
+    /// How long, in seconds, a running job's lease lasts without a heartbeat.
+    /// The daemon renews it every third of this. It matters when several
+    /// daemons share one remote palace: a daemon that stalls or is cut off
+    /// for longer than this loses its jobs to another. Raise it if your
+    /// network or host pauses longer than that without being dead; lower it
+    /// to fail over faster. Irrelevant, beyond the heartbeat cost, to an
+    /// embedded palace, which only one daemon can open.
+    pub lease_ttl_secs: u64,
 }
 
 impl Default for JobsConfig {
@@ -127,6 +135,10 @@ impl Default for JobsConfig {
             // checkpoint item, an audit chunk) to finish, short enough that
             // a stuck job cannot hold up a service manager's stop timeout.
             drain_timeout_secs: 10,
+            // Long enough to ride out a garbage-collection pause or a
+            // dropped packet or two, short enough that a dead daemon's jobs
+            // move within the minute.
+            lease_ttl_secs: 30,
         }
     }
 }
@@ -225,6 +237,11 @@ impl Config {
         {
             self.jobs.drain_timeout_secs = n;
         }
+        if let Ok(n) = std::env::var("MEMCASTLE_JOBS_LEASE_TTL_SECS")
+            && let Ok(n) = n.parse()
+        {
+            self.jobs.lease_ttl_secs = n;
+        }
     }
 
     /// The `tracing` filter directive this run should log with.
@@ -272,6 +289,14 @@ impl Config {
         if !(1..=86_400).contains(&self.jobs.drain_timeout_secs) {
             return Err(Error::config(
                 "jobs.drain_timeout_secs must be between 1 and 86400 seconds",
+            ));
+        }
+        // The heartbeat renews every third of the lease; under three seconds
+        // that is sub-second, which is noise on a network store, and a day is
+        // a units mistake that would leave a dead daemon's jobs stuck.
+        if !(3..=86_400).contains(&self.jobs.lease_ttl_secs) {
+            return Err(Error::config(
+                "jobs.lease_ttl_secs must be between 3 and 86400 seconds",
             ));
         }
         Ok(())
@@ -375,5 +400,21 @@ mod tests {
     fn the_drain_timeout_is_read_from_the_config_file() {
         let config: Config = toml::from_str("[jobs]\ndrain_timeout_secs = 45").unwrap();
         assert_eq!(config.jobs.drain_timeout_secs, 45);
+    }
+
+    #[test]
+    fn the_lease_ttl_defaults_to_thirty_seconds_and_rejects_nonsense() {
+        assert_eq!(Config::default().jobs.lease_ttl_secs, 30);
+        for secs in [0, 2, 86_401] {
+            let mut config = Config::default();
+            config.jobs.lease_ttl_secs = secs;
+            assert!(config.validate().is_err(), "{secs}s must be rejected");
+        }
+    }
+
+    #[test]
+    fn a_config_file_that_sets_only_the_drain_timeout_keeps_the_default_lease_ttl() {
+        let config: Config = toml::from_str("[jobs]\ndrain_timeout_secs = 5").unwrap();
+        assert_eq!(config.jobs.lease_ttl_secs, 30);
     }
 }

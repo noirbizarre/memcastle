@@ -27,3 +27,5 @@ The history is the value.
   decoupled from the SurrealDB engine and storage backend
 - [ADR-005](005-timestamp-representation.md) — timestamps are `datetime` when required,
   canonical RFC 3339 strings when optional
+- [ADR-006](006-job-leases.md) — running jobs are held by a heartbeat lease,
+  not by an assumption of one daemon

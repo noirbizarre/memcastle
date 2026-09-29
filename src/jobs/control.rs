@@ -70,6 +70,10 @@ pub struct JobContext {
     job_id: JobId,
     control: JobControl,
     store: SurrealStore,
+    /// The worker whose lease this run executes under, when it has one.
+    /// With it, every write the handler makes is fenced: refused if the
+    /// stored job has been leased to someone else since.
+    lease_owner: Option<String>,
 }
 
 impl JobContext {
@@ -80,7 +84,17 @@ impl JobContext {
             job_id,
             control,
             store,
+            lease_owner: None,
         }
+    }
+
+    /// Fence this context's writes to `worker`'s lease: a checkpoint is
+    /// refused with [`crate::Error::LeaseLost`] if another daemon has taken
+    /// the job over, instead of overwriting the new owner's progress.
+    #[must_use]
+    pub fn with_lease(mut self, worker: impl Into<String>) -> Self {
+        self.lease_owner = Some(worker.into());
+        self
     }
 
     /// The job this context is executing.
@@ -116,7 +130,8 @@ impl JobContext {
     ///
     /// # Errors
     ///
-    /// Returns an error if the store write fails.
+    /// Returns an error if the store write fails, or
+    /// [`crate::Error::LeaseLost`] if this run's lease was taken over.
     pub async fn checkpoint(
         &self,
         job: &mut Job,
@@ -125,7 +140,18 @@ impl JobContext {
     ) -> Result<()> {
         job.progress = progress;
         job.checkpoint = checkpoint;
-        self.store.save_job(job).await
+        match &self.lease_owner {
+            None => self.store.save_job(job).await,
+            Some(owner) => {
+                if self.store.save_job_fenced(job, owner).await? {
+                    Ok(())
+                } else {
+                    Err(crate::Error::LeaseLost {
+                        id: job.id.to_string(),
+                    })
+                }
+            }
+        }
     }
 
     /// Checkpoint an index-based handler (mining, checkpoint): record that

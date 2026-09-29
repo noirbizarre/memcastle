@@ -17,9 +17,10 @@
 //! - Stuck failed jobs: `Failed` jobs whose `recovery_attempts` has reached
 //!   `max_attempts` (the crash-recovery budget), which will never
 //!   auto-recover via `Scheduler::recover`.
-//! - Running jobs: a plain count, informational only — there is no lease
-//!   TTL yet to judge any of them "stale" (see `domain::Job::lease_expires_at`'s
-//!   doc comment), so this is a cross-check number, not a defect signal.
+//! - Running jobs: a plain count, informational only. A job's lease
+//!   (`domain::Job::lease_expires_at`) says whether it is live, but this is a
+//!   cross-check number, not a defect signal, and a stale one is the
+//!   scheduler's reaper's business, not the audit's.
 //! - Drawers without an embedding: informational only, never a defect —
 //!   semantic search doesn't exist yet, so an absent embedding is expected,
 //!   not broken.

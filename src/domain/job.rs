@@ -302,9 +302,11 @@ pub struct Job {
     /// `Running`, so a paused, finished or crash-recovered job never claims
     /// an owner that no longer holds it.
     pub lease_owner: Option<String>,
-    /// When the current lease would be considered stale. Reserved: nothing
-    /// populates it yet, because crash recovery runs once at startup rather
-    /// than by lease expiry. Cleared together with `lease_owner`.
+    /// When the current lease expires unless renewed. Set on claim
+    /// (`jobs.lease_ttl_secs` ahead) and extended by the owner's heartbeat;
+    /// a `Running` job past this, with no live owner in the daemon that reads
+    /// it, is reaped (see `jobs::Scheduler`). Cleared together with
+    /// `lease_owner`. See `docs/adr/006-job-leases.md`.
     pub lease_expires_at: Option<DateTime<Utc>>,
     /// A user asked this `Running` job to pause and no handler has honoured
     /// it yet. Recorded on the job (not only on the in-memory `JobControl`)

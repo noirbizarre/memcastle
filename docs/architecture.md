@@ -211,8 +211,9 @@ All four are gated by `MemoryMode` exactly like `search` — see the mode table 
 
 > The queue state is durable; the in-memory scheduler is only the execution mechanism.
 
-`domain::Job` is a plain record (`id`, `kind`, `status`, `priority`, timestamps, `progress`, `attempt`/`recovery_attempts`/`max_attempts`,
-`checkpoint`, `error`, lease fields, and any pending `pause_requested`/`cancel_requested`) persisted in SurrealDB.
+`domain::Job` is a plain record (`id`, `kind`, `status`, `priority`, timestamps, `progress`,
+`attempt`/`recovery_attempts`/`max_attempts`, `checkpoint`, `error`, the lease (`lease_owner`, `lease_expires_at`),
+and any pending `pause_requested`/`cancel_requested`) persisted in SurrealDB.
 Its status only ever changes through `Job::apply(event)`, an explicit transition table
 (any `(status, event)` pair not listed here is rejected with a `TransitionError`):
 
@@ -241,9 +242,12 @@ Default priorities per submission path: `Mine` → `Background` (so mining never
 
 `jobs::Scheduler` is a single sequential dispatcher loop (`store.claim_next_job`, a claim-and-transition)
 that spawns bounded worker tasks (a `tokio::sync::Semaphore`) to execute claimed jobs.
-The claim is a `SELECT` followed by an `UPSERT`, not a database-level atomic operation:
-because exactly one scheduler owns the queue per daemon — the same "one daemon per palace" invariant as storage —
-the sequential claim loop needs no distributed lock to be safe.
+The claim is a `SELECT` followed by a write guarded on the job still being `Queued`,
+so two daemons racing for one job cannot both win, without a distributed lock.
+The claim also leases the job: `lease_owner` and `lease_expires_at` (now plus `jobs.lease_ttl_secs`, default 30),
+which the owning daemon renews with a heartbeat every third of that.
+Every write a worker makes to its job is fenced on still holding the lease.
+See [ADR-006](adr/006-job-leases.md) for the design, and for what happens to a stalled or partitioned daemon.
 
 **Pause and cancel are cooperative, never a process kill.**
 A handler (`jobs::demo`, `mining::run`) is written as a loop over discrete units of work (steps, files)
@@ -267,6 +271,10 @@ or marked `Failed` (with the reason recorded) otherwise — never silently forgo
 The budget is `Job::max_attempts` (3), and what it counts is `Job::recovery_attempts`: crashes survived, and nothing else.
 `Job::attempt` is a separate, informational count of every claim, including the one after a user's resume
 or a shutdown re-queue, so a job that was merely paused twice is not one crash from failing.
+With an embedded palace, where SurrealKV's file lock admits only one daemon, every `Running` job is a dead predecessor's
+and is recovered at startup.
+With a remote palace only jobs whose lease has expired are, both at startup and periodically,
+so a second daemon cannot steal a live one's work.
 `Queued` jobs need no recovery, and `Paused` jobs are deliberately left paused until someone resumes them.
 A pause or cancel request does not depend on the in-memory `JobControl` surviving:
 `request_pause`/`request_cancel` write `pause_requested`/`cancel_requested` on the `Running` job record
@@ -303,7 +311,8 @@ not a port of `pi-palace`'s `/palace-audit` feature list,
 most of which addresses a split-store desync failure mode that doesn't exist here.
 It checks for orphan drawers (a `room` reference that no longer resolves), dangling `provenance.job_id` references,
 `Failed` jobs that have exhausted their attempt budget,
-a plain `Running`-job count (informational — there is no lease TTL yet to call any of them "stale"),
+a plain `Running`-job count (informational — the lease says whether a job is live,
+but the audit reports a count, not a verdict),
 and drawers with no `embedding` (informational — semantic search doesn't exist yet, so this is never a defect).
 Unlike `mining`/`checkpoint`, it does not chunk its work with a per-unit checkpoint:
 a full scan is cheap and idempotent, so there is no meaningful partial state to resume from.

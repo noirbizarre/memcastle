@@ -58,12 +58,19 @@ const POLL_INTERVAL: Duration = Duration::from_millis(200);
 /// losing only the work since its last checkpoint.
 const DEFAULT_DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// A unique-enough label for this scheduler instance, recorded as
-/// `lease_owner` on jobs it claims. Not load-bearing for correctness (see
-/// `docs/architecture.md` on why single-dispatcher claiming needs no
-/// distributed lock) — it exists so a job record is self-describing when inspected.
+/// How long a job's lease lasts without being renewed, unless configured
+/// otherwise (`jobs.lease_ttl_secs`). The heartbeat renews it every third of
+/// this, so a live daemon survives two missed beats before it is reaped.
+const DEFAULT_LEASE_TTL: Duration = Duration::from_secs(30);
+
+/// A label unique to this scheduler instance, recorded as `lease_owner` on
+/// the jobs it claims. Load-bearing: it is what a fenced write and a lease
+/// renewal are checked against, so two daemons must never share one — hence
+/// a random suffix on top of the pid (a pid alone repeats across hosts and
+/// across restarts).
 fn worker_id() -> String {
-    format!("memcastle-{}", std::process::id())
+    let suffix = uuid::Uuid::new_v4().simple().to_string();
+    format!("memcastle-{}-{}", std::process::id(), &suffix[..8])
 }
 
 /// Owns the in-process side of the job queue: claiming, dispatching to
@@ -83,6 +90,17 @@ pub struct Scheduler {
     worker: String,
     /// How long [`Scheduler::run`] waits for in-flight jobs on shutdown.
     drain_timeout: Duration,
+    /// How long a claimed job's lease lasts between heartbeats.
+    lease_ttl: Duration,
+    /// Whether this daemon is the only one that can ever use this store (an
+    /// embedded palace, guarded by SurrealKV's file lock). If so, every
+    /// `Running` job at startup belongs to a dead predecessor and is
+    /// recovered at once; if not, only jobs whose lease has expired are.
+    exclusive_store: bool,
+    /// When a heartbeat last renewed every lease it tried to. If renewals
+    /// keep failing for a whole lease, this daemon must assume its jobs have
+    /// been reaped and stop them.
+    last_renewed: std::sync::Mutex<tokio::time::Instant>,
 }
 
 impl Scheduler {
@@ -99,7 +117,28 @@ impl Scheduler {
             shutting_down: AtomicBool::new(false),
             worker: worker_id(),
             drain_timeout: DEFAULT_DRAIN_TIMEOUT,
+            lease_ttl: DEFAULT_LEASE_TTL,
+            exclusive_store: true,
+            last_renewed: std::sync::Mutex::new(tokio::time::Instant::now()),
         }
+    }
+
+    /// Set how long a job's lease lasts between heartbeats (see
+    /// `jobs.lease_ttl_secs`).
+    #[must_use]
+    pub fn with_lease_ttl(mut self, lease_ttl: Duration) -> Self {
+        self.lease_ttl = lease_ttl;
+        self
+    }
+
+    /// Declare that other daemons may share this store (a remote backend), so
+    /// startup recovery must not treat every `Running` job as abandoned: only
+    /// those whose lease has expired are. The default assumes the embedded
+    /// backend, where SurrealKV's file lock guarantees this daemon is alone.
+    #[must_use]
+    pub fn with_shared_store(mut self) -> Self {
+        self.exclusive_store = false;
+        self
     }
 
     /// Set how long shutdown waits for in-flight jobs (see
@@ -117,50 +156,104 @@ impl Scheduler {
     /// counted in `Job::recovery_attempts`) allows, or marked `Failed`
     /// otherwise — a job is never silently forgotten.
     ///
+    /// With an exclusive store (embedded) every `Running` job is a dead
+    /// predecessor's and is recovered at once. With a shared one (remote)
+    /// only jobs whose lease has expired are: a live daemon's jobs are
+    /// renewed, and stealing one would run it twice.
+    ///
     /// # Errors
     ///
     /// Returns an error if the store cannot be read from or written to.
     pub async fn recover(&self) -> Result<()> {
-        let stuck = self.store.list_jobs(Some(JobStatus::Running)).await?;
-        for mut job in stuck {
-            // A stop the user asked for before the crash outranks resuming:
-            // re-running a job they cancelled (an applied repair, a big mine)
-            // is the one outcome they explicitly ruled out. Cancel beats
-            // pause. Neither spends attempt budget: the job did not fail.
-            if job.cancel_requested {
-                info!(job_id = %job.id, "recovering a job the user had cancelled");
-                job.apply(JobEvent::Cancel)?;
-            } else if job.pause_requested {
-                info!(job_id = %job.id, "recovering a job the user had paused");
-                job.apply(JobEvent::Pause)?;
-            } else {
-                // Only a crash spends the budget. `attempt` also counts the
-                // claims that follow a user's resume or a shutdown re-queue,
-                // which are not failures: charging those made a job that had
-                // merely been paused twice one crash from being failed.
-                job.recovery_attempts += 1;
-                if job.recovery_attempts < job.max_attempts {
-                    info!(
-                        job_id = %job.id,
-                        recoveries = job.recovery_attempts,
-                        "recovering interrupted job to queued"
-                    );
-                    job.apply(JobEvent::RecoverToQueued)?;
-                } else {
-                    warn!(
-                        job_id = %job.id,
-                        recoveries = job.recovery_attempts,
-                        "interrupted job exhausted its crash-recovery budget"
-                    );
-                    job.error = Some(format!(
-                        "exhausted its crash-recovery budget: the daemon stopped uncleanly \
-                         {} times while this job was running",
-                        job.recovery_attempts
-                    ));
-                    job.apply(JobEvent::Fail)?;
-                }
+        if self.exclusive_store {
+            for job in self.store.list_jobs(Some(JobStatus::Running)).await? {
+                self.recover_job(job).await?;
             }
-            self.store.save_job(&job).await?;
+            Ok(())
+        } else {
+            self.reap_expired_leases().await
+        }
+    }
+
+    /// Recover every `Running` job whose lease has lapsed and that this
+    /// daemon is not itself running: the job of a daemon that died, stalled
+    /// or was partitioned away. Run periodically alongside the heartbeat.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the store cannot be read from or written to.
+    async fn reap_expired_leases(&self) -> Result<()> {
+        let now = chrono::Utc::now();
+        for job in self.store.list_jobs(Some(JobStatus::Running)).await? {
+            // Our own jobs are renewed by the heartbeat; one that merely
+            // looks expired because a beat was late must not be re-queued
+            // while it is still executing here.
+            if self.controls.contains_key(&job.id) {
+                continue;
+            }
+            // No expiry at all is a job written before leases existed: there
+            // is no live lease to respect.
+            if job
+                .lease_expires_at
+                .is_some_and(|expires_at| expires_at > now)
+            {
+                continue;
+            }
+            self.recover_job(job).await?;
+        }
+        Ok(())
+    }
+
+    /// Put one abandoned `Running` job back where it belongs.
+    ///
+    /// Written back only if the stored record still carries the lease that
+    /// was read (unless the store is exclusive, where nothing else writes):
+    /// if the owner renewed in the meantime, or another daemon already
+    /// reaped it, this does nothing.
+    async fn recover_job(&self, seen: Job) -> Result<()> {
+        let mut job = seen.clone();
+        // A stop the user asked for before the crash outranks resuming:
+        // re-running a job they cancelled (an applied repair, a big mine)
+        // is the one outcome they explicitly ruled out. Cancel beats
+        // pause. Neither spends attempt budget: the job did not fail.
+        if job.cancel_requested {
+            info!(job_id = %job.id, "recovering a job the user had cancelled");
+            job.apply(JobEvent::Cancel)?;
+        } else if job.pause_requested {
+            info!(job_id = %job.id, "recovering a job the user had paused");
+            job.apply(JobEvent::Pause)?;
+        } else {
+            // Only a crash spends the budget. `attempt` also counts the
+            // claims that follow a user's resume or a shutdown re-queue,
+            // which are not failures: charging those made a job that had
+            // merely been paused twice one crash from being failed.
+            job.recovery_attempts += 1;
+            if job.recovery_attempts < job.max_attempts {
+                info!(
+                    job_id = %job.id,
+                    recoveries = job.recovery_attempts,
+                    "recovering interrupted job to queued"
+                );
+                job.apply(JobEvent::RecoverToQueued)?;
+            } else {
+                warn!(
+                    job_id = %job.id,
+                    recoveries = job.recovery_attempts,
+                    "interrupted job exhausted its crash-recovery budget"
+                );
+                job.error = Some(format!(
+                    "exhausted its crash-recovery budget: the daemon stopped uncleanly \
+                     {} times while this job was running",
+                    job.recovery_attempts
+                ));
+                job.apply(JobEvent::Fail)?;
+            }
+        }
+        if self.exclusive_store {
+            return self.store.save_job(&job).await;
+        }
+        if !self.store.save_job_if_lease_unchanged(&job, &seen).await? {
+            info!(job_id = %seen.id, "another daemon recovered or renewed this job first");
         }
         Ok(())
     }
@@ -282,6 +375,11 @@ impl Scheduler {
     /// live query) keeps this loop's own logic trivial to read and test.
     pub async fn run(self: Arc<Self>, shutdown: CancellationToken) {
         let mut ticker = tokio::time::interval(POLL_INTERVAL);
+        // A third of the lease, so two beats can be missed before a live
+        // daemon's job looks abandoned; floored so a tiny test TTL cannot
+        // turn the heartbeat into a busy loop.
+        let mut heartbeat =
+            tokio::time::interval((self.lease_ttl / 3).max(Duration::from_millis(50)));
         loop {
             tokio::select! {
                 () = shutdown.cancelled() => {
@@ -291,9 +389,64 @@ impl Scheduler {
                 _ = ticker.tick() => {
                     self.clone().try_dispatch_one().await;
                 }
+                _ = heartbeat.tick() => {
+                    self.heartbeat().await;
+                    if let Err(error) = self.reap_expired_leases().await {
+                        warn!(%error, "failed to reap expired job leases");
+                    }
+                }
             }
         }
         self.drain(self.drain_timeout).await;
+    }
+
+    /// Renew the lease on every job this daemon is running, and stop any job
+    /// whose lease it can no longer hold.
+    ///
+    /// A renewal that finds the lease gone (the job was reaped and may be
+    /// running elsewhere now) interrupts the job at its next boundary; its
+    /// fenced writes are refused meanwhile, so it cannot clobber the new
+    /// owner. If the store itself is unreachable for a whole lease, this
+    /// daemon assumes the same has happened and stops everything: a
+    /// partitioned daemon must fence itself, because nothing else can.
+    async fn heartbeat(&self) {
+        let running: Vec<(JobId, JobControl)> = self
+            .controls
+            .iter()
+            .map(|entry| (*entry.key(), entry.value().clone()))
+            .collect();
+        let ttl = chrono::Duration::from_std(self.lease_ttl).unwrap_or(chrono::Duration::MAX);
+        let expires_at = chrono::Utc::now() + ttl;
+        let mut every_renewal_reached_the_store = true;
+        for (id, control) in running {
+            match self
+                .store
+                .renew_job_lease(id, &self.worker, expires_at)
+                .await
+            {
+                Ok(true) => {}
+                Ok(false) => {
+                    warn!(job_id = %id, "lost the lease on a running job; stopping it");
+                    control.request_interrupt();
+                }
+                Err(error) => {
+                    every_renewal_reached_the_store = false;
+                    warn!(job_id = %id, %error, "failed to renew a job lease");
+                }
+            }
+        }
+        let mut last_renewed = self
+            .last_renewed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if every_renewal_reached_the_store {
+            *last_renewed = tokio::time::Instant::now();
+        } else if last_renewed.elapsed() > self.lease_ttl {
+            warn!("could not renew job leases for a whole lease; stopping every job");
+            for entry in self.controls.iter() {
+                entry.value().request_interrupt();
+            }
+        }
     }
 
     /// Stop in-flight jobs at their next unit-of-work boundary and wait, up
@@ -328,7 +481,8 @@ impl Scheduler {
         let Ok(permit) = Arc::clone(&self.semaphore).try_acquire_owned() else {
             return; // at capacity; try again next tick
         };
-        let claimed = self.store.claim_next_job(&self.worker).await;
+        let ttl = chrono::Duration::from_std(self.lease_ttl).unwrap_or(chrono::Duration::MAX);
+        let claimed = self.store.claim_next_job(&self.worker, ttl).await;
         match claimed {
             Ok(Some(job)) => {
                 // Registered here, before the spawn, not inside `execute`:
@@ -356,7 +510,10 @@ impl Scheduler {
             // walked `controls` without seeing this job.
             control.request_interrupt();
         }
-        let ctx = JobContext::new(job.id, control.clone(), self.store.clone());
+        // Fenced to this worker's lease: if a partition let another daemon
+        // reap this job, this run's checkpoints are refused, not merged.
+        let ctx = JobContext::new(job.id, control.clone(), self.store.clone())
+            .with_lease(self.worker.clone());
 
         let outcome = match job.kind.clone() {
             JobKind::Demo { steps } => demo::run(&ctx, &mut job, demo::DemoParams { steps }).await,
@@ -393,6 +550,14 @@ impl Scheduler {
 
         self.controls.remove(&job.id);
 
+        if let Err(crate::Error::LeaseLost { .. }) = &outcome {
+            // Another daemon owns this job now. Marking it `Failed` here
+            // would overwrite the new owner's record with a stale verdict,
+            // so drop everything and let it run its course there.
+            warn!(job_id = %job.id, "lease lost while running; abandoning this run");
+            return;
+        }
+
         let event = match outcome {
             Ok(JobOutcome::Completed) => JobEvent::Complete,
             Ok(JobOutcome::Paused) => JobEvent::Pause,
@@ -413,8 +578,15 @@ impl Scheduler {
                 warn!(job_id = %job.id, %error, "could not re-queue a job interrupted by shutdown");
             }
         }
-        if let Err(error) = self.store.save_job(&job).await {
-            warn!(job_id = %job.id, %error, "failed to persist final job state");
+        // Fenced like every other write of a leased run: if the lease lapsed
+        // and the job was reaped, this final state is stale and is dropped.
+        match self.store.save_job_fenced(&job, &self.worker).await {
+            Ok(true) => {}
+            Ok(false) => warn!(
+                job_id = %job.id,
+                "lease lost before the final state could be saved; dropping it"
+            ),
+            Err(error) => warn!(job_id = %job.id, %error, "failed to persist final job state"),
         }
     }
 }
@@ -542,7 +714,7 @@ mod tests {
         scheduler.recover().await.unwrap();
         let claimed = scheduler
             .store
-            .claim_next_job("test-worker")
+            .claim_next_job("test-worker", chrono::Duration::seconds(30))
             .await
             .unwrap()
             .expect("the recovered job must be claimable");
@@ -822,7 +994,7 @@ mod tests {
         for _ in 0..5 {
             let claimed = scheduler
                 .store
-                .claim_next_job("test-worker")
+                .claim_next_job("test-worker", chrono::Duration::seconds(30))
                 .await
                 .unwrap()
                 .expect("claimable");
@@ -845,7 +1017,7 @@ mod tests {
         for crash in 1..=job.max_attempts {
             let claimed = scheduler
                 .store
-                .claim_next_job("test-worker")
+                .claim_next_job("test-worker", chrono::Duration::seconds(30))
                 .await
                 .unwrap()
                 .expect("claimable until the budget is spent");
@@ -929,5 +1101,224 @@ mod tests {
         saver.await.unwrap().expect("checkpoints must not fail");
         marker.await.unwrap().expect("requests must not fail");
         assert!(reload(&scheduler, &job).await.pause_requested);
+    }
+
+    /// A second daemon over the same store, as a remote backend allows.
+    fn second_daemon(first: &Scheduler) -> Scheduler {
+        Scheduler::new(first.store.clone(), 1).with_shared_store()
+    }
+
+    async fn submit_demo(scheduler: &Scheduler) -> Job {
+        scheduler
+            .submit(JobKind::Demo { steps: 1 }, Priority::Normal, "test")
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn two_daemons_racing_for_the_queue_never_claim_the_same_job() {
+        let first = scheduler().await;
+        let second = second_daemon(&first);
+        for _ in 0..20 {
+            submit_demo(&first).await;
+        }
+        let ttl = chrono::Duration::seconds(30);
+
+        let claim_all = |store: SurrealStore, worker: &'static str| async move {
+            let mut mine = Vec::new();
+            while let Some(job) = store.claim_next_job(worker, ttl).await.unwrap() {
+                mine.push(job.id);
+            }
+            mine
+        };
+        let (a, b) = tokio::join!(
+            claim_all(first.store.clone(), "daemon-a"),
+            claim_all(second.store.clone(), "daemon-b"),
+        );
+
+        let mut all: Vec<_> = a.iter().chain(&b).copied().collect();
+        assert_eq!(all.len(), 20, "every job is claimed exactly once");
+        all.sort_by_key(|id| id.to_string());
+        all.dedup();
+        assert_eq!(all.len(), 20, "no job may be claimed by both daemons");
+    }
+
+    #[tokio::test]
+    async fn a_second_daemon_cannot_steal_a_job_whose_lease_is_live() {
+        let first = scheduler().await;
+        let job = submit_demo(&first).await;
+        first
+            .store
+            .claim_next_job("daemon-a", chrono::Duration::seconds(30))
+            .await
+            .unwrap()
+            .expect("claimed");
+
+        second_daemon(&first).recover().await.unwrap();
+
+        let after = reload(&first, &job).await;
+        assert_eq!(
+            after.status,
+            JobStatus::Running,
+            "a live daemon's job is not abandoned"
+        );
+        assert_eq!(after.lease_owner.as_deref(), Some("daemon-a"));
+        assert_eq!(after.recovery_attempts, 0);
+    }
+
+    #[tokio::test]
+    async fn a_second_daemon_reclaims_a_job_once_its_lease_has_expired() {
+        let first = scheduler().await;
+        let job = submit_demo(&first).await;
+        // Already expired: the owner never renewed.
+        first
+            .store
+            .claim_next_job("daemon-a", chrono::Duration::seconds(-1))
+            .await
+            .unwrap()
+            .expect("claimed");
+
+        second_daemon(&first).recover().await.unwrap();
+
+        let after = reload(&first, &job).await;
+        assert_eq!(after.status, JobStatus::Queued);
+        assert_eq!(after.recovery_attempts, 1, "a lapsed lease is a crash");
+        assert_eq!(after.lease_owner, None);
+    }
+
+    #[tokio::test]
+    async fn a_shared_store_recovers_a_running_job_that_never_had_a_lease() {
+        let first = scheduler().await;
+        // Written by a version from before leases existed.
+        let job = seed(&first, JobStatus::Running, 1).await;
+
+        second_daemon(&first).recover().await.unwrap();
+
+        assert_eq!(reload(&first, &job).await.status, JobStatus::Queued);
+    }
+
+    #[tokio::test]
+    async fn a_worker_whose_job_was_reaped_and_reclaimed_cannot_write_it_any_more() {
+        let first = scheduler().await;
+        let job = submit_demo(&first).await;
+        let stale = first
+            .store
+            .claim_next_job("daemon-a", chrono::Duration::seconds(-1))
+            .await
+            .unwrap()
+            .expect("claimed");
+        // Another daemon reaps it and takes it over.
+        second_daemon(&first).recover().await.unwrap();
+        let taken = first
+            .store
+            .claim_next_job("daemon-b", chrono::Duration::seconds(30))
+            .await
+            .unwrap()
+            .expect("re-claimed");
+        assert_eq!(taken.id, job.id);
+
+        // The stale worker wakes up and tries to checkpoint.
+        let ctx = JobContext::new(job.id, JobControl::default(), first.store.clone())
+            .with_lease("daemon-a");
+        let mut stale = stale;
+        let error = ctx
+            .checkpoint(
+                &mut stale,
+                crate::domain::JobProgress::default(),
+                serde_json::json!({ "next_step": 99 }),
+            )
+            .await
+            .expect_err("a fenced checkpoint must be refused");
+
+        assert!(matches!(error, crate::Error::LeaseLost { .. }), "{error:?}");
+        let after = reload(&first, &job).await;
+        assert_eq!(after.lease_owner.as_deref(), Some("daemon-b"));
+        assert_ne!(after.checkpoint, serde_json::json!({ "next_step": 99 }));
+    }
+
+    #[tokio::test]
+    async fn the_heartbeat_keeps_a_running_jobs_lease_from_expiring() {
+        let scheduler = Arc::new(
+            Scheduler::new(SurrealStore::connect_memory_for_tests().await, 1)
+                .with_lease_ttl(Duration::from_millis(600)),
+        );
+        let job = scheduler
+            .submit(JobKind::Demo { steps: 200 }, Priority::Normal, "test")
+            .await
+            .unwrap();
+        let shutdown = CancellationToken::new();
+        let handle = tokio::spawn(Arc::clone(&scheduler).run(shutdown.clone()));
+
+        // Wait until it is running, then note its lease and let several TTLs pass.
+        let mut first_expiry = None;
+        for _ in 0..100 {
+            let current = reload(&scheduler, &job).await;
+            if current.status == JobStatus::Running {
+                first_expiry = current.lease_expires_at;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let first_expiry = first_expiry.expect("the job started");
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+
+        let after = reload(&scheduler, &job).await;
+        assert_eq!(
+            after.status,
+            JobStatus::Running,
+            "still running, not reaped"
+        );
+        assert!(
+            after.lease_expires_at > Some(first_expiry),
+            "the lease must have been renewed past {first_expiry}: {:?}",
+            after.lease_expires_at
+        );
+        assert!(
+            after.lease_expires_at > Some(chrono::Utc::now()),
+            "and must be live now"
+        );
+        shutdown.cancel();
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_daemon_that_finds_its_lease_gone_stops_the_job() {
+        let scheduler = scheduler().await;
+        // The store says another daemon owns this job.
+        let job = submit_demo(&scheduler).await;
+        scheduler
+            .store
+            .claim_next_job("someone-else", chrono::Duration::seconds(30))
+            .await
+            .unwrap()
+            .expect("claimed");
+        // ...but this daemon still believes it is running it.
+        let control = JobControl::default();
+        scheduler.controls.insert(job.id, control.clone());
+
+        scheduler.heartbeat().await;
+
+        assert!(
+            control.was_interrupted(),
+            "a job we no longer own must be stopped"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_reaper_leaves_a_job_this_daemon_is_still_running_alone() {
+        let scheduler = scheduler().await;
+        let job = submit_demo(&scheduler).await;
+        scheduler
+            .store
+            .claim_next_job(&scheduler.worker, chrono::Duration::seconds(-1))
+            .await
+            .unwrap()
+            .expect("claimed");
+        // Expired on paper because a beat was late, but it is ours and live.
+        scheduler.controls.insert(job.id, JobControl::default());
+
+        scheduler.reap_expired_leases().await.unwrap();
+
+        assert_eq!(reload(&scheduler, &job).await.status, JobStatus::Running);
     }
 }

@@ -12,10 +12,10 @@
 //!   deliberately **dropped as redundant**, not merely deferred:
 //!   `jobs::Scheduler::recover` already runs at every daemon startup and
 //!   fails any crash-recovered `Running` job whose `recovery_attempts` has
-//!   reached `max_attempts` (see that function's doc comment). There is no lease
-//!   TTL yet (`domain::Job::lease_expires_at` is unpopulated — see
-//!   `crate::audit`'s module doc), so there is no live signal this handler
-//!   could use to find *additional* stuck jobs while the daemon stays up.
+//!   reached `max_attempts` (see that function's doc comment), and its
+//!   periodic reaper does the same for any job whose lease has lapsed
+//!   (`domain::Job::lease_expires_at`), so this handler has no *additional*
+//!   stuck jobs to find while the daemon stays up.
 //!   The population `AuditReport::stuck_failed_jobs` counts is already
 //!   `Failed`, not `Running` — a repair action to "fail" it again would be
 //!   a no-op; the only real way out of that state is the existing,

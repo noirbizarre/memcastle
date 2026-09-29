@@ -50,10 +50,15 @@ pub async fn run(config: Config) -> Result<()> {
         );
     }
 
-    let scheduler = Arc::new(
-        Scheduler::new(store.clone(), config.jobs.max_concurrency)
-            .with_drain_timeout(Duration::from_secs(config.jobs.drain_timeout_secs)),
-    );
+    let mut scheduler = Scheduler::new(store.clone(), config.jobs.max_concurrency)
+        .with_drain_timeout(Duration::from_secs(config.jobs.drain_timeout_secs))
+        .with_lease_ttl(Duration::from_secs(config.jobs.lease_ttl_secs));
+    if backend.is_shared() {
+        // Another daemon may be running jobs against this same palace: only
+        // reclaim the ones whose lease has actually lapsed.
+        scheduler = scheduler.with_shared_store();
+    }
+    let scheduler = Arc::new(scheduler);
     scheduler.recover().await?;
 
     let shutdown = CancellationToken::new();

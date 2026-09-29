@@ -277,6 +277,22 @@ pub enum Error {
         id: String,
     },
 
+    /// A worker tried to write a job it no longer holds the lease on: the
+    /// lease lapsed (a stalled or partitioned daemon) and another daemon
+    /// reaped the job, so this worker's copy is stale and its write was
+    /// refused rather than allowed to clobber the new owner's.
+    #[error("job {id} is no longer leased to this daemon")]
+    #[diagnostic(
+        code(memcastle::jobs::lease_lost),
+        help(
+            "another daemon took the job over after its lease expired; if this daemon was only slow, raise jobs.lease_ttl_secs"
+        )
+    )]
+    LeaseLost {
+        /// The job whose lease was lost.
+        id: String,
+    },
+
     /// The HTTP server failed to bind or serve.
     #[error("server error: {message}")]
     #[diagnostic(
@@ -525,6 +541,9 @@ mod tests {
             Error::JobOrphaned {
                 id: "x".to_string(),
             },
+            Error::LeaseLost {
+                id: "x".to_string(),
+            },
             Error::server("boom"),
             Error::ModeForbidden {
                 operation: "checkpoint".to_string(),
@@ -557,6 +576,7 @@ mod tests {
             | Error::Remote { .. }
             | Error::DaemonNotRunning
             | Error::JobOrphaned { .. }
+            | Error::LeaseLost { .. }
             | Error::Server { .. }
             | Error::ModeForbidden { .. }
             | Error::MigrationLocked { .. }

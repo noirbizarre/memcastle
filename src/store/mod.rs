@@ -177,6 +177,15 @@ pub enum Backend {
 }
 
 impl Backend {
+    /// Whether other daemons can connect to the same palace at the same time.
+    /// An embedded palace cannot: SurrealKV's file lock admits one process,
+    /// which is what lets startup recovery treat every `Running` job as a
+    /// dead predecessor's. A remote one can, so recovery must go by lease.
+    #[must_use]
+    pub fn is_shared(&self) -> bool {
+        matches!(self, Self::Remote { .. })
+    }
+
     /// The endpoint string `engine::any::connect` dispatches on.
     fn endpoint(&self) -> String {
         match self {
@@ -362,7 +371,7 @@ mod tests {
         assert_eq!(fetched.status, crate::domain::JobStatus::Queued);
 
         let claimed = store
-            .claim_next_job("worker-1")
+            .claim_next_job("worker-1", chrono::Duration::seconds(30))
             .await
             .expect("claim")
             .expect("a job was claimed");
