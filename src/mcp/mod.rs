@@ -344,11 +344,13 @@ impl McpTools {
     async fn memcastle_mine(
         &self,
         Parameters(args): Parameters<MineArgs>,
+        Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
         let requested_by = "mcp".to_string();
+        let mode = self.mode_for(&parts);
         match self
             .app
-            .submit_mine(args.path.into(), args.wing, requested_by)
+            .submit_mine(args.path.into(), args.wing, requested_by, mode)
             .await
         {
             Ok(job) => {
@@ -469,8 +471,12 @@ impl McpTools {
     }
 
     #[tool(description = "List jobs known to the daemon")]
-    async fn memcastle_jobs_list(&self) -> Result<CallToolResult, McpError> {
-        match self.app.list_jobs(None).await {
+    async fn memcastle_jobs_list(
+        &self,
+        Extension(parts): Extension<http::request::Parts>,
+    ) -> Result<CallToolResult, McpError> {
+        let mode = self.mode_for(&parts);
+        match self.app.list_jobs(None, mode).await {
             Ok(jobs) => {
                 let text = serde_json::to_string_pretty(&jobs).unwrap_or_default();
                 Ok(CallToolResult::success(vec![ContentBlock::text(text)]))

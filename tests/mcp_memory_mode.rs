@@ -306,3 +306,34 @@ async fn emergency_checkpoint_over_mcp_follows_the_sessions_mode() {
     read_only.cancel().await.expect("close session");
     daemon.shutdown().await;
 }
+
+#[tokio::test]
+async fn the_mcp_job_list_and_mine_tools_follow_the_sessions_mode() {
+    let daemon = TestDaemon::start().await;
+    let disabled = connect(&daemon.base_url).await;
+    let read_only = connect(&daemon.base_url).await;
+    set_mode(&disabled, "disabled").await;
+    set_mode(&read_only, "read_only").await;
+
+    assert!(
+        call(&disabled, "memcastle_jobs_list", serde_json::json!({})).await,
+        "a disabled session must not read job records, which carry checkpoint content"
+    );
+    assert!(
+        !call(&read_only, "memcastle_jobs_list", serde_json::json!({})).await,
+        "a read-only session may read job records"
+    );
+    assert!(
+        call(
+            &read_only,
+            "memcastle_mine",
+            serde_json::json!({ "path": "/tmp" })
+        )
+        .await,
+        "mining files drawers, so a read-only session must not submit it"
+    );
+
+    disabled.cancel().await.expect("close session");
+    read_only.cancel().await.expect("close session");
+    daemon.shutdown().await;
+}

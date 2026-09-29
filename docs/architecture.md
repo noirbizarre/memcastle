@@ -141,7 +141,7 @@ It is *never* a process-wide setting — there is no `MEMCASTLE_ENABLED=false` d
 because the daemon already serves many agents at once;
 disabling memory for one of them must not touch the others' in-flight jobs or reads.
 
-| mode        | read (`search`/`recall`/`wake_up`/`diary_read`) | write (`checkpoint`/`emergency_checkpoint`/`diary_write`) |
+| mode        | read (`search`/`recall`/`wake_up`/`diary_read`, job `list`/`show`) | write (`checkpoint`/`emergency_checkpoint`/`diary_write`, `mine`, applied `repair`) |
 |-------------|--------------------------------------------------|-------------------------------------------------------------|
 | `Full`      | ok                                               | ok                                                            |
 | `ReadOnly`  | ok                                               | rejected (`Error::ModeForbidden`)                             |
@@ -151,13 +151,18 @@ disabling memory for one of them must not touch the others' in-flight jobs or re
 an empty result would be indistinguishable from "genuinely found nothing,"
 which would leak an ambiguous signal into a session that is supposed to behave as if MemCastle doesn't exist.
 
-Only those seven operations are gated. Administrative/daemon-level operations —
-`status`, job listing/control (`list_jobs`, `pause_job`, `resume_job`, `cancel_job`, `retry_job`),
-and job submission (`submit_mine`, `submit_demo`) —
-are not session-scoped memory operations and are never gated by mode:
-a disabled session can still see daemon/job state and submit background work.
-`Audit`/`Repair` fall on the administrative side of this line too,
-unless a future issue explicitly reclassifies one of them.
+The gate follows what an operation reads or writes, not its method name.
+A job record carries its whole input — for a checkpoint job, the memory being written —
+so listing or showing jobs is a memory read, and a job whose purpose is to file or delete drawers
+(`submit_mine`, and `submit_repair` when it is not a dry run) is a memory write.
+Otherwise a disabled session could read palace content through the job list,
+and a read-only one could mutate the palace by submitting a mine.
+`ReadOnly` keeps job reads, since it can already read the same content through search.
+
+What stays ungated is genuinely administrative:
+`status` (counts and version, no content), job control (`pause_job`, `resume_job`, `cancel_job`, `retry_job` —
+they need a job id, which a session that cannot list jobs never learns),
+`submit_demo` (touches no palace content), `submit_audit` and a dry-run `submit_repair` (they only report).
 
 Enforcement is centralized in `app::AppServices` (`require_read`/`require_write`, checked before any store contact) —
 `api` and `mcp` only *extract* a `MemoryMode` and pass it down, never independently deciding what's allowed:

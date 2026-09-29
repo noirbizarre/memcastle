@@ -190,15 +190,22 @@ impl AppServices {
     /// Mining is background work: it always runs at [`Priority::Background`]
     /// so it never delays checkpoint/audit/repair jobs.
     ///
+    /// Gated as a **write**: the job's whole purpose is to file drawers, so
+    /// letting a `ReadOnly` session submit it would mutate the palace
+    /// through the back door, and a `Disabled` one must not touch it at all.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the job cannot be persisted.
+    /// Returns an error if the job cannot be persisted, or
+    /// [`Error::ModeForbidden`] if `mode` doesn't permit writes.
     pub async fn submit_mine(
         &self,
         path: PathBuf,
         wing: Option<String>,
         requested_by: impl Into<String>,
+        mode: MemoryMode,
     ) -> Result<Job> {
+        Self::require_write(mode, "mine")?;
         self.scheduler
             .submit(
                 JobKind::Mine {
@@ -307,19 +314,26 @@ impl AppServices {
     /// named in that issue was dropped as redundant with
     /// `jobs::Scheduler::recover`.
     ///
-    /// Runs at [`Priority::Normal`], same as `submit_audit`. **Not** gated
-    /// by [`MemoryMode`] — administrative, same reasoning as
-    /// `submit_audit`.
+    /// Runs at [`Priority::Normal`], same as `submit_audit`. A **dry run** is
+    /// not gated by [`MemoryMode`] — it only reports, exactly like audit.
+    /// An applied repair (`dry_run == false`) deletes drawers, so it is
+    /// gated as a **write**.
     ///
     /// # Errors
     ///
-    /// Returns an error if the job cannot be persisted.
+    /// Returns an error if the job cannot be persisted, or
+    /// [`Error::ModeForbidden`] if this is an applied repair and `mode`
+    /// doesn't permit writes.
     pub async fn submit_repair(
         &self,
         dry_run: bool,
         based_on_job: Option<JobId>,
         requested_by: impl Into<String>,
+        mode: MemoryMode,
     ) -> Result<Job> {
+        if !dry_run {
+            Self::require_write(mode, "repair")?;
+        }
         self.scheduler
             .submit(
                 JobKind::Repair {
@@ -334,19 +348,30 @@ impl AppServices {
 
     /// List jobs, optionally filtered to one status.
     ///
+    /// Gated as a **read**: a job record carries its whole input, and for a
+    /// checkpoint job that is the memory being written. Leaving this open
+    /// would let a `Disabled` session read palace content through the job
+    /// list, defeating the guarantee that nothing MemCastle-derived reaches
+    /// it.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the store query fails.
-    pub async fn list_jobs(&self, status: Option<JobStatus>) -> Result<Vec<Job>> {
+    /// Returns an error if the store query fails, or
+    /// [`Error::ModeForbidden`] if `mode` doesn't permit reads.
+    pub async fn list_jobs(&self, status: Option<JobStatus>, mode: MemoryMode) -> Result<Vec<Job>> {
+        Self::require_read(mode, "jobs list")?;
         self.store.list_jobs(status).await
     }
 
-    /// Fetch one job by id.
+    /// Fetch one job by id. Gated as a **read** for the same reason as
+    /// [`Self::list_jobs`].
     ///
     /// # Errors
     ///
-    /// Returns an error if the store query fails.
-    pub async fn get_job(&self, id: JobId) -> Result<Option<Job>> {
+    /// Returns an error if the store query fails, or
+    /// [`Error::ModeForbidden`] if `mode` doesn't permit reads.
+    pub async fn get_job(&self, id: JobId, mode: MemoryMode) -> Result<Option<Job>> {
+        Self::require_read(mode, "jobs show")?;
         self.store.get_job(id).await
     }
 
@@ -831,6 +856,93 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_disabled_session_cannot_read_checkpointed_content_through_the_job_list() {
+        let app = test_app().await;
+        let submitted = app
+            .checkpoint(
+                one_item_payload("a secret preference"),
+                "test",
+                MemoryMode::Full,
+            )
+            .await
+            .expect("full-mode checkpoint");
+
+        // A job record carries its whole payload, so listing or showing it
+        // is a memory read: it must be refused, not merely redacted.
+        assert_mode_forbidden(
+            &app.list_jobs(None, MemoryMode::Disabled).await,
+            MemoryMode::Disabled,
+        );
+        assert_mode_forbidden(
+            &app.get_job(submitted.id, MemoryMode::Disabled).await,
+            MemoryMode::Disabled,
+        );
+    }
+
+    #[tokio::test]
+    async fn a_read_only_session_can_still_list_and_show_jobs() {
+        let app = test_app().await;
+        let submitted = app
+            .checkpoint(one_item_payload("readable"), "test", MemoryMode::Full)
+            .await
+            .expect("full-mode checkpoint");
+
+        // ReadOnly may already read the same content through search/recall,
+        // so blocking job reads for it would protect nothing.
+        assert_eq!(
+            app.list_jobs(None, MemoryMode::ReadOnly)
+                .await
+                .expect("list")
+                .len(),
+            1
+        );
+        assert!(
+            app.get_job(submitted.id, MemoryMode::ReadOnly)
+                .await
+                .expect("get")
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn mining_is_a_write_so_read_only_and_disabled_sessions_cannot_submit_it() {
+        let app = test_app().await;
+        for mode in [MemoryMode::ReadOnly, MemoryMode::Disabled] {
+            let result = app
+                .submit_mine("/tmp/anything".into(), None, "test", mode)
+                .await;
+            assert_mode_forbidden(&result, mode);
+        }
+        assert!(
+            app.list_jobs(None, MemoryMode::Full)
+                .await
+                .expect("list")
+                .is_empty(),
+            "a rejected mine must not leave a job behind"
+        );
+        app.submit_mine("/tmp/anything".into(), None, "test", MemoryMode::Full)
+            .await
+            .expect("full-mode mine is accepted");
+    }
+
+    #[tokio::test]
+    async fn an_applied_repair_is_a_write_but_a_dry_run_is_only_a_report() {
+        let app = test_app().await;
+
+        assert_mode_forbidden(
+            &app.submit_repair(false, None, "test", MemoryMode::ReadOnly)
+                .await,
+            MemoryMode::ReadOnly,
+        );
+        app.submit_repair(true, None, "test", MemoryMode::ReadOnly)
+            .await
+            .expect("a read-only session may ask what a repair would do");
+        app.submit_repair(false, None, "test", MemoryMode::Full)
+            .await
+            .expect("a full-mode session may apply a repair");
+    }
+
+    #[tokio::test]
     async fn a_disabled_search_is_rejected_without_a_store_query() {
         let app = test_app().await;
         let result = app
@@ -1044,7 +1156,10 @@ mod tests {
             .await;
         assert_mode_forbidden(&result, MemoryMode::ReadOnly);
         assert!(
-            app.list_jobs(None).await.expect("list").is_empty(),
+            app.list_jobs(None, MemoryMode::Full)
+                .await
+                .expect("list")
+                .is_empty(),
             "a rejected emergency checkpoint must not leave a job behind"
         );
     }
