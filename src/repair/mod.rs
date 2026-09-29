@@ -36,15 +36,16 @@
 //! matter what the (by then stale) report said.
 //!
 //! A cancel request is honoured before each delete of an applied repair
-//! (the codebase's only destructive loop); a pause request is not honoured
-//! at all — see `crate::audit`'s note that these handlers run to completion
-//! — so `POST /api/jobs/{id}/pause` on an audit or repair only *requests*
-//! a pause, which such a job ignores.
+//! (the codebase's only destructive loop), and so is a pause: the handler
+//! stops between deletes and returns `Paused`. That is also how a daemon
+//! shutdown interrupts it, so shutdown does not have to wait out its drain
+//! timeout for a repair that could have stopped at once.
 //!
 //! Like `crate::audit`, this handler does not chunk its work with a
-//! per-unit checkpoint — see that module's doc comment for why a palace
-//! scan (plus, here, a handful of deletes) doesn't need resumable partial
-//! state.
+//! per-unit checkpoint — see that module's doc comment. A paused (or
+//! interrupted) repair therefore resumes from scratch, which is safe: the
+//! resumed run recomputes the live orphan set, so drawers the first run
+//! already deleted are simply no longer there, and deleting is idempotent.
 
 use std::collections::HashSet;
 
@@ -108,10 +109,8 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: RepairParams) -> Resul
         based_on_job,
     } = params;
     let store = ctx.store();
-    // No per-unit work to chunk (see the module doc) — a single check up
-    // front is the only cooperative-cancel point this handler needs.
-    if ctx.is_cancelled() {
-        return Ok(JobOutcome::Cancelled);
+    if let Some(stop) = stop_requested(ctx) {
+        return Ok(stop);
     }
 
     // Always the current, live orphan set — never the possibly-stale
@@ -124,7 +123,21 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: RepairParams) -> Resul
         orphans.retain(|orphan| audited_ids.contains(&orphan.drawer_id));
     }
 
-    let (actions, cancelled) = plan_or_apply(store, ctx, orphans, dry_run).await?;
+    let (actions, halted) = plan_or_apply(store, ctx, orphans, dry_run).await?;
+    if halted == Some(JobOutcome::Paused) {
+        // No result and no checkpoint: the resumed run rescans, so a partial
+        // report would only describe a run that is about to be redone.
+        job.progress = JobProgress {
+            current: 0,
+            total: Some(1),
+            message: Some(format!(
+                "paused after {} orphan drawer(s); will rescan on resume",
+                actions.len()
+            )),
+        };
+        return Ok(JobOutcome::Paused);
+    }
+    let cancelled = halted == Some(JobOutcome::Cancelled);
 
     job.progress = JobProgress {
         current: 1,
@@ -160,32 +173,46 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: RepairParams) -> Resul
     })
 }
 
+/// Whether the job has been asked to stop, and how: cancel outranks pause,
+/// matching every other handler (a cancelled job never resumes).
+fn stop_requested(ctx: &JobContext) -> Option<JobOutcome> {
+    if ctx.is_cancelled() {
+        Some(JobOutcome::Cancelled)
+    } else if ctx.should_pause() {
+        Some(JobOutcome::Paused)
+    } else {
+        None
+    }
+}
+
 /// Plan (dry run) or apply the removal of each orphan, returning the actions
-/// taken and whether a cancel stopped the loop early.
+/// taken and, if the loop stopped early, why (`Cancelled` or `Paused`).
 ///
-/// The cancel check sits before *each* delete, not just at the top of
-/// [`run`]: this is the one destructive loop in the codebase, and a cancel a
-/// user sends mid-repair must stop further deletions rather than be honoured
-/// only after the last one. Pause is deliberately not honoured — a
-/// half-applied repair has no checkpoint worth resuming from, since the next
-/// run recomputes the live orphan set.
+/// The stop check sits before *each* item, not just at the top of [`run`]:
+/// this is the one destructive loop in the codebase, and a cancel a user
+/// sends mid-repair must stop further deletions rather than be honoured only
+/// after the last one. A pause (or a shutdown interrupt) stops it the same
+/// way; the next run recomputes the live orphan set, so nothing needs
+/// checkpointing.
 async fn plan_or_apply(
     store: &SurrealStore,
     ctx: &JobContext,
     orphans: Vec<crate::audit::OrphanDrawer>,
     dry_run: bool,
-) -> Result<(Vec<RepairAction>, bool)> {
+) -> Result<(Vec<RepairAction>, Option<JobOutcome>)> {
     let mut actions = Vec::with_capacity(orphans.len());
     for orphan in orphans {
+        // A dry run deletes nothing and does no I/O per item, so there is
+        // nothing to protect and no time to save by stopping it early.
         if !dry_run {
-            if ctx.is_cancelled() {
-                return Ok((actions, true));
+            if let Some(stop) = stop_requested(ctx) {
+                return Ok((actions, Some(stop)));
             }
             store.delete_drawer(orphan.drawer_id).await?;
         }
         actions.push(RepairAction::RemoveOrphanDrawer(orphan));
     }
-    Ok((actions, false))
+    Ok((actions, None))
 }
 
 /// Load the drawer ids a prior audit job flagged as orphans.
@@ -318,9 +345,13 @@ mod tests {
         let job = repair_job(false, None);
         let ctx = ctx_for(&store, &job, control);
 
-        let (actions, cancelled) = plan_or_apply(&store, &ctx, orphans, false).await.unwrap();
+        let (actions, halted) = plan_or_apply(&store, &ctx, orphans, false).await.unwrap();
 
-        assert!(cancelled, "the loop must report that it was cut short");
+        assert_eq!(
+            halted,
+            Some(JobOutcome::Cancelled),
+            "the loop must say it was cut short"
+        );
         assert!(
             actions.is_empty(),
             "nothing may be reported as done that was not"
@@ -340,9 +371,9 @@ mod tests {
         control.request_cancel();
         let ctx = ctx_for(&store, &repair_job(true, None), control);
 
-        let (actions, cancelled) = plan_or_apply(&store, &ctx, orphans, true).await.unwrap();
+        let (actions, halted) = plan_or_apply(&store, &ctx, orphans, true).await.unwrap();
 
-        assert!(!cancelled);
+        assert_eq!(halted, None);
         assert_eq!(actions.len(), 1);
     }
 
@@ -568,5 +599,45 @@ mod tests {
             matches!(error, Error::InvalidBasedOnJob { .. }),
             "{error:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_pause_stops_an_applied_repair_before_it_deletes_and_a_resume_finishes_it() {
+        let store = memory_store().await;
+        let (drawer, _) = create_orphan_drawer(&store).await;
+
+        let control = JobControl::default();
+        control.request_pause();
+        let mut job = repair_job(false, None);
+        let ctx = ctx_for(&store, &job, control);
+        let outcome = run(
+            &ctx,
+            &mut job,
+            RepairParams {
+                dry_run: false,
+                based_on_job: None,
+            },
+        )
+        .await
+        .expect("run");
+
+        assert_eq!(outcome, JobOutcome::Paused, "a pause must not be ignored");
+        assert!(job.result.is_none(), "a paused repair has no report yet");
+        assert!(store.drawer_exists(drawer).await.unwrap());
+
+        // Resume: a fresh control, the same job — it rescans and completes.
+        let ctx = ctx_for(&store, &job, JobControl::default());
+        let outcome = run(
+            &ctx,
+            &mut job,
+            RepairParams {
+                dry_run: false,
+                based_on_job: None,
+            },
+        )
+        .await
+        .expect("resumed run");
+        assert_eq!(outcome, JobOutcome::Completed);
+        assert!(!store.drawer_exists(drawer).await.unwrap());
     }
 }

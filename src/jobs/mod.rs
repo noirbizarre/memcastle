@@ -51,12 +51,12 @@ pub enum JobOutcome {
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 /// How long shutdown waits for in-flight jobs to reach their next unit-of-work
-/// boundary and checkpoint. Bounded because a handler stuck in one long unit
-/// (or one that never checks for pause, like `Audit`/`Repair`) must not hang
-/// the daemon's exit; a job still running after this is left `Running` and
-/// re-queued by [`Scheduler::recover`] on the next start, losing only the
-/// work since its last checkpoint.
-const DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
+/// boundary and checkpoint, unless configured otherwise
+/// (`jobs.drain_timeout_secs`). Bounded because a handler stuck in one long
+/// unit must not hang the daemon's exit; a job still running after this is
+/// left `Running` and re-queued by [`Scheduler::recover`] on the next start,
+/// losing only the work since its last checkpoint.
+const DEFAULT_DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A unique-enough label for this scheduler instance, recorded as
 /// `lease_owner` on jobs it claims. Not load-bearing for correctness (see
@@ -81,6 +81,8 @@ pub struct Scheduler {
     /// walked `controls` still gets interrupted.
     shutting_down: AtomicBool,
     worker: String,
+    /// How long [`Scheduler::run`] waits for in-flight jobs on shutdown.
+    drain_timeout: Duration,
 }
 
 impl Scheduler {
@@ -96,7 +98,16 @@ impl Scheduler {
             max_concurrency: u32::try_from(max_concurrency).unwrap_or(u32::MAX),
             shutting_down: AtomicBool::new(false),
             worker: worker_id(),
+            drain_timeout: DEFAULT_DRAIN_TIMEOUT,
         }
+    }
+
+    /// Set how long shutdown waits for in-flight jobs (see
+    /// `jobs.drain_timeout_secs`).
+    #[must_use]
+    pub fn with_drain_timeout(mut self, drain_timeout: Duration) -> Self {
+        self.drain_timeout = drain_timeout;
+        self
     }
 
     /// Recover jobs left `Running` by a daemon that stopped uncleanly.
@@ -282,7 +293,7 @@ impl Scheduler {
                 }
             }
         }
-        self.drain(DRAIN_TIMEOUT).await;
+        self.drain(self.drain_timeout).await;
     }
 
     /// Stop in-flight jobs at their next unit-of-work boundary and wait, up
@@ -612,7 +623,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_job_that_ignores_the_interrupt_is_left_running_for_recovery() {
-        // A handler that never checks for pause (like Audit/Repair) must not
+        // A handler that never checks for pause (one stuck inside a single long unit of work) must not
         // hang shutdown: drain gives up at the timeout and leaves the record
         // `Running`, which is exactly what `recover` repairs on next start.
         let scheduler = scheduler().await;
@@ -862,5 +873,29 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn the_drain_waits_no_longer_than_the_configured_timeout() {
+        let scheduler = Arc::new(
+            Scheduler::new(SurrealStore::connect_memory_for_tests().await, 1)
+                .with_drain_timeout(Duration::from_millis(100)),
+        );
+        // A worker that never lets go of its permit, like a stuck handler.
+        let _held = Arc::clone(&scheduler.semaphore)
+            .try_acquire_owned()
+            .expect("the only permit is free");
+        let shutdown = CancellationToken::new();
+        shutdown.cancel();
+
+        let started = tokio::time::Instant::now();
+        tokio::time::timeout(Duration::from_secs(5), Arc::clone(&scheduler).run(shutdown))
+            .await
+            .expect("run must give up at the configured drain timeout");
+
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the 100ms setting, not the 10s default, must bound the drain"
+        );
     }
 }

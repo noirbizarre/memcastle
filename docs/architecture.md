@@ -241,8 +241,10 @@ A handler (`jobs::demo`, `mining::run`) is written as a loop over discrete units
 that checks `JobContext::should_pause`/`is_cancelled` between units,
 persists a `checkpoint` before stopping, and returns — the scheduler transitions its status afterward.
 Resuming a paused job re-reads that checkpoint and continues from there, not from zero.
-`Audit` and `Repair` never check for pause, so a pause request only *requests* one and they run to completion;
-an applied `Repair` does check for cancel before each delete.
+`Audit` and `Repair` honour both too: audit checks between wings, after the job scan and every 500 drawers,
+and an applied repair checks before each delete.
+Neither keeps a checkpoint, so a paused (or shutdown-interrupted) one restarts from scratch when resumed —
+safe, because an audit only reads and a repair recomputes the live orphan set.
 
 **Resuming is replay-safe.**
 A handler writes an item's records first and saves the checkpoint after, so a crash between the two
@@ -319,8 +321,9 @@ On SIGINT/SIGTERM or `POST /api/shutdown`, it stops accepting new jobs and asks 
 at its next unit-of-work boundary.
 Each one checkpoints and goes straight back to `Queued` (a job the user had paused stays `Paused`),
 so the next daemon resumes it without anyone pressing resume.
-The wait is bounded (10 seconds): a job that does not stop in time — one that never checks for pause,
-like `Audit`/`Repair` — is left `Running` and re-queued by `Scheduler::recover` on the next start.
+The wait is bounded by `jobs.drain_timeout_secs` (default 10, env `MEMCASTLE_JOBS_DRAIN_TIMEOUT_SECS`):
+a job that does not stop in time — one stuck inside a single long unit of work —
+is left `Running` and re-queued by `Scheduler::recover` on the next start.
 The daemon then removes its registry file and exits.
 
 The registry file (`~/.memcastle/run/<hash of the canonical palace path>/daemon.json`)

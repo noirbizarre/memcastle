@@ -10,6 +10,7 @@
 pub mod lifecycle;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -49,7 +50,10 @@ pub async fn run(config: Config) -> Result<()> {
         );
     }
 
-    let scheduler = Arc::new(Scheduler::new(store.clone(), config.jobs.max_concurrency));
+    let scheduler = Arc::new(
+        Scheduler::new(store.clone(), config.jobs.max_concurrency)
+            .with_drain_timeout(Duration::from_secs(config.jobs.drain_timeout_secs)),
+    );
     scheduler.recover().await?;
 
     let shutdown = CancellationToken::new();

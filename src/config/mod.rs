@@ -97,10 +97,23 @@ impl Default for ServerConfig {
 }
 
 /// Job scheduler settings.
+///
+/// `#[serde(default)]` so a config file that sets only some of these (say just
+/// `max_concurrency`) keeps working when a new setting is added, instead of
+/// failing to parse for a key it has never heard of.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct JobsConfig {
     /// Maximum number of jobs executing concurrently.
     pub max_concurrency: usize,
+    /// How long shutdown waits, in seconds, for running jobs to reach their
+    /// next unit-of-work boundary, checkpoint and hand themselves back to the
+    /// queue. A job still running after this is left `Running` and re-queued
+    /// by crash recovery on the next start, losing only the work since its
+    /// last checkpoint. Raise it if your jobs have long units of work and
+    /// you would rather wait than redo them; lower it if a supervisor kills
+    /// the daemon sooner than this anyway.
+    pub drain_timeout_secs: u64,
 }
 
 impl Default for JobsConfig {
@@ -110,6 +123,10 @@ impl Default for JobsConfig {
             // `num_cpus::get()` — mining is I/O- as much as CPU-bound in
             // this bootstrap, and an extra dependency isn't worth it yet.
             max_concurrency: 4,
+            // Long enough for every handler's unit of work (a file, a
+            // checkpoint item, an audit chunk) to finish, short enough that
+            // a stuck job cannot hold up a service manager's stop timeout.
+            drain_timeout_secs: 10,
         }
     }
 }
@@ -203,6 +220,11 @@ impl Config {
         {
             self.jobs.max_concurrency = n;
         }
+        if let Ok(n) = std::env::var("MEMCASTLE_JOBS_DRAIN_TIMEOUT_SECS")
+            && let Ok(n) = n.parse()
+        {
+            self.jobs.drain_timeout_secs = n;
+        }
     }
 
     /// The `tracing` filter directive this run should log with.
@@ -243,6 +265,14 @@ impl Config {
     pub fn validate(&self) -> Result<()> {
         if self.jobs.max_concurrency == 0 {
             return Err(Error::config("jobs.max_concurrency must be at least 1"));
+        }
+        // Zero would skip the drain entirely, abandoning every in-flight job
+        // to crash recovery on each clean shutdown; a day is far past any
+        // supervisor's patience and is almost certainly a units mistake.
+        if !(1..=86_400).contains(&self.jobs.drain_timeout_secs) {
+            return Err(Error::config(
+                "jobs.drain_timeout_secs must be between 1 and 86400 seconds",
+            ));
         }
         Ok(())
     }
@@ -315,5 +345,35 @@ mod tests {
             Backend::Embedded { path } => assert_eq!(path, Path::new("/tmp/palace/db")),
             Backend::Remote { .. } => panic!("expected an embedded backend"),
         }
+    }
+
+    #[test]
+    fn the_drain_timeout_defaults_to_ten_seconds() {
+        assert_eq!(Config::default().jobs.drain_timeout_secs, 10);
+    }
+
+    #[test]
+    fn a_zero_or_absurd_drain_timeout_is_rejected() {
+        for secs in [0, 86_401] {
+            let mut config = Config::default();
+            config.jobs.drain_timeout_secs = secs;
+            assert!(config.validate().is_err(), "{secs}s must be rejected");
+        }
+        let mut config = Config::default();
+        config.jobs.drain_timeout_secs = 30;
+        config.validate().expect("30s is fine");
+    }
+
+    #[test]
+    fn a_config_file_that_sets_only_max_concurrency_keeps_the_default_drain_timeout() {
+        let config: Config = toml::from_str("[jobs]\nmax_concurrency = 2").unwrap();
+        assert_eq!(config.jobs.max_concurrency, 2);
+        assert_eq!(config.jobs.drain_timeout_secs, 10);
+    }
+
+    #[test]
+    fn the_drain_timeout_is_read_from_the_config_file() {
+        let config: Config = toml::from_str("[jobs]\ndrain_timeout_secs = 45").unwrap();
+        assert_eq!(config.jobs.drain_timeout_secs, 45);
     }
 }
