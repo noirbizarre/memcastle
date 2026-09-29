@@ -10,7 +10,6 @@
 #![allow(clippy::result_large_err)]
 
 use std::process::ExitCode;
-use std::str::FromStr;
 
 use clap::Parser;
 use miette::MietteHandlerOpts;
@@ -24,7 +23,7 @@ use cli::{
 use memcastle::app::WakeUpBudget;
 use memcastle::client::DaemonClient;
 use memcastle::config::Config;
-use memcastle::domain::{JobId, MemoryMode};
+use memcastle::domain::MemoryMode;
 use memcastle::store::SurrealStore;
 use memcastle::{Error, Result};
 
@@ -353,7 +352,11 @@ async fn cmd_audit(config: &Config, mode: Option<MemoryMode>, args: AuditArgs) -
 async fn cmd_repair(config: &Config, mode: Option<MemoryMode>, args: RepairArgs) -> Result<()> {
     // Parsed client-side, before ever contacting the daemon — same
     // reasoning as `parse_job_id`'s other call sites in `cmd_jobs`.
-    let based_on_job = args.based_on_job.as_deref().map(parse_job_id).transpose()?;
+    let based_on_job = args
+        .based_on_job
+        .as_deref()
+        .map(Error::parse_job_id)
+        .transpose()?;
     let job = client(config, mode)
         .submit_repair(!args.apply, based_on_job)
         .await?;
@@ -388,21 +391,21 @@ async fn cmd_jobs(config: &Config, mode: Option<MemoryMode>, command: JobsComman
     let daemon = client(config, mode);
     match command {
         JobsCommand::List { status } => {
-            let status = status.map(|s| parse_status(&s)).transpose()?;
+            let status = status.map(|s| Error::parse_job_status(&s)).transpose()?;
             print_json(&daemon.list_jobs(status).await?)?;
         }
-        JobsCommand::Show { id } => print_json(&daemon.get_job(parse_job_id(&id)?).await?)?,
+        JobsCommand::Show { id } => print_json(&daemon.get_job(Error::parse_job_id(&id)?).await?)?,
         JobsCommand::Pause { id } => {
-            print_json(&daemon.pause_job(parse_job_id(&id)?).await?)?;
+            print_json(&daemon.pause_job(Error::parse_job_id(&id)?).await?)?;
         }
         JobsCommand::Resume { id } => {
-            print_json(&daemon.resume_job(parse_job_id(&id)?).await?)?;
+            print_json(&daemon.resume_job(Error::parse_job_id(&id)?).await?)?;
         }
         JobsCommand::Cancel { id } => {
-            print_json(&daemon.cancel_job(parse_job_id(&id)?).await?)?;
+            print_json(&daemon.cancel_job(Error::parse_job_id(&id)?).await?)?;
         }
         JobsCommand::Retry { id } => {
-            print_json(&daemon.retry_job(parse_job_id(&id)?).await?)?;
+            print_json(&daemon.retry_job(Error::parse_job_id(&id)?).await?)?;
         }
         JobsCommand::Demo { steps } => {
             // The daemon has no "submit a demo job" REST endpoint of its
@@ -414,15 +417,6 @@ async fn cmd_jobs(config: &Config, mode: Option<MemoryMode>, command: JobsComman
         }
     }
     Ok(())
-}
-
-fn parse_job_id(raw: &str) -> Result<JobId> {
-    JobId::from_str(raw).map_err(|_| Error::invalid_job_id(raw))
-}
-
-fn parse_status(raw: &str) -> Result<memcastle::domain::JobStatus> {
-    raw.parse()
-        .map_err(|message: String| Error::invalid_input("status", message))
 }
 
 /// Install miette's diagnostic handler.

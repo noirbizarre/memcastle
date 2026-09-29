@@ -428,6 +428,30 @@ impl Error {
         Self::InvalidJobId { raw: raw.into() }
     }
 
+    /// Parse a job id a caller supplied, raising [`Error::InvalidJobId`] for
+    /// one that is not shaped like a job id. The one parser REST, MCP and the
+    /// CLI share, so the same mistake gets the same diagnostic everywhere.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidJobId`] if `raw` is not a job id.
+    pub fn parse_job_id(raw: &str) -> Result<crate::domain::JobId> {
+        raw.parse().map_err(|_| Self::invalid_job_id(raw))
+    }
+
+    /// Parse a job status filter a caller supplied, raising
+    /// [`Error::InvalidInput`] (naming `status` and the accepted values)
+    /// for an unknown one. Shared by REST, MCP and the CLI for the same reason
+    /// as [`Error::parse_job_id`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidInput`] if `raw` is not a job status.
+    pub fn parse_job_status(raw: &str) -> Result<crate::domain::JobStatus> {
+        raw.parse()
+            .map_err(|message: String| Self::invalid_input("status", message))
+    }
+
     /// Build an [`Error::NotImplemented`].
     pub fn not_implemented(feature: impl Into<String>) -> Self {
         Self::NotImplemented {

@@ -9,8 +9,6 @@ mod error;
 mod extract;
 mod mode;
 
-use std::str::FromStr;
-
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Json};
@@ -232,7 +230,7 @@ struct SubmitJobBody {
 }
 
 fn default_requested_by() -> String {
-    "http".to_string()
+    crate::domain::channel::HTTP.to_string()
 }
 
 async fn submit_job(
@@ -333,10 +331,9 @@ async fn shutdown_now(State(state): State<ApiState>) -> impl IntoResponse {
 }
 
 fn parse_job_id(raw: &str) -> Result<JobId, ApiError> {
-    JobId::from_str(raw).map_err(|_| ApiError::from(crate::Error::invalid_job_id(raw)))
+    Ok(crate::Error::parse_job_id(raw)?)
 }
 
 fn parse_status(raw: &str) -> Result<JobStatus, ApiError> {
-    raw.parse()
-        .map_err(|message: String| ApiError::from(crate::Error::invalid_input("status", message)))
+    Ok(crate::Error::parse_job_status(raw)?)
 }

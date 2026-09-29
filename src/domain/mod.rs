@@ -24,4 +24,17 @@ pub use job::{
     TransitionError,
 };
 pub use memory_mode::MemoryMode;
+
+/// The channels a write can come through, recorded as `Job::requested_by` and
+/// `provenance.requested_by`. Named once so a spelling drift between the
+/// client that sends one and the daemon that records it cannot split "cli"
+/// from "CLI" in the palace's provenance.
+pub mod channel {
+    /// The `memcastle` command line.
+    pub const CLI: &str = "cli";
+    /// A direct REST caller that did not name itself.
+    pub const HTTP: &str = "http";
+    /// An MCP tool call.
+    pub const MCP: &str = "mcp";
+}
 pub use palace::{DEFAULT_PALACE_NAME, Palace, Room, Wing};

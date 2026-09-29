@@ -13,6 +13,7 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 
 use crate::app::{StatusReport, WakeUpBudget, WakeUpContext};
+use crate::domain::channel::CLI as CHANNEL;
 use crate::domain::{CheckpointPayload, Drawer, Job, JobId, JobStatus, MemoryMode};
 use crate::error::{Error, Result};
 use crate::search::SearchHit;
@@ -209,7 +210,7 @@ impl DaemonClient {
                     "agent_identity": agent_identity,
                     "wing": wing,
                     "content": content,
-                    "requested_by": "cli",
+                    "requested_by": CHANNEL,
                 })),
         )
         .await
@@ -247,7 +248,7 @@ impl DaemonClient {
     pub async fn submit_mine(&self, path: std::path::PathBuf, wing: Option<String>) -> Result<Job> {
         self.send(
             self.http.post(format!("{}/api/jobs", self.base_url)).json(
-                &json!({ "type": "mine", "path": path, "wing": wing, "requested_by": "cli" }),
+                &json!({ "type": "mine", "path": path, "wing": wing, "requested_by": CHANNEL }),
             ),
         )
         .await
@@ -263,7 +264,7 @@ impl DaemonClient {
         self.send(
             self.http
                 .post(format!("{}/api/jobs", self.base_url))
-                .json(&json!({ "type": "audit", "scope": scope, "requested_by": "cli" })),
+                .json(&json!({ "type": "audit", "scope": scope, "requested_by": CHANNEL })),
         )
         .await
     }
@@ -276,7 +277,7 @@ impl DaemonClient {
     /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
     pub async fn submit_repair(&self, dry_run: bool, based_on_job: Option<JobId>) -> Result<Job> {
         self.send(self.http.post(format!("{}/api/jobs", self.base_url)).json(
-            &json!({ "type": "repair", "dry_run": dry_run, "based_on_job": based_on_job, "requested_by": "cli" }),
+            &json!({ "type": "repair", "dry_run": dry_run, "based_on_job": based_on_job, "requested_by": CHANNEL }),
         ))
         .await
     }
@@ -292,7 +293,7 @@ impl DaemonClient {
         self.send(
             self.http
                 .post(format!("{}/api/jobs", self.base_url))
-                .json(&json!({ "type": "demo", "steps": steps, "requested_by": "cli" })),
+                .json(&json!({ "type": "demo", "steps": steps, "requested_by": CHANNEL })),
         )
         .await
     }
@@ -307,7 +308,7 @@ impl DaemonClient {
     pub async fn checkpoint(&self, payload: CheckpointPayload, emergency: bool) -> Result<Job> {
         self.send(
             self.http.post(format!("{}/api/jobs", self.base_url)).json(
-                &json!({ "type": "checkpoint", "payload": payload, "requested_by": "cli", "emergency": emergency }),
+                &json!({ "type": "checkpoint", "payload": payload, "requested_by": CHANNEL, "emergency": emergency }),
             ),
         )
         .await
@@ -330,8 +331,8 @@ impl DaemonClient {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Remote`] (status 404, code `memcastle::jobs::not_found`)
-    /// if the daemon has no such job.
+    /// Returns [`Error::Remote`] (status 404, with the daemon's not-found
+    /// diagnostic code) if the daemon has no such job.
     pub async fn get_job(&self, id: JobId) -> Result<Job> {
         self.send(self.http.get(format!("{}/api/jobs/{id}", self.base_url)))
             .await
