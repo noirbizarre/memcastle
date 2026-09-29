@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted; the list of gated operations is amended by [ADR-007](007-memory-mode-gate-follows-data-access.md),
+and the session-mode mechanism by the amendment at the end of this record.
 
 ## Context
 
@@ -30,6 +31,8 @@ by the seven memory-content operations (`search`/`recall`/`wake_up`/`diary_read`
 Administrative/daemon-level operations (`status`, job listing/control, `submit_mine`, `submit_demo`,
 and — provisionally — `Audit`/`Repair`) are never gated:
 a disabled session still sees daemon/job state and can submit background work.
+*(Amended by ADR-007: job listing/inspection, `mine` and applied `repair` are gated after all,
+because they read or write memory content.)*
 
 `Disabled` is deliberately symmetric:
 reads are rejected with the same typed `Error::ModeForbidden` as writes, never a silent `Ok(empty)`.
