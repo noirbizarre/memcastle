@@ -282,9 +282,14 @@ pub struct Job {
     pub result: Option<Value>,
     /// The terminal error, when `status == Failed`.
     pub error: Option<String>,
-    /// The scheduler instance currently holding this job, if `Running`.
+    /// The scheduler instance currently holding this job — `Some` only
+    /// while `Running`; [`Job::apply`] clears it on every transition out of
+    /// `Running`, so a paused, finished or crash-recovered job never claims
+    /// an owner that no longer holds it.
     pub lease_owner: Option<String>,
-    /// When the current lease is considered stale (crash-recovery threshold).
+    /// When the current lease would be considered stale. Reserved: nothing
+    /// populates it yet, because crash recovery runs once at startup rather
+    /// than by lease expiry. Cleared together with `lease_owner`.
     pub lease_expires_at: Option<DateTime<Utc>>,
 }
 
@@ -355,6 +360,13 @@ impl Job {
         if next == Running {
             self.started_at.get_or_insert(now);
         }
+        if self.status == Running && next != Running {
+            // Leaving `Running` ends the lease. Done here, not by each
+            // caller, for the same reason `completed_at` is: a caller that
+            // forgot would leave a finished job naming a worker as its owner.
+            self.lease_owner = None;
+            self.lease_expires_at = None;
+        }
         if matches!(next, Completed | Failed | Cancelled) {
             self.completed_at = Some(now);
         }
@@ -365,6 +377,9 @@ impl Job {
             // same reason `completed_at` is set here rather than by every
             // caller of `Complete`/`Fail`/`Cancel`: one place to get right.
             self.error = None;
+            // Likewise `completed_at`: a re-queued job is not complete, and
+            // a stale timestamp would make it look finished-and-running.
+            self.completed_at = None;
         }
         self.status = next;
         Ok(())
@@ -473,6 +488,56 @@ mod tests {
                 "a rejected transition must not mutate state"
             );
         }
+    }
+
+    #[test]
+    fn every_transition_out_of_running_releases_the_lease() {
+        for event in [
+            JobEvent::Pause,
+            JobEvent::Complete,
+            JobEvent::Fail,
+            JobEvent::Cancel,
+            JobEvent::RecoverToQueued,
+        ] {
+            let mut job = demo_job();
+            job.apply(JobEvent::Claim).unwrap();
+            job.lease_owner = Some("worker-1".to_string());
+            job.lease_expires_at = Some(Utc::now());
+
+            job.apply(event).unwrap();
+
+            assert_eq!(
+                job.lease_owner, None,
+                "{event:?} must release the lease owner"
+            );
+            assert_eq!(
+                job.lease_expires_at, None,
+                "{event:?} must clear the lease expiry"
+            );
+        }
+    }
+
+    #[test]
+    fn a_rejected_transition_leaves_the_lease_alone() {
+        let mut job = demo_job();
+        job.apply(JobEvent::Claim).unwrap();
+        job.lease_owner = Some("worker-1".to_string());
+
+        assert!(job.apply(JobEvent::Retry).is_err());
+
+        assert_eq!(job.lease_owner.as_deref(), Some("worker-1"));
+    }
+
+    #[test]
+    fn retrying_a_failed_job_clears_its_completion_time() {
+        let mut job = demo_job();
+        job.apply(JobEvent::Claim).unwrap();
+        job.apply(JobEvent::Fail).unwrap();
+        assert!(job.completed_at.is_some());
+
+        job.apply(JobEvent::Retry).unwrap();
+
+        assert_eq!(job.completed_at, None, "a re-queued job is not complete");
     }
 
     #[test]
