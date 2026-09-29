@@ -201,14 +201,18 @@ async fn the_port_comes_from_the_file_then_the_environment_then_the_flag() {
 async fn the_bind_address_comes_from_the_environment_when_no_flag_is_given() {
     let root = tempfile::tempdir().expect("tempdir");
 
+    // The wildcard, not another loopback address such as 127.0.0.2: macOS
+    // configures only 127.0.0.1 on its loopback interface, so binding
+    // anything else there fails. The wildcard binds everywhere and is not
+    // the default, so seeing it proves the variable was applied.
     let daemon = start(root.path(), &root.path().join("palace"), |cmd| {
-        cmd.env("MEMCASTLE_BIND", "127.0.0.2")
+        cmd.env("MEMCASTLE_BIND", "0.0.0.0")
             .env("MEMCASTLE_PORT", "0");
     })
     .await;
 
     let addr: std::net::SocketAddr = daemon.info.bind_addr.parse().expect("a socket address");
-    assert_eq!(addr.ip(), "127.0.0.2".parse::<IpAddr>().unwrap());
+    assert_eq!(addr.ip(), "0.0.0.0".parse::<IpAddr>().unwrap());
 }
 
 #[test]
