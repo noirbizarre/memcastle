@@ -17,13 +17,15 @@ mise run build      # cargo build
 mise run test       # cargo nextest run (accepts nextest selectors)
 mise run lint       # cargo clippy --all-targets --all-features -- -D warnings
 mise run format     # cargo fmt --all
-mise run check      # everything CI runs except coverage/docs
-mise run ci         # everything CI runs, locally
+mise run guards     # the architecture guard hooks, described below
+mise run check      # every lint, the guards and the tests, without modifying the tree
+mise run ci         # check plus the docs build: the local equivalent of CI's lint and test steps
 mise cli <args>      # run memcastle from source, e.g. `mise cli status`
 ```
 
 `prek install` (once) wires the same checks into `git commit` as pre-commit hooks —
-formatting, Clippy, spelling, and the architecture guard described below.
+formatting, Clippy, spelling, actionlint, markdownlint, commitlint, basic file hygiene,
+and the architecture guard described below.
 
 ## Running the daemon locally
 

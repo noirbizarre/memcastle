@@ -106,7 +106,10 @@ See CONTRIBUTING.md.
 mise run ci
 ```
 
-Formatting, Clippy, spelling, workflow and Markdown linting, tests and the documentation build. Same as CI.
+Formatting, Clippy, spelling, workflow and Markdown linting, the architecture guard hooks, tests
+and the documentation build.
+This is the local equivalent of CI's lint and test steps; CI additionally runs every prek hook, coverage on three
+operating systems and `gh ship validate`.
 
 ## This repository is generated from a template
 

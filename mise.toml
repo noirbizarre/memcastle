@@ -130,10 +130,12 @@ run = "cargo insta review"
 
 [tasks.check]
 description = "Run every check that does not modify the working tree"
-depends = ["format:check", "lint", "lint:actions", "lint:md", "spell", "test"]
+# `guards` is project-specific: without it `check`/`ci` pass locally while the
+# architecture hooks (which otherwise run only on commit and in CI) fail later.
+depends = ["format:check", "lint", "lint:actions", "lint:md", "spell", "guards", "test"]
 
 [tasks.ci]
-description = "Everything CI runs, locally"
+description = "The local equivalent of CI's lint, test and documentation steps"
 depends = ["check", "docs:build"]
 
 # --- memcastle itself ---------------------------------------------------
@@ -233,3 +235,15 @@ git tpl diff --exit-code --stat
 #
 # Artwork tasks belong here rather than in `default` or `check`: they rewrite
 # committed binaries, so a routine run would dirty the working tree every time.
+
+[tasks.guards]
+description = "Run the architecture guard hooks over the whole tree"
+# The same hooks CI runs through `prek run --all-files`, minus the ones that
+# duplicate other tasks (fmt, clippy, typos, markdownlint, actionlint). These
+# enforce AGENTS.md invariants 1, 2 and 4, which nothing else in `check` covers.
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+prek run --all-files store-isolation
+prek run --all-files single-writer
+"""
