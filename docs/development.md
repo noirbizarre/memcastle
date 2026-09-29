@@ -84,6 +84,11 @@ so the same capability becomes available to every interface at once.
 The `single-writer` hook enforces the companion invariant, one daemon and one writer per embedded palace:
 `SurrealStore::connect` may only be called from `src/server/`, `src/store/` and `src/main.rs` (for `migrate`).
 
+Two more hooks guard the remaining invariants.
+`job-status-only-via-apply` fails on any `.status =` assignment outside `src/domain/job.rs`,
+so a job's status only ever changes through `Job::apply`.
+`no-hand-rolled-ddl` fails on schema DDL in Rust code, because the schema is SurrealKit's (`database/schema/*.surql`).
+
 ## This repository is generated from a template
 
 See `CONTRIBUTING.md` for the `git tpl` workflow (`mise run tpl:diff`, `mise run tpl:update`),

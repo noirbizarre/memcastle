@@ -132,3 +132,28 @@ language = "system"
 entry = '''bash -c '! grep -rnP --include=*.rs "SurrealStore::connect\(|surrealkv:" src | grep -vP "^src/(server/|store/|main\.rs:)" | grep -vP "^\S+:\d+:\s*//"' '''
 files = '^src/.*\.rs$'
 pass_filenames = false
+
+# AGENTS.md invariant #2: `Job::apply` is the only thing that assigns
+# `job.status`. Without this a handler could set a status directly and skip the
+# lease/timestamp bookkeeping the state machine centralises. The pattern is `=`
+# not followed by another `=`, so comparisons pass; the state machine's own
+# file (and its tests, which seed a status to walk every transition) is exempt.
+[[repos.hooks]]
+id = "job-status-only-via-apply"
+name = "only domain::job assigns Job.status"
+language = "system"
+entry = '''bash -c '! grep -rnP --include=*.rs "\.status\s*=[^=]" src tests | grep -vP "^src/domain/job\.rs:" | grep -vP "^\S+:\d+:\s*//"' '''
+files = '^(src|tests)/.*\.rs$'
+pass_filenames = false
+
+# AGENTS.md invariant #5: schema management is SurrealKit's. Schema lives in
+# `database/schema/*.surql` and is applied through `Sync`/`embed_schema!()`, so
+# Rust code has no business issuing DDL — that would be a hand-rolled schema
+# engine growing back. Comments may still mention the statements.
+[[repos.hooks]]
+id = "no-hand-rolled-ddl"
+name = "schema DDL lives in database/schema, not in Rust"
+language = "system"
+entry = '''bash -c '! grep -rniP --include=*.rs "(DEFINE|REMOVE|ALTER)\s+(TABLE|FIELD|INDEX|EVENT|ANALYZER)|INFO\s+FOR\s+(DB|TABLE)" src | grep -vP "^\S+:\d+:\s*//"' '''
+files = '^src/.*\.rs$'
+pass_filenames = false

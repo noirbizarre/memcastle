@@ -27,7 +27,8 @@ Each of these should be enforced by a hook or a test. An invariant nothing check
    Enforced by the `prek` `store-isolation` hook: it greps `main.rs`, `cli.rs`, `client/`, `mcp/` and `api/`
    for any `crate::`/`memcastle::` `store` or `jobs` import, allowing only `main.rs`'s `SurrealStore` import for `migrate`.
 2. **Job status only changes through `domain::Job::apply`** — no other code assigns `job.status` directly.
-   Enforced by `domain::job`'s unit tests (every transition, including the rejected ones).
+   Enforced by `domain::job`'s table-driven test over every (status, event) pair, including the rejected ones,
+   and by the prek `job-status-only-via-apply` hook, which fails on any `.status =` assignment outside `domain/job.rs`.
 3. **The job queue is durable, the scheduler is only the execution mechanism** —
    a job's state survives a daemon restart.
    Enforced by `jobs::Scheduler::recover`, its per-state unit tests in `jobs::tests`,
@@ -43,6 +44,8 @@ Each of these should be enforced by a hook or a test. An invariant nothing check
    SurrealKit's `Sync`/`embed_schema!()` (`store::mod`), never a hand-rolled schema-diff/versioning engine.
    MemCastle owns only its own application data-migration steps and version watermark
    (`crate::migrate`, `store::migration_state`) — see `docs/adr/004-versioned-database-migrations.md`.
+   Enforced by the prek `no-hand-rolled-ddl` hook: no `DEFINE`/`REMOVE`/`ALTER` DDL or `INFO FOR` statement
+   may appear in Rust code under `src/` (comments excepted).
 
 ## Layout
 

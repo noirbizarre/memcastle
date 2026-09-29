@@ -800,6 +800,66 @@ mod tests {
         ));
     }
 
+    /// The complete transition table, spelled out independently of `apply`'s
+    /// `match` so a change to either shows up as a failure here.
+    fn expected_transition(from: JobStatus, event: JobEvent) -> Option<JobStatus> {
+        use JobEvent::{Cancel, Claim, Complete, Fail, Pause, RecoverToQueued, Resume, Retry};
+        use JobStatus::{Cancelled, Completed, Failed, Paused, Queued, Running};
+        match (from, event) {
+            (Queued, Claim) => Some(Running),
+            (Running, Pause) => Some(Paused),
+            (Paused, Resume) => Some(Queued),
+            (Running, Complete) => Some(Completed),
+            (Running, Fail) => Some(Failed),
+            (Queued | Paused | Running, Cancel) => Some(Cancelled),
+            (Running, RecoverToQueued) => Some(Queued),
+            (Failed, Retry) => Some(Queued),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn every_status_and_event_pair_is_either_the_documented_transition_or_rejected_untouched() {
+        let statuses = [
+            JobStatus::Queued,
+            JobStatus::Running,
+            JobStatus::Paused,
+            JobStatus::Completed,
+            JobStatus::Failed,
+            JobStatus::Cancelled,
+        ];
+        let events = [
+            JobEvent::Claim,
+            JobEvent::Pause,
+            JobEvent::Resume,
+            JobEvent::Complete,
+            JobEvent::Fail,
+            JobEvent::Cancel,
+            JobEvent::Retry,
+            JobEvent::RecoverToQueued,
+        ];
+        for from in statuses {
+            for event in events {
+                let mut job = demo_job();
+                job.status = from;
+                let result = job.apply(event);
+                match expected_transition(from, event) {
+                    Some(to) => {
+                        result
+                            .unwrap_or_else(|e| panic!("{from:?} + {event:?} must be legal: {e}"));
+                        assert_eq!(job.status, to, "{from:?} + {event:?}");
+                    }
+                    None => {
+                        assert!(result.is_err(), "{from:?} + {event:?} must be rejected");
+                        // A rejected event must leave the job exactly as it was,
+                        // or a refused request would still corrupt state.
+                        assert_eq!(job.status, from, "{from:?} + {event:?} changed status");
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn a_status_name_is_the_word_serde_uses() {
         for status in [

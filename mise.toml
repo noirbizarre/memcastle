@@ -240,10 +240,12 @@ git tpl diff --exit-code --stat
 description = "Run the architecture guard hooks over the whole tree"
 # The same hooks CI runs through `prek run --all-files`, minus the ones that
 # duplicate other tasks (fmt, clippy, typos, markdownlint, actionlint). These
-# enforce AGENTS.md invariants 1, 2 and 4, which nothing else in `check` covers.
+# enforce AGENTS.md invariants 1, 2, 4 and 5, which nothing else in `check` covers.
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
 prek run --all-files store-isolation
 prek run --all-files single-writer
+prek run --all-files job-status-only-via-apply
+prek run --all-files no-hand-rolled-ddl
 """
