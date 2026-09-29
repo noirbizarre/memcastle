@@ -288,7 +288,7 @@ impl McpTools {
     /// Read the `mcp-session-id` header rmcp's streamable-HTTP transport
     /// sets on every request after the initialize handshake — the only way
     /// to identify "which session is this" from inside a tool handler (see
-    /// `McpTools::modes`'s doc comment).
+    /// `McpTools::mode`'s doc comment).
     ///
     /// `None` when the header is absent or empty: a request with no session
     /// has no identity, and must not be given one by falling back to `""`,
@@ -473,7 +473,7 @@ impl McpTools {
 
     #[tool(
         description = "Submit a read-only palace consistency audit; returns the job id \
-                        immediately — poll memcastle_jobs_list or GET /api/jobs/{id} for the \
+                        immediately — poll memcastle_job_get for the \
                         report, which lands in the job's `result` field once completed"
     )]
     async fn memcastle_audit(

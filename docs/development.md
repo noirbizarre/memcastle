@@ -70,7 +70,8 @@ The global `--mode` flag (or `MEMCASTLE_MODE`) runs a CLI command in a memory mo
 
 - **Unit tests** live next to the code they test (`domain::job`'s state machine, `config`'s validation,
   `store`'s migrations/persistence — the storage tests use SurrealDB's in-memory engine for speed, plus one test
-  against a real SurrealKV directory to prove data survives a reconnect).
+  against a real SurrealKV directory; survival across a restart is proven at the process boundary in
+  `tests/persistence.rs`, because SurrealKV's file lock is not released within one process).
 - **Integration tests** (`tests/`) run against a tempdir palace and an OS-assigned port.
   Most start the daemon in-process (`tests/common`'s `TestDaemon`); the ones that need a real process boundary
   (SurrealKV's file lock is not released within one process) spawn the `memcastle` binary instead:
@@ -99,6 +100,8 @@ is enforced by the `store-isolation` `prek` hook.
 It greps `src/main.rs`, `src/cli.rs`, `src/client/`, `src/mcp/` and `src/api/`
 for a direct `store` or `jobs` import (including grouped `use crate::{store::..}` imports).
 The one allowed exception is `main.rs`'s `SurrealStore` import, which `memcastle migrate` needs.
+The pattern matches text, not syntax, so a diagnostic-code string such as `memcastle::jobs::not_found` trips it too:
+tests should read a code from the error (`Error::body().code`) rather than spell it out in these directories.
 If you find yourself wanting to import `store` from one of those,
 the fix is almost always to add a method to `app::AppServices` instead,
 so the same capability becomes available to every interface at once.

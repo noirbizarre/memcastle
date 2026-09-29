@@ -159,7 +159,7 @@ async fn cmd_migrate(config: &Config, args: MigrateArgs) -> Result<()> {
         if args.check && !status.pending.is_empty() {
             return Err(Error::MigrationsPending {
                 count: status.pending.len(),
-                versions: format!("{:?}", status.pending),
+                pending: status.pending.join(", "),
             });
         }
         return Ok(());

@@ -79,7 +79,7 @@ reads are rejected with the same typed `Error::ModeForbidden` as writes, never a
 - Callers must treat `Error::ModeForbidden` distinctly from a generic failure,
   since "no results" and "not allowed to read" are only distinguishable through the error type, by design.
 - `Audit`/`Repair` remaining ungated is provisional
-  (flagged in `domain::memory_mode`'s module doc as open to future reclassification), not a settled boundary.
+  (open to future reclassification, and recorded here rather than in `domain::memory_mode`), not a settled boundary.
 
 ## Amendment: how the session's mode is held
 

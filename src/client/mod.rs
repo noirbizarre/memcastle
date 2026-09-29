@@ -330,7 +330,8 @@ impl DaemonClient {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::JobNotFound`] if it doesn't exist.
+    /// Returns [`Error::Remote`] (status 404, code `memcastle::jobs::not_found`)
+    /// if the daemon has no such job.
     pub async fn get_job(&self, id: JobId) -> Result<Job> {
         self.send(self.http.get(format!("{}/api/jobs/{id}", self.base_url)))
             .await

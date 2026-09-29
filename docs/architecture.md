@@ -202,7 +202,8 @@ See [ADR-002](adr/002-memory-mode-session-scoping.md) for the full rationale and
 
 ## Memory primitives: recall, wake_up, diary
 
-- `AppServices::recall` is `search` under a recall-oriented name (task brief §14's vocabulary) —
+- `AppServices::recall` is `search` under a recall-oriented name
+  (the original project brief's vocabulary; the brief itself is not kept in this repository) —
   the same scoped `lexical_search` underneath, never paraphrasing or truncating a `Drawer.content`.
   It exists as a name to hang a future recall-specific reranking off, not a reason to duplicate logic today;
   MemCastle itself does not enforce a search-before-answer protocol — that discipline is an integration/skill's job.

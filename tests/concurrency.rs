@@ -1,6 +1,7 @@
 //! Proves multiple clients can hit the same daemon/store concurrently
-//! without corrupting state — the concurrency invariant the architecture
-//! doc calls out explicitly.
+//! without corrupting state — the invariant that one daemon serves many
+//! agent sessions at once (see `docs/architecture.md`, "The core idea", and
+//! ADR-002's tests of memory-mode isolation).
 
 mod common;
 

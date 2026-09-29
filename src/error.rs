@@ -92,7 +92,7 @@ pub enum Error {
 
     /// `memcastle migrate --check` found migrations that have not been
     /// applied.
-    #[error("{count} migration(s) pending: {versions}")]
+    #[error("{count} migration(s) pending: {pending}")]
     #[diagnostic(
         code(memcastle::migrate::pending),
         help(
@@ -102,8 +102,8 @@ pub enum Error {
     MigrationsPending {
         /// How many migrations are pending.
         count: usize,
-        /// The pending versions, for display.
-        versions: String,
+        /// The names of the pending migration steps, for display.
+        pending: String,
     },
 
     /// A SurrealDB operation failed.
@@ -133,7 +133,7 @@ pub enum Error {
         message: String,
     },
 
-    /// SurrealKit's schema `Sync` (or its `dry_run` check) failed. MemCastle
+    /// SurrealKit's schema `Sync` failed. MemCastle
     /// delegates all schema management to SurrealKit (see
     /// `docs/adr/004-versioned-database-migrations.md`) rather than
     /// reimplementing schema diffing, so this wraps whatever SurrealKit
@@ -196,7 +196,7 @@ pub enum Error {
     #[diagnostic(
         code(memcastle::jobs::invalid_transition),
         help(
-            "valid transitions: queued->running, running->paused, paused->queued, running->completed, running->failed, failed->queued (retry), queued|paused|running->cancelled"
+            "valid transitions: queued->running, running->paused, paused->queued, running->completed, running->failed, running->queued (crash recovery), failed->queued (retry), queued|paused|running->cancelled"
         )
     )]
     InvalidJobTransition {
@@ -551,7 +551,7 @@ mod tests {
             Error::not_implemented("memcastle wings"),
             Error::MigrationsPending {
                 count: 1,
-                versions: "[2]".to_string(),
+                pending: "canonical-timestamps".to_string(),
             },
             Error::Store {
                 source: surrealdb::Error::internal("boom".to_string()),

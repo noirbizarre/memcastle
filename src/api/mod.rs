@@ -1,4 +1,4 @@
-//! The HTTP API: health, status, and job inspection/control.
+//! The HTTP API: health, status, search/recall/wake-up/diary, job inspection/control and shutdown.
 //!
 //! Every handler is a deserialize -> call one `AppServices` method ->
 //! serialize sandwich — no business logic lives here. This is also where

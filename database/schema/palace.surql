@@ -45,7 +45,8 @@ DEFINE FIELD IF NOT EXISTS embedding ON TABLE drawer TYPE option<array<float>>;
 DEFINE FIELD IF NOT EXISTS provenance ON TABLE drawer TYPE object FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS valid_from ON TABLE drawer TYPE datetime;
 -- `option<string>`, not `option<datetime>`: casting a bound `NONE` value to
--- `<datetime>` errors rather than passing through in SurrealDB 2.x, so an
+-- `<datetime>` errors rather than passing through in SurrealDB 3.x (see
+-- ADR-005), so an
 -- *optional* datetime round-trips as a plain RFC3339 string instead (see
 -- `store::mod`'s module doc on the cast convention this schema relies on).
 DEFINE FIELD IF NOT EXISTS valid_to ON TABLE drawer TYPE option<string>;
