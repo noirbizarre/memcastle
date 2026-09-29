@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::domain::{
     CheckpointPayload, Drawer, DrawerId, Job, JobId, JobKind, JobStatus, MemoryMode, MiningSource,
@@ -62,6 +61,30 @@ pub struct WakeUpBudget {
     /// Maximum total content bytes across `recent_highlights` (not
     /// counting `diary`).
     pub max_bytes: usize,
+}
+
+/// How many hits `search`/`recall` return when the caller does not say. One
+/// value for every interface: the CLI, REST and MCP each used to carry their
+/// own copy of `10`, and a change to one would have made the same query
+/// return different amounts depending on how it was asked.
+pub const DEFAULT_SEARCH_LIMIT: u32 = 10;
+
+/// How many entries `diary_read` returns when the caller does not say —
+/// shared by every interface for the same reason as [`DEFAULT_SEARCH_LIMIT`].
+pub const DEFAULT_DIARY_LIMIT: u32 = 20;
+
+impl WakeUpBudget {
+    /// A budget from optional caller-supplied limits, each falling back to
+    /// [`WakeUpBudget::default`]'s value when omitted. The one place that
+    /// merge is written, instead of once per interface.
+    #[must_use]
+    pub fn from_options(max_items: Option<usize>, max_bytes: Option<usize>) -> Self {
+        let default = Self::default();
+        Self {
+            max_items: max_items.unwrap_or(default.max_items),
+            max_bytes: max_bytes.unwrap_or(default.max_bytes),
+        }
+    }
 }
 
 impl Default for WakeUpBudget {
@@ -439,32 +462,21 @@ impl AppServices {
             .get_or_create_room(wing_record.id, "diary", None)
             .await?;
 
-        let now = Utc::now();
-        let mut hasher = Sha256::new();
-        hasher.update(content.as_bytes());
-        let content_hash = hex_encode(&hasher.finalize());
-
-        let drawer = Drawer {
-            id: DrawerId::new(),
-            room: room.id,
+        let drawer = Drawer::new(
+            DrawerId::new(),
+            room.id,
             content,
-            content_hash,
-            source: Source {
+            Source {
                 kind: SourceKind::Manual,
                 uri: None,
                 agent: Some(agent_identity.to_string()),
             },
-            tags: vec![],
-            embedding: None,
-            provenance: Provenance {
+            vec![],
+            Provenance {
                 requested_by: agent_identity.to_string(),
                 job_id: None,
             },
-            valid_from: now,
-            valid_to: None,
-            created_at: now,
-            updated_at: now,
-        };
+        );
         self.store.create_drawer(&drawer).await?;
         Ok(drawer)
     }
@@ -599,12 +611,6 @@ impl AppServices {
             generated_at: Utc::now(),
         })
     }
-}
-
-/// Lowercase hex — see `mining`/`checkpoint`'s identical helper for why this
-/// is a few lines of its own rather than a shared dependency.
-fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[cfg(test)]
@@ -853,6 +859,26 @@ mod tests {
             }
             other => panic!("expected Error::ModeForbidden, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_wake_up_budget_falls_back_to_the_default_only_for_what_was_omitted() {
+        let default = WakeUpBudget::default();
+
+        let none = WakeUpBudget::from_options(None, None);
+        assert_eq!(
+            (none.max_items, none.max_bytes),
+            (default.max_items, default.max_bytes)
+        );
+
+        let partial = WakeUpBudget::from_options(Some(3), None);
+        assert_eq!(
+            (partial.max_items, partial.max_bytes),
+            (3, default.max_bytes)
+        );
+
+        let full = WakeUpBudget::from_options(Some(3), Some(100));
+        assert_eq!((full.max_items, full.max_bytes), (3, 100));
     }
 
     #[tokio::test]

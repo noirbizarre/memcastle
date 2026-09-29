@@ -67,7 +67,7 @@ struct SearchArgs {
 }
 
 fn default_search_limit() -> u32 {
-    10
+    crate::app::DEFAULT_SEARCH_LIMIT
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -143,7 +143,7 @@ struct DiaryReadArgs {
 }
 
 fn default_diary_limit() -> u32 {
-    20
+    crate::app::DEFAULT_DIARY_LIMIT
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -320,11 +320,7 @@ impl McpTools {
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
         let mode = self.mode_for(&parts);
-        let default_budget = WakeUpBudget::default();
-        let budget = WakeUpBudget {
-            max_items: args.max_items.unwrap_or(default_budget.max_items),
-            max_bytes: args.max_bytes.unwrap_or(default_budget.max_bytes),
-        };
+        let budget = WakeUpBudget::from_options(args.max_items, args.max_bytes);
         match self
             .app
             .wake_up(&args.agent_identity, args.wing.as_deref(), budget, mode)

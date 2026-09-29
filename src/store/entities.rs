@@ -53,7 +53,12 @@ impl SurrealStore {
     /// `kind` is normalized (trimmed, lowercased) before either half of the
     /// get-or-create runs, so `"Person"` and `"person"` resolve to the same
     /// entity — see [`normalize_label`].
-    pub async fn create_entity(&self, name: &str, kind: &str, properties: Value) -> Result<Entity> {
+    pub async fn get_or_create_entity(
+        &self,
+        name: &str,
+        kind: &str,
+        properties: Value,
+    ) -> Result<Entity> {
         let kind = required_label("kind", kind)?;
 
         let mut response = self

@@ -208,11 +208,7 @@ async fn cmd_recall(config: &Config, args: RecallArgs) -> Result<()> {
 }
 
 async fn cmd_wake_up(config: &Config, args: WakeUpArgs) -> Result<()> {
-    let default_budget = WakeUpBudget::default();
-    let budget = WakeUpBudget {
-        max_items: args.max_items.unwrap_or(default_budget.max_items),
-        max_bytes: args.max_bytes.unwrap_or(default_budget.max_bytes),
-    };
+    let budget = WakeUpBudget::from_options(args.max_items, args.max_bytes);
     let context = client(config)
         .wake_up(&args.agent_identity, args.wing.as_deref(), budget)
         .await?;

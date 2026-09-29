@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::TestDaemon;
+use common::{TestDaemon, get_job, wait_for_job_status};
 use memcastle::domain::{Job, JobId, JobStatus};
 
 #[tokio::test]
@@ -238,36 +238,6 @@ async fn the_client_reports_what_the_daemon_said_instead_of_blaming_the_connecti
         "{error:?}"
     );
     daemon.shutdown().await;
-}
-
-async fn get_job(client: &reqwest::Client, base_url: &str, id: JobId) -> Job {
-    client
-        .get(format!("{base_url}/api/jobs/{id}"))
-        .send()
-        .await
-        .expect("request")
-        .json()
-        .await
-        .expect("json")
-}
-
-/// Poll rather than sleep a fixed duration, matching the convention used
-/// throughout `tests/concurrency.rs` — a fixed sleep only holds up on a
-/// fast, idle machine.
-async fn wait_for_job_status(
-    client: &reqwest::Client,
-    base_url: &str,
-    id: JobId,
-    status: JobStatus,
-) -> Job {
-    for _ in 0..300 {
-        let job = get_job(client, base_url, id).await;
-        if job.status == status {
-            return job;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    panic!("job {id} did not reach {status:?} within 30s");
 }
 
 /// Unlike [`wait_for_job_status`], checks `attempt` and `status` in the

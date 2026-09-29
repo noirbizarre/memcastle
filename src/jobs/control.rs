@@ -114,4 +114,33 @@ impl JobContext {
         job.checkpoint = checkpoint;
         self.store.save_job(job).await
     }
+
+    /// Checkpoint an index-based handler (mining, checkpoint): record that
+    /// `index` of `total` units are done, with `{"next_index": index}` as the
+    /// resume state and `"{verb} {index}/{total} {unit}"` as the progress
+    /// line.
+    ///
+    /// Shared so every handler that walks a list agrees on the resume key —
+    /// a handler that spelled it differently would silently restart from
+    /// zero when resumed by the shared logic.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the store write fails.
+    pub async fn checkpoint_at(
+        &self,
+        job: &mut Job,
+        index: usize,
+        total: usize,
+        verb: &str,
+        unit: &str,
+    ) -> Result<()> {
+        let progress = JobProgress {
+            current: index as u32,
+            total: Some(total as u32),
+            message: Some(format!("{verb} {index}/{total} {unit}")),
+        };
+        self.checkpoint(job, progress, serde_json::json!({ "next_index": index }))
+            .await
+    }
 }

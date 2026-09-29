@@ -122,6 +122,18 @@ impl Scheduler {
         Ok(())
     }
 
+    /// Fetch a job the caller named by id.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::Error::JobNotFound`] if no job has that id.
+    async fn load_job(&self, id: JobId) -> Result<Job> {
+        self.store
+            .get_job(id)
+            .await?
+            .ok_or(crate::Error::JobNotFound { id: id.to_string() })
+    }
+
     /// Submit a new job and persist it as `Queued`.
     ///
     /// # Errors
@@ -153,11 +165,7 @@ impl Scheduler {
             control.request_pause();
             return Ok(());
         }
-        let mut job = self
-            .store
-            .get_job(id)
-            .await?
-            .ok_or(crate::Error::JobNotFound { id: id.to_string() })?;
+        let mut job = self.load_job(id).await?;
         // Not running: let the state machine produce the precise rejection.
         job.apply(JobEvent::Pause)?;
         // Only reachable if a record says `Running` with no worker behind it,
@@ -181,11 +189,7 @@ impl Scheduler {
             control.request_cancel();
             return Ok(());
         }
-        let mut job = self
-            .store
-            .get_job(id)
-            .await?
-            .ok_or(crate::Error::JobNotFound { id: id.to_string() })?;
+        let mut job = self.load_job(id).await?;
         job.apply(JobEvent::Cancel)?;
         self.store.save_job(&job).await?;
         Ok(())
@@ -198,11 +202,7 @@ impl Scheduler {
     ///
     /// Returns an error if the job doesn't exist or isn't `Paused`.
     pub async fn resume(&self, id: JobId) -> Result<()> {
-        let mut job = self
-            .store
-            .get_job(id)
-            .await?
-            .ok_or(crate::Error::JobNotFound { id: id.to_string() })?;
+        let mut job = self.load_job(id).await?;
         job.apply(JobEvent::Resume)?;
         self.store.save_job(&job).await?;
         Ok(())
@@ -216,11 +216,7 @@ impl Scheduler {
     ///
     /// Returns an error if the job doesn't exist or isn't `Failed`.
     pub async fn retry(&self, id: JobId) -> Result<()> {
-        let mut job = self
-            .store
-            .get_job(id)
-            .await?
-            .ok_or(crate::Error::JobNotFound { id: id.to_string() })?;
+        let mut job = self.load_job(id).await?;
         job.apply(JobEvent::Retry)?;
         self.store.save_job(&job).await?;
         Ok(())

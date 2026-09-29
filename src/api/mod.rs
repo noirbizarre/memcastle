@@ -73,7 +73,7 @@ struct SearchParams {
 }
 
 fn default_search_limit() -> u32 {
-    10
+    crate::app::DEFAULT_SEARCH_LIMIT
 }
 
 async fn search(
@@ -132,11 +132,7 @@ async fn wake_up(
     Query(params): Query<WakeUpParams>,
     ModeHeader(mode): ModeHeader,
 ) -> Result<impl IntoResponse, ApiError> {
-    let default_budget = WakeUpBudget::default();
-    let budget = WakeUpBudget {
-        max_items: params.max_items.unwrap_or(default_budget.max_items),
-        max_bytes: params.max_bytes.unwrap_or(default_budget.max_bytes),
-    };
+    let budget = WakeUpBudget::from_options(params.max_items, params.max_bytes);
     Ok(Json(
         state
             .app
@@ -177,7 +173,7 @@ struct DiaryReadParams {
 }
 
 fn default_diary_limit() -> u32 {
-    20
+    crate::app::DEFAULT_DIARY_LIMIT
 }
 
 async fn diary_read(

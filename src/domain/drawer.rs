@@ -2,6 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use super::{DrawerId, JobId, RoomId};
 
@@ -73,4 +74,88 @@ pub struct Drawer {
     pub created_at: DateTime<Utc>,
     /// Last-updated timestamp (metadata only — `content` itself is immutable).
     pub updated_at: DateTime<Utc>,
+}
+
+impl Drawer {
+    /// A freshly written drawer: its `content_hash` computed from `content`,
+    /// and every timestamp set to now, with no embedding and no validity end.
+    ///
+    /// The single place a drawer is assembled. Diary writes, mining and
+    /// checkpoints all used to build the struct by hand, each with its own
+    /// hashing and clock reads, so a change to what "a new drawer" means had
+    /// to be made in three places and could be missed in one.
+    #[must_use]
+    pub fn new(
+        id: DrawerId,
+        room: RoomId,
+        content: String,
+        source: Source,
+        tags: Vec<String>,
+        provenance: Provenance,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id,
+            room,
+            content_hash: content_hash(&content),
+            content,
+            source,
+            tags,
+            embedding: None,
+            provenance,
+            valid_from: now,
+            valid_to: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+}
+
+/// The SHA-256 of `content`, as lowercase hex — a drawer's `content_hash`.
+#[must_use]
+pub fn content_hash(content: &str) -> String {
+    sha256_hex(content.as_bytes())
+}
+
+/// SHA-256 of `bytes` as lowercase hex. Encoded by hand: `finalize()` returns
+/// a fixed-size byte array that does not implement `LowerHex`, and a
+/// dependency for one `format!` is not worth it.
+#[must_use]
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_new_drawer_hashes_its_content_and_starts_valid_with_matching_timestamps() {
+        let drawer = Drawer::new(
+            DrawerId::new(),
+            RoomId::new(),
+            "hello".to_string(),
+            Source {
+                kind: SourceKind::Manual,
+                uri: None,
+                agent: None,
+            },
+            vec![],
+            Provenance {
+                requested_by: "test".to_string(),
+                job_id: None,
+            },
+        );
+
+        assert_eq!(
+            drawer.content_hash, "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+            "SHA-256 of `hello`"
+        );
+        assert_eq!(drawer.created_at, drawer.valid_from);
+        assert_eq!(drawer.created_at, drawer.updated_at);
+        assert!(drawer.valid_to.is_none() && drawer.embedding.is_none());
+    }
 }

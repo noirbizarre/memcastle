@@ -18,10 +18,6 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::Utc;
-use serde_json::json;
-use sha2::{Digest, Sha256};
-
 use crate::domain::Job;
 use crate::domain::{Drawer, DrawerId, MiningSource, Provenance, Source, SourceKind};
 use crate::error::Result;
@@ -118,57 +114,38 @@ async fn mine_directory(
             return Ok(JobOutcome::Cancelled);
         }
         if ctx.should_pause() {
-            checkpoint_at(ctx, job, index, files.len()).await?;
+            ctx.checkpoint_at(job, index, files.len(), "mined", "files")
+                .await?;
             return Ok(JobOutcome::Paused);
         }
 
         if let Some(content) = read_mineable(file) {
-            let now = Utc::now();
-            let mut hasher = Sha256::new();
-            hasher.update(content.as_bytes());
-            let content_hash = hex_encode(&hasher.finalize());
-
-            let drawer = Drawer {
+            let drawer = Drawer::new(
                 // Derived, not random: a crash between the write below and
                 // the checkpoint at the loop's end makes the resumed attempt
                 // redo this same file, and a fresh id would store it twice.
-                id: DrawerId::derive(job.id.0, &format!("mine-drawer:{index}")),
-                room: room.id,
+                DrawerId::derive(job.id.0, &format!("mine-drawer:{index}")),
+                room.id,
                 content,
-                content_hash,
-                source: Source {
+                Source {
                     kind: SourceKind::File,
                     uri: Some(file.display().to_string()),
                     agent: None,
                 },
-                tags: vec![],
-                embedding: None,
-                provenance: Provenance {
+                vec![],
+                Provenance {
                     requested_by: job.requested_by.clone(),
                     job_id: Some(job.id),
                 },
-                valid_from: now,
-                valid_to: None,
-                created_at: now,
-                updated_at: now,
-            };
+            );
             store.create_drawer_once(&drawer).await?;
         }
 
-        checkpoint_at(ctx, job, index + 1, files.len()).await?;
+        ctx.checkpoint_at(job, index + 1, files.len(), "mined", "files")
+            .await?;
     }
 
     Ok(JobOutcome::Completed)
-}
-
-async fn checkpoint_at(ctx: &JobContext, job: &mut Job, index: usize, total: usize) -> Result<()> {
-    let progress = crate::domain::JobProgress {
-        current: index as u32,
-        total: Some(total as u32),
-        message: Some(format!("mined {index}/{total} files")),
-    };
-    ctx.checkpoint(job, progress, json!({ "next_index": index }))
-        .await
 }
 
 /// Recursively collect file paths under `dir`, skipping noisy subtrees and
@@ -204,13 +181,6 @@ fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Lowercase hex, without pulling in a dependency just for this — `sha2`'s
-/// `finalize()` returns a fixed-size byte array, not something that
-/// implements `LowerHex` directly.
-fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
 /// Read `path` as UTF-8 text, or `None` if it's too large, empty, or not
 /// valid UTF-8 — a silent skip rather than a job-ending error, since a mixed
 /// tree of text and binary files is the normal case, not an exceptional one.
@@ -228,6 +198,7 @@ mod tests {
     use super::*;
     use crate::domain::{JobKind, Priority};
     use crate::jobs::JobControl;
+    use serde_json::json;
 
     #[tokio::test]
     async fn replaying_files_whose_checkpoint_was_never_saved_mines_no_duplicates() {
