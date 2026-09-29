@@ -313,18 +313,26 @@ async fn restart_brings_the_daemon_back_on_the_requested_address() {
     let wanted = format!("127.0.0.1:{port}");
     assert_ne!(first.bind_addr, wanted);
 
-    let output = Command::new(&bin)
+    // Output goes to files, not pipes: on Windows the daemon `restart` leaves
+    // running inherits every inheritable handle of its parent, including the
+    // write end of a captured pipe, so waiting for the pipe to close would
+    // wait for the daemon to exit.
+    let stdout_file = dir.path().join("restart.out");
+    let stderr_file = dir.path().join("restart.err");
+    let status = Command::new(&bin)
         .args(["restart", "--bind", &wanted])
         .env("MEMCASTLE_PALACE_PATH", &palace)
-        .output()
+        .stdout(std::fs::File::create(&stdout_file).expect("stdout file"))
+        .stderr(std::fs::File::create(&stderr_file).expect("stderr file"))
+        .status()
         .await
         .expect("run `memcastle restart`");
     assert!(
-        output.status.success(),
+        status.success(),
         "restart failed: {}",
-        String::from_utf8_lossy(&output.stderr)
+        std::fs::read_to_string(&stderr_file).unwrap_or_default()
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = std::fs::read_to_string(&stdout_file).expect("restart output");
     assert!(
         stdout.contains(&wanted),
         "it must report where it came back: {stdout}"
