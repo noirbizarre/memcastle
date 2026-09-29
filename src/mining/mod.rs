@@ -390,7 +390,12 @@ mod tests {
             .unwrap()
             .into_iter()
             .filter_map(|drawer| drawer.source.uri)
-            .map(|uri| uri.rsplit('/').next().unwrap_or_default().to_string())
+            // `Path`, not a split on `/`: the separator is `\` on Windows.
+            .filter_map(|uri| {
+                Path::new(&uri)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
             .collect();
         mined.sort();
         (job, mined)

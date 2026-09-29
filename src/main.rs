@@ -191,10 +191,16 @@ async fn cmd_restart(
     let daemon = client(config, mode);
     if daemon.health().await {
         daemon.shutdown().await?;
-        // Best-effort: poll until the port frees up, or give up after a few
-        // seconds rather than hanging indefinitely on a stuck shutdown.
-        for _ in 0..50 {
-            if !daemon.health().await {
+        // Wait for the old daemon to be *gone*, not merely to stop answering:
+        // its listener closes as soon as shutdown begins, but it then drains
+        // running jobs (up to `jobs.drain_timeout_secs`) while still holding
+        // the palace's file lock, and a new daemon started in that window
+        // dies on the lock. The registry file is removed only once the drain
+        // is over, which makes it the signal that matters. Bounded, so a
+        // stuck shutdown cannot hang this command.
+        let registry = memcastle::server::lifecycle::registry_path(&config.palace.path);
+        for _ in 0..600 {
+            if !registry.exists() {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -202,48 +208,64 @@ async fn cmd_restart(
     }
 
     let exe = std::env::current_exe().map_err(|source| Error::io("current executable", source))?;
-    let mut command = std::process::Command::new(exe);
-    command.arg("serve");
-    if let Some(path) = config_path {
-        command.arg("--config").arg(path);
-    }
-    if let Some(bind) = args.bind {
-        command.arg("--bind").arg(bind.to_string());
-    }
-    // Detached from this terminal: the new daemon outlives this command, and
-    // an inherited stderr would interleave its log with the shell prompt.
-    let mut child = command
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|source| Error::io("memcastle serve", source))?;
+    // The old process removes its registry file just before it exits, so
+    // its lock can outlive that by a moment: a new daemon that dies at once
+    // is retried a couple of times before it is reported as failed.
+    const ATTEMPTS: u32 = 3;
+    let mut last_failure = String::new();
+    for attempt in 1..=ATTEMPTS {
+        let mut command = std::process::Command::new(&exe);
+        command.arg("serve");
+        if let Some(path) = config_path {
+            command.arg("--config").arg(path);
+        }
+        if let Some(bind) = args.bind {
+            command.arg("--bind").arg(bind.to_string());
+        }
+        // Detached from this terminal: the new daemon outlives this command,
+        // and an inherited stderr would interleave its log with the prompt.
+        let mut child = command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|source| Error::io("memcastle serve", source))?;
 
-    // A daemon takes a couple of seconds to open SurrealDB and migrate; a
-    // debug build on a slow disk takes far longer, hence the generous bound.
-    for _ in 0..600 {
-        if let Some(info) = memcastle::server::lifecycle::read_if_live(&config.palace.path) {
-            println!(
-                "restarted: memcastle is serving on http://{}",
-                info.bind_addr
-            );
-            return Ok(());
+        // A daemon takes a couple of seconds to open SurrealDB and migrate; a
+        // debug build on a slow disk takes far longer, hence the generous
+        // bound.
+        for _ in 0..600 {
+            if let Some(info) = memcastle::server::lifecycle::read_if_live(&config.palace.path) {
+                println!(
+                    "restarted: memcastle is serving on http://{}",
+                    info.bind_addr
+                );
+                return Ok(());
+            }
+            if let Some(status) = child
+                .try_wait()
+                .map_err(|source| Error::io("memcastle serve", source))?
+            {
+                last_failure =
+                    format!("the new daemon exited with {status} before it started serving");
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|source| Error::io("memcastle serve", source))?
-        {
-            return Err(Error::server(format!(
-                "the new daemon exited with {status} before it started serving; run \
-                 `memcastle serve` in the foreground to see why"
-            )));
+        if last_failure.is_empty() {
+            return Err(Error::server(
+                "the new daemon did not start serving within 60 seconds; run `memcastle serve` \
+                 in the foreground to see what it is waiting on",
+            ));
         }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        if attempt < ATTEMPTS {
+            last_failure.clear();
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
     }
-    Err(Error::server(
-        "the new daemon did not start serving within 60 seconds; run `memcastle serve` in the \
-         foreground to see what it is waiting on",
-    ))
+    Err(Error::server(format!(
+        "{last_failure} ({ATTEMPTS} attempts); run `memcastle serve` in the foreground to see why"
+    )))
 }
 
 async fn cmd_search(config: &Config, mode: Option<MemoryMode>, args: SearchArgs) -> Result<()> {
