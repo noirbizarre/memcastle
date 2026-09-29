@@ -15,6 +15,10 @@ use memcastle::server::lifecycle::{RuntimeInfo, read_if_live};
 use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 
+mod common;
+
+use common::wait_for_all_jobs_completed;
+
 #[tokio::test]
 async fn drawers_survive_a_daemon_restart_against_the_same_palace() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -49,7 +53,7 @@ async fn drawers_survive_a_daemon_restart_against_the_same_palace() {
             .error_for_status()
             .expect("mine job accepted");
 
-        wait_for_all_jobs_completed(&client, &base).await;
+        wait_for_all_jobs_completed(&client, &base, 1).await;
         stop_daemon(&bin, &palace, &mut child).await;
     }
 
@@ -111,7 +115,7 @@ async fn checkpoint_drawers_survive_a_daemon_restart_against_the_same_palace() {
             .error_for_status()
             .expect("checkpoint job accepted");
 
-        wait_for_all_jobs_completed(&client, &base).await;
+        wait_for_all_jobs_completed(&client, &base, 1).await;
         stop_daemon(&bin, &palace, &mut child).await;
     }
 
@@ -440,24 +444,6 @@ async fn drain_stderr(child: &mut Child) -> String {
             tokio::time::timeout(Duration::from_millis(500), out.read_to_string(&mut stderr)).await;
     }
     stderr
-}
-
-async fn wait_for_all_jobs_completed(client: &reqwest::Client, base: &str) {
-    for _ in 0..100 {
-        let jobs: Vec<serde_json::Value> = client
-            .get(format!("{base}/api/jobs"))
-            .send()
-            .await
-            .expect("list jobs")
-            .json()
-            .await
-            .expect("jobs response is json");
-        if !jobs.is_empty() && jobs.iter().all(|job| job["status"] == "completed") {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    panic!("mining job did not complete in time");
 }
 
 async fn stop_daemon(bin: &Path, palace: &Path, child: &mut Child) {

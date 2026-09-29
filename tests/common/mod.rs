@@ -126,3 +126,29 @@ pub async fn wait_for_job_status(
     }
     panic!("job {id} did not reach {status:?} within 30s");
 }
+
+/// Poll until exactly `expected` jobs exist and every one is `Completed`,
+/// returning them. The count matters: without it, a list that is momentarily
+/// empty (or short of a job still being submitted) would satisfy "all of them
+/// completed" vacuously.
+pub async fn wait_for_all_jobs_completed(
+    client: &reqwest::Client,
+    base_url: &str,
+    expected: usize,
+) -> Vec<Job> {
+    for _ in 0..300 {
+        let jobs: Vec<Job> = client
+            .get(format!("{base_url}/api/jobs"))
+            .send()
+            .await
+            .expect("request")
+            .json()
+            .await
+            .expect("json");
+        if jobs.len() == expected && jobs.iter().all(|job| job.status == JobStatus::Completed) {
+            return jobs;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("not every one of {expected} job(s) reached Completed within 30s");
+}
