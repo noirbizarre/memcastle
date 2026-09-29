@@ -31,8 +31,11 @@ Each of these should be enforced by a hook or a test. An invariant nothing check
    a job's state survives a daemon restart.
    Enforced by `jobs::Scheduler::recover`, its per-state unit tests in `jobs::tests`,
    and `tests/persistence.rs` (SIGKILL a daemon mid-job, restart, the job resumes).
-4. **One daemon per palace, one writer** — `store` is only ever constructed by `server::run` or the `migrate`
+4. **One daemon per embedded palace, one writer** — `store` is only ever constructed by `server::run` or the `migrate`
    CLI command (the same second exception as (1)); nothing else opens the embedded SurrealKV path directly.
+   SurrealKV's file lock enforces the single writer for an embedded palace.
+   A remote palace may be shared by several daemons; job leases and fencing keep that safe
+   (see `docs/adr/006-job-leases.md`).
    Enforced by the prek `single-writer` hook: `SurrealStore::connect` and the `surrealkv:` endpoint
    may only appear under `server/`, `store/` and in `main.rs`.
 5. **Schema management is SurrealKit's, not MemCastle's** — `database/schema/*.surql` is applied through

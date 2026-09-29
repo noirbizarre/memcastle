@@ -119,11 +119,12 @@ entry = '''bash -c '! grep -rnP --include=*.rs "(?<![A-Za-z0-9_])(crate|memcastl
 files = '^src/(main\.rs|cli\.rs|client/|mcp/|api/)'
 pass_filenames = false
 
-# AGENTS.md invariant #4: one daemon per palace, one writer — a store is only
-# ever constructed by `server::run` or the `migrate` command in `main.rs`
-# (the same documented exception as invariant #1). Nothing else may open the
-# embedded SurrealKV path, since a second opener would either fail on the
-# file lock or, on the remote backend, become a second writer.
+# AGENTS.md invariant #4: one daemon per embedded palace, one writer — a store
+# is only ever constructed by `server::run` or the `migrate` command in
+# `main.rs` (the same documented exception as invariant #1). Nothing else may
+# open the embedded SurrealKV path, since a second opener would either fail on
+# the file lock or, on the remote backend, bypass the lease/fencing that keeps
+# several daemons safe (ADR-006).
 [[repos.hooks]]
 id = "single-writer"
 name = "only server::run and `migrate` construct a SurrealStore"

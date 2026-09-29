@@ -78,7 +78,7 @@ If you find yourself wanting to import `store` from one of those,
 the fix is almost always to add a method to `app::AppServices` instead,
 so the same capability becomes available to every interface at once.
 
-The `single-writer` hook enforces the companion invariant, one daemon and one writer per palace:
+The `single-writer` hook enforces the companion invariant, one daemon and one writer per embedded palace:
 `SurrealStore::connect` may only be called from `src/server/`, `src/store/` and `src/main.rs` (for `migrate`).
 
 ## This repository is generated from a template

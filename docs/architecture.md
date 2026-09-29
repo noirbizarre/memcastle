@@ -23,7 +23,8 @@ opens its own SQLite connections, and reloads an embedding model from scratch.
 `mempalace-rs` in particular pairs SQLite (metadata) with a separate `usearch` HNSW index,
 kept in sync only by best-effort,
 which is the root cause of an entire "watchdog / auto-repair / re-embed everything" subsystem in that codebase.
-MemCastle avoids that failure category by construction: one store, one writer process, no second index file to desync.
+MemCastle avoids that failure category by construction: one store, one writer process per embedded palace (a remote palace's several daemons are kept safe by job leases, see ADR-006),
+no second index file to desync.
 
 ## Layers
 

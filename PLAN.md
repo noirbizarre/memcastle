@@ -52,8 +52,9 @@ Status: complete — every issue below is done.
 issue for full reasoning):
 
 - `pi-palace` routes every MemPalace write through its daemon's job queue to
-  dodge a multi-process file-lock race. MemCastle already has one process, one
-  writer (AGENTS.md invariant #4) — that specific race doesn't exist here.
+  dodge a multi-process file-lock race. An embedded MemCastle palace already
+  has one process, one writer (AGENTS.md invariant #4), and a remote one is
+  protected by job leases (ADR-006) — that specific race doesn't exist here.
   Checkpoint is a job for durability/priority/restart-survival, not lock
   avoidance; diary stays a direct, fast `AppServices` call (#12, #13).
 - MemCastle's single-SurrealDB design is explicitly meant to avoid needing a
