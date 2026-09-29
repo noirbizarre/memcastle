@@ -106,10 +106,12 @@ pub enum JobKind {
     /// issue that requested it (a second "fail stuck jobs" action turned
     /// out to be redundant with `jobs::Scheduler::recover`).
     Repair {
-        /// When `true` (the default at every CLI/API entry point), only
-        /// record what would be done in the report — never mutate
+        /// When `true` (the default at every entry point — a submission that
+        /// omits it deserializes as a dry run, never as a destructive one),
+        /// only record what would be done in the report — never mutate
         /// anything. `false` performs exactly the actions a prior dry run
         /// would have reported, no more.
+        #[serde(default = "default_dry_run")]
         dry_run: bool,
         /// Restrict actions to what a specific prior [`JobKind::Audit`]
         /// job found, rather than a fresh palace-wide scan alone. Only
@@ -118,6 +120,12 @@ pub enum JobKind {
         /// never trusts a stored report on its own.
         based_on_job: Option<JobId>,
     },
+}
+
+/// A repair that says nothing about `dry_run` must fail safe: destructive
+/// only when the caller asked for it explicitly.
+fn default_dry_run() -> bool {
+    true
 }
 
 /// A snapshot of how far along a job is.
@@ -515,6 +523,30 @@ mod tests {
         let err = job.apply(JobEvent::Retry).unwrap_err();
         assert_eq!(err.from, JobStatus::Completed);
         assert_eq!(job.status, JobStatus::Completed);
+    }
+
+    #[test]
+    fn a_repair_submission_that_omits_dry_run_is_a_dry_run() {
+        let kind: JobKind =
+            serde_json::from_value(serde_json::json!({ "type": "repair" })).unwrap();
+        assert!(
+            matches!(
+                kind,
+                JobKind::Repair {
+                    dry_run: true,
+                    based_on_job: None
+                }
+            ),
+            "an omitted dry_run must never mean a destructive run: {kind:?}"
+        );
+    }
+
+    #[test]
+    fn an_explicit_dry_run_false_is_honoured() {
+        let kind: JobKind =
+            serde_json::from_value(serde_json::json!({ "type": "repair", "dry_run": false }))
+                .unwrap();
+        assert!(matches!(kind, JobKind::Repair { dry_run: false, .. }));
     }
 
     #[test]

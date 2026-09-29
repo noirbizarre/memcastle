@@ -50,6 +50,40 @@ async fn a_fresh_palaces_dry_run_repair_completes_with_no_planned_actions() {
 }
 
 #[tokio::test]
+async fn a_repair_submitted_without_dry_run_over_http_is_a_dry_run() {
+    let daemon = TestDaemon::start().await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .post(format!("{}/api/jobs", daemon.base_url))
+        .json(&serde_json::json!({ "type": "repair", "requested_by": "test" }))
+        .send()
+        .await
+        .expect("request");
+    assert!(
+        response.status().is_success(),
+        "a repair without dry_run must be accepted, not rejected: {}",
+        response.status()
+    );
+    let submitted: Job = response.json().await.expect("json");
+
+    let job = wait_for_job_status(
+        &client,
+        &daemon.base_url,
+        submitted.id,
+        JobStatus::Completed,
+    )
+    .await;
+    assert_eq!(
+        job.result.expect("result")["dry_run"],
+        serde_json::json!(true),
+        "the default must be the non-destructive one"
+    );
+
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_fresh_palaces_applied_repair_completes_with_no_actions_taken() {
     let daemon = TestDaemon::start().await;
     let client = reqwest::Client::new();
