@@ -42,6 +42,9 @@ cli / mcp / api          <- interfaces (thin: parse, dispatch, serialize)
 Every subcommand except `serve`/`daemon`/`migrate` is a thin `client::DaemonClient` HTTP call —
 `memcastle mine ./project` submits a job over HTTP
 exactly the way an MCP tool call or a future web dashboard would, rather than mining anything itself.
+`restart` adds only process management on top of that:
+it reads the daemon's registry file (`server::lifecycle`) to know when the old daemon is really gone,
+then respawns `serve` — it never touches `store` or `jobs`.
 `serve`/`daemon` is the one command with real work:
 it *is* the composition root (`server::run`) that owns the store, the scheduler, and the HTTP/MCP listeners.
 `migrate` is a second, narrow exception: it connects to storage directly through `crate::migrate`,

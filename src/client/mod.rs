@@ -1,6 +1,7 @@
 //! The CLI's HTTP client for a running daemon.
 //!
-//! Every non-`serve` CLI command is a thin wrapper over this — it never
+//! Every CLI command except `serve`/`daemon` and `migrate` is a thin wrapper
+//! over this (`restart` adds only daemon process management) — it never
 //! touches `store` or `jobs` directly (same rule as `api`/`mcp`; see
 //! `app`'s doc comment), which is what guarantees the CLI can only ever do
 //! what a web dashboard calling the same API could also do.

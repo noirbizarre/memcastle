@@ -14,7 +14,9 @@
 //!
 //! `main.rs`/`cli.rs` are thin: every subcommand either runs `server::run`
 //! (the `serve`/`daemon` command) or goes through `client::DaemonClient`
-//! (everything else) — see `docs/architecture.md` for the full rationale.
+//! (everything else), with two narrow exceptions: `migrate` connects to
+//! storage itself, and `restart` also manages the daemon process (registry
+//! file plus respawn) — see `docs/architecture.md` for the full rationale.
 
 #![allow(clippy::result_large_err)]
 #![warn(missing_docs)]

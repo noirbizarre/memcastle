@@ -3,7 +3,9 @@
 //! Every subcommand is either `serve`/`daemon` (which runs the actual
 //! engine, via `memcastle::server::run`) or a thin `DaemonClient` call — see
 //! `memcastle::app`'s doc comment for why that split is the whole point of
-//! this architecture.
+//! this architecture. The exceptions: `migrate` opens storage itself (it must
+//! work before a daemon exists), and `restart` additionally manages the daemon
+//! process (registry file plus respawn) without touching `store` or `jobs`.
 
 #![allow(clippy::result_large_err)]
 

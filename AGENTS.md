@@ -20,7 +20,8 @@ Each of these should be enforced by a hook or a test. An invariant nothing check
 
 1. **The CLI has no business logic MCP/HTTP can't reuse** —
    every subcommand except `serve`/`daemon`/`migrate` only calls `client::DaemonClient`, never `store` or `jobs`
-   directly. `migrate` is a second, narrow exception alongside `serve`: it connects to storage directly (via
+   directly. (`restart` also manages the daemon *process* — it reads the registry file via `server::lifecycle`
+   and respawns `serve` — but touches neither `store` nor `jobs`.) `migrate` is a second, narrow exception alongside `serve`: it connects to storage directly (via
    `crate::migrate::run`/`status`, the same runner `serve` calls on every startup) because migration must work
    without, and before, a daemon exists — see `docs/adr/004-versioned-database-migrations.md`.
    Enforced by the `prek` `store-isolation` hook: it greps `main.rs`, `cli.rs`, `client/`, `mcp/` and `api/`
