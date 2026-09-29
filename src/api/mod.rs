@@ -6,12 +6,13 @@
 //! `memcastle serve` to shut down gracefully (see `server::lifecycle`).
 
 mod error;
+mod extract;
 mod mode;
 
 use std::str::FromStr;
 
 use axum::Router;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Json};
 use axum::routing::{get, post};
 use serde::Deserialize;
@@ -19,6 +20,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::app::{AppServices, WakeUpBudget};
 use crate::domain::{JobId, JobKind, JobStatus, MiningSource};
+
+use extract::{ApiJson, ApiQuery};
 
 pub use error::ApiError;
 pub use mode::ModeHeader;
@@ -78,7 +81,7 @@ fn default_search_limit() -> u32 {
 
 async fn search(
     State(state): State<ApiState>,
-    Query(params): Query<SearchParams>,
+    ApiQuery(params): ApiQuery<SearchParams>,
     ModeHeader(mode): ModeHeader,
 ) -> Result<impl IntoResponse, ApiError> {
     Ok(Json(
@@ -106,7 +109,7 @@ struct RecallParams {
 
 async fn recall(
     State(state): State<ApiState>,
-    Query(params): Query<RecallParams>,
+    ApiQuery(params): ApiQuery<RecallParams>,
     ModeHeader(mode): ModeHeader,
 ) -> Result<impl IntoResponse, ApiError> {
     Ok(Json(
@@ -129,7 +132,7 @@ struct WakeUpParams {
 
 async fn wake_up(
     State(state): State<ApiState>,
-    Query(params): Query<WakeUpParams>,
+    ApiQuery(params): ApiQuery<WakeUpParams>,
     ModeHeader(mode): ModeHeader,
 ) -> Result<impl IntoResponse, ApiError> {
     let budget = WakeUpBudget::from_options(params.max_items, params.max_bytes);
@@ -159,7 +162,7 @@ struct DiaryWriteBody {
 async fn diary_write(
     State(state): State<ApiState>,
     ModeHeader(mode): ModeHeader,
-    Json(body): Json<DiaryWriteBody>,
+    ApiJson(body): ApiJson<DiaryWriteBody>,
 ) -> Result<impl IntoResponse, ApiError> {
     Ok(Json(
         state
@@ -189,7 +192,7 @@ fn default_diary_limit() -> u32 {
 
 async fn diary_read(
     State(state): State<ApiState>,
-    Query(params): Query<DiaryReadParams>,
+    ApiQuery(params): ApiQuery<DiaryReadParams>,
     ModeHeader(mode): ModeHeader,
 ) -> Result<impl IntoResponse, ApiError> {
     Ok(Json(
@@ -208,7 +211,7 @@ struct ListJobsParams {
 async fn list_jobs(
     State(state): State<ApiState>,
     ModeHeader(mode): ModeHeader,
-    Query(params): Query<ListJobsParams>,
+    ApiQuery(params): ApiQuery<ListJobsParams>,
 ) -> Result<impl IntoResponse, ApiError> {
     let status = params.status.map(|s| parse_status(&s)).transpose()?;
     Ok(Json(state.app.list_jobs(status, mode).await?))
@@ -235,7 +238,7 @@ fn default_requested_by() -> String {
 async fn submit_job(
     State(state): State<ApiState>,
     ModeHeader(mode): ModeHeader,
-    Json(body): Json<SubmitJobBody>,
+    ApiJson(body): ApiJson<SubmitJobBody>,
 ) -> Result<impl IntoResponse, ApiError> {
     let job = match body.kind {
         JobKind::Mine { source, wing } => {
