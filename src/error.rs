@@ -309,17 +309,31 @@ pub enum Error {
         id: String,
     },
 
-    /// The HTTP server failed to bind or serve.
+    /// The HTTP server failed while starting or serving (a failed *bind* is
+    /// [`Error::ServerBind`]).
     #[error("server error: {message}")]
     #[diagnostic(
         code(memcastle::server::failed),
-        help(
-            "check that the bind address is free, or pick another with `--bind` or MEMCASTLE_BIND"
-        )
+        help("run `memcastle serve -v` in the foreground to see what the daemon was doing")
     )]
     Server {
         /// What went wrong.
         message: String,
+    },
+
+    /// The daemon could not listen on the configured address and port.
+    ///
+    /// Its own variant, not [`Error::Server`], because the fix depends on
+    /// *why* the bind failed (port taken, port privileged, address not on
+    /// this machine) and the help text is chosen from the OS error kind.
+    #[error("cannot listen on {addr}: {source}")]
+    #[diagnostic(code(memcastle::server::bind_failed), help("{}", bind_help(source)))]
+    ServerBind {
+        /// The address the daemon tried to bind.
+        addr: std::net::SocketAddr,
+        /// The OS error.
+        #[source]
+        source: std::io::Error,
     },
 
     /// A memory operation was rejected by the calling session/request's
@@ -503,6 +517,12 @@ impl Error {
         }
     }
 
+    /// Build an [`Error::ServerBind`].
+    #[must_use]
+    pub fn server_bind(addr: std::net::SocketAddr, source: std::io::Error) -> Self {
+        Self::ServerBind { addr, source }
+    }
+
     /// Build an [`Error::MigrationLocked`].
     pub fn migration_locked(owner: impl Into<String>) -> Self {
         Self::MigrationLocked {
@@ -520,6 +540,30 @@ impl Error {
             version,
             name: name.into(),
             message: message.into(),
+        }
+    }
+}
+
+/// The fix for a failed bind, chosen by what the OS said: each cause has a
+/// different remedy, and "check the address" would send someone whose port is
+/// simply taken to the wrong setting.
+fn bind_help(source: &std::io::Error) -> &'static str {
+    match source.kind() {
+        std::io::ErrorKind::AddrInUse => {
+            "another process (possibly another memcastle daemon) already listens on that port: \
+             stop it, or pick a free port with `--port`, MEMCASTLE_PORT or `server.port`"
+        }
+        std::io::ErrorKind::PermissionDenied => {
+            "binding this port needs privileges (ports below 1024 usually do): \
+             pick a higher port with `--port`, MEMCASTLE_PORT or `server.port`"
+        }
+        std::io::ErrorKind::AddrNotAvailable => {
+            "this machine has no interface with that address: \
+             check `--bind`, MEMCASTLE_BIND or `server.bind` (`127.0.0.1` is always available)"
+        }
+        _ => {
+            "check the listener address and port (`--bind`/`--port`, MEMCASTLE_BIND/MEMCASTLE_PORT \
+             or `server.bind`/`server.port`)"
         }
     }
 }
@@ -613,6 +657,10 @@ mod tests {
                 id: "x".to_string(),
             },
             Error::server("boom"),
+            Error::server_bind(
+                std::net::SocketAddr::from(([127, 0, 0, 1], 8420)),
+                std::io::Error::from(std::io::ErrorKind::AddrInUse),
+            ),
             Error::ModeForbidden {
                 operation: "checkpoint".to_string(),
                 mode: crate::domain::MemoryMode::Disabled,
@@ -647,6 +695,7 @@ mod tests {
             | Error::JobOrphaned { .. }
             | Error::LeaseLost { .. }
             | Error::Server { .. }
+            | Error::ServerBind { .. }
             | Error::ModeForbidden { .. }
             | Error::MigrationLocked { .. }
             | Error::MigrationFailed { .. } => {}
@@ -710,6 +759,27 @@ mod tests {
             "input help must not blame the config: {input}"
         );
         assert!(config.contains("config file"));
+    }
+
+    #[test]
+    fn a_failed_bind_names_the_address_and_the_help_follows_the_os_error() {
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 8420));
+        let cases = [
+            (std::io::ErrorKind::AddrInUse, "--port"),
+            (std::io::ErrorKind::PermissionDenied, "privileges"),
+            (std::io::ErrorKind::AddrNotAvailable, "--bind"),
+            (std::io::ErrorKind::Other, "--bind"),
+        ];
+        for (kind, expected) in cases {
+            let error = Error::server_bind(addr, std::io::Error::from(kind));
+            assert!(error.to_string().contains("127.0.0.1:8420"), "{error}");
+            assert_eq!(
+                error.code().map(|c| c.to_string()).as_deref(),
+                Some("memcastle::server::bind_failed")
+            );
+            let help = error.help().unwrap().to_string();
+            assert!(help.contains(expected), "{kind:?}: {help}");
+        }
     }
 
     #[test]

@@ -31,7 +31,8 @@ A daemon and a client started from different working directories would disagree 
 - **The registry moves out of the palace's way.**
   It is runtime metadata, so it lives in the state directory, not in the data directory that users back up and copy.
 - **Precedence is defaults, config file, environment, command line.**
-  A global `--palace` flag joins `--bind` as the command-line layer, built once before the config is loaded
+  A global `--palace` flag joins `--bind` (and, since ADR-011, `--port`) as the command-line layer,
+  built once before the config is loaded
   so that every command resolves the same palace.
 - **A palace path must be absolute.**
   Validation rejects a relative one with a message naming the ways to set it.

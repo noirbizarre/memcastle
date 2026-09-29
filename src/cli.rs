@@ -4,7 +4,7 @@
 //! another, and keeping them apart is what lets the library be used without
 //! the CLI. See `main.rs` for what each variant actually does.
 
-use std::net::SocketAddr;
+use std::net::IpAddr;
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
@@ -62,7 +62,7 @@ pub enum Command {
     Stop,
     /// Stop the daemon, then start a fresh one and wait until it is serving
     /// (best-effort; for supervised deployments, prefer restarting through
-    /// your process manager). `--config`, `--bind` and the resolved
+    /// your process manager). `--config`, `--bind`, `--port` and the resolved
     /// `--palace` are passed on to the new daemon.
     Restart(ServeArgs),
     /// Search palace drawer content.
@@ -106,9 +106,16 @@ pub enum Command {
 /// Arguments for `memcastle serve`.
 #[derive(Debug, Args)]
 pub struct ServeArgs {
-    /// Override the configured HTTP bind address.
-    #[arg(long)]
-    pub bind: Option<SocketAddr>,
+    /// Interface address to listen on, overriding `server.bind` and
+    /// `MEMCASTLE_BIND` (default `127.0.0.1`). An IP address alone: the port
+    /// is `--port`. Anything but a loopback address exposes the daemon, which
+    /// has no authentication, to the network.
+    #[arg(long, value_name = "IP", value_parser = memcastle::config::parse_bind_host)]
+    pub bind: Option<IpAddr>,
+    /// TCP port to listen on, overriding `server.port` and `MEMCASTLE_PORT`
+    /// (default 8420). `0` lets the OS pick a free one.
+    #[arg(long, value_name = "PORT")]
+    pub port: Option<u16>,
 }
 
 /// Arguments for `memcastle migrate`.
@@ -307,5 +314,49 @@ mod tests {
     #[test]
     fn the_command_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    fn serve_args(args: &[&str]) -> Result<ServeArgs, clap::Error> {
+        let cli = Cli::try_parse_from(std::iter::once("memcastle").chain(args.iter().copied()))?;
+        match cli.command {
+            Command::Serve(serve) => Ok(serve),
+            other => panic!("expected serve, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn serve_accepts_the_bind_and_port_from_the_issue_example() {
+        let serve = serve_args(&["serve", "--bind", "127.0.0.1", "--port", "8787"]).unwrap();
+        assert_eq!(serve.bind, Some("127.0.0.1".parse().unwrap()));
+        assert_eq!(serve.port, Some(8787));
+    }
+
+    #[test]
+    fn the_daemon_alias_takes_the_same_listener_flags() {
+        let serve = serve_args(&["daemon", "--bind", "::1", "--port", "9000"]).unwrap();
+        assert_eq!(serve.bind, Some("::1".parse().unwrap()));
+        assert_eq!(serve.port, Some(9000));
+    }
+
+    #[test]
+    fn serve_without_listener_flags_leaves_both_unset_so_the_lower_layers_apply() {
+        let serve = serve_args(&["serve"]).unwrap();
+        assert_eq!((serve.bind, serve.port), (None, None));
+    }
+
+    #[test]
+    fn a_bind_that_still_carries_a_port_is_rejected_pointing_at_port() {
+        let err = serve_args(&["serve", "--bind", "127.0.0.1:8420"]).unwrap_err();
+        assert!(err.to_string().contains("--port"), "{err}");
+    }
+
+    #[test]
+    fn an_out_of_range_or_non_numeric_port_is_rejected() {
+        for port in ["70000", "-1", "http"] {
+            assert!(
+                serve_args(&["serve", "--port", port]).is_err(),
+                "{port} must be rejected"
+            );
+        }
     }
 }

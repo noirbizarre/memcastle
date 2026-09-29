@@ -11,7 +11,7 @@
 
 pub mod paths;
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -30,7 +30,9 @@ pub struct Overrides {
     /// `--palace`: replaces `palace.path`.
     pub palace: Option<PathBuf>,
     /// `--bind`: replaces `server.bind`.
-    pub bind: Option<SocketAddr>,
+    pub bind: Option<IpAddr>,
+    /// `--port`: replaces `server.port`.
+    pub port: Option<u16>,
 }
 
 /// Where the palace's own data lives, distinct from `store` (which is where
@@ -101,18 +103,66 @@ impl StoreConfig {
 }
 
 /// HTTP server (API + MCP) settings.
+///
+/// The interface and the port are separate settings so either can be
+/// overridden alone (`--port 9000` must not require restating the address).
+/// `#[serde(default)]` so a config file that sets only `port` keeps the
+/// loopback default for `bind` instead of failing to parse.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ServerConfig {
-    /// Address the daemon's HTTP listener binds to.
-    pub bind: SocketAddr,
+    /// Interface address the daemon's HTTP listener binds to. Loopback by
+    /// default: the daemon has no authentication, so listening on a wildcard
+    /// address must be an explicit choice.
+    pub bind: IpAddr,
+    /// TCP port the listener binds to. `0` asks the OS for a free port (the
+    /// daemon records the real one in its registry file); tests rely on it.
+    pub port: u16,
 }
+
+/// The default listener address: loopback only, never a wildcard.
+const DEFAULT_BIND: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+/// The default listener port.
+const DEFAULT_PORT: u16 = 8420;
 
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            bind: SocketAddr::from(([127, 0, 0, 1], 8420)),
+            bind: DEFAULT_BIND,
+            port: DEFAULT_PORT,
         }
     }
+}
+
+impl ServerConfig {
+    /// The address the listener binds to and clients fall back to: the one
+    /// place `bind` and `port` are combined, so no caller can disagree.
+    #[must_use]
+    pub fn socket_addr(&self) -> SocketAddr {
+        SocketAddr::new(self.bind, self.port)
+    }
+}
+
+/// Parse a bind *interface* (`--bind`, `MEMCASTLE_BIND`).
+///
+/// # Errors
+///
+/// Returns a message when `raw` is not an IP address. A `host:port` value —
+/// what `--bind` accepted before the port became its own setting — gets a
+/// pointer to `--port`, because "invalid IP address syntax" alone would not
+/// tell someone with an old service file what changed.
+pub fn parse_bind_host(raw: &str) -> std::result::Result<IpAddr, String> {
+    let raw = raw.trim();
+    raw.parse().map_err(|e| {
+        if raw.parse::<SocketAddr>().is_ok() {
+            format!(
+                "{raw:?} includes a port, but the bind address is now an IP address alone; \
+                 set the port with `--port`, MEMCASTLE_PORT or `server.port`"
+            )
+        } else {
+            format!("{raw:?} is not an IP address ({e})")
+        }
+    })
 }
 
 /// Job scheduler settings.
@@ -235,6 +285,9 @@ impl Config {
         if let Some(bind) = overrides.bind {
             self.server.bind = bind;
         }
+        if let Some(port) = overrides.port {
+            self.server.port = port;
+        }
     }
 
     fn from_file(path: &Path) -> Result<Self> {
@@ -266,7 +319,11 @@ impl Config {
             self.palace.path = PathBuf::from(path);
         }
         if let Some(bind) = lookup("MEMCASTLE_BIND") {
-            self.server.bind = parse_override("MEMCASTLE_BIND", &bind)?;
+            self.server.bind = parse_bind_host(&bind)
+                .map_err(|e| Error::config(format!("MEMCASTLE_BIND: {e}")))?;
+        }
+        if let Some(port) = lookup("MEMCASTLE_PORT") {
+            self.server.port = parse_override("MEMCASTLE_PORT", &port)?;
         }
         if let Some(level) = lookup("MEMCASTLE_LOG") {
             self.logging.level = level;
@@ -424,12 +481,63 @@ mod tests {
         let mut config = Config::default();
         config
             .apply_overrides_from(env(&[
-                ("MEMCASTLE_BIND", "127.0.0.1:9999"),
+                ("MEMCASTLE_BIND", "127.0.0.2"),
+                ("MEMCASTLE_PORT", "9999"),
                 ("MEMCASTLE_JOBS_MAX_CONCURRENCY", "7"),
             ]))
             .unwrap();
-        assert_eq!(config.server.bind.port(), 9999);
+        assert_eq!(config.server.bind, "127.0.0.2".parse::<IpAddr>().unwrap());
+        assert_eq!(config.server.port, 9999);
         assert_eq!(config.jobs.max_concurrency, 7);
+    }
+
+    #[test]
+    fn the_default_listener_is_loopback_only_on_port_8420() {
+        let server = ServerConfig::default();
+        assert!(server.bind.is_loopback(), "the default must be local-only");
+        assert_eq!(server.socket_addr().to_string(), "127.0.0.1:8420");
+    }
+
+    #[test]
+    fn a_config_file_that_sets_only_the_port_keeps_the_loopback_bind() {
+        let config: Config = toml::from_str("[server]\nport = 9000").unwrap();
+        assert_eq!(config.server.port, 9000);
+        assert!(config.server.bind.is_loopback());
+    }
+
+    #[test]
+    fn a_config_file_that_sets_only_the_bind_keeps_the_default_port() {
+        let config: Config = toml::from_str("[server]\nbind = \"::1\"").unwrap();
+        assert_eq!(config.server.bind, "::1".parse::<IpAddr>().unwrap());
+        assert_eq!(config.server.port, 8420);
+        assert_eq!(config.server.socket_addr().to_string(), "[::1]:8420");
+    }
+
+    #[test]
+    fn a_bind_that_still_carries_a_port_is_rejected_with_a_pointer_to_the_port_setting() {
+        let mut config = Config::default();
+        let err = config
+            .apply_overrides_from(env(&[("MEMCASTLE_BIND", "127.0.0.1:8420")]))
+            .unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("MEMCASTLE_BIND") && message.contains("MEMCASTLE_PORT"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_malformed_port_override_is_an_error_naming_the_variable() {
+        for raw in ["abc", "70000", "-1", ""] {
+            let mut config = Config::default();
+            let err = config
+                .apply_overrides_from(env(&[("MEMCASTLE_PORT", raw)]))
+                .unwrap_err();
+            assert!(
+                err.to_string().contains("MEMCASTLE_PORT"),
+                "{raw:?} must name the variable: {err}"
+            );
+        }
     }
 
     #[test]
@@ -495,27 +603,47 @@ mod tests {
             root.path().join("flag"),
         );
         let mut config: Config = toml::from_str(&format!(
-            "[palace]\npath = {:?}\n[server]\nbind = \"127.0.0.1:1111\"",
+            "[palace]\npath = {:?}\n[server]\nbind = \"127.0.0.1\"\nport = 1111",
             file.display().to_string()
         ))
         .unwrap();
         assert_eq!(config.palace.path, file, "the file outranks the default");
+        assert_eq!(config.server.port, 1111);
 
         config
             .apply_overrides_from(env(&[
                 ("MEMCASTLE_PALACE_PATH", &env_path.display().to_string()),
-                ("MEMCASTLE_BIND", "127.0.0.1:2222"),
+                ("MEMCASTLE_BIND", "127.0.0.2"),
+                ("MEMCASTLE_PORT", "2222"),
             ]))
             .unwrap();
         assert_eq!(config.palace.path, env_path);
-        assert_eq!(config.server.bind.port(), 2222);
+        assert_eq!(config.server.socket_addr().to_string(), "127.0.0.2:2222");
 
         config.apply_cli_overrides(&Overrides {
             palace: Some(flag.clone()),
-            bind: Some("127.0.0.1:3333".parse().unwrap()),
+            bind: Some("127.0.0.3".parse().unwrap()),
+            port: Some(3333),
         });
         assert_eq!(config.palace.path, flag);
-        assert_eq!(config.server.bind.port(), 3333);
+        assert_eq!(config.server.socket_addr().to_string(), "127.0.0.3:3333");
+    }
+
+    #[test]
+    fn the_bind_and_the_port_are_overridden_independently_at_every_layer() {
+        // File sets both, env replaces only the port, the flag replaces only
+        // the bind: each layer must leave the other setting alone.
+        let mut config: Config =
+            toml::from_str("[server]\nbind = \"127.0.0.2\"\nport = 1111").unwrap();
+        config
+            .apply_overrides_from(env(&[("MEMCASTLE_PORT", "2222")]))
+            .unwrap();
+        assert_eq!(config.server.socket_addr().to_string(), "127.0.0.2:2222");
+        config.apply_cli_overrides(&Overrides {
+            bind: Some("127.0.0.3".parse().unwrap()),
+            ..Overrides::default()
+        });
+        assert_eq!(config.server.socket_addr().to_string(), "127.0.0.3:2222");
     }
 
     #[test]
@@ -525,6 +653,7 @@ mod tests {
         config.apply_cli_overrides(&Overrides::default());
         assert_eq!(config.palace.path, before.palace.path);
         assert_eq!(config.server.bind, before.server.bind);
+        assert_eq!(config.server.port, before.server.port);
     }
 
     #[test]

@@ -299,7 +299,7 @@ async fn a_pause_requested_before_a_sigkill_comes_back_paused_after_restart() {
 
 /// `memcastle restart` must bring the daemon back the way it was asked to,
 /// and only say so once it is serving: a bare `memcastle serve` would drop
-/// `--bind` and come back on the default address.
+/// `--bind`/`--port` and come back on the default address.
 #[tokio::test]
 async fn restart_brings_the_daemon_back_on_the_requested_address() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -324,7 +324,13 @@ async fn restart_brings_the_daemon_back_on_the_requested_address() {
     let stdout_file = dir.path().join("restart.out");
     let stderr_file = dir.path().join("restart.err");
     let status = Command::new(&bin)
-        .args(["restart", "--bind", &wanted])
+        .args([
+            "restart",
+            "--bind",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+        ])
         .env("MEMCASTLE_PALACE_PATH", &palace)
         .stdout(std::fs::File::create(&stdout_file).expect("stdout file"))
         .stderr(std::fs::File::create(&stderr_file).expect("stderr file"))
@@ -405,7 +411,8 @@ async fn spawn_daemon_and_wait(bin: &Path, palace: &Path) -> (Child, RuntimeInfo
     let mut child = Command::new(bin)
         .arg("serve")
         .env("MEMCASTLE_PALACE_PATH", palace)
-        .env("MEMCASTLE_BIND", "127.0.0.1:0")
+        .env("MEMCASTLE_BIND", "127.0.0.1")
+        .env("MEMCASTLE_PORT", "0")
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         // If the test panics before explicitly stopping the daemon, don't

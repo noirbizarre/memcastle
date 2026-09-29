@@ -353,8 +353,14 @@ a destructive operation must never act on a report that might have gone stale si
 `memcastle serve`/`daemon` runs in the **foreground**
 (matching the `mempalace-server.service` systemd-unit pattern from the reference implementations) —
 backgrounding is a supervisor's job (systemd, Docker, your shell), not this binary's.
-On startup it: loads config, connects and migrates storage, recovers interrupted jobs,
-starts the scheduler, binds the HTTP listener (serving both the REST API and MCP), and writes a small registry file.
+On startup it: loads config, binds the HTTP listener (serving both the REST API and MCP),
+connects and migrates storage, recovers interrupted jobs, starts the scheduler,
+and writes a small registry file.
+The listener is bound first, before anything else has an effect,
+so an address that is taken or unavailable fails the start without having created, migrated or recovered anything
+(see [ADR-011](adr/011-split-bind-address-and-port.md)).
+Connections that arrive while storage is still opening wait in the listener's backlog,
+and the registry file, which is how clients find the daemon, is written only once it is ready to serve.
 On SIGINT/SIGTERM or `POST /api/shutdown`, it stops accepting new jobs and asks every running job to stop
 at its next unit-of-work boundary.
 Each one checkpoints and goes straight back to `Queued` (a job the user had paused stays `Paused`),

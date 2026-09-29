@@ -92,13 +92,14 @@ async fn async_main() -> ExitCode {
 /// loaded, so that every command resolves the palace and address the same way
 /// (`--bind` used to be applied to `serve` alone, after loading).
 fn overrides_from(args: &Cli) -> Overrides {
-    let bind = match &args.command {
-        Command::Serve(serve) | Command::Restart(serve) => serve.bind,
-        _ => None,
+    let (bind, port) = match &args.command {
+        Command::Serve(serve) | Command::Restart(serve) => (serve.bind, serve.port),
+        _ => (None, None),
     };
     Overrides {
         palace: args.palace.clone(),
         bind,
+        port,
     }
 }
 
@@ -131,7 +132,7 @@ async fn run(args: Cli, config: Config) -> Result<()> {
 /// A client for the daemon this palace's config points at, sending `mode`
 /// (from `--mode`/`MEMCASTLE_MODE`) with every request when one was given.
 fn client(config: &Config, mode: Option<MemoryMode>) -> DaemonClient {
-    let daemon = DaemonClient::discover(&config.palace.path, config.server.bind);
+    let daemon = DaemonClient::discover(&config.palace.path, config.server.socket_addr());
     match mode {
         Some(mode) => daemon.with_mode(mode),
         None => daemon,
@@ -190,7 +191,7 @@ async fn cmd_stop(config: &Config, mode: Option<MemoryMode>) -> Result<()> {
 /// behind it — the same signal every other command discovers the daemon by —
 /// not the process merely having been spawned: reporting success before that
 /// told users a daemon that had crashed on startup was up. The new daemon
-/// gets the original `--config` and `--bind` and the resolved `--palace`,
+/// gets the original `--config`, `--bind` and `--port` and the resolved `--palace`,
 /// because a bare `memcastle serve` would silently come back on the default
 /// address with the default config.
 async fn cmd_restart(
@@ -232,6 +233,12 @@ async fn cmd_restart(
         }
         if let Some(bind) = args.bind {
             command.arg("--bind").arg(bind.to_string());
+        }
+        // Forwarded like `--bind`: without it the respawned daemon would
+        // fall back to the configured port while this command waits on the
+        // one that was asked for.
+        if let Some(port) = args.port {
+            command.arg("--port").arg(port.to_string());
         }
         // Always the resolved palace, not just an explicit `--palace`: the
         // respawned daemon must serve exactly the palace this command

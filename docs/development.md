@@ -40,7 +40,7 @@ mise cli search "job scheduler"
 mise cli stop
 ```
 
-By default the palace lives under `~/.local/share/memcastle/default` and the daemon binds `127.0.0.1:8420`.
+By default the palace lives under `~/.local/share/memcastle/default` and the daemon listens on `127.0.0.1` port `8420`.
 Every path, environment variable, flag and the precedence between them is in [Configuration](configuration.md).
 `config::Config` is the source of truth if that page ever drifts.
 
@@ -59,7 +59,9 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `tests/memory_mode.rs`, `tests/mcp_memory_mode.rs` — per-request and per-MCP-session memory modes (in-process).
   - `tests/audit.rs`, `tests/repair.rs` — the audit and repair job kinds end to end (in-process).
   - `tests/persistence.rs` — data and job state survive a daemon restart, including a SIGKILL mid-job
-    and a pause or cancel requested just before it, and `memcastle restart --bind` (subprocess).
+    and a pause or cancel requested just before it, and `memcastle restart --bind --port` (subprocess).
+  - `tests/config_bind.rs` — the listener itself: bind address and port precedence, and real bind failures
+    (subprocess).
   - `tests/migrate.rs` — `memcastle migrate` and its `--check`/`--status` modes (subprocess).
   - `tests/cli.rs` — the binary's argument parsing and its behaviour with no daemon reachable (subprocess).
   - `tests/cli_daemon.rs` — CLI flags that change what the daemon is asked: `--mode`, and relative `mine` paths
