@@ -48,10 +48,12 @@ pub struct StatusReport {
 /// Bounds `AppServices::wake_up`'s output — deterministic and testable, no
 /// LLM-based summarization (task brief §13: this is L0/L1 only). Both
 /// limits apply to `recent_highlights` only: `max_items` caps how many
-/// drawers are fetched at all (pushed into the store query's `LIMIT`);
-/// `max_bytes` then caps their cumulative content length, dropping whole
-/// drawers (never truncating one mid-string) once the running total would
-/// exceed it — see `AppServices::wake_up`'s doc comment. The single `diary`
+/// drawers are fetched at all (pushed into the store query's `LIMIT`, and
+/// clamped to [`MAX_READ_LIMIT`] like every other read);
+/// `max_bytes` then caps their cumulative content length: a whole drawer that
+/// would push the running total over it is left out (never truncated
+/// mid-string) and the older, possibly smaller, ones after it are still
+/// considered — see `AppServices::wake_up`'s doc comment. The single `diary`
 /// entry, already capped at exactly one, is always included regardless of
 /// `max_bytes`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -663,21 +665,30 @@ impl AppServices {
             None => None,
         };
 
+        // Clamped like every other read limit: an `as u32` here wrapped a
+        // huge `max_items` to a small number (2^32 to zero) and silently
+        // returned nothing.
+        let limit = u32::try_from(budget.max_items)
+            .unwrap_or(u32::MAX)
+            .min(MAX_READ_LIMIT);
         let candidates = self
             .store
-            .list_checkpoint_originated_drawers(wing, budget.max_items as u32)
+            .list_checkpoint_originated_drawers(wing, limit)
             .await?;
 
         // Trim to the byte budget by whole drawers, never mid-content: a
-        // drawer that would push the running total over `max_bytes` is
-        // simply left out, not truncated (see `recall`'s verbatim
-        // guarantee, which this must not undermine for `wake_up` either).
+        // drawer that would push the running total over `max_bytes` is left
+        // out, not truncated (see `recall`'s verbatim guarantee, which this
+        // must not undermine for `wake_up` either). Left out *and skipped
+        // past*: stopping at the first one that does not fit would drop every
+        // older highlight after it, however small, when the budget still has
+        // room for them.
         let mut recent_highlights = Vec::new();
         let mut total_bytes = 0usize;
         for drawer in candidates {
-            let next_total = total_bytes + drawer.content.len();
+            let next_total = total_bytes.saturating_add(drawer.content.len());
             if next_total > budget.max_bytes {
-                break;
+                continue;
             }
             total_bytes = next_total;
             recent_highlights.push(drawer);
@@ -1458,5 +1469,60 @@ mod tests {
 
         assert_eq!(drawer.provenance.requested_by, "mcp");
         assert_eq!(drawer.source.agent.as_deref(), Some("agent-a"));
+    }
+
+    #[tokio::test]
+    async fn an_oversize_highlight_is_skipped_and_the_smaller_older_ones_after_it_are_kept() {
+        let (app, store) = test_app_with_store().await;
+        // Oldest to newest, so newest-first reads: small-new, LARGE, small-old.
+        seed_checkpoint_drawer(&store, "project-x", "small-old").await;
+        seed_checkpoint_drawer(&store, "project-x", &"L".repeat(200)).await;
+        seed_checkpoint_drawer(&store, "project-x", "small-new").await;
+
+        let context = app
+            .wake_up(
+                "agent-a",
+                Some("project-x"),
+                WakeUpBudget {
+                    max_items: 10,
+                    max_bytes: 40,
+                },
+                MemoryMode::Full,
+            )
+            .await
+            .expect("wake up");
+
+        let contents: Vec<&str> = context
+            .recent_highlights
+            .iter()
+            .map(|d| d.content.as_str())
+            .collect();
+        assert_eq!(
+            contents,
+            ["small-new", "small-old"],
+            "the big one is left out, not a reason to drop everything older"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_huge_max_items_is_clamped_instead_of_wrapping_to_nothing() {
+        let (app, store) = test_app_with_store().await;
+        seed_checkpoint_drawer(&store, "project-x", "a highlight").await;
+
+        // 2^32 truncated to zero under an `as u32` cast, and returned nothing.
+        let context = app
+            .wake_up(
+                "agent-a",
+                Some("project-x"),
+                WakeUpBudget {
+                    max_items: 1 << 32,
+                    max_bytes: 8192,
+                },
+                MemoryMode::Full,
+            )
+            .await
+            .expect("wake up");
+
+        assert_eq!(context.recent_highlights.len(), 1);
     }
 }

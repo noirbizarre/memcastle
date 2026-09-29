@@ -335,7 +335,8 @@ pub struct Job {
     /// as handler-defined *resume* state, and stuffing a final report in
     /// there would be exactly the "abuse of a field's stated purpose" this
     /// split avoids. `None` for every job kind that has no report to give
-    /// (`Demo`/`Mine`/`Checkpoint` never set this).
+    /// (`Demo`/`Checkpoint` never set this). `Mine` sets only a small summary:
+    /// the files considered, the limit, and whether the tree was truncated.
     pub result: Option<Value>,
     /// The terminal error, when `status == Failed`.
     pub error: Option<String>,

@@ -201,6 +201,8 @@ See `docs/adr/002-memory-mode-session-scoping.md` for the full rationale and rej
   the agent's most recent diary entry (when a `wing` is given)
   plus up to `WakeUpBudget::max_items` most recent checkpoint-originated drawers,
   trimmed to `max_bytes` by whole drawers only — never mid-content, preserving the same verbatim guarantee as `recall`.
+  A highlight too big for what is left of the budget is skipped, and the older, smaller ones after it are still tried;
+  `max_items` is clamped to `MAX_READ_LIMIT` like every other read limit.
   Deliberately simple for V1 (task brief §13: "do not prematurely implement an elaborate token optimizer") —
   this is only L0/L1 of the task brief's layered retrieval model; project-specific and deeper retrieval are future work.
 - `AppServices::diary_write`/`diary_read` persist/read an agent's journal entries
@@ -257,6 +259,9 @@ A handler (`jobs::demo`, `mining::run`) is written as a loop over discrete units
 that checks `JobContext::should_pause`/`is_cancelled` between units,
 persists a `checkpoint` before stopping, and returns — the scheduler transitions its status afterward.
 Resuming a paused job re-reads that checkpoint and continues from there, not from zero.
+A mining job stops at 2000 files so a huge tree finishes in bounded time,
+but it says so: its progress line names the limit and its `result` records `truncated: true`,
+and it keeps the first 2000 in name order, so a resumed job sees the same files as the one it continues.
 `Audit` and `Repair` honour both too: audit checks between wings, after the job scan and every 500 drawers,
 and an applied repair checks before each delete.
 Neither keeps a checkpoint, so a paused (or shutdown-interrupted) one restarts from scratch when resumed —

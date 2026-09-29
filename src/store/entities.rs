@@ -24,7 +24,7 @@ use serde_json::Value;
 use crate::domain::{
     Entity, EntityId, NewRelationship, Relationship, RelationshipId, require_label,
 };
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 use super::SurrealStore;
 
@@ -120,6 +120,16 @@ impl SurrealStore {
         Ok(relationship)
     }
 
+    /// [`Error::RelationshipNotFound`] unless a `relates_to` edge with this id
+    /// exists (open or closed).
+    async fn require_relationship(&self, id: RelationshipId) -> Result<()> {
+        if self.relationship_exists(id).await? {
+            Ok(())
+        } else {
+            Err(Error::RelationshipNotFound { id: id.to_string() })
+        }
+    }
+
     /// Whether a `relates_to` edge with this id exists.
     pub async fn relationship_exists(&self, id: RelationshipId) -> Result<bool> {
         #[derive(Deserialize)]
@@ -170,6 +180,10 @@ impl SurrealStore {
         if self.relationship_exists(new_id).await? {
             return Ok(replacement);
         }
+        // Checked, not assumed: `UPDATE` on an id that is not there reports
+        // success having changed nothing, which would leave the replacement
+        // opened with no old edge closed — two current edges for one fact.
+        self.require_relationship(old_id).await?;
 
         self.db
             .query(
@@ -204,6 +218,12 @@ impl SurrealStore {
         id: RelationshipId,
         at: DateTime<Utc>,
     ) -> Result<()> {
+        // Checked first: the `UPDATE` below matches nothing for a missing id
+        // and still succeeds, so a mistyped id would read as a retraction
+        // that happened. An edge that exists but is already closed is fine —
+        // that is a replayed invalidate, and `WHERE !valid_to` keeps its
+        // original close time.
+        self.require_relationship(id).await?;
         self.db
             // `WHERE !valid_to`: only close an edge that is still open, so
             // repeating an invalidate (a replayed job item) keeps the
@@ -467,5 +487,102 @@ mod tests {
             "invalidating must not create a replacement edge, got {history:?}"
         );
         assert!(history[0].valid_to.is_some());
+    }
+
+    async fn two_entities(store: &SurrealStore) -> (EntityId, EntityId) {
+        let alice = store
+            .get_or_create_entity("Alice", "person", serde_json::json!({}))
+            .await
+            .unwrap();
+        let acme = store
+            .get_or_create_entity("Acme", "organization", serde_json::json!({}))
+            .await
+            .unwrap();
+        (alice.id, acme.id)
+    }
+
+    fn a_fact(from: EntityId, to: EntityId) -> NewRelationship {
+        NewRelationship {
+            from,
+            to,
+            predicate: "employee_of".to_string(),
+            confidence: 0.9,
+        }
+    }
+
+    #[tokio::test]
+    async fn invalidating_a_relationship_that_does_not_exist_is_an_error_not_a_silent_no_op() {
+        let store = memory_store().await;
+        let missing = RelationshipId::new();
+
+        let error = store
+            .invalidate_relationship(missing, Utc::now())
+            .await
+            .expect_err("a mistyped id must not read as a retraction");
+
+        assert!(
+            matches!(error, Error::RelationshipNotFound { .. }),
+            "{error:?}"
+        );
+        assert!(
+            !store.relationship_exists(missing).await.unwrap(),
+            "and the failed call must not have created the record"
+        );
+    }
+
+    #[tokio::test]
+    async fn superseding_a_relationship_that_does_not_exist_is_an_error_and_opens_no_edge() {
+        let store = memory_store().await;
+        let (alice, acme) = two_entities(&store).await;
+        let replacement = RelationshipId::new();
+
+        let error = store
+            .supersede_relationship(
+                RelationshipId::new(),
+                replacement,
+                a_fact(alice, acme),
+                Utc::now(),
+            )
+            .await
+            .expect_err("there is no old edge to close");
+
+        assert!(
+            matches!(error, Error::RelationshipNotFound { .. }),
+            "{error:?}"
+        );
+        assert!(
+            !store.relationship_exists(replacement).await.unwrap(),
+            "no replacement may be opened when nothing was closed"
+        );
+    }
+
+    #[tokio::test]
+    async fn replaying_an_invalidate_or_a_supersede_is_still_fine() {
+        // A resumed checkpoint job repeats the item it crashed in.
+        let store = memory_store().await;
+        let (alice, acme) = two_entities(&store).await;
+        let original = open_relationship(&store, alice, acme, "employee_of", 0.9)
+            .await
+            .unwrap();
+        let replacement = RelationshipId::new();
+        store
+            .supersede_relationship(original.id, replacement, a_fact(alice, acme), Utc::now())
+            .await
+            .unwrap();
+
+        // Superseding again: the replacement exists, so it is skipped.
+        store
+            .supersede_relationship(original.id, replacement, a_fact(alice, acme), Utc::now())
+            .await
+            .expect("a replayed supersede is a no-op");
+        // Invalidating the already-closed original: it exists, so it is fine.
+        store
+            .invalidate_relationship(original.id, Utc::now())
+            .await
+            .expect("a replayed invalidate is a no-op");
+        assert_eq!(
+            store.list_relationships(alice, false).await.unwrap().len(),
+            1
+        );
     }
 }

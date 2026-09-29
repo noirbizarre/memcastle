@@ -176,6 +176,21 @@ pub enum Error {
         message: String,
     },
 
+    /// A knowledge-graph mutation named a relationship that does not exist —
+    /// a mistyped or already-removed id, which must not be reported as if the
+    /// fact had been superseded or retracted.
+    #[error("relationship {id} not found")]
+    #[diagnostic(
+        code(memcastle::graph::relationship_not_found),
+        help(
+            "check the relationship id in the checkpoint item's `fact`: it must be one this palace holds"
+        )
+    )]
+    RelationshipNotFound {
+        /// The id that was looked up.
+        id: String,
+    },
+
     /// A job transition was rejected by the state machine.
     #[error("job {id} cannot go from {from:?} to {event:?}")]
     #[diagnostic(
@@ -547,6 +562,9 @@ mod tests {
                 field: "kind".to_string(),
             },
             Error::serialization("a thing", "nope"),
+            Error::RelationshipNotFound {
+                id: "x".to_string(),
+            },
             Error::InvalidJobTransition {
                 id: "x".to_string(),
                 from: "Queued".to_string(),
@@ -595,6 +613,7 @@ mod tests {
             | Error::SchemaSync { .. }
             | Error::EmptyLabel { .. }
             | Error::Serialization { .. }
+            | Error::RelationshipNotFound { .. }
             | Error::InvalidJobTransition { .. }
             | Error::JobNotFound { .. }
             | Error::InvalidBasedOnJob { .. }

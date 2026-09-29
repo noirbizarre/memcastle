@@ -18,7 +18,7 @@ impl From<Error> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = match &self.0 {
-            Error::JobNotFound { .. } => StatusCode::NOT_FOUND,
+            Error::JobNotFound { .. } | Error::RelationshipNotFound { .. } => StatusCode::NOT_FOUND,
             Error::InvalidJobTransition { .. }
             | Error::InvalidInput { .. }
             | Error::InvalidJobId { .. }

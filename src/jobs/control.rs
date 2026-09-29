@@ -175,8 +175,10 @@ impl JobContext {
         unit: &str,
     ) -> Result<()> {
         let progress = JobProgress {
-            current: index as u32,
-            total: Some(total as u32),
+            // Saturating rather than wrapping: a count past `u32::MAX` must
+            // read as "enormous", not as a small number.
+            current: u32::try_from(index).unwrap_or(u32::MAX),
+            total: Some(u32::try_from(total).unwrap_or(u32::MAX)),
             message: Some(format!("{verb} {index}/{total} {unit}")),
         };
         self.checkpoint(job, progress, serde_json::json!({ "next_index": index }))
