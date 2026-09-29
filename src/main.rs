@@ -22,7 +22,7 @@ use cli::{
 };
 use memcastle::app::WakeUpBudget;
 use memcastle::client::DaemonClient;
-use memcastle::config::Config;
+use memcastle::config::{Config, Overrides};
 use memcastle::domain::MemoryMode;
 use memcastle::store::SurrealStore;
 use memcastle::{Error, Result};
@@ -68,7 +68,7 @@ async fn async_main() -> ExitCode {
     // filter. A config that fails to load still gets a working logger (at
     // the default level) — the failure itself is reported through miette
     // below, not tracing, so nothing is lost by initializing second.
-    let config = Config::load(args.config.as_deref());
+    let config = Config::load(args.config.as_deref(), &overrides_from(&args));
     // A config that failed to load still honours `-v`, on top of the default.
     init_tracing(match &config {
         Ok(config) => config.log_filter(args.verbose),
@@ -88,15 +88,24 @@ async fn async_main() -> ExitCode {
     }
 }
 
-async fn run(args: Cli, mut config: Config) -> Result<()> {
+/// The command-line layer of configuration. Built once, before the config is
+/// loaded, so that every command resolves the palace and address the same way
+/// (`--bind` used to be applied to `serve` alone, after loading).
+fn overrides_from(args: &Cli) -> Overrides {
+    let bind = match &args.command {
+        Command::Serve(serve) | Command::Restart(serve) => serve.bind,
+        _ => None,
+    };
+    Overrides {
+        palace: args.palace.clone(),
+        bind,
+    }
+}
+
+async fn run(args: Cli, config: Config) -> Result<()> {
     let mode = args.mode;
     match args.command {
-        Command::Serve(serve_args) => {
-            if let Some(bind) = serve_args.bind {
-                config.server.bind = bind;
-            }
-            memcastle::server::run(config).await
-        }
+        Command::Serve(_) => memcastle::server::run(config).await,
         Command::Migrate(args) => cmd_migrate(&config, args).await,
         Command::Status => cmd_status(&config, mode).await,
         Command::Stop => cmd_stop(&config, mode).await,
@@ -181,8 +190,9 @@ async fn cmd_stop(config: &Config, mode: Option<MemoryMode>) -> Result<()> {
 /// behind it — the same signal every other command discovers the daemon by —
 /// not the process merely having been spawned: reporting success before that
 /// told users a daemon that had crashed on startup was up. The new daemon
-/// gets the original `--config` and `--bind`, because a bare `memcastle serve`
-/// would silently come back on the default address with the default config.
+/// gets the original `--config` and `--bind` and the resolved `--palace`,
+/// because a bare `memcastle serve` would silently come back on the default
+/// address with the default config.
 async fn cmd_restart(
     config: &Config,
     config_path: Option<&std::path::Path>,
@@ -223,6 +233,11 @@ async fn cmd_restart(
         if let Some(bind) = args.bind {
             command.arg("--bind").arg(bind.to_string());
         }
+        // Always the resolved palace, not just an explicit `--palace`: the
+        // respawned daemon must serve exactly the palace this command
+        // found and waits on, whichever layer (file, environment, flag)
+        // named it.
+        command.arg("--palace").arg(&config.palace.path);
         // Detached from this terminal: the new daemon outlives this command,
         // and an inherited stderr would interleave its log with the prompt.
         let mut child = command
