@@ -62,9 +62,23 @@ async fn async_main() -> ExitCode {
     let args = Cli::parse();
     let verbose = args.verbose > 0 || std::env::var_os("RUST_BACKTRACE").is_some();
     install_miette_hook(verbose);
-    init_tracing();
 
-    match run(args).await {
+    // Config is loaded before tracing so `logging.level` can drive the
+    // filter. A config that fails to load still gets a working logger (at
+    // the default level) — the failure itself is reported through miette
+    // below, not tracing, so nothing is lost by initializing second.
+    let config = Config::load(args.config.as_deref());
+    init_tracing(
+        config
+            .as_ref()
+            .map_or_else(|_| "info".to_string(), Config::log_filter),
+    );
+
+    let outcome = match config {
+        Ok(config) => run(args, config).await,
+        Err(error) => Err(error),
+    };
+    match outcome {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{:?}", miette::Report::new(error));
@@ -73,9 +87,7 @@ async fn async_main() -> ExitCode {
     }
 }
 
-async fn run(args: Cli) -> Result<()> {
-    let mut config = Config::load(args.config.as_deref())?;
-
+async fn run(args: Cli, mut config: Config) -> Result<()> {
     match args.command {
         Command::Serve(serve_args) => {
             if let Some(bind) = serve_args.bind {
@@ -349,13 +361,9 @@ fn install_miette_hook(verbose: bool) {
     }));
 }
 
-/// Structured logging, level from `MEMCASTLE_LOG`/`RUST_LOG`, defaulting to
-/// `info`. Set up before config loading so a config-load failure is itself
-/// logged consistently with everything after it.
-fn init_tracing() {
-    let filter = std::env::var("MEMCASTLE_LOG")
-        .or_else(|_| std::env::var("RUST_LOG"))
-        .unwrap_or_else(|_| "info".to_string());
+/// Structured logging with `filter` as the `EnvFilter` directive — see
+/// `Config::log_filter` for where it comes from and its precedence.
+fn init_tracing(filter: String) {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
         .with_writer(std::io::stderr)

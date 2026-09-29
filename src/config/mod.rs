@@ -205,6 +205,36 @@ impl Config {
         }
     }
 
+    /// The `tracing` filter directive this run should log with.
+    ///
+    /// Precedence, highest first: `MEMCASTLE_LOG` (already folded into
+    /// `logging.level` by [`Config::load`]'s env overrides), then the
+    /// conventional `RUST_LOG`, then `logging.level` from the config file or
+    /// its default. `RUST_LOG` outranks the file so a one-off
+    /// `RUST_LOG=debug memcastle serve` still works against a config that
+    /// pins a quieter level.
+    #[must_use]
+    pub fn log_filter(&self) -> String {
+        Self::resolve_log_filter(
+            &self.logging.level,
+            std::env::var_os("MEMCASTLE_LOG").is_some(),
+            std::env::var("RUST_LOG").ok(),
+        )
+    }
+
+    /// The pure part of [`Config::log_filter`], split out so precedence is
+    /// testable without mutating process-wide environment variables.
+    fn resolve_log_filter(
+        configured: &str,
+        memcastle_log_is_set: bool,
+        rust_log: Option<String>,
+    ) -> String {
+        match rust_log {
+            Some(rust_log) if !memcastle_log_is_set => rust_log,
+            _ => configured.to_string(),
+        }
+    }
+
     /// Check invariants a malformed config or override could violate.
     ///
     /// # Errors
@@ -236,6 +266,34 @@ fn default_config_file() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_configured_log_level_is_used_when_no_environment_variable_overrides_it() {
+        assert_eq!(Config::resolve_log_filter("debug", false, None), "debug");
+    }
+
+    #[test]
+    fn rust_log_outranks_the_config_file_level() {
+        assert_eq!(
+            Config::resolve_log_filter("warn", false, Some("trace".to_string())),
+            "trace"
+        );
+    }
+
+    #[test]
+    fn memcastle_log_outranks_rust_log() {
+        // `MEMCASTLE_LOG` is already folded into the configured level.
+        assert_eq!(
+            Config::resolve_log_filter("memcastle=debug", true, Some("trace".to_string())),
+            "memcastle=debug"
+        );
+    }
+
+    #[test]
+    fn a_logging_level_in_the_config_file_is_read() {
+        let config: Config = toml::from_str("[logging]\nlevel = \"debug\"").unwrap();
+        assert_eq!(config.logging.level, "debug");
+    }
+
     use super::*;
 
     #[test]
