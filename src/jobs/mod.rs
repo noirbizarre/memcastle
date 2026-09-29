@@ -898,4 +898,36 @@ mod tests {
             "the 100ms setting, not the 10s default, must bound the drain"
         );
     }
+
+    #[tokio::test]
+    async fn a_checkpoint_racing_a_stop_request_neither_fails_nor_loses_the_request() {
+        // SurrealDB fails one of two transactions writing the same record at
+        // once with a retryable conflict: the worker's checkpoint and the
+        // user's request are exactly that pair.
+        let scheduler = Arc::new(scheduler().await);
+        let job = seed(&scheduler, JobStatus::Running, 1).await;
+
+        let saver = {
+            let (scheduler, job) = (Arc::clone(&scheduler), job.clone());
+            tokio::spawn(async move {
+                for _ in 0..200 {
+                    scheduler.store.save_job(&job).await?;
+                }
+                Ok::<_, crate::Error>(())
+            })
+        };
+        let marker = {
+            let (scheduler, id) = (Arc::clone(&scheduler), job.id);
+            tokio::spawn(async move {
+                for _ in 0..200 {
+                    scheduler.store.mark_pause_requested(id).await?;
+                }
+                Ok::<_, crate::Error>(())
+            })
+        };
+
+        saver.await.unwrap().expect("checkpoints must not fail");
+        marker.await.unwrap().expect("requests must not fail");
+        assert!(reload(&scheduler, &job).await.pause_requested);
+    }
 }

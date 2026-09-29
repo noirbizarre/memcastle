@@ -28,6 +28,10 @@ impl SurrealStore {
     /// after every transition without branching on "is this the first
     /// save?".
     pub async fn save_job(&self, job: &Job) -> Result<()> {
+        super::retrying_on_conflict(|| self.save_job_once(job)).await
+    }
+
+    async fn save_job_once(&self, job: &Job) -> Result<()> {
         self.db
             .query(
                 "UPSERT type::record('job', $id) SET \
@@ -85,6 +89,10 @@ impl SurrealStore {
     }
 
     async fn mark_stop_requested(&self, id: JobId, field: &'static str) -> Result<bool> {
+        super::retrying_on_conflict(|| self.mark_stop_requested_once(id, field)).await
+    }
+
+    async fn mark_stop_requested_once(&self, id: JobId, field: &'static str) -> Result<bool> {
         // `WHERE status = 'running'` makes the check and the write one
         // statement: a job that finished in between is left untouched instead
         // of being tagged with a request nothing will ever clear. `field` is

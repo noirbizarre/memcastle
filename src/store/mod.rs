@@ -73,6 +73,45 @@ pub(crate) fn bindable<T: serde::Serialize>(value: &T) -> Result<serde_json::Val
         .map_err(|source| Error::serialization("a value bound for storage", source))
 }
 
+/// Whether `error` is SurrealDB reporting a write conflict — two transactions
+/// touching the same record at once — which it documents as safe to retry.
+fn is_write_conflict(error: &Error) -> bool {
+    matches!(
+        error,
+        Error::Store { source }
+            if matches!(
+                source.query_details(),
+                Some(surrealdb::types::QueryError::TransactionConflict)
+            )
+    )
+}
+
+/// Run `operation`, retrying a few times if it loses a write conflict.
+///
+/// A job record has two concurrent writers by design: the worker checkpointing
+/// its progress, and the API recording a user's pause or cancel. SurrealDB
+/// resolves that race by failing one transaction with a retryable conflict;
+/// without a retry the loser surfaced as a failed checkpoint (killing the
+/// job) or a 500 on the user's request.
+pub(crate) async fn retrying_on_conflict<T, F, Fut>(mut operation: F) -> Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    const MAX_RETRIES: u32 = 8;
+    let mut retries = 0;
+    loop {
+        match operation().await {
+            Err(error) if is_write_conflict(&error) && retries < MAX_RETRIES => {
+                retries += 1;
+                // A short, growing pause so the winner can commit.
+                tokio::time::sleep(std::time::Duration::from_millis(u64::from(retries) * 5)).await;
+            }
+            other => return other,
+        }
+    }
+}
+
 /// Deserialize the query results at `index` into `Vec<T>`.
 ///
 /// The mirror image of `bindable`: the 3.x driver's `take` only accepts
