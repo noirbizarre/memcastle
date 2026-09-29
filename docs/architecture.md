@@ -38,14 +38,18 @@ cli / mcp / api          <- interfaces (thin: parse, dispatch, serialize)
 ```
 
 **The CLI has no business logic MCP/HTTP can't reuse.**
-Every subcommand except `serve`/`daemon` is a thin `client::DaemonClient` HTTP call —
+Every subcommand except `serve`/`daemon`/`migrate` is a thin `client::DaemonClient` HTTP call —
 `memcastle mine ./project` submits a job over HTTP
 exactly the way an MCP tool call or a future web dashboard would, rather than mining anything itself.
 `serve`/`daemon` is the one command with real work:
 it *is* the composition root (`server::run`) that owns the store, the scheduler, and the HTTP/MCP listeners.
+`migrate` is a second, narrow exception: it connects to storage directly through `crate::migrate`,
+the same runner `serve` calls on every startup, because migration must work before a daemon exists
+(see `docs/adr/004-versioned-database-migrations.md`).
 
 `app::AppServices` is the one seam every interface (`api`, `mcp`, and `server::run` itself) calls through.
-Nothing under `api`/`mcp`/`cli` reaches into `store` or `jobs` directly — a `prek` hook greps for that.
+Nothing under `api`/`mcp`/`cli`/`client` reaches into `store` or `jobs` directly —
+the `store-isolation` `prek` hook greps for that (and `single-writer` limits who may construct a store).
 
 ## Storage: one SurrealDB, embedded or remote
 
@@ -195,7 +199,8 @@ All four are gated by `MemoryMode` exactly like `search` — see the mode table 
 
 `domain::Job` is a plain record (`id`, `kind`, `status`, `priority`, timestamps, `progress`, `attempt`/`max_attempts`,
 `checkpoint`, `error`, lease fields) persisted in SurrealDB.
-Its status only ever changes through `Job::apply(event)`, an explicit, exhaustively-matched transition table:
+Its status only ever changes through `Job::apply(event)`, an explicit transition table
+(any `(status, event)` pair not listed here is rejected with a `TransitionError`):
 
 ```text
 queued   -> running    (claimed)
@@ -205,6 +210,7 @@ running  -> completed
 running  -> failed
 queued | paused | running -> cancelled
 running  -> queued     (crash recovery, attempt budget permitting)
+failed   -> queued     (retry; clears the error, keeps the checkpoint)
 ```
 
 **Priority.** `Job.priority` is `domain::Priority`, a five-level enum (`Background < Low < Normal < High < Critical`) —
@@ -214,14 +220,15 @@ It serializes to/from the store's existing `job.priority` (`TYPE int`) column vi
 so introducing the enum took no migration.
 A value read back that doesn't match one of the five is a surfaced `InvalidPriority` error,
 never silently coerced to a default.
-`jobs::Scheduler::claim_next_job` claims the oldest, highest-priority `Queued` job first,
+`SurrealStore::claim_next_job` claims the oldest, highest-priority `Queued` job first,
 backed by the composite index `job_status_idx ON job FIELDS status, priority, created_at`.
 Default priorities per submission path: `Mine` → `Background` (so mining never delays anything else), `Demo` → `Normal`,
 `Audit`/`Repair` → `Normal`, `Checkpoint` → `High`, `Checkpoint` (emergency) → `Critical`.
 
-`jobs::Scheduler` is a single sequential dispatcher loop (`store.claim_next_job`, an atomic claim-and-transition)
+`jobs::Scheduler` is a single sequential dispatcher loop (`store.claim_next_job`, a claim-and-transition)
 that spawns bounded worker tasks (a `tokio::sync::Semaphore`) to execute claimed jobs.
-Because exactly one scheduler owns the queue per daemon — the same "one daemon per palace" invariant as storage —
+The claim is a `SELECT` followed by an `UPSERT`, not a database-level atomic operation:
+because exactly one scheduler owns the queue per daemon — the same "one daemon per palace" invariant as storage —
 the sequential claim loop needs no distributed lock to be safe.
 
 **Pause and cancel are cooperative, never a process kill.**
@@ -233,6 +240,9 @@ Resuming a paused job re-reads that checkpoint and continues from there, not fro
 **Crash recovery** (`Scheduler::recover`, run once at daemon startup):
 any job left `Running` by an unclean shutdown is re-queued if its attempt budget allows,
 or marked `Failed` otherwise — never silently forgotten.
+`Queued` jobs need no recovery, and `Paused` jobs are deliberately left paused until someone resumes them.
+Only the in-memory `JobControl` handles are lost in a crash: a pause or cancel request that was still pending
+is lost with them, and the recovered job runs again from its checkpoint.
 
 **`checkpoint` vs `result`.** `Job.checkpoint` is handler-defined *resume* state
 (`mining`/`checkpoint`'s per-item `{"next_index": n}`) —

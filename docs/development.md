@@ -6,7 +6,8 @@
 
 That's it — SurrealKV, the embedded storage engine, is pure Rust,
 so unlike the RocksDB backend this project used before #47,
-there's no C/C++ toolchain or `cmake` prerequisite to compile it.
+the storage engine itself needs no C/C++ toolchain.
+(A transitive TLS dependency, `aws-lc-sys`, may use `cmake` on some targets; that is unrelated to storage.)
 
 ## Everyday tasks
 
