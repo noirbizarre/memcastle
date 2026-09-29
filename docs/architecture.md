@@ -294,7 +294,13 @@ a destructive operation must never act on a report that might have gone stale si
 backgrounding is a supervisor's job (systemd, Docker, your shell), not this binary's.
 On startup it: loads config, connects and migrates storage, recovers interrupted jobs,
 starts the scheduler, binds the HTTP listener (serving both the REST API and MCP), and writes a small registry file.
-On SIGINT/SIGTERM or `POST /api/shutdown`, it stops accepting new jobs, lets the scheduler's dispatch loop drain, and exits.
+On SIGINT/SIGTERM or `POST /api/shutdown`, it stops accepting new jobs and asks every running job to stop
+at its next unit-of-work boundary.
+Each one checkpoints and goes straight back to `Queued` (a job the user had paused stays `Paused`),
+so the next daemon resumes it without anyone pressing resume.
+The wait is bounded (10 seconds): a job that does not stop in time — one that never checks for pause,
+like `Audit`/`Repair` — is left `Running` and re-queued by `Scheduler::recover` on the next start.
+The daemon then removes its registry file and exits.
 
 The registry file (`~/.memcastle/run/<hash of the canonical palace path>/daemon.json`)
 is **operational metadata, never the source of truth** for "is a daemon running" —

@@ -13,6 +13,7 @@ mod control;
 mod demo;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use dashmap::DashMap;
@@ -47,6 +48,14 @@ pub enum JobOutcome {
 /// next to the job's own execution time.
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
+/// How long shutdown waits for in-flight jobs to reach their next unit-of-work
+/// boundary and checkpoint. Bounded because a handler stuck in one long unit
+/// (or one that never checks for pause, like `Audit`/`Repair`) must not hang
+/// the daemon's exit; a job still running after this is left `Running` and
+/// re-queued by [`Scheduler::recover`] on the next start, losing only the
+/// work since its last checkpoint.
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// A unique-enough label for this scheduler instance, recorded as
 /// `lease_owner` on jobs it claims. Not load-bearing for correctness (see
 /// `docs/architecture.md` on why single-dispatcher claiming needs no
@@ -62,6 +71,13 @@ pub struct Scheduler {
     store: SurrealStore,
     controls: Arc<DashMap<JobId, JobControl>>,
     semaphore: Arc<Semaphore>,
+    /// How many permits `semaphore` was created with — needed to tell when
+    /// *every* worker has finished (all permits are back).
+    max_concurrency: u32,
+    /// Set once shutdown begins, so a job that starts (or is between
+    /// `claim` and registering its control) after the drain has already
+    /// walked `controls` still gets interrupted.
+    shutting_down: AtomicBool,
     worker: String,
 }
 
@@ -70,10 +86,13 @@ impl Scheduler {
     /// jobs to execute at once.
     #[must_use]
     pub fn new(store: SurrealStore, max_concurrency: usize) -> Self {
+        let max_concurrency = max_concurrency.max(1);
         Self {
             store,
             controls: Arc::new(DashMap::new()),
-            semaphore: Arc::new(Semaphore::new(max_concurrency.max(1))),
+            semaphore: Arc::new(Semaphore::new(max_concurrency)),
+            max_concurrency: u32::try_from(max_concurrency).unwrap_or(u32::MAX),
+            shutting_down: AtomicBool::new(false),
             worker: worker_id(),
         }
     }
@@ -204,13 +223,42 @@ impl Scheduler {
         loop {
             tokio::select! {
                 () = shutdown.cancelled() => {
-                    info!("scheduler shutting down; in-flight jobs get their current unit of work to finish");
+                    info!("scheduler shutting down; draining in-flight jobs");
                     break;
                 }
                 _ = ticker.tick() => {
                     self.clone().try_dispatch_one().await;
                 }
             }
+        }
+        self.drain(DRAIN_TIMEOUT).await;
+    }
+
+    /// Stop in-flight jobs at their next unit-of-work boundary and wait, up
+    /// to `timeout`, for them to checkpoint and hand their job back to the
+    /// queue. No new job is claimed once this runs (the dispatch loop has
+    /// already exited).
+    ///
+    /// A job that does not stop in time is left `Running` on purpose:
+    /// [`Scheduler::recover`] handles exactly that on the next start.
+    async fn drain(&self, timeout: Duration) {
+        // Flag first, then walk the controls: a job registering its control
+        // concurrently either lands in the walk or sees the flag itself.
+        self.shutting_down.store(true, Ordering::SeqCst);
+        for control in self.controls.iter() {
+            control.request_interrupt();
+        }
+
+        // Every running job holds one permit for its whole execution, so
+        // owning all of them means every worker has finished writing its
+        // final state.
+        let all_idle = Arc::clone(&self.semaphore).acquire_many_owned(self.max_concurrency);
+        match tokio::time::timeout(timeout, all_idle).await {
+            Ok(_) => info!("all in-flight jobs stopped cleanly"),
+            Err(_) => warn!(
+                remaining = self.controls.len(),
+                "in-flight jobs did not stop within the drain timeout; they stay running and are recovered on next start"
+            ),
         }
     }
 
@@ -237,7 +285,12 @@ impl Scheduler {
     async fn execute(&self, mut job: Job) {
         let control = JobControl::default();
         self.controls.insert(job.id, control.clone());
-        let ctx = JobContext::new(job.id, control, self.store.clone());
+        if self.shutting_down.load(Ordering::SeqCst) {
+            // Claimed just as shutdown began: `drain` may already have
+            // walked `controls` without seeing this job.
+            control.request_interrupt();
+        }
+        let ctx = JobContext::new(job.id, control.clone(), self.store.clone());
 
         let outcome = match job.kind.clone() {
             JobKind::Demo { steps } => demo::run(&self.store, &ctx, &mut job, steps).await,
@@ -270,6 +323,13 @@ impl Scheduler {
         };
         if let Err(error) = job.apply(event) {
             warn!(job_id = %job.id, %error, "job finished in a status its outcome couldn't transition from");
+        } else if event == JobEvent::Pause && control.was_interrupted() {
+            // Paused by shutdown, not by a user: hand the job straight back
+            // to the queue (checkpoint intact) so the next daemon resumes it
+            // without anyone having to notice and press resume.
+            if let Err(error) = job.apply(JobEvent::Resume) {
+                warn!(job_id = %job.id, %error, "could not re-queue a job interrupted by shutdown");
+            }
         }
         if let Err(error) = self.store.save_job(&job).await {
             warn!(job_id = %job.id, %error, "failed to persist final job state");
@@ -401,6 +461,96 @@ mod tests {
             claimed.attempt, 2,
             "the re-claim is the job's second attempt"
         );
+    }
+
+    /// Submit a slow demo job (150ms/step), run the dispatch loop, and wait
+    /// until it is genuinely mid-flight with at least one step checkpointed.
+    async fn running_scheduler_with_a_job_in_flight() -> (
+        Arc<Scheduler>,
+        Job,
+        CancellationToken,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let scheduler = Arc::new(scheduler().await);
+        let job = scheduler
+            .submit(JobKind::Demo { steps: 200 }, Priority::Normal, "test")
+            .await
+            .unwrap();
+        let shutdown = CancellationToken::new();
+        let handle = tokio::spawn(Arc::clone(&scheduler).run(shutdown.clone()));
+        for _ in 0..200 {
+            let current = reload(&scheduler, &job).await;
+            if current.status == JobStatus::Running && current.progress.current >= 1 {
+                return (scheduler, job, shutdown, handle);
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("the job never got going");
+    }
+
+    #[tokio::test]
+    async fn shutdown_waits_for_an_in_flight_job_and_requeues_it_with_its_checkpoint() {
+        let (scheduler, job, shutdown, handle) = running_scheduler_with_a_job_in_flight().await;
+
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("run must return once in-flight jobs have stopped")
+            .unwrap();
+
+        let after = reload(&scheduler, &job).await;
+        assert_eq!(
+            after.status,
+            JobStatus::Queued,
+            "a job interrupted by shutdown must be back in the queue, not stranded Running or Paused"
+        );
+        assert!(
+            after.checkpoint["next_step"].as_u64().unwrap_or(0) >= 1,
+            "the interrupted job must have checkpointed its progress: {}",
+            after.checkpoint
+        );
+        assert_eq!(after.lease_owner, None);
+    }
+
+    #[tokio::test]
+    async fn a_pause_the_user_asked_for_survives_a_shutdown() {
+        let (scheduler, job, shutdown, handle) = running_scheduler_with_a_job_in_flight().await;
+
+        scheduler.request_pause(job.id).unwrap();
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("run must return once in-flight jobs have stopped")
+            .unwrap();
+
+        assert_eq!(
+            reload(&scheduler, &job).await.status,
+            JobStatus::Paused,
+            "a restart must not silently un-pause a job the user paused"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_job_that_ignores_the_interrupt_is_left_running_for_recovery() {
+        // A handler that never checks for pause (like Audit/Repair) must not
+        // hang shutdown: drain gives up at the timeout and leaves the record
+        // `Running`, which is exactly what `recover` repairs on next start.
+        let scheduler = scheduler().await;
+        let job = seed(&scheduler, JobStatus::Running, 1).await;
+        let _held = Arc::clone(&scheduler.semaphore)
+            .try_acquire_owned()
+            .expect("the only permit is free");
+
+        let started = tokio::time::Instant::now();
+        scheduler.drain(Duration::from_millis(100)).await;
+
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "drain must honour its timeout instead of waiting forever"
+        );
+        assert_eq!(reload(&scheduler, &job).await.status, JobStatus::Running);
+        scheduler.recover().await.unwrap();
+        assert_eq!(reload(&scheduler, &job).await.status, JobStatus::Queued);
     }
 
     #[tokio::test]

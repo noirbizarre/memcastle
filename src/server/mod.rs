@@ -88,9 +88,10 @@ pub async fn run(config: Config) -> Result<()> {
         .with_graceful_shutdown(shutdown_signal)
         .await;
 
-    // The dispatch loop already exits on the same `shutdown` token; wait for
-    // it rather than aborting, so a job mid-checkpoint gets to finish
-    // writing before we remove the registry file out from under it.
+    // The dispatch loop exits on the same `shutdown` token and then drains
+    // in-flight jobs (`Scheduler::drain`); wait for it rather than aborting,
+    // so a job mid-checkpoint gets to finish writing before we remove the
+    // registry file out from under it.
     let _ = dispatch_handle.await;
     lifecycle::remove(&config.palace.path);
     info!("memcastle daemon stopped");

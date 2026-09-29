@@ -23,6 +23,12 @@ use crate::store::SurrealStore;
 pub struct JobControl {
     cancel: CancellationToken,
     pause_requested: Arc<AtomicBool>,
+    /// Set only when the *scheduler* (daemon shutdown) asked for the pause,
+    /// as opposed to a user. Kept apart from `pause_requested` because the
+    /// two must end differently: a user's pause leaves the job `Paused`
+    /// until they resume it, while a shutdown's pause must put the job
+    /// straight back in the queue so the next daemon picks it up unasked.
+    interrupted: Arc<AtomicBool>,
 }
 
 impl JobControl {
@@ -34,6 +40,22 @@ impl JobControl {
     /// Ask the handler to stop at its next opportunity.
     pub fn request_cancel(&self) {
         self.cancel.cancel();
+    }
+
+    /// Ask the handler to stop at its next unit of work because the daemon
+    /// is shutting down. Handlers see this as an ordinary pause request; the
+    /// scheduler then re-queues the job instead of leaving it `Paused`.
+    /// A pause a user already requested wins — they asked for it to stay
+    /// paused, and a restart must not silently un-pause it.
+    pub(crate) fn request_interrupt(&self) {
+        if !self.pause_requested.swap(true, Ordering::Relaxed) {
+            self.interrupted.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Whether the pause this control carries came from a daemon shutdown.
+    pub(crate) fn was_interrupted(&self) -> bool {
+        self.interrupted.load(Ordering::Relaxed)
     }
 }
 
