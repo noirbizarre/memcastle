@@ -38,6 +38,10 @@ A client finds a running daemon through the registry file, which is keyed by the
 
 The registry is runtime metadata, not palace data, so it lives in the state directory rather than beside the palace.
 Backing up or copying a palace never carries a stale daemon record with it.
+Each palace has its own file, `$XDG_STATE_HOME/memcastle/run/<palace-hash>/daemon.json`,
+where `<palace-hash>` is derived from the palace's canonical path.
+If no home directory can be determined, the registry falls back to `memcastle/run` under the system temporary directory.
+[Storage and data](storage.md#the-registry-file) describes the file.
 
 ## Precedence
 
@@ -53,6 +57,8 @@ The resolved configuration is validated once all layers are applied.
 
 Logging has one more input.
 Its precedence, highest first, is `MEMCASTLE_LOG`, `RUST_LOG`, the `-v` / `-vv` flags, then `logging.level`.
+`MEMCASTLE_LOG`, `RUST_LOG` and `logging.level` accept a level (`error`, `warn`, `info`, `debug`, `trace`)
+or a filter directive such as `memcastle=debug,warn`.
 
 ## Config file
 
@@ -103,7 +109,7 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `server.bind` (an IP address) | `MEMCASTLE_BIND` | `127.0.0.1` |
 | `server.port` (0 to 65535) | `MEMCASTLE_PORT` | `8420` |
 | `logging.level` | `MEMCASTLE_LOG` | `info` |
-| `jobs.max_concurrency` | `MEMCASTLE_JOBS_MAX_CONCURRENCY` | `4` |
+| `jobs.max_concurrency` (at least 1) | `MEMCASTLE_JOBS_MAX_CONCURRENCY` | `4` |
 | `jobs.drain_timeout_secs` (1 to 86400) | `MEMCASTLE_JOBS_DRAIN_TIMEOUT_SECS` | `10` |
 | `jobs.lease_ttl_secs` (3 to 86400) | `MEMCASTLE_JOBS_LEASE_TTL_SECS` | `30` |
 | `store.mode` and remote settings | none | `embedded` |
@@ -172,3 +178,10 @@ and has not created the palace, migrated it or touched its jobs.
 Windows is built and tested, but has no dedicated layout: the same dot-directories are used under your home directory.
 Any platform-specific behaviour would be an explicit design decision, recorded in an ADR;
 see [ADR-010](adr/010-unix-xdg-paths.md).
+
+## See also
+
+- [Running the daemon](daemon.md) for starting, stopping and supervising it.
+- [Storage and data](storage.md) for what lives in the palace and the registry.
+- [CLI reference](cli.md) for every flag.
+- [Troubleshooting](troubleshooting.md) for configuration errors.
