@@ -94,7 +94,7 @@ jobs:
         with:
           tool: cross@0.2.5
 
-      # Two builds of the same commit from different checkout paths must
+      # Two builds of the same commit from different checkout paths should
       # produce the same bytes, and a panic message or debug path carries the
       # path it was built under. Each prefix below is rewritten to a fixed
       # name: the checkout, the cargo and rustup homes (whose registry sources

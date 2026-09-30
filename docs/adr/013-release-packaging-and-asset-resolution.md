@@ -65,7 +65,8 @@ A release that cannot be rebuilt to the same bytes cannot be checked by anyone b
   The toolchain, `cross` and the runner images are pinned, and every build path is remapped to a fixed name.
   Tarballs are assembled with a fixed order, commit-time mtimes and no owner, and gzip without a header timestamp.
   Each release carries `SHA256SUMS`, a CycloneDX bill of materials and GitHub build-provenance attestations.
-  A workflow builds the Linux binary twice from different paths and fails if the bytes differ.
+  No CI job rebuilds the release to compare the bytes: two LTO release builds take far too long for a pull request check.
+  Reproducibility is a property of how the release is built, and anyone can verify it by rebuilding the tag.
 - **SurrealKV is the only storage engine in the tree, and a test says so.**
   `tests/dependencies.rs` reads `Cargo.lock` and fails on RocksDB, TiKV, FoundationDB, IndexedDB or any
   SurrealDB engine crate other than SurrealKV and the in-memory engine used by tests.
@@ -110,10 +111,12 @@ A release that cannot be rebuilt to the same bytes cannot be checked by anyone b
   The resolver ignores that directory on purpose, so such an install has to name its assets with `--assets-dir`
   or unpack somewhere else, such as `/usr/local` or `~/.local/opt/memcastle`.
   In 0.1, with no package assets, nothing is affected.
-- Reproducibility is guaranteed only for what the workflow checks: the Linux binary, built natively.
-  The macOS and Windows builds are pinned and attested, but linkers and SDKs on those platforms embed details
-  the workflow does not control, so identical bytes are expected but not verified.
-  The release's Linux binaries are built under `cross`, so the check is a proxy for them, not the same build.
+- Reproducibility is designed in but not enforced by CI.
+  A native Linux release build was checked by hand to give identical bytes from two checkout paths,
+  but a change that breaks that (a build script embedding a path, a dependency stamping the time) is not caught
+  until someone rebuilds a release.
+  The macOS and Windows builds, and the Linux ones built under `cross`, are pinned and attested,
+  but their linkers and SDKs embed details the workflow does not control, so identical bytes are expected, not verified.
 - The release workflow is stricter about versions: bumping the Rust toolchain is a deliberate edit to
-  `RUSTUP_TOOLCHAIN`, the `rust-toolchain` action refs and the reproducibility workflow together.
+  `RUSTUP_TOOLCHAIN` and the `dtolnay/rust-toolchain` refs together.
 - `aws-lc-sys`, a TLS dependency, compiles C and can need `cmake`, so the build is C-free for storage only (ADR-001).

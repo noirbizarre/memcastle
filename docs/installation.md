@@ -113,8 +113,8 @@ gh attestation verify memcastle_<version>_linux-amd64 --repo noirbizarre/memcast
 ```
 
 A software bill of materials, `memcastle-<version>.cdx.json` in CycloneDX format, lists every crate in the build.
-The releases are built to be reproducible; the Linux binary is rebuilt from two different checkout paths in CI
-and compared byte for byte.
+The releases are built to be reproducible: the toolchain and build environment are pinned and build paths are
+remapped, so rebuilding a tag on the same target should give the same bytes.
 
 ### From source
 

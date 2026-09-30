@@ -90,13 +90,12 @@ Nothing to release is the normal case for step 1, and costs one workflow run rep
 - `SHA256SUMS` over all of the above, with build-provenance attestations for every file and an SBOM attestation for the
   executables and tarballs, which `gh attestation verify` checks.
 
-The release is built to be reproducible, and three things keep it that way.
+The release is built to be reproducible, and two things keep it that way.
 The Rust toolchain, `cross` and the runner images are pinned to exact versions,
 so moving any of them is an edit to the workflow and not something that happens between two releases.
 Build paths are remapped to fixed names, and the tarballs have a fixed order, timestamps and ownership.
-The 🔁 Reproducibility workflow builds the Linux binary twice from different checkout paths on every pull request
-that could change the result, and fails if the bytes differ.
-Bump the toolchain in `RUSTUP_TOOLCHAIN` and the `dtolnay/rust-toolchain` refs of both workflows together.
+CI does not rebuild the release to check this, because two LTO release builds are too slow for a pull request.
+Bump the toolchain in `RUSTUP_TOOLCHAIN` and the `dtolnay/rust-toolchain` refs together.
 See [ADR-013](docs/adr/013-release-packaging-and-asset-resolution.md) for the reasoning.
 
 The pinned release workflow is template-owned (see below), so a change that belongs to every project generated
