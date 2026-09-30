@@ -336,6 +336,25 @@ pub enum Error {
         source: std::io::Error,
     },
 
+    /// The operator-chosen assets directory does not exist or is not a
+    /// directory.
+    ///
+    /// An explicit choice is never silently replaced by the installed or
+    /// embedded assets: a typo'd `--assets-dir` would otherwise serve the
+    /// wrong files with nothing to say so.
+    #[error("assets directory {path} does not exist or is not a directory")]
+    #[diagnostic(
+        code(memcastle::assets::not_found),
+        help(
+            "point `--assets-dir`, MEMCASTLE_ASSETS_DIR or `assets.dir` at an existing directory, \
+             or remove the setting to use the installed or embedded assets"
+        )
+    )]
+    AssetsNotFound {
+        /// The configured directory.
+        path: String,
+    },
+
     /// A memory operation was rejected by the calling session/request's
     /// [`crate::domain::MemoryMode`]: `ReadOnly` rejects writes, `Disabled`
     /// rejects everything (see that type's doc comment for the full
@@ -523,6 +542,11 @@ impl Error {
         Self::ServerBind { addr, source }
     }
 
+    /// Build an [`Error::AssetsNotFound`].
+    pub fn assets_not_found(path: impl Into<String>) -> Self {
+        Self::AssetsNotFound { path: path.into() }
+    }
+
     /// Build an [`Error::MigrationLocked`].
     pub fn migration_locked(owner: impl Into<String>) -> Self {
         Self::MigrationLocked {
@@ -667,6 +691,7 @@ mod tests {
             },
             Error::migration_locked("someone"),
             Error::migration_failed(1, "step", "boom"),
+            Error::assets_not_found("/nowhere"),
         ]
     }
 
@@ -698,7 +723,8 @@ mod tests {
             | Error::ServerBind { .. }
             | Error::ModeForbidden { .. }
             | Error::MigrationLocked { .. }
-            | Error::MigrationFailed { .. } => {}
+            | Error::MigrationFailed { .. }
+            | Error::AssetsNotFound { .. } => {}
         }
     }
 

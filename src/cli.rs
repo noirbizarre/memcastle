@@ -65,8 +65,8 @@ pub enum Command {
     Stop,
     /// Stop the daemon, then start a fresh one and wait until it is serving
     /// (best-effort; for supervised deployments, prefer restarting through
-    /// your process manager). `--config`, `--bind`, `--port` and the resolved
-    /// `--palace` are passed on to the new daemon.
+    /// your process manager). `--config`, `--bind`, `--port`, `--assets-dir`
+    /// and the resolved `--palace` are passed on to the new daemon.
     Restart(ServeArgs),
     /// Search palace drawer content.
     Search(SearchArgs),
@@ -127,6 +127,13 @@ pub struct ServeArgs {
     /// (default 8420). `0` lets the OS pick a free one.
     #[arg(long, value_name = "PORT")]
     pub port: Option<u16>,
+    /// Directory of runtime assets, overriding `assets.dir` and
+    /// `MEMCASTLE_ASSETS_DIR`. It outranks the assets a package installed and
+    /// the ones built into the binary, so a local web build can be served
+    /// without installing it. Must be an absolute path to an existing
+    /// directory; it is only read, never written.
+    #[arg(long, value_name = "DIR")]
+    pub assets_dir: Option<PathBuf>,
 }
 
 /// Arguments for `memcastle migrate`.

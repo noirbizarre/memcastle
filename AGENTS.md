@@ -60,6 +60,7 @@ src/
 ├── domain/     Palace/Wing/Room/Drawer/Job, checkpoint payloads, entities, memory modes — pure types, no I/O
 ├── store/      SurrealDB connection and repository methods (schema is applied from `database/schema/`)
 ├── migrate/    versioned data migrations and the version watermark, run before serving
+├── assets/     runtime asset resolution (override, installed, embedded); never user data, never the network
 ├── jobs/       the scheduler: claiming, dispatch, cooperative pause/cancel, crash recovery
 ├── mining/     the mining job handler
 ├── checkpoint/ the checkpoint job handler (durable, resumable memory writes)

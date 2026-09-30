@@ -92,14 +92,17 @@ async fn async_main() -> ExitCode {
 /// loaded, so that every command resolves the palace and address the same way
 /// (`--bind` used to be applied to `serve` alone, after loading).
 fn overrides_from(args: &Cli) -> Overrides {
-    let (bind, port) = match &args.command {
-        Command::Serve(serve) | Command::Restart(serve) => (serve.bind, serve.port),
-        _ => (None, None),
+    let (bind, port, assets_dir) = match &args.command {
+        Command::Serve(serve) | Command::Restart(serve) => {
+            (serve.bind, serve.port, serve.assets_dir.clone())
+        }
+        _ => (None, None, None),
     };
     Overrides {
         palace: args.palace.clone(),
         bind,
         port,
+        assets_dir,
     }
 }
 
@@ -221,7 +224,7 @@ async fn cmd_stop(config: &Config, mode: Option<MemoryMode>) -> Result<()> {
 /// behind it — the same signal every other command discovers the daemon by —
 /// not the process merely having been spawned: reporting success before that
 /// told users a daemon that had crashed on startup was up. The new daemon
-/// gets the original `--config`, `--bind` and `--port` and the resolved `--palace`,
+/// gets the original `--config`, `--bind`, `--port` and `--assets-dir` and the resolved `--palace`,
 /// because a bare `memcastle serve` would silently come back on the default
 /// address with the default config.
 async fn cmd_restart(
@@ -269,6 +272,11 @@ async fn cmd_restart(
         // one that was asked for.
         if let Some(port) = args.port {
             command.arg("--port").arg(port.to_string());
+        }
+        // Forwarded for the same reason: a developer's local asset build
+        // would otherwise be silently replaced by the installed one.
+        if let Some(dir) = &args.assets_dir {
+            command.arg("--assets-dir").arg(dir);
         }
         // Always the resolved palace, not just an explicit `--palace`: the
         // respawned daemon must serve exactly the palace this command

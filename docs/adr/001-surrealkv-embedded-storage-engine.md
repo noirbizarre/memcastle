@@ -25,7 +25,7 @@ and the project is a single-writer, single-palace, local-first tool.
 
 The alternative already available in the same `surrealdb` crate's `any` engine is `kv-surrealkv`:
 SurrealDB's own embedded engine, pure Rust (confirmed by inspecting its resolved dependency tree —
-`arc-swap`, `crossbeam-skiplist`, `lz4_flex`, `snap`, etc., no `cc`/`cmake` build-dependency at all).
+`arc-swap`, `crossbeam-skiplist`, `lz4_flex`, `snap`, etc., no `cc`/`cmake` build-dependency from the engine itself).
 
 ## Decision
 
@@ -45,8 +45,11 @@ Use SurrealKV (`kv-surrealkv`) as the only embedded storage backend for Phase 1.
 
 ## Consequences
 
-- The default build no longer needs a C/C++ toolchain or `cmake` at all;
+- The default build no longer needs a C/C++ toolchain or `cmake` for *storage*;
   first-build time and cross-compilation for release targets both get simpler as a side effect.
+  (Amended 2026-09-30: the TLS dependency `aws-lc-sys`, pulled in through SurrealDB's `rustls` and JWKS support,
+  compiles C and may use `cmake` on some hosts, so the build as a whole is not C-free.
+  That is unrelated to the storage engine, and `tests/dependencies.rs` now guards that SurrealKV remains the only one.)
 - SurrealKV is younger and less battle-tested than RocksDB, particularly for large-scale or high-throughput workloads.
   That risk is accepted for Phase 1's local-first, single-user, single-writer scope;
   it is exactly what the server-mode follow-up task above needs to re-evaluate

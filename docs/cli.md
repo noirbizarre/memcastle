@@ -28,14 +28,16 @@ See [Configuration](configuration.md) for how these flags combine with the confi
 
 | Command | What it does |
 |---|---|
-| `memcastle serve [--bind <IP>] [--port <PORT>]` | Run the daemon in the foreground. `daemon` is an alias. |
-| `memcastle restart [--bind <IP>] [--port <PORT>]` | Stop the running daemon, start a detached new one and wait until it serves. |
+| `memcastle serve [--bind <IP>] [--port <PORT>] [--assets-dir <DIR>]` | Run the daemon in the foreground. `daemon` is an alias. |
+| `memcastle restart [--bind <IP>] [--port <PORT>] [--assets-dir <DIR>]` | Stop the running daemon, start a detached new one and wait until it serves. |
 | `memcastle stop` | Ask the running daemon to shut down gracefully. |
 | `memcastle status [--json]` | Report whether the daemon is running, where, which palace, and whether the datastore is healthy. |
 | `memcastle migrate [--check \| --status]` | Apply, or just inspect, the palace's migrations without a daemon. |
 
-`--bind` and `--port` only exist on `serve` and `restart`;
+`--bind`, `--port` and `--assets-dir` only exist on `serve` and `restart`;
 client commands find the daemon through its registry file instead.
+`--assets-dir` names a directory of runtime assets that outranks the installed and built-in ones,
+see [Runtime assets](configuration.md#runtime-assets).
 See [Running the daemon](daemon.md) for the details of each, and [Migrations and upgrades](migrations.md) for `migrate`.
 
 ### Exit codes of `status`
