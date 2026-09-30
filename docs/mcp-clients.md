@@ -84,7 +84,8 @@ Run `claude mcp list` to check the connection, or `/mcp` inside a session.
 ### Any other client
 
 Register a remote server of type **streamable HTTP** (some clients call it just `http`) with the URL above.
-No headers or credentials are needed, because the daemon has no authentication.
+No headers or credentials are needed unless you turned on [authentication](authentication.md#mcp-clients),
+in which case send `Authorization: Bearer <token>` as a header on the server.
 A client that can only launch a local command (stdio) cannot connect to MemCastle directly.
 
 ## Use it
@@ -104,7 +105,8 @@ To try it, ask your agent to run `memcastle_status`, then to search for somethin
 A session can lower its own privileges by calling `memcastle_set_mode` with `read_only` or `disabled`,
 for example at session start.
 See [Memory modes](memory-modes.md).
-The daemon has no authentication, so this coordinates cooperating clients rather than restricting untrusted ones.
+A client can raise its mode again, and authentication identifies no individual client,
+so this coordinates cooperating clients rather than restricting untrusted ones.
 
 ## Sharing one palace between clients
 

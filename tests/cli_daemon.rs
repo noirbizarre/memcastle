@@ -21,6 +21,9 @@ fn memcastle(daemon: &TestDaemon) -> Command {
     command
         .env("MEMCASTLE_PALACE_PATH", &daemon.palace_path)
         .env_remove("MEMCASTLE_MODE")
+        // A developer's real token must not leak into a test daemon that has none.
+        .env_remove("MEMCASTLE_AUTH_ENABLED")
+        .env_remove("MEMCASTLE_AUTH_TOKEN")
         .stdin(Stdio::null());
     command
 }

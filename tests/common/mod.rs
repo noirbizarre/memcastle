@@ -36,14 +36,21 @@ impl TestDaemon {
     /// Like [`Self::start`], but with a configurable job concurrency —
     /// tests exercising several jobs at once need more than the default.
     pub async fn start_with(max_concurrency: usize) -> Self {
+        Self::start_configured(|config| config.jobs.max_concurrency = max_concurrency).await
+    }
+
+    /// Like [`Self::start`], but `configure` may change the otherwise-default
+    /// configuration first — how a test turns authentication on.
+    pub async fn start_configured(configure: impl FnOnce(&mut Config)) -> Self {
         let tempdir = tempfile::tempdir().expect("tempdir");
         let palace_path = tempdir.path().join("palace");
 
         let mut config = Config::default();
         config.palace.path = palace_path.clone();
-        config.jobs.max_concurrency = max_concurrency;
+        config.jobs.max_concurrency = 1;
         config.server.bind = "127.0.0.1".parse().expect("valid IP address");
         config.server.port = 0;
+        configure(&mut config);
 
         let handle = tokio::spawn(memcastle::server::run(config));
 
@@ -59,11 +66,18 @@ impl TestDaemon {
     /// Ask the daemon to shut down and wait for its task to finish,
     /// propagating anything it returned.
     pub async fn shutdown(self) {
+        self.shutdown_as(None).await;
+    }
+
+    /// Like [`Self::shutdown`], presenting `token` — for a daemon that
+    /// requires one, where an anonymous shutdown would be refused.
+    pub async fn shutdown_as(self, token: Option<&str>) {
         let client = reqwest::Client::new();
-        let _ = client
-            .post(format!("{}/api/shutdown", self.base_url))
-            .send()
-            .await;
+        let mut request = client.post(format!("{}/api/shutdown", self.base_url));
+        if let Some(token) = token {
+            request = request.bearer_auth(token);
+        }
+        let _ = request.send().await;
         tokio::time::timeout(Duration::from_secs(15), self.handle)
             .await
             .expect("daemon did not shut down within 15s")

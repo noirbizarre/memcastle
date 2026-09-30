@@ -67,3 +67,9 @@ so the default must stay local-only and leaving it must be a deliberate act.
 - Exposing the daemon beyond loopback is one setting away, and nothing but the operator stands between the palace
   and the network.
   Authentication is a separate decision.
+
+## Amendment (2026-09-30)
+
+Authentication was decided in [ADR-014](014-optional-token-authentication.md).
+It is optional and off by default, so the loopback default above still stands, and the daemon logs a warning when it
+listens beyond loopback with authentication disabled.

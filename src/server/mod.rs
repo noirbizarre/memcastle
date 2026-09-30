@@ -14,10 +14,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, warn};
 
-use crate::app::{AppServices, RuntimeContext};
-use crate::config::Config;
+use crate::app::{AppServices, AuthPolicy, RuntimeContext};
+use crate::config::{Config, Secret};
 use crate::error::{Error, Result};
 use crate::jobs::Scheduler;
 use crate::store::SurrealStore;
@@ -74,6 +74,17 @@ pub async fn run(config: Config) -> Result<()> {
         );
     }
 
+    // Hashed here and the plaintext dropped with `config`: the daemon keeps
+    // only the digest of a configured secret.
+    let auth_policy = AuthPolicy::new(
+        config.auth.enabled,
+        config.auth.token.as_ref().map(Secret::expose),
+    );
+    // After migrations (the verifier table exists) and before the scheduler
+    // starts: a daemon that could never authenticate anyone must fail before
+    // it has changed or served anything.
+    auth_policy.ensure_satisfiable(&store).await?;
+
     let mut scheduler = Scheduler::new(store.clone(), config.jobs.max_concurrency)
         .with_drain_timeout(Duration::from_secs(config.jobs.drain_timeout_secs))
         .with_lease_ttl(Duration::from_secs(config.jobs.lease_ttl_secs));
@@ -93,14 +104,30 @@ pub async fn run(config: Config) -> Result<()> {
     };
 
     let backend_info = backend.describe();
-    let app = AppServices::new(store, Arc::clone(&scheduler)).with_runtime(RuntimeContext {
-        // The real bound address, not the requested one: `status` must agree
-        // with the registry file when port 0 was asked for.
-        bind_addr: actual_addr.to_string(),
-        palace_path: config.palace.path.display().to_string(),
-        backend: backend_info.kind.to_string(),
-        location: backend_info.location,
-    });
+    let app = AppServices::new(store, Arc::clone(&scheduler))
+        .with_runtime(RuntimeContext {
+            // The real bound address, not the requested one: `status` must agree
+            // with the registry file when port 0 was asked for.
+            bind_addr: actual_addr.to_string(),
+            palace_path: config.palace.path.display().to_string(),
+            backend: backend_info.kind.to_string(),
+            location: backend_info.location,
+        })
+        .with_auth(auth_policy);
+    if config.auth.enabled {
+        info!(
+            "authentication is enabled: every route except GET /api/health requires a bearer token"
+        );
+    } else if !config.server.bind.is_loopback() {
+        // Not an error (the operator may front the daemon with something else)
+        // but never silent: this is the configuration where anyone on the
+        // network can read and write the palace.
+        warn!(
+            bind = %config.server.bind,
+            "listening beyond loopback with authentication disabled: anyone who can reach this \
+             address can read and write the palace; set auth.enabled (see docs/authentication.md)"
+        );
+    }
     let mcp_service = crate::mcp::service(app.clone(), &shutdown);
     // One trace layer over both surfaces: a request line at `debug` on the
     // way in and a response line (status, latency) on the way out, so "what
@@ -108,8 +135,18 @@ pub async fn run(config: Config) -> Result<()> {
     // and REST alike. A failed response (5xx) is logged at `error` by the
     // layer itself; rejections are logged with their diagnostic by
     // `api::ApiError`, which the layer cannot see.
-    let router = crate::api::router(app, shutdown.clone())
+    //
+    // Authentication wraps REST and MCP together, *inside* the trace layer (the
+    // layer added last is outermost) so a refused request is still traced.
+    // Added to the merged router rather than per route, so a route added later
+    // cannot be forgotten. The trace layer logs no headers, which is what
+    // keeps the `Authorization` header out of the log.
+    let router = crate::api::router(app.clone(), shutdown.clone())
         .nest_service("/mcp", mcp_service)
+        .layer(axum::middleware::from_fn_with_state(
+            app,
+            crate::api::require_auth,
+        ))
         .layer(
             tower_http::trace::TraceLayer::new_for_http()
                 .make_span_with(

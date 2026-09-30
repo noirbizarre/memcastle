@@ -81,6 +81,11 @@ port = 8420
 [logging]
 level = "info"
 
+# Optional bearer-token authentication. Prefer MEMCASTLE_AUTH_TOKEN to `token` here,
+# so the secret stays out of the file.
+[auth]
+enabled = false
+
 # Only to serve assets from somewhere other than the installed or embedded ones.
 [assets]
 dir = "/home/alice/src/memcastle-web/dist"
@@ -122,7 +127,13 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `jobs.max_concurrency` (at least 1) | `MEMCASTLE_JOBS_MAX_CONCURRENCY` | `4` |
 | `jobs.drain_timeout_secs` (1 to 86400) | `MEMCASTLE_JOBS_DRAIN_TIMEOUT_SECS` | `10` |
 | `jobs.lease_ttl_secs` (3 to 86400) | `MEMCASTLE_JOBS_LEASE_TTL_SECS` | `30` |
+| `auth.enabled` (`true` or `false`) | `MEMCASTLE_AUTH_ENABLED` | `false` |
+| `auth.token` (at least 16 characters) | `MEMCASTLE_AUTH_TOKEN` | none |
 | `store.mode` and remote settings | none | `embedded` |
+
+`auth.token` is a secret, and is handled as one: MemCastle never logs it, prints it, serialises it, or writes it anywhere,
+and the client commands read it from the environment or the config file, never from a flag.
+See [Authentication](authentication.md).
 
 Some variables are read by the command line rather than the config file:
 
@@ -177,7 +188,9 @@ Port `0` asks the OS for a free port, which is useful for tests and scripts;
 the port actually chosen is in the daemon's registry file and its log.
 
 The default never listens on all network interfaces.
-The daemon has no authentication, so use a non-loopback address such as `0.0.0.0` only on a network you trust.
+Authentication is off unless you enable it, so use a non-loopback address such as `0.0.0.0` only on a network you trust,
+or with [authentication](authentication.md) enabled.
+The daemon logs a warning when it listens beyond loopback without it.
 
 The listener is bound before anything else happens.
 If the address is taken, needs privileges, or does not exist on this machine,

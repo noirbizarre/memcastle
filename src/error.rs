@@ -405,6 +405,41 @@ pub enum Error {
         /// What went wrong.
         message: String,
     },
+
+    /// The daemon requires a bearer token and the request carried none, a
+    /// malformed one, or the wrong one.
+    ///
+    /// Its own variant (and HTTP 401, not the 403 of [`Error::ModeForbidden`])
+    /// so a client can tell "who are you?" apart from "you may not do that"
+    /// and from "the daemon is not there". `reason` is a fixed word
+    /// (`missing`, `malformed`, `invalid`) and never echoes the presented
+    /// token: this error is logged.
+    #[error("authentication required: the bearer token is {reason}")]
+    #[diagnostic(
+        code(memcastle::auth::unauthorized),
+        help(
+            "send `Authorization: Bearer <token>`; the CLI reads the token from MEMCASTLE_AUTH_TOKEN \
+             or `auth.token`. A token can be (re)generated with `memcastle auth generate` \
+             by someone who already holds a valid one"
+        )
+    )]
+    Unauthorized {
+        /// Why the credential was refused: `missing`, `malformed` or `invalid`.
+        reason: &'static str,
+    },
+
+    /// Authentication is enabled but the daemon has nothing to check a token
+    /// against, so it refuses to start rather than serve everything open or
+    /// lock every client out with no way back in.
+    #[error("authentication is enabled but no token is configured or stored")]
+    #[diagnostic(
+        code(memcastle::auth::not_configured),
+        help(
+            "set MEMCASTLE_AUTH_TOKEN (or `auth.token`), or start once with `auth.enabled = false`, \
+             run `memcastle auth generate`, store the token, then enable authentication"
+        )
+    )]
+    AuthNotConfigured,
 }
 
 /// What every interface reports about a failure: the message, and the two
@@ -692,6 +727,8 @@ mod tests {
             Error::migration_locked("someone"),
             Error::migration_failed(1, "step", "boom"),
             Error::assets_not_found("/nowhere"),
+            Error::Unauthorized { reason: "missing" },
+            Error::AuthNotConfigured,
         ]
     }
 
@@ -724,7 +761,9 @@ mod tests {
             | Error::ModeForbidden { .. }
             | Error::MigrationLocked { .. }
             | Error::MigrationFailed { .. }
-            | Error::AssetsNotFound { .. } => {}
+            | Error::AssetsNotFound { .. }
+            | Error::Unauthorized { .. }
+            | Error::AuthNotConfigured => {}
         }
     }
 

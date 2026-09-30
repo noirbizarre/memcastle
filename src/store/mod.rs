@@ -46,6 +46,7 @@ mod embedded_schema_gen {
 }
 use embedded_schema_gen::embedded_schema;
 
+mod auth;
 mod drawers;
 mod entities;
 mod jobs;

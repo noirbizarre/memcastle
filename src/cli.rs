@@ -96,6 +96,10 @@ pub enum Command {
     /// Inspect and control jobs.
     #[command(subcommand)]
     Jobs(JobsCommand),
+    /// Manage the daemon's authentication token. Administrative, and never
+    /// available to MCP clients.
+    #[command(subcommand)]
+    Auth(AuthCommand),
     /// List wings. Not yet implemented.
     Wings,
     /// List rooms. Not yet implemented.
@@ -119,8 +123,8 @@ pub struct StatusArgs {
 pub struct ServeArgs {
     /// Interface address to listen on, overriding `server.bind` and
     /// `MEMCASTLE_BIND` (default `127.0.0.1`). An IP address alone: the port
-    /// is `--port`. Anything but a loopback address exposes the daemon, which
-    /// has no authentication, to the network.
+    /// is `--port`. Anything but a loopback address exposes the daemon to the
+    /// network: enable authentication (`auth.enabled`) when you do.
     #[arg(long, value_name = "IP", value_parser = memcastle::config::parse_bind_host)]
     pub bind: Option<IpAddr>,
     /// TCP port to listen on, overriding `server.port` and `MEMCASTLE_PORT`
@@ -278,6 +282,22 @@ pub enum DiaryCommand {
     },
 }
 
+/// `memcastle auth` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum AuthCommand {
+    /// Generate a high-entropy token and print it to standard output, once.
+    /// The daemon keeps only a digest, so the token cannot be shown again:
+    /// store it in a secret manager, then set `auth.enabled` and restart.
+    /// Generating again replaces the previous token, which is rotation.
+    /// While authentication is enabled this needs a valid token
+    /// (MEMCASTLE_AUTH_TOKEN) like every other command.
+    Generate,
+    /// Revoke the generated token, so it stops working immediately. A shared
+    /// secret set through MEMCASTLE_AUTH_TOKEN or `auth.token` is not
+    /// affected: change the configuration and restart to revoke that one.
+    Revoke,
+}
+
 /// `memcastle jobs` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum JobsCommand {
@@ -360,6 +380,22 @@ mod tests {
     fn serve_without_listener_flags_leaves_both_unset_so_the_lower_layers_apply() {
         let serve = serve_args(&["serve"]).unwrap();
         assert_eq!((serve.bind, serve.port), (None, None));
+    }
+
+    #[test]
+    fn auth_generate_and_revoke_parse_and_take_no_token_argument() {
+        for (word, expected) in [("generate", "Generate"), ("revoke", "Revoke")] {
+            let cli = Cli::try_parse_from(["memcastle", "auth", word]).unwrap();
+            assert!(
+                matches!(&cli.command, Command::Auth(auth) if format!("{auth:?}") == expected),
+                "{:?}",
+                cli.command
+            );
+        }
+        // The token must never be a command-line argument: it would land in
+        // shell history and the process list.
+        assert!(Cli::try_parse_from(["memcastle", "auth", "generate", "--token", "x"]).is_err());
+        assert!(Cli::try_parse_from(["memcastle", "--token", "x", "status"]).is_err());
     }
 
     #[test]

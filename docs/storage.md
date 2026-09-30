@@ -25,6 +25,10 @@ Inside an embedded palace directory:
 ```
 
 Only `db/` matters.
+It includes the daemon's own small tables, such as the stored [authentication](authentication.md) token digest
+(`auth_state`), which therefore travels with a backup of the palace.
+It is a SHA-256 digest of the generated token, never the token, and a secret configured through the environment or the
+config file is not stored in it at all.
 The registry file is deliberately kept outside the palace, so copying or backing up a palace never carries a stale
 daemon record with it.
 

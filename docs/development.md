@@ -64,6 +64,12 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `tests/mcp_smoke.rs` — the MCP surface end to end: a real MCP client over streamable HTTP against a
     `memcastle serve` subprocess, covering read and write tools, migrations before serving, a second session,
     and persistence across a restart with a reconnecting session (subprocess).
+  - `tests/auth.rs` — optional bearer-token authentication over real HTTP: every route guarded, the open health probe,
+    a configured secret, generate, rotate and revoke, and MCP with a token and with no credential-management tool
+    (in-process).
+  - `tests/auth_lifecycle.rs` — the authentication lifecycle through the real CLI: generate, restart, enable, a
+    rotated and a revoked token, the daemon refusing to start with nothing to check against, and no token ever reaching
+    the log, the database or any file (subprocess).
   - `tests/config_bind.rs` — the listener itself: bind address and port precedence, and real bind failures
     (subprocess).
   - `tests/config_paths.rs` — the XDG config, data and state locations, resolved through the real binary
@@ -94,6 +100,10 @@ so the same capability becomes available to every interface at once.
 
 The `single-writer` hook enforces the companion invariant, one daemon and one writer per embedded palace:
 `SurrealStore::connect` may only be called from `src/server/`, `src/store/` and `src/main.rs` (for `migrate`).
+
+The authentication invariant has no hook, because a route or an MCP tool is not something a grep can recognise.
+It is enforced by tests instead: `tests/auth.rs` walks every REST route (and a route that does not exist) without a
+token, and fails if an MCP tool's name mentions credentials.
 
 Two more hooks guard the remaining invariants.
 `job-status-only-via-apply` fails on any `.status =` assignment outside `src/domain/job.rs`,

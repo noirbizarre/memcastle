@@ -413,6 +413,9 @@ async fn spawn_daemon_and_wait(bin: &Path, palace: &Path) -> (Child, RuntimeInfo
         .env("MEMCASTLE_PALACE_PATH", palace)
         .env("MEMCASTLE_BIND", "127.0.0.1")
         .env("MEMCASTLE_PORT", "0")
+        // The test daemon runs without authentication, whatever the developer's shell exports.
+        .env_remove("MEMCASTLE_AUTH_ENABLED")
+        .env_remove("MEMCASTLE_AUTH_TOKEN")
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         // If the test panics before explicitly stopping the daemon, don't
