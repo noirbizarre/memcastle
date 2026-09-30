@@ -1,0 +1,9 @@
+# Used by `cross` for the Linux release legs of .github/workflows/publish-release.yaml.
+#
+# `cross` builds inside a container and forwards only a fixed set of
+# environment variables into it. `SOURCE_DATE_EPOCH` (the commit time, which
+# the release workflow sets so that a rebuild stamps the same date) is not one
+# of them, so it is named here; without this the cross-compiled Linux binaries
+# would be the only ones that could not see it.
+[build.env]
+passthrough = ["SOURCE_DATE_EPOCH"]

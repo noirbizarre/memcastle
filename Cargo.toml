@@ -107,9 +107,12 @@ uuid = { version = "1.26.1", features = ["v4", "serde"] }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }
 tokio-util = "0.7.19"
 
-# Storage. `kv-surrealkv` is the embedded engine — pure Rust, so the default
-# build pulls no native C++ dependency or `cmake` step (see #47; the prior
-# `kv-rocksdb` did both). `protocol-ws` is the remote one — both go through
+# Storage. `kv-surrealkv` is the embedded engine — pure Rust, so the storage
+# layer pulls no native C++ dependency (see #47; the prior `kv-rocksdb` did).
+# The build is not entirely C-free: the TLS stack (`aws-lc-sys`) compiles C and
+# may use `cmake` on some hosts, unrelated to storage. `tests/dependencies.rs`
+# fails if a second storage engine ever appears in `Cargo.lock`.
+# `protocol-ws` is the remote one — both go through
 # the single `engine::any` connection type so the rest of the codebase never
 # branches on which one is active. 3.x reworked the serde/type surface:
 # `bind`/`take` now require the driver's own `SurrealValue` trait, not

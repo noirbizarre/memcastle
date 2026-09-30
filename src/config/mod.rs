@@ -33,6 +33,8 @@ pub struct Overrides {
     pub bind: Option<IpAddr>,
     /// `--port`: replaces `server.port`.
     pub port: Option<u16>,
+    /// `--assets-dir`: replaces `assets.dir`.
+    pub assets_dir: Option<PathBuf>,
 }
 
 /// Where the palace's own data lives, distinct from `store` (which is where
@@ -165,6 +167,19 @@ pub fn parse_bind_host(raw: &str) -> std::result::Result<IpAddr, String> {
     })
 }
 
+/// Runtime asset settings (see [`crate::assets`]).
+///
+/// Not a palace or user-data setting: the assets are package content, and the
+/// directory named here is never written to.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AssetsConfig {
+    /// An explicit assets directory, outranking the installed package assets
+    /// and the embedded ones. Unset by default: a standalone binary needs no
+    /// assets directory, and a package finds its own.
+    pub dir: Option<PathBuf>,
+}
+
 /// Job scheduler settings.
 ///
 /// `#[serde(default)]` so a config file that sets only some of these (say just
@@ -246,6 +261,9 @@ pub struct Config {
     /// Logging settings.
     #[serde(default)]
     pub logging: LoggingConfig,
+    /// Runtime asset settings.
+    #[serde(default)]
+    pub assets: AssetsConfig,
 }
 
 impl Config {
@@ -288,6 +306,9 @@ impl Config {
         if let Some(port) = overrides.port {
             self.server.port = port;
         }
+        if let Some(dir) = &overrides.assets_dir {
+            self.assets.dir = Some(dir.clone());
+        }
     }
 
     fn from_file(path: &Path) -> Result<Self> {
@@ -324,6 +345,9 @@ impl Config {
         }
         if let Some(port) = lookup("MEMCASTLE_PORT") {
             self.server.port = parse_override("MEMCASTLE_PORT", &port)?;
+        }
+        if let Some(dir) = lookup("MEMCASTLE_ASSETS_DIR") {
+            self.assets.dir = Some(PathBuf::from(dir));
         }
         if let Some(level) = lookup("MEMCASTLE_LOG") {
             self.logging.level = level;
@@ -400,6 +424,19 @@ impl Config {
                  MEMCASTLE_PALACE_PATH or `palace.path` in the config file, \
                  or set HOME or XDG_DATA_HOME so the default can be derived",
                 self.palace.path.display().to_string()
+            )));
+        }
+        // Same reasoning as the palace path: a relative assets directory
+        // resolves against whatever directory the daemon was started from, so
+        // a service manager and a shell would serve different files. Whether
+        // it exists is checked at startup (`assets::Assets::resolve`), not
+        // here, which stays free of I/O.
+        if let Some(dir) = self.assets.dir.as_ref().filter(|dir| !dir.is_absolute()) {
+            return Err(Error::config(format!(
+                "assets.dir {:?} is not an absolute path; set it to one with `--assets-dir`, \
+                 MEMCASTLE_ASSETS_DIR or `assets.dir` in the config file, or remove it \
+                 to use the installed or embedded assets",
+                dir.display().to_string()
             )));
         }
         if self.jobs.max_concurrency == 0 {
@@ -489,6 +526,44 @@ mod tests {
         assert_eq!(config.server.bind, "127.0.0.2".parse::<IpAddr>().unwrap());
         assert_eq!(config.server.port, 9999);
         assert_eq!(config.jobs.max_concurrency, 7);
+    }
+
+    #[test]
+    fn no_assets_directory_is_configured_by_default() {
+        assert_eq!(Config::default().assets.dir, None);
+    }
+
+    #[test]
+    fn the_assets_directory_comes_from_the_file_then_the_environment_then_the_flag() {
+        let mut config: Config = toml::from_str("[assets]\ndir = \"/from/file\"").unwrap();
+        assert_eq!(config.assets.dir, Some(PathBuf::from("/from/file")));
+
+        config
+            .apply_overrides_from(env(&[("MEMCASTLE_ASSETS_DIR", "/from/env")]))
+            .unwrap();
+        assert_eq!(config.assets.dir, Some(PathBuf::from("/from/env")));
+
+        config.apply_cli_overrides(&Overrides {
+            assets_dir: Some(PathBuf::from("/from/flag")),
+            ..Overrides::default()
+        });
+        assert_eq!(config.assets.dir, Some(PathBuf::from("/from/flag")));
+    }
+
+    #[test]
+    fn a_relative_assets_directory_is_rejected_with_the_way_to_fix_it() {
+        let mut config = Config::default();
+        config.palace.path = std::env::temp_dir();
+        config.assets.dir = Some(PathBuf::from("web/dist"));
+
+        let err = config.validate().unwrap_err();
+
+        assert!(matches!(err, Error::Config { .. }), "{err}");
+        let message = err.to_string();
+        assert!(
+            message.contains("--assets-dir") && message.contains("MEMCASTLE_ASSETS_DIR"),
+            "{message}"
+        );
     }
 
     #[test]
@@ -624,6 +699,7 @@ mod tests {
             palace: Some(flag.clone()),
             bind: Some("127.0.0.3".parse().unwrap()),
             port: Some(3333),
+            ..Overrides::default()
         });
         assert_eq!(config.palace.path, flag);
         assert_eq!(config.server.socket_addr().to_string(), "127.0.0.3:3333");

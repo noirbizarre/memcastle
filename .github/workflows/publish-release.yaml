@@ -37,6 +37,13 @@ env:
   # Same bar CI's clippy job already holds the code to; a release binary
   # should not ship a warning CI would have failed on for anyone else.
   RUSTFLAGS: -D warnings
+  # The toolchain a release is built with is an exact version, not `stable`:
+  # a release rebuilt a month later must not change because rustc did. The
+  # environment variable also outranks `rust-toolchain.toml`, which names the
+  # moving `stable` channel for local development and would otherwise make
+  # rustup install the latest one over the pinned install below. Keep it equal
+  # to the `dtolnay/rust-toolchain` ref.
+  RUSTUP_TOOLCHAIN: "1.98.1"
 
 jobs:
   build:
@@ -50,12 +57,16 @@ jobs:
         # property that is not in the matrix type whenever no Windows target is
         # selected — an actionlint error, not a runtime one, so it would only
         # surface in the consuming project's CI.
+        #
+        # Runners are named images, not `-latest`: the toolchain, linker and
+        # SDK a release is built with come from the image, so a `-latest`
+        # that moves between two releases changes the binary.
         include:
-          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-latest, asset: linux-amd64, cross: true, ext: "" }
-          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-latest, asset: linux-arm64, cross: true, ext: "" }
-          - { target: x86_64-apple-darwin, runner: macos-latest, asset: darwin-amd64, cross: false, ext: "" }
-          - { target: aarch64-apple-darwin, runner: macos-latest, asset: darwin-arm64, cross: false, ext: "" }
-          - { target: x86_64-pc-windows-msvc, runner: windows-latest, asset: windows-amd64, cross: false, ext: ".exe" }
+          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-24.04, asset: linux-amd64, cross: true, ext: "" }
+          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04, asset: linux-arm64, cross: true, ext: "" }
+          - { target: x86_64-apple-darwin, runner: macos-15, asset: darwin-amd64, cross: false, ext: "" }
+          - { target: aarch64-apple-darwin, runner: macos-15, asset: darwin-arm64, cross: false, ext: "" }
+          - { target: x86_64-pc-windows-msvc, runner: windows-2022, asset: windows-amd64, cross: false, ext: ".exe" }
     steps:
       - uses: actions/checkout@v7
         with:
@@ -66,7 +77,8 @@ jobs:
           # in this job shells out to `git push`.
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@stable
+      # An exact version: see `RUSTUP_TOOLCHAIN` above, which this must equal.
+      - uses: dtolnay/rust-toolchain@1.98.1
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
@@ -74,9 +86,37 @@ jobs:
       # `cross` is only needed on the Linux legs, so it is installed
       # conditionally here rather than added to mise.toml, which would pull it
       # onto every runner in the matrix. It also supplies the cross C toolchain
-      # that any vendored C dependency needs.
-      - uses: taiki-e/install-action@cross
+      # that any vendored C dependency needs. Pinned: its container image is
+      # selected by its own version, so an unpinned `cross` changes the C
+      # toolchain under the same tag.
+      - uses: taiki-e/install-action@v2
         if: matrix.cross
+        with:
+          tool: cross@0.2.5
+
+      # Two builds of the same commit from different checkout paths should
+      # produce the same bytes, and a panic message or debug path carries the
+      # path it was built under. Each prefix below is rewritten to a fixed
+      # name: the checkout, the cargo and rustup homes (whose registry sources
+      # are the bulk of the paths), and `/project`, where `cross` mounts the
+      # tree in its container. Prefixes that do not exist on a leg match
+      # nothing. `cygpath` converts to the form rustc sees on Windows, where
+      # bash paths are not native.
+      #
+      # `SOURCE_DATE_EPOCH` is the commit time: the one clock a rebuild can
+      # share, for anything that stamps a date.
+      - name: Make the build independent of where it runs
+        shell: bash
+        run: |
+          native() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
+          remap="--remap-path-prefix=$(native "${GITHUB_WORKSPACE}")=/build"
+          remap="${remap} --remap-path-prefix=$(native "${CARGO_HOME:-${HOME}/.cargo}")=/cargo"
+          remap="${remap} --remap-path-prefix=$(native "${RUSTUP_HOME:-${HOME}/.rustup}")=/rustup"
+          remap="${remap} --remap-path-prefix=/project=/build"
+          {
+            echo "RUSTFLAGS=${RUSTFLAGS} ${remap}"
+            echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)"
+          } >> "${GITHUB_ENV}"
 
       # Without this a standalone MSVC binary can fail to start on a machine
       # that lacks the matching Visual C++ Redistributable — exactly the
@@ -112,7 +152,16 @@ jobs:
   publish:
     name: 🚀 Publish
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+
+    # `id-token` lets the job ask GitHub to sign an attestation as this
+    # workflow, and `attestations` lets it store the result; `contents` is
+    # what checkout already needed. The release upload below uses the App
+    # token instead, so none of these can publish a release.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
 
     # This is the deployment. Declaring a `url:` registers it in the
     # repository's deployment list and links straight to what shipped.
@@ -145,11 +194,76 @@ jobs:
           merge-multiple: true
           path: dist
 
+      # The native-package layout (docs/adr/013): the executable under `bin/`
+      # and the documentation under `share/doc/memcastle/`, so unpacking at a
+      # prefix (`tar -xzf ... --strip-components=1 -C /usr/local`) puts each
+      # file where a package manager would. There is no `share/memcastle/`
+      # yet, because nothing in 0.1 is a package asset.
+      #
+      # Every flag that follows exists so the same inputs give the same bytes:
+      # a fixed order, the commit time for every mtime, no owner, and `gzip -n`
+      # so the gzip header carries neither a name nor a clock. The raw binaries
+      # stay as they are: the AUR recipe, the Homebrew formula and
+      # `cargo binstall` all fetch them by name.
+      #
+      # Windows has no tarball: its asset is the `.exe`, which needs no layout.
+      - name: Package the Unix binaries
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+          epoch="$(git log -1 --format=%ct)"
+          for asset in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+            name="memcastle-${TAG}-${asset}"
+            root="stage/${name}"
+            install -d -m 755 "${root}/bin" "${root}/share/doc/memcastle"
+            install -m 755 "dist/memcastle_${TAG}_${asset}" "${root}/bin/memcastle"
+            install -m 644 LICENSE README.md "${root}/share/doc/memcastle/"
+            tar -C stage --sort=name --format=gnu --mtime="@${epoch}" \
+              --owner=0 --group=0 --numeric-owner -cf - "${name}" \
+              | gzip -n -9 > "dist/memcastle_${TAG}_${asset}.tar.gz"
+          done
+
+      # A bill of materials for the whole release: every crate any target
+      # links, taken from `Cargo.lock` and the manifest. `--target all` because
+      # one SBOM describes five builds. Named with a hyphen so the `memcastle_*`
+      # glob that selects the attested subjects below does not match it.
+      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-cyclonedx@0.5.9
+      - name: Software bill of materials
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          cargo cyclonedx --format json --spec-version 1.5 --target all \
+            --override-filename "memcastle-${TAG}.cdx"
+          mv "memcastle-${TAG}.cdx.json" dist/
+
       - name: Checksums
         working-directory: dist
         # `--` so an asset whose name begins with a dash is treated as a
         # file rather than an option (shellcheck SC2035).
         run: sha256sum -- * > SHA256SUMS
+
+      # Signed statements that GitHub Actions built exactly these bytes from
+      # this repository at this tag, checkable with `gh attestation verify`.
+      # The checksums file is the subject list so every published file is
+      # covered without naming them here.
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-checksums: dist/SHA256SUMS
+
+      # The SBOM is attached to the executables and tarballs it describes, not
+      # to itself or to the checksums file.
+      - name: List the artifacts the bill of materials describes
+        working-directory: dist
+        run: sha256sum -- memcastle_* > ../sbom-subjects
+      - uses: actions/attest-sbom@v4
+        with:
+          subject-checksums: sbom-subjects
+          sbom-path: dist/memcastle-${{ inputs.tag }}.cdx.json
 
       # The release already exists as a DRAFT: gh-ship created it before
       # dispatching this workflow, and will undraft it once we succeed.

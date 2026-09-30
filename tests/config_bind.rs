@@ -24,6 +24,7 @@ fn isolated(root: &Path) -> Command {
         "MEMCASTLE_BIND",
         "MEMCASTLE_PORT",
         "MEMCASTLE_MODE",
+        "MEMCASTLE_ASSETS_DIR",
     ] {
         cmd.env_remove(name);
     }

@@ -78,6 +78,29 @@ Nothing to release is the normal case for step 1, and costs one workflow run rep
 
 `gh ship validate` runs on every pull request, so a broken release contract fails on the PR rather than mid-release.
 
+### What a release contains
+
+📦 Publish Release attaches, for a tag `<tag>`:
+
+- the raw executables, `memcastle_<tag>_<platform>[.exe]`, which the AUR recipe, the Homebrew formula and
+  `cargo binstall` fetch by name, so renaming them breaks those;
+- a tarball for each Unix platform, `memcastle_<tag>_<platform>.tar.gz`, in the native-package layout
+  (`bin/`, `share/doc/memcastle/`);
+- `memcastle-<tag>.cdx.json`, a CycloneDX bill of materials;
+- `SHA256SUMS` over all of the above, with build-provenance attestations for every file and an SBOM attestation for the
+  executables and tarballs, which `gh attestation verify` checks.
+
+The release is built to be reproducible, and two things keep it that way.
+The Rust toolchain, `cross` and the runner images are pinned to exact versions,
+so moving any of them is an edit to the workflow and not something that happens between two releases.
+Build paths are remapped to fixed names, and the tarballs have a fixed order, timestamps and ownership.
+CI does not rebuild the release to check this, because two LTO release builds are too slow for a pull request.
+Bump the toolchain in `RUSTUP_TOOLCHAIN` and the `dtolnay/rust-toolchain` refs together.
+See [ADR-013](docs/adr/013-release-packaging-and-asset-resolution.md) for the reasoning.
+
+The pinned release workflow is template-owned (see below), so a change that belongs to every project generated
+from the template should be made in rust.tpl.
+
 ### Repository requirements
 
 The release jobs authenticate as a GitHub App, not with `GITHUB_TOKEN` —

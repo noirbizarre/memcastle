@@ -399,6 +399,36 @@ The design points worth knowing:
   an unhealthy datastore is reported there with HTTP 200, while `/api/health` stays a plain liveness check.
   See [ADR-012](adr/012-status-reports-a-stopped-daemon-and-exits-by-state.md).
 
+## Release packaging and runtime assets
+
+A release is a single executable that starts a daemon on a machine with nothing else installed and no network.
+What else a release may carry falls into three kinds, kept apart on purpose:
+
+- **Embedded** in the binary: anything small that must match its version exactly.
+  The SurrealDB schema (`surrealkit::embed_schema!`) and the data migrations (`crate::migrate`) are of this kind.
+- **Installed** by a package manager under `share/memcastle`: a future web UI, for instance.
+- **User data and configuration**, under the XDG directories and never treated as assets.
+
+`assets::Assets::resolve` picks one source for the run, in this order:
+
+```mermaid
+flowchart TD
+    start([daemon starts]) --> override{"--assets-dir,<br/>MEMCASTLE_ASSETS_DIR or<br/>assets.dir set?"}
+    override -- yes --> exists{directory exists?}
+    exists -- yes --> useOverride[use the override]
+    exists -- no --> fail[[refuse to start:<br/>memcastle::assets::not_found]]
+    override -- no --> installed{"share/memcastle found next to<br/>the executable, in /usr/local<br/>or in /usr, outside the XDG data dir?"}
+    installed -- yes --> useInstalled[use the installed directory]
+    installed -- no --> useEmbedded[use the embedded assets]
+```
+
+The resolver only reads directories, so startup never needs the network, and it serves nothing yet:
+the web UI is the first consumer.
+The module is pure and the daemon's composition root calls it once, before binding the listener,
+so a mistyped override fails a start that has changed nothing.
+[ADR-013](adr/013-release-packaging-and-asset-resolution.md) records the layout, the order and what was rejected;
+[Installation](installation.md#standalone-binary-or-native-package) documents the layout for users.
+
 ## MCP: another interface on the daemon, not a special process
 
 `mcp::McpTools` implements `rmcp::ServerHandler` and is mounted at `/mcp` on the *same* `axum` router as the REST API,
@@ -436,5 +466,8 @@ Deliberately out of scope, and each is structurally possible without rework give
 - Robust cross-platform process supervision for `memcastle restart`
   (it is a best-effort respawn; use a real supervisor in production).
 - A web dashboard (the API is shaped so one can be built entirely as an API client, as the CLI is).
+  Its packaging is settled, in [ADR-013](adr/013-release-packaging-and-asset-resolution.md);
+  the daemon serves nothing from the asset directory yet.
+- Native `.deb` and `.rpm` packages, and any network-based asset download.
 
 Decisions and their rejected alternatives are collected in the [Architecture Decisions](adr/README.md).

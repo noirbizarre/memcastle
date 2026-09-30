@@ -141,7 +141,9 @@ Set `MEMCASTLE_LOG=warn` for a quiet daemon.
 
 The daemon does its own graceful shutdown on `SIGTERM`, does not fork, and logs to standard error,
 which is what supervisors expect.
-MemCastle does not ship service files; a systemd user unit looks like this:
+The binary neither generates nor installs service files: integrating with an init system is a package's job,
+not the core binary's (see [ADR-013](adr/013-release-packaging-and-asset-resolution.md)).
+A systemd user unit you can write by hand looks like this:
 
 ```ini title="~/.config/systemd/user/memcastle.service"
 [Unit]

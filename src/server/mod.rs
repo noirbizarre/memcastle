@@ -38,6 +38,12 @@ pub async fn run(config: Config) -> Result<()> {
     // connections in its backlog until `axum::serve` below; the registry
     // file, which clients discover the daemon by, is still written only once
     // everything is ready.
+    // Resolved before the listener binds, so a mistyped `--assets-dir` fails
+    // before anything else happens. Purely local: it reads directories and
+    // never the network, which is what lets a standalone binary start offline.
+    let assets = crate::assets::Assets::resolve_for_process(config.assets.dir.as_deref())?;
+    info!(source = %assets.source(), "runtime assets resolved");
+
     let requested_addr = config.server.socket_addr();
     let listener = tokio::net::TcpListener::bind(requested_addr)
         .await

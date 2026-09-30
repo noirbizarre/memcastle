@@ -43,3 +43,5 @@ The history is the value.
   bound before the daemon does anything else
 - [ADR-012](012-status-reports-a-stopped-daemon-and-exits-by-state.md) — `status` answers for a stopped daemon too,
   and its exit code says which state it found
+- [ADR-013](013-release-packaging-and-asset-resolution.md) — releases are one binary plus an optional package layout,
+  and assets resolve override, installed, embedded
