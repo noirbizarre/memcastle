@@ -1,0 +1,89 @@
+# Memory modes
+
+A memory mode decides what one client is allowed to do with the palace.
+It exists so memory can be turned down for a single session — say, an agent that should read but not write —
+without stopping the daemon or touching any other client sharing it.
+
+| Mode | Reads | Writes |
+|---|---|---|
+| `full` (the default) | allowed | allowed |
+| `read_only` | allowed | rejected |
+| `disabled` | rejected | rejected |
+
+The mode is **never daemon-wide**.
+There is no switch that turns the whole daemon off, because the daemon serves many agents at once
+and disabling memory for one of them must not interrupt another's reads or running jobs.
+
+## What counts as a read or a write
+
+The rule follows what an operation touches, not what it is called.
+
+- **Reads:** `search`, `recall`, `wake_up`, `diary_read`, and listing or showing jobs.
+  Jobs count because a job record carries its whole input, such as the memory a checkpoint is writing.
+- **Writes:** `checkpoint`, `diary_write`, `mine`, and `repair` when it is not a dry run.
+  Mining and applied repairs count because their purpose is to file or delete drawers.
+- **Never gated:** `status`, job control (pause, resume, cancel, retry), demo jobs, `audit` and a dry-run `repair`.
+  They report on the palace or steer work that was already allowed, and never expose drawer content.
+
+A rejected operation fails with `memcastle::app::mode_forbidden`, on reads as well as writes.
+A disabled session never receives an empty result that could be mistaken for "nothing found".
+
+```mermaid
+flowchart LR
+    R[Request] --> M{Mode of this<br/>session or request}
+    M -->|full| A[Run it]
+    M -->|read_only| W{Writes to<br/>the palace?}
+    M -->|disabled| X{Touches palace<br/>content?}
+    W -->|no| A
+    W -->|yes| E[mode_forbidden]
+    X -->|no| A
+    X -->|yes| E
+```
+
+## Choosing a mode
+
+The mode is carried differently on each interface, and defaults to `full` on all of them.
+
+### MCP
+
+Call the `memcastle_set_mode` tool once at the start of a session.
+Every later call on that session uses it, and other sessions are unaffected.
+
+```json
+{ "mode": "read_only" }
+```
+
+The mode lives as long as the MCP session.
+A request that does not belong to a session has nothing to remember a mode under:
+it runs as `full`, and `memcastle_set_mode` on it is an error.
+
+### REST
+
+Send the `X-MemCastle-Mode` header on each request.
+
+```sh
+curl -s -H 'X-MemCastle-Mode: read_only' 'http://127.0.0.1:8420/api/search?q=formatter'
+```
+
+An unrecognized value is a `400`, never silently treated as `full`.
+
+### CLI
+
+Pass `--mode` (or set `MEMCASTLE_MODE`) to run a command the way a session in that mode would.
+
+```sh
+memcastle --mode read_only search formatter   # works
+memcastle --mode read_only mine ./project     # rejected
+```
+
+This is mostly useful to check what a restricted session can and cannot do.
+
+Modes are advisory boundaries between cooperating clients on one machine, not security:
+the daemon has no authentication, and any client can choose `full`.
+
+## Why job listing is gated
+
+Listing jobs would otherwise let a disabled session read palace content through the job list,
+and letting a read-only session submit a mining job would let it change the palace.
+The full reasoning is in [ADR-002](adr/002-memory-mode-session-scoping.md) (why the mode is per session)
+and [ADR-007](adr/007-memory-mode-gate-follows-data-access.md) (why the gate follows data access).

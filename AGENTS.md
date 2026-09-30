@@ -95,6 +95,12 @@ This keeps a diff scoped to the sentence that actually changed.
 The rule applies to the linted documents (`AGENTS.md`, `CONTRIBUTING.md`, `README.md` and `docs/`);
 `PLAN.md`, `integrations/README.md` and `skills/README.md` are working documents outside that lint scope.
 
+**Documentation ships with the behaviour.**
+A change to a CLI flag, a setting, an environment variable, an MCP tool, a REST route or any other user-visible behaviour
+updates the page that documents it in the same change (`docs/cli.md`, `docs/configuration.md`, `docs/mcp-and-api.md`, ...).
+Document what the code does, not what it will do, and diagram architecture with Mermaid.
+See [Development](docs/development.md#documentation).
+
 ## Commits
 
 Conventional Commits, enforced by commitlint on `commit-msg`.

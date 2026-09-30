@@ -6,8 +6,7 @@
 - The remaining tools (nextest, prek, typos, ...) via `mise` — run `mise install` once.
 
 That's it — SurrealKV, the embedded storage engine, is pure Rust,
-so unlike the RocksDB backend this project used before #47,
-the storage engine itself needs no C/C++ toolchain.
+so the storage engine itself needs no C/C++ toolchain.
 (A transitive TLS dependency, `aws-lc-sys`, may use `cmake` on some targets; that is unrelated to storage.)
 
 ## Everyday tasks
@@ -21,6 +20,8 @@ mise run guards     # the architecture guard hooks, described below
 mise run check      # every lint, the guards and the tests, without modifying the tree
 mise run ci         # check plus the docs build: the local equivalent of CI's lint and test steps
 mise cli <args>      # run memcastle from source, e.g. `mise cli status`
+mise run docs       # serve this documentation locally
+mise run docs:build # build it into site/
 ```
 
 `prek install` (once) wires the same checks into `git commit` as pre-commit hooks —
@@ -65,6 +66,8 @@ Every path, environment variable, flag and the precedence between them is in [Co
     and persistence across a restart with a reconnecting session (subprocess).
   - `tests/config_bind.rs` — the listener itself: bind address and port precedence, and real bind failures
     (subprocess).
+  - `tests/config_paths.rs` — the XDG config, data and state locations, resolved through the real binary
+    (subprocess).
   - `tests/migrate.rs` — `memcastle migrate` and its `--check`/`--status` modes (subprocess).
   - `tests/cli.rs` — the binary's argument parsing and its behaviour with no daemon reachable (subprocess).
   - `tests/cli_daemon.rs` — CLI flags that change what the daemon is asked: `--mode`, and relative `mine` paths
@@ -96,6 +99,27 @@ Two more hooks guard the remaining invariants.
 `job-status-only-via-apply` fails on any `.status =` assignment outside `src/domain/job.rs`,
 so a job's status only ever changes through `Job::apply`.
 `no-hand-rolled-ddl` fails on schema DDL in Rust code, because the schema is SurrealKit's (`database/schema/*.surql`).
+
+## Documentation
+
+The documentation site is built by [Zensical](https://zensical.org/) from `docs/`, configured in `zensical.toml`.
+`mise run docs` serves it with live reload, and `mise run docs:build` (part of `mise run ci`) builds it.
+Documentation is part of a change, not a follow-up: a pull request that changes a flag, a setting, a tool
+or a user-visible behaviour updates the page that describes it, in the same commit series.
+
+- **Where things go.** Task-oriented pages (installation, quickstart, guides) and references (configuration, CLI, MCP and
+  REST) are for users; `architecture.md`, this page and `adr/` are for contributors.
+  Say a thing once and link to it from elsewhere instead of repeating it.
+- **New pages** must be added to the `nav` in `zensical.toml`, or they are built but not reachable.
+- **Describe what exists.** Document the implementation as it is, and put anything not built yet under a "not
+  implemented" or "non-goals" heading rather than describing it as available.
+  Run the command and paste real output when a page shows some.
+- **Diagrams** use [Mermaid](https://mermaid.js.org/) in fenced `mermaid` blocks, next to the text they explain.
+  GitHub and the site both render them; stick to flowcharts, sequence, state, class and entity-relationship diagrams,
+  and keep them small enough to read on a phone.
+- **Prose style.** One sentence per line, wrapped at a clause boundary if a sentence would pass 120 columns
+  (`mise run lint:md` enforces the width).
+  `mise run spell` runs `typos`; a legitimate new term goes into `typos.toml`'s `extend-words`.
 
 ## This repository is generated from a template
 

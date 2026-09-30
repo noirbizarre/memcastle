@@ -48,6 +48,14 @@ which is why the format task is `format` and not `fmt` (`mise fmt` formats `mise
 and why running the binary is `mise cli` and not `mise run` (`mise run` runs a task).
 Prefer the explicit `mise run <task>` in scripts: mise can claim a new name in any release.
 
+## Documentation
+
+Documentation is part of the change, not a follow-up:
+a pull request that changes a flag, a setting, an MCP tool or a user-visible behaviour updates the page that describes it.
+User pages live in `docs/`, are listed in the `nav` of `zensical.toml`, and use one sentence per line.
+Architecture diagrams are Mermaid.
+[Development](docs/development.md#documentation) has the conventions, and `mise run docs` previews the site.
+
 ## Commits
 
 [Conventional Commits](https://www.conventionalcommits.org/), enforced by commitlint on `commit-msg`.
