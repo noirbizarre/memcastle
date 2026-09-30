@@ -96,9 +96,9 @@ A release that cannot be rebuilt to the same bytes cannot be checked by anyone b
   There is nothing to put in them beyond the binary that the AUR and Homebrew recipes already install.
   The layout is the contract; the formats can follow when a second installable file exists.
   *Amended: the release now attaches `.deb` and `.rpm` packages built with nfpm, with the same contents as the tarball
-  and no service unit.
+  plus the systemd user unit.
   They are unsigned, have no apt or dnf repository, and declare no dependencies.
-  The Arch package additionally installs `/usr/lib/systemd/user/memcastle.service`.*
+  The Arch package installs the same unit.*
 - **Generate the systemd unit from the binary, such as `memcastle install-service`.**
   It couples the core binary to one init system and to paths it cannot know, and it is a packager's responsibility.
 - **Only pin the toolchain.**

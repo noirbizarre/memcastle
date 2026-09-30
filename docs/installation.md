@@ -88,9 +88,11 @@ sudo apt install ./memcastle_<version>_linux-amd64.deb
 sudo dnf install ./memcastle_<version>_linux-amd64.rpm
 ```
 
-They install `/usr/bin/memcastle` and `/usr/share/doc/memcastle/`, and nothing under your XDG directories,
+They install `/usr/bin/memcastle`, the systemd user unit `/usr/lib/systemd/user/memcastle.service`
+and `/usr/share/doc/memcastle/`, and nothing under your XDG directories,
 so removing the package leaves your configuration and palace alone.
-They ship no service unit; write one by hand as in [Under a supervisor](daemon.md#under-a-supervisor).
+The unit is used as on Arch: `systemctl --user start memcastle`, as described in [Arch Linux](#arch-linux-aur).
+The package does not enable or start it.
 Verify them like any other download, as in [Verify a download](#verify-a-download).
 
 The packages are unsigned, there is no apt or dnf repository so upgrades are manual,
