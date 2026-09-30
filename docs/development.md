@@ -60,6 +60,9 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `tests/audit.rs`, `tests/repair.rs` — the audit and repair job kinds end to end (in-process).
   - `tests/persistence.rs` — data and job state survive a daemon restart, including a SIGKILL mid-job
     and a pause or cancel requested just before it, and `memcastle restart --bind --port` (subprocess).
+  - `tests/mcp_smoke.rs` — the MCP surface end to end: a real MCP client over streamable HTTP against a
+    `memcastle serve` subprocess, covering read and write tools, migrations before serving, a second session,
+    and persistence across a restart with a reconnecting session (subprocess).
   - `tests/config_bind.rs` — the listener itself: bind address and port precedence, and real bind failures
     (subprocess).
   - `tests/migrate.rs` — `memcastle migrate` and its `--check`/`--status` modes (subprocess).
