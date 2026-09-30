@@ -18,7 +18,10 @@ pub mod status;
 
 pub use status::StatusView;
 
-use crate::app::{JobControlResult, StatusReport, WakeUpBudget, WakeUpContext};
+use crate::app::{
+    GeneratedToken, JobControlResult, RevokeResult, StatusReport, WakeUpBudget, WakeUpContext,
+};
+use crate::config::Secret;
 use crate::domain::channel::CLI as CHANNEL;
 use crate::domain::{CheckpointPayload, Drawer, Job, JobId, JobStatus, MemoryMode};
 use crate::error::{Error, Result};
@@ -37,17 +40,33 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Build the one HTTP client every call goes through, optionally stamping the
-/// `X-MemCastle-Mode` header on each request.
-fn http_client(mode: Option<MemoryMode>) -> reqwest::Client {
+/// `X-MemCastle-Mode` and `Authorization` headers on each request.
+///
+/// Both headers are built here, together, from the client's stored settings:
+/// `with_mode` and `with_token` each rebuild the client, and if either built
+/// only its own header the other would be silently dropped.
+fn http_client(mode: Option<MemoryMode>, token: Option<&Secret>) -> reqwest::Client {
     let mut builder = reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(REQUEST_TIMEOUT);
+    let mut headers = reqwest::header::HeaderMap::new();
     if let Some(mode) = mode {
-        let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::HeaderName::from_static(MemoryMode::HEADER),
             reqwest::header::HeaderValue::from_static(mode.as_str()),
         );
+    }
+    // A token that cannot be a header value (a newline in it, say) is skipped
+    // rather than panicking; the daemon then answers 401, which names the
+    // problem, instead of the CLI crashing with the secret in a backtrace.
+    if let Some(mut value) = token.and_then(|token| {
+        reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token.expose())).ok()
+    }) {
+        // Keeps the credential out of `Debug` output and HTTP/2 header compression.
+        value.set_sensitive(true);
+        headers.insert(reqwest::header::AUTHORIZATION, value);
+    }
+    if !headers.is_empty() {
         builder = builder.default_headers(headers);
     }
     builder
@@ -85,6 +104,9 @@ pub struct DaemonClient {
     base_url: String,
     source: EndpointSource,
     http: reqwest::Client,
+    /// Kept so either `with_*` can rebuild `http` with the other's setting intact.
+    mode: Option<MemoryMode>,
+    token: Option<Secret>,
 }
 
 /// Where a [`DaemonClient`] got its address, so `status` can say so.
@@ -110,7 +132,9 @@ impl DaemonClient {
         Self {
             base_url: format!("http://{}", connectable(&bind_addr)),
             source,
-            http: http_client(None),
+            http: http_client(None, None),
+            mode: None,
+            token: None,
         }
     }
 
@@ -131,8 +155,44 @@ impl DaemonClient {
     /// session in that mode. Without it a client runs as `Full`.
     #[must_use]
     pub fn with_mode(mut self, mode: MemoryMode) -> Self {
-        self.http = http_client(Some(mode));
+        self.mode = Some(mode);
+        self.http = http_client(self.mode, self.token.as_ref());
         self
+    }
+
+    /// Present `token` as `Authorization: Bearer` on every request, for a
+    /// daemon that has authentication enabled. `None` leaves the client
+    /// anonymous, which is what a daemon without authentication expects.
+    #[must_use]
+    pub fn with_token(mut self, token: Option<Secret>) -> Self {
+        self.token = token;
+        self.http = http_client(self.mode, self.token.as_ref());
+        self
+    }
+
+    /// Generate a token on the daemon (`POST /api/auth/token`), replacing any
+    /// previous one. The plaintext is in the answer and nowhere else.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Remote`] with status 401 when the daemon requires a token this
+    /// client does not hold, or [`Error::DaemonNotRunning`].
+    pub async fn auth_generate(&self) -> Result<GeneratedToken> {
+        self.send(self.http.post(format!("{}/api/auth/token", self.base_url)))
+            .await
+    }
+
+    /// Revoke the generated token (`DELETE /api/auth/token`).
+    ///
+    /// # Errors
+    ///
+    /// As for [`Self::auth_generate`].
+    pub async fn auth_revoke(&self) -> Result<RevokeResult> {
+        self.send(
+            self.http
+                .delete(format!("{}/api/auth/token", self.base_url)),
+        )
+        .await
     }
 
     async fn send<T: DeserializeOwned>(&self, request: reqwest::RequestBuilder) -> Result<T> {

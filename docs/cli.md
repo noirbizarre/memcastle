@@ -158,6 +158,30 @@ Pausing and cancelling are requests: a running job stops at its next unit of wor
 which is a quick way to check the daemon end to end.
 The states a job moves through are in [Architecture](architecture.md#job-lifecycle).
 
+## Authentication
+
+```sh
+memcastle auth generate
+memcastle auth revoke
+```
+
+`auth generate` asks the daemon to make a high-entropy token, and prints it on standard output, once, and nothing else,
+so it pipes straight into a secret manager.
+The daemon keeps only a digest, so the token cannot be shown again.
+The instructions for enabling authentication go to standard error.
+Running it again replaces the previous token, which is how you rotate.
+`auth revoke` removes the stored token, which stops working at once, and prints `{"revoked": true}`.
+
+Both are administrative REST and CLI operations, and neither is available to MCP clients.
+While the daemon has authentication disabled they need nothing, which is how the first token is made.
+Once it is enabled they need a valid token like every other command.
+
+With authentication enabled, every client command presents the token in `MEMCASTLE_AUTH_TOKEN` (or `auth.token`);
+there is deliberately no flag for it, so it stays out of your shell history and the process list.
+A daemon that refuses it answers `401` with `memcastle::auth::unauthorized`,
+reported as `memcastle::client::remote_rejected`.
+[Authentication](authentication.md) covers provisioning, rotation and revocation.
+
 ## Not implemented yet
 
 `wings`, `rooms`, `drawers` and `maintenance` are reserved names.

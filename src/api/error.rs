@@ -25,6 +25,9 @@ impl IntoResponse for ApiError {
             | Error::InvalidBasedOnJob { .. }
             | Error::EmptyLabel { .. } => StatusCode::BAD_REQUEST,
             Error::ModeForbidden { .. } => StatusCode::FORBIDDEN,
+            // 401, not 403: the caller is unidentified, which is different from
+            // an identified caller being refused by its memory mode.
+            Error::Unauthorized { .. } => StatusCode::UNAUTHORIZED,
             // The request is fine; the job's recorded state (Running, but with
             // no worker) is what conflicts with it, and a restart resolves it.
             // A 500 would blame the daemon for something the caller can fix.
@@ -48,7 +51,16 @@ impl IntoResponse for ApiError {
         // The same body MCP reports (`Error::body`): `error` for callers that
         // only read a message, `code` and `help` so a remote failure is
         // exactly as actionable as one rendered locally.
-        (status, Json(body)).into_response()
+        let mut response = (status, Json(body)).into_response();
+        if status == StatusCode::UNAUTHORIZED {
+            // RFC 9110 requires a challenge on every 401; it also lets generic
+            // HTTP clients tell this apart from any other refusal.
+            response.headers_mut().insert(
+                axum::http::header::WWW_AUTHENTICATE,
+                axum::http::HeaderValue::from_static("Bearer"),
+            );
+        }
+        response
     }
 }
 

@@ -152,6 +152,12 @@ dirs = "7.0.0"
 sha2 = "0.11.0"
 dashmap = "6.2.1"
 
+# Authentication (see docs/adr/014): `subtle` for constant-time digest
+# comparison, `getrandom` for OS-sourced token entropy. Both were already
+# in the lockfile transitively, so this adds no new supply-chain surface.
+subtle = "2.6.1"
+getrandom = "0.4.3"
+
 [dev-dependencies]
 assert_cmd = "2"
 predicates = "3"

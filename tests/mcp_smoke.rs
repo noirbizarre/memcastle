@@ -40,6 +40,8 @@ fn memcastle(root: &Path, palace: &Path) -> Command {
         "MEMCASTLE_BIND",
         "MEMCASTLE_PORT",
         "MEMCASTLE_MODE",
+        "MEMCASTLE_AUTH_ENABLED",
+        "MEMCASTLE_AUTH_TOKEN",
     ] {
         cmd.env_remove(name);
     }

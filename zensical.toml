@@ -28,6 +28,7 @@ nav = [
   ] },
   { "Guides" = [
     { "Running the daemon" = "daemon.md" },
+    { "Authentication" = "authentication.md" },
     { "Memory modes" = "memory-modes.md" },
     { "Storage and data" = "storage.md" },
     { "Migrations and upgrades" = "migrations.md" },

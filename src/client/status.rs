@@ -12,6 +12,7 @@ use serde::Serialize;
 
 use super::{DaemonClient, EndpointSource};
 use crate::app::StatusReport;
+use crate::config::Secret;
 use crate::domain::MemoryMode;
 use crate::error::{Error, Result};
 use crate::server::lifecycle::{self, Registry};
@@ -84,9 +85,10 @@ impl StatusView {
         palace_path: &Path,
         configured_bind: SocketAddr,
         mode: Option<MemoryMode>,
+        token: Option<Secret>,
     ) -> Result<Self> {
         let registry = lifecycle::inspect(palace_path);
-        let daemon = DaemonClient::discover(palace_path, configured_bind);
+        let daemon = DaemonClient::discover(palace_path, configured_bind).with_token(token);
         let daemon = match mode {
             Some(mode) => daemon.with_mode(mode),
             None => daemon,
@@ -181,6 +183,14 @@ impl StatusView {
             report.jobs_queued, report.jobs_running, report.jobs_paused
         ));
         lines.push(format!("  mode       {}", report.mode.as_str()));
+        lines.push(format!(
+            "  auth       {}",
+            if report.auth_enabled {
+                "enabled (bearer token required)"
+            } else {
+                "disabled"
+            }
+        ));
         lines.push("Restart with `memcastle restart`, stop with `memcastle stop`.".to_string());
         lines.join("\n")
     }
@@ -262,6 +272,7 @@ mod tests {
             bind_addr: "127.0.0.1:8420".into(),
             palace_path: "/data/palace".into(),
             datastore,
+            auth_enabled: false,
         }
     }
 

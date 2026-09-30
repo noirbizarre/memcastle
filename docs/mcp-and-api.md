@@ -86,6 +86,8 @@ as `full`.
 `/api/health`, job control (pause, resume, cancel, retry) and `/api/shutdown` are never gated and ignore it.
 
 A mode the daemon refuses is a `403` with the code `memcastle::app::mode_forbidden`.
+A request without a valid token, on a daemon with [authentication](authentication.md) enabled,
+is a `401` with the code `memcastle::auth::unauthorized` and a `WWW-Authenticate: Bearer` header.
 Other statuses are `400` for invalid input or a transition the job's state does not allow, `404` for an unknown job,
 `409` for a job recorded as running that has no worker (restart the daemon), and `500` for a server failure.
 
@@ -106,6 +108,8 @@ Other statuses are `400` for invalid input or a transition the job's state does 
 | `POST /api/jobs/{id}/cancel` | Cancel a job. | none |
 | `POST /api/jobs/{id}/retry` | Retry a failed job. | none |
 | `POST /api/shutdown` | Shut the daemon down gracefully. | none |
+| `POST /api/auth/token` | Generate a token, replacing any previous one: `{token, algorithm, version, created_at}`. | none |
+| `DELETE /api/auth/token` | Revoke the generated token: `{"revoked": true}`. | none |
 
 `requested_by` records which channel a write came through; it defaults to `http` (the CLI sends `cli`, MCP uses `mcp`).
 The status report keeps `/api/health` cheap: an unhealthy datastore is reported inside `/api/status` with a `200`,
@@ -116,6 +120,23 @@ curl -s http://127.0.0.1:8420/api/health
 curl -s 'http://127.0.0.1:8420/api/search?q=formatter&limit=5'
 curl -s http://127.0.0.1:8420/api/jobs?status=running
 ```
+
+### Authentication
+
+Authentication is optional and off by default.
+When the daemon has it enabled, every request, REST and `/mcp` alike, must carry `Authorization: Bearer <token>`.
+The one exception is `GET /api/health`, which stays open for liveness probes.
+
+```sh
+curl -s -H "Authorization: Bearer $MEMCASTLE_AUTH_TOKEN" http://127.0.0.1:8420/api/status
+```
+
+The two `/api/auth/token` routes are open while authentication is disabled, which is how the first token is made,
+and need a valid token once it is enabled.
+The token in the response to `POST /api/auth/token` is the only time it is ever shown, and the response is sent with
+`Cache-Control: no-store`.
+Neither route has an MCP tool: MCP exposes memory capabilities and never credential management.
+The status report's `auth_enabled` says whether the daemon requires a token, and never includes one.
 
 ### Submitting jobs
 

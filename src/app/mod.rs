@@ -6,6 +6,8 @@
 //! directly (enforced by a `prek` grep hook — see `AGENTS.md`), so a web
 //! dashboard or a new transport can only ever do what this struct exposes.
 
+mod auth;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -19,6 +21,8 @@ use crate::domain::{
 use crate::error::{Error, Result};
 use crate::jobs::Scheduler;
 use crate::store::{SearchHit, SurrealStore};
+
+pub use auth::{AuthPolicy, GeneratedToken, RevokeResult};
 
 /// A point-in-time summary of daemon health, for `GET /api/status`,
 /// `memcastle status`, and the `memcastle_status` MCP tool alike.
@@ -61,6 +65,10 @@ pub struct StatusReport {
     /// The datastore's health and migration state.
     #[serde(default)]
     pub datastore: DatastoreStatus,
+    /// Whether the daemon requires a bearer token. Only the fact, never any
+    /// credential: this report is served to whoever can call `status`.
+    #[serde(default)]
+    pub auth_enabled: bool,
 }
 
 /// The datastore section of a [`StatusReport`]: can the daemon reach its
@@ -223,6 +231,7 @@ pub struct AppServices {
     scheduler: Arc<Scheduler>,
     started_at: DateTime<Utc>,
     runtime: Arc<RuntimeContext>,
+    auth: Arc<AuthPolicy>,
 }
 
 impl AppServices {
@@ -234,6 +243,7 @@ impl AppServices {
             scheduler,
             started_at: Utc::now(),
             runtime: Arc::new(RuntimeContext::default()),
+            auth: Arc::new(AuthPolicy::default()),
         }
     }
 
@@ -292,6 +302,7 @@ impl AppServices {
                 location: self.runtime.location.clone(),
                 ..DatastoreStatus::default()
             },
+            auth_enabled: self.auth_enabled(),
         };
         match self.read_status_details(&mut report).await {
             Ok(()) => report.datastore.ok = true,

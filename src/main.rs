@@ -17,8 +17,8 @@ use miette::MietteHandlerOpts;
 mod cli;
 
 use cli::{
-    AuditArgs, CheckpointArgs, Cli, Command, DiaryCommand, JobsCommand, MigrateArgs, MineArgs,
-    RecallArgs, RepairArgs, SearchArgs, ServeArgs, StatusArgs, WakeUpArgs,
+    AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, DiaryCommand, JobsCommand, MigrateArgs,
+    MineArgs, RecallArgs, RepairArgs, SearchArgs, ServeArgs, StatusArgs, WakeUpArgs,
 };
 use memcastle::app::WakeUpBudget;
 use memcastle::client::{DaemonClient, StatusView};
@@ -143,6 +143,7 @@ async fn run_command(
         Command::Repair(args) => cmd_repair(&config, mode, args).await,
         Command::Diary(cmd) => cmd_diary(&config, mode, cmd).await,
         Command::Jobs(jobs) => cmd_jobs(&config, mode, jobs).await,
+        Command::Auth(auth) => cmd_auth(&config, auth).await,
         Command::Wings => Err(Error::not_implemented("memcastle wings")),
         Command::Rooms => Err(Error::not_implemented("memcastle rooms")),
         Command::Drawers => Err(Error::not_implemented("memcastle drawers")),
@@ -152,8 +153,13 @@ async fn run_command(
 
 /// A client for the daemon this palace's config points at, sending `mode`
 /// (from `--mode`/`MEMCASTLE_MODE`) with every request when one was given.
+///
+/// The configured token (`auth.token`/`MEMCASTLE_AUTH_TOKEN`) is presented on
+/// every request. It is never a command-line argument, so it cannot end up in
+/// shell history or the process list.
 fn client(config: &Config, mode: Option<MemoryMode>) -> DaemonClient {
-    let daemon = DaemonClient::discover(&config.palace.path, config.server.socket_addr());
+    let daemon = DaemonClient::discover(&config.palace.path, config.server.socket_addr())
+        .with_token(config.auth.token.clone());
     match mode {
         Some(mode) => daemon.with_mode(mode),
         None => daemon,
@@ -178,7 +184,13 @@ async fn cmd_status(
     mode: Option<MemoryMode>,
     args: &StatusArgs,
 ) -> Result<ExitCode> {
-    let view = StatusView::collect(&config.palace.path, config.server.socket_addr(), mode).await?;
+    let view = StatusView::collect(
+        &config.palace.path,
+        config.server.socket_addr(),
+        mode,
+        config.auth.token.clone(),
+    )
+    .await?;
     if args.json {
         print_json(&view)?;
     } else {
@@ -474,6 +486,35 @@ async fn cmd_jobs(config: &Config, mode: Option<MemoryMode>, command: JobsComman
             // `mine` command uses, just with a different JSON body.
             let job: memcastle::domain::Job = daemon.demo(steps).await?;
             print_json(&job)?;
+        }
+    }
+    Ok(())
+}
+
+/// Manage the daemon's bearer token. No `--mode`: a memory mode is a session's
+/// privilege over memory, and this is an administrative operation on
+/// credentials.
+async fn cmd_auth(config: &Config, command: AuthCommand) -> Result<()> {
+    let daemon = client(config, None);
+    match command {
+        AuthCommand::Generate => {
+            let generated = daemon.auth_generate().await?;
+            // The token alone on stdout, so `memcastle auth generate | op item
+            // create ...` captures exactly it. It is printed here and nowhere
+            // else: not logged, not written to a file, not in any JSON.
+            println!("{}", generated.token);
+            // Guidance goes to stderr so it never ends up in the captured token.
+            eprintln!(
+                "Store this token now (in 1Password or another secret manager): it is shown once \
+                 and MemCastle keeps only a digest.\n\
+                 To require it, set `auth.enabled = true` (or MEMCASTLE_AUTH_ENABLED=true), \
+                 provide the token to clients as MEMCASTLE_AUTH_TOKEN, and restart the daemon \
+                 (`memcastle restart`)."
+            );
+        }
+        AuthCommand::Revoke => {
+            let result = daemon.auth_revoke().await?;
+            print_json(&result)?;
         }
     }
     Ok(())

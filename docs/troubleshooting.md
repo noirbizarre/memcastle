@@ -36,6 +36,30 @@ a second `serve` on the same palace, or `memcastle migrate` while the daemon run
 Check `memcastle status`, stop that process, and try again.
 For a remote palace, check the URL and credentials in `[store]`.
 
+### `memcastle::auth::unauthorized`
+
+The daemon has [authentication](authentication.md) enabled and did not accept the token.
+The CLI shows it as `memcastle::client::remote_rejected` with `(401, memcastle::auth::unauthorized)`,
+and `memcastle status` exits `1`, which is how it differs from a daemon that is not running (`3`).
+Export the token as `MEMCASTLE_AUTH_TOKEN` (or set `auth.token`) in the environment of the command;
+an MCP client needs an `Authorization: Bearer` header.
+A token that was rotated or revoked stops working at once, and the message does not say which case it is.
+
+### `memcastle::auth::not_configured`
+
+Authentication is enabled, but the daemon has no token to check: none in `MEMCASTLE_AUTH_TOKEN` or `auth.token`,
+and none generated.
+Nothing was started, created or changed.
+Either set a secret, or start once with authentication disabled, run `memcastle auth generate`, store the token,
+and enable authentication.
+
+### Everything is refused after `memcastle auth revoke`
+
+Revoking the only credential leaves nothing that can authenticate, so even `memcastle stop` is refused.
+Stop the process with your supervisor (or `kill`), and start it again with authentication disabled
+(unset `MEMCASTLE_AUTH_ENABLED`) or with a new `MEMCASTLE_AUTH_TOKEN`.
+Nothing is lost, because authentication guards access and does not encrypt the palace.
+
 ### `status` reports the registry as `stale`
 
 The registry file names a process that no longer exists, because the daemon was killed or crashed.

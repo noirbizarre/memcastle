@@ -5,6 +5,7 @@
 //! `/api/shutdown` lives, which is how `memcastle stop` asks a foreground
 //! `memcastle serve` to shut down gracefully (see `server::lifecycle`).
 
+mod auth;
 mod error;
 mod extract;
 mod mode;
@@ -21,6 +22,7 @@ use crate::domain::{JobId, JobKind, JobStatus, MiningSource};
 
 use extract::{ApiJson, ApiQuery};
 
+pub use auth::require_auth;
 pub use error::ApiError;
 pub use mode::ModeHeader;
 
@@ -32,6 +34,9 @@ struct ApiState {
 
 /// Build the API router. `shutdown` is fired by `POST /api/shutdown`; the
 /// caller (`server::run`) is what actually stops the listener in response.
+///
+/// Authentication is *not* applied here: `server::run` wraps this router and
+/// `/mcp` together in [`require_auth`], so one layer guards both surfaces.
 pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
     let state = ApiState { app, shutdown };
     Router::new()
@@ -48,6 +53,12 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
         .route("/api/jobs/{id}/cancel", post(cancel_job))
         .route("/api/jobs/{id}/retry", post(retry_job))
         .route("/api/shutdown", post(shutdown_now))
+        // Administrative, and deliberately REST-only: there is no MCP tool for
+        // these, so an agent integration cannot mint or revoke credentials.
+        .route(
+            "/api/auth/token",
+            post(auth::generate_token).delete(auth::revoke_token),
+        )
         .with_state(state)
 }
 

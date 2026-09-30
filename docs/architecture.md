@@ -452,6 +452,14 @@ Logging follows the same shape: a `tower-http` trace layer on the shared router 
 `debug`, `api::ApiError` logs a rejected request at `warn` and a server failure at `error` with its diagnostic code,
 and every MCP tool call is traced at `debug` (a failed one at `warn`).
 
+**One authentication layer.**
+When authentication is enabled, a single middleware on the merged router checks the bearer token before any REST
+handler or the MCP service sees the request, and only `GET /api/health` is exempt.
+It calls `AppServices::authenticate`, which checks a configured secret and the stored verifier in constant time.
+Generating and revoking a token are REST and CLI operations over `AppServices`, and MCP has no tool for either.
+The trace layer logs no headers, so the `Authorization` header never reaches the log.
+See [Authentication](authentication.md) and [ADR-014](adr/014-optional-token-authentication.md).
+
 ## Non-goals for now
 
 Deliberately out of scope, and each is structurally possible without rework given the module boundaries above:
@@ -462,7 +470,9 @@ Deliberately out of scope, and each is structurally possible without rework give
 - The CLI auto-starting a daemon on demand.
 - `wings`/`rooms`/`drawers`/`maintenance` commands (reserved names that return `not_implemented`).
 - Remote SurrealDB authentication beyond root sign-in.
-- Authentication and TLS on the daemon's own listener.
+- TLS on the daemon's own listener (use a TLS-terminating proxy).
+- OAuth/OIDC, users, roles and scopes: 0.1 has one optional shared bearer token,
+  and the authentication layer is where those would attach ([ADR-014](adr/014-optional-token-authentication.md)).
 - Robust cross-platform process supervision for `memcastle restart`
   (it is a best-effort respawn; use a real supervisor in production).
 - A web dashboard (the API is shaped so one can be built entirely as an API client, as the CLI is).

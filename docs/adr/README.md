@@ -45,3 +45,5 @@ The history is the value.
   and its exit code says which state it found
 - [ADR-013](013-release-packaging-and-asset-resolution.md) — releases are one binary plus an optional package layout,
   and assets resolve override, installed, embedded
+- [ADR-014](014-optional-token-authentication.md) — authentication is an optional bearer token, checked at one layer,
+  and never an MCP capability

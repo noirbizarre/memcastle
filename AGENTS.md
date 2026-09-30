@@ -47,6 +47,13 @@ Each of these should be enforced by a hook or a test. An invariant nothing check
    (`crate::migrate`, `store::migration_state`) — see `docs/adr/004-versioned-database-migrations.md`.
    Enforced by the prek `no-hand-rolled-ddl` hook: no `DEFINE`/`REMOVE`/`ALTER` DDL or `INFO FOR` statement
    may appear in Rust code under `src/` (comments excepted).
+6. **Every route but `GET /api/health` passes the authentication layer, and MCP never touches credentials** —
+   the layer wraps the merged router in `server::run`, so a route added later is guarded by default,
+   and token generation and revocation are REST/CLI operations with no MCP tool.
+   A token or secret is never logged, serialised or persisted in plaintext (`config::Secret` redacts it;
+   the store holds only a digest) — see `docs/adr/014-optional-token-authentication.md`.
+   Enforced by `tests/auth.rs` (every route and an unknown path refused without a token, no credential-named MCP tool)
+   and `tests/auth_lifecycle.rs` (no token in the log, the database or any file).
 
 ## Layout
 

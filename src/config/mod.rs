@@ -114,8 +114,9 @@ impl StoreConfig {
 #[serde(default)]
 pub struct ServerConfig {
     /// Interface address the daemon's HTTP listener binds to. Loopback by
-    /// default: the daemon has no authentication, so listening on a wildcard
-    /// address must be an explicit choice.
+    /// default: authentication is optional and off by default, so listening
+    /// on a wildcard address must be an explicit choice (and should come with
+    /// `auth.enabled`).
     pub bind: IpAddr,
     /// TCP port the listener binds to. `0` asks the OS for a free port (the
     /// daemon records the real one in its registry file); tests rely on it.
@@ -143,6 +144,61 @@ impl ServerConfig {
     pub fn socket_addr(&self) -> SocketAddr {
         SocketAddr::new(self.bind, self.port)
     }
+}
+
+/// A configuration value that must never reach a log line, a status report or a
+/// serialised config.
+///
+/// `Debug` is redacted by hand and `Serialize` is skipped on the owning field:
+/// `Config` derives both, and a derived `Debug` on a bare `String` would print
+/// the token the first time someone wrote `tracing::debug!("{config:?}")`.
+#[derive(Clone, Deserialize, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct Secret(String);
+
+impl Secret {
+    /// Wrap a secret value.
+    #[must_use]
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// The plaintext, for the two places that genuinely need it: hashing it on
+    /// the daemon and sending it as a bearer header from the client.
+    #[must_use]
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // A fixed placeholder, not even the length: the length narrows a brute force.
+        f.write_str("[REDACTED]")
+    }
+}
+
+/// The shortest shared secret accepted. A guessable token defeats the point of
+/// turning authentication on, and `memcastle auth generate` produces far longer.
+pub const MIN_TOKEN_LEN: usize = 16;
+
+/// Daemon authentication settings (see `docs/adr/014`).
+///
+/// Off by default so the local standalone workflow stays simple.
+/// `#[serde(default)]` so a config file that sets only `enabled` still parses.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AuthConfig {
+    /// Whether the daemon requires a bearer token. Decided once per daemon
+    /// start, from configuration only: a stored verifier alone never turns it
+    /// on, or generating a token would silently change the next restart.
+    pub enabled: bool,
+    /// A shared secret, from the config file or `MEMCASTLE_AUTH_TOKEN`. The
+    /// daemon accepts it in addition to a token made by `auth generate`, and
+    /// the CLI presents it to a daemon that requires one. Prefer the
+    /// environment variable so the secret stays out of the file.
+    #[serde(skip_serializing)]
+    pub token: Option<Secret>,
 }
 
 /// Parse a bind *interface* (`--bind`, `MEMCASTLE_BIND`).
@@ -264,6 +320,9 @@ pub struct Config {
     /// Runtime asset settings.
     #[serde(default)]
     pub assets: AssetsConfig,
+    /// Authentication settings.
+    #[serde(default)]
+    pub auth: AuthConfig,
 }
 
 impl Config {
@@ -360,6 +419,16 @@ impl Config {
         }
         if let Some(n) = lookup("MEMCASTLE_JOBS_LEASE_TTL_SECS") {
             self.jobs.lease_ttl_secs = parse_override("MEMCASTLE_JOBS_LEASE_TTL_SECS", &n)?;
+        }
+        if let Some(raw) = lookup("MEMCASTLE_AUTH_ENABLED") {
+            self.auth.enabled = parse_override("MEMCASTLE_AUTH_ENABLED", &raw)?;
+        }
+        // Deliberately not `parse_override`: its error embeds the raw value,
+        // and this one is a secret. An empty variable (a secret manager that
+        // resolved to nothing) is kept so `validate` rejects it by name
+        // rather than silently leaving authentication unconfigured.
+        if let Some(token) = lookup("MEMCASTLE_AUTH_TOKEN") {
+            self.auth.token = Some(Secret::new(token.trim()));
         }
         Ok(())
     }
@@ -458,6 +527,15 @@ impl Config {
                 "jobs.lease_ttl_secs must be between 3 and 86400 seconds",
             ));
         }
+        // The message never includes the token itself, only what to do about it.
+        if let Some(token) = &self.auth.token
+            && token.expose().len() < MIN_TOKEN_LEN
+        {
+            return Err(Error::config(format!(
+                "auth.token (or MEMCASTLE_AUTH_TOKEN) must be at least {MIN_TOKEN_LEN} characters; \
+                 generate a strong one with `memcastle auth generate`"
+            )));
+        }
         Ok(())
     }
 }
@@ -526,6 +604,71 @@ mod tests {
         assert_eq!(config.server.bind, "127.0.0.2".parse::<IpAddr>().unwrap());
         assert_eq!(config.server.port, 9999);
         assert_eq!(config.jobs.max_concurrency, 7);
+    }
+
+    const TOKEN: &str = "mc_0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn authentication_is_disabled_and_tokenless_by_default() {
+        let config = Config::default();
+        assert!(!config.auth.enabled);
+        assert!(config.auth.token.is_none());
+    }
+
+    #[test]
+    fn the_auth_settings_come_from_the_file_then_the_environment() {
+        let mut config: Config =
+            toml::from_str(&format!("[auth]\nenabled = false\ntoken = \"{TOKEN}\"")).unwrap();
+        assert_eq!(config.auth.token.as_ref().map(Secret::expose), Some(TOKEN));
+
+        config
+            .apply_overrides_from(env(&[
+                ("MEMCASTLE_AUTH_ENABLED", "true"),
+                ("MEMCASTLE_AUTH_TOKEN", "mc_from_the_environment_0000"),
+            ]))
+            .unwrap();
+        assert!(config.auth.enabled);
+        assert_eq!(
+            config.auth.token.as_ref().map(Secret::expose),
+            Some("mc_from_the_environment_0000")
+        );
+    }
+
+    #[test]
+    fn a_malformed_auth_enabled_variable_is_named_in_the_error() {
+        let mut config = Config::default();
+        let err = config
+            .apply_overrides_from(env(&[("MEMCASTLE_AUTH_ENABLED", "maybe")]))
+            .unwrap_err();
+        assert!(err.to_string().contains("MEMCASTLE_AUTH_ENABLED"), "{err}");
+    }
+
+    #[test]
+    fn the_secret_never_appears_in_debug_output_or_a_serialised_config() {
+        let mut config = Config::default();
+        config.auth.token = Some(Secret::new(TOKEN));
+
+        assert!(!format!("{config:?}").contains(TOKEN));
+        assert!(format!("{config:?}").contains("[REDACTED]"));
+        assert!(!toml::to_string(&config).unwrap().contains(TOKEN));
+        assert!(!serde_json::to_string(&config).unwrap().contains(TOKEN));
+    }
+
+    #[test]
+    fn a_short_or_empty_token_is_rejected_without_echoing_it() {
+        for short in ["", "hunter2"] {
+            let mut config = Config::default();
+            config.palace.path = std::env::temp_dir();
+            config.auth.token = Some(Secret::new(short));
+
+            let message = config.validate().unwrap_err().to_string();
+
+            assert!(message.contains("MEMCASTLE_AUTH_TOKEN"), "{message}");
+            assert!(
+                short.is_empty() || !message.contains(short),
+                "the rejected token leaked into the error: {message}"
+            );
+        }
     }
 
     #[test]

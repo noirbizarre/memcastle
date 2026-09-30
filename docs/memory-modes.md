@@ -79,7 +79,8 @@ memcastle --mode read_only mine ./project     # rejected
 This is mostly useful to check what a restricted session can and cannot do.
 
 Modes are advisory boundaries between cooperating clients on one machine, not security:
-the daemon has no authentication, and any client can choose `full`.
+any client can choose `full`, and [authentication](authentication.md), when enabled, gives every client that holds the
+token the same access.
 
 ## Why job listing is gated
 

@@ -170,7 +170,12 @@ On macOS a launchd agent that runs `memcastle serve` with `KeepAlive` does the s
 
 ## Exposing the daemon
 
-The daemon has **no authentication**.
-The default, `127.0.0.1`, keeps it reachable from your machine only.
-Binding a non-loopback address such as `0.0.0.0` exposes the palace to that network, so do it only on a network you trust
-or behind something that authenticates for you.
+Authentication is optional and **off by default**.
+The default, `127.0.0.1`, keeps the daemon reachable from your machine only.
+Binding a non-loopback address such as `0.0.0.0` exposes the palace to that network, and the daemon logs a warning
+when it does so without authentication.
+Enable [authentication](authentication.md) when you do, and put a TLS-terminating proxy in front of it,
+because the token travels in cleartext over plain HTTP.
+
+With a supervisor, inject the secret as `MEMCASTLE_AUTH_TOKEN` from an `EnvironmentFile=` or your secret manager,
+not as an argument; [Authentication](authentication.md#with-a-shared-secret-from-a-secret-manager) shows how.

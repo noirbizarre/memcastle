@@ -7,6 +7,7 @@
 //! dependencies is what lets `store`'s backend change without a domain
 //! rewrite.
 
+pub mod auth;
 mod checkpoint;
 mod drawer;
 mod entity;
