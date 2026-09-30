@@ -1,0 +1,26 @@
+# Builds the .deb and .rpm from the binary already staged in dist/.
+# Driven by .github/workflows/publish-release.yaml, which exports
+# VERSION, NFPM_ARCH and BINARY.
+name: memcastle
+arch: "${NFPM_ARCH}"
+platform: linux
+version: "${VERSION}"
+section: utils
+priority: optional
+maintainer: Axel H. <noirbizarre@gmail.com>
+description: Local-first, always-on memory server for AI coding agents over MCP/HTTP.
+homepage: https://github.com/noirbizarre/memcastle
+license: MIT
+contents:
+  - src: "${BINARY}"
+    dst: /usr/bin/memcastle
+    file_info:
+      mode: 0755
+  - src: LICENSE
+    dst: /usr/share/doc/memcastle/LICENSE
+    file_info:
+      mode: 0644
+  - src: README.md
+    dst: /usr/share/doc/memcastle/README.md
+    file_info:
+      mode: 0644
