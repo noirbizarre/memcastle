@@ -91,6 +91,9 @@ jobs:
           license=$(curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${TAG}/LICENSE" | sha256sum | cut -d' ' -f1)
           sed -i "s/@SHA256_LICENSE@/${license}/" build/PKGBUILD
 
+          service=$(curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${TAG}/packaging/systemd/memcastle.service" | sha256sum | cut -d' ' -f1)
+          sed -i "s/@SHA256_SERVICE@/${service}/" build/PKGBUILD
+
           # A leftover placeholder means an asset was renamed upstream and the
           # package would pin nothing: an empty `sha256sums` entry does not
           # fail a build, it accepts whatever it downloads. Fail here instead.

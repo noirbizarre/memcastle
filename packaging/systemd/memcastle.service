@@ -1,0 +1,26 @@
+# Package-owned systemd *user* unit: installed to /usr/lib/systemd/user/.
+# Never edit it in place; override with `systemctl --user edit memcastle`.
+[Unit]
+Description=MemCastle memory server
+Documentation=https://github.com/noirbizarre/memcastle
+After=network.target
+
+[Service]
+# `serve` stays in the foreground and has no sd_notify, so Type=simple.
+Type=simple
+ExecStart=/usr/bin/memcastle serve
+# Logs go to stderr, hence the journal; warn hides noisy embedded-DB startup lines.
+Environment=MEMCASTLE_LOG=warn
+# Optional (`-`): holds MEMCASTLE_AUTH_ENABLED/MEMCASTLE_AUTH_TOKEN when
+# authentication is on, and stays user-owned (mode 0600). %E is $XDG_CONFIG_HOME.
+EnvironmentFile=-%E/memcastle/secret.env
+Restart=on-failure
+# systemd's start-rate limit stops a crash loop, e.g. auth enabled with no credential.
+# Leaves room for the job drain (jobs.drain_timeout_secs).
+TimeoutStopSec=30
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=default.target

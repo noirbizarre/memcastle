@@ -94,17 +94,54 @@ op run --env-file=memcastle.env -- memcastle status
 ```
 
 Under systemd, give the unit an `EnvironmentFile=` with mode `0600`, or use `LoadCredential=` with a wrapper that
-exports the credential as `MEMCASTLE_AUTH_TOKEN`:
-
-```ini title="~/.config/systemd/user/memcastle.service"
-[Service]
-Environment=MEMCASTLE_AUTH_ENABLED=true
-EnvironmentFile=%h/.config/memcastle/secret.env
-ExecStart=%h/.local/bin/memcastle serve
-```
+exports the credential as `MEMCASTLE_AUTH_TOKEN`; see [Under systemd](#under-systemd).
 
 `restart` starts the new daemon with your environment and your `--config`, so a secret in either carries over
 without being passed on the command line.
+
+### Under systemd
+
+The packaged user unit (Arch `memcastle-bin`, `/usr/lib/systemd/user/memcastle.service`)
+is package-owned and holds no secret.
+It reads an optional, user-owned `EnvironmentFile=-%E/memcastle/secret.env`, which is `~/.config/memcastle/secret.env`
+unless you moved `XDG_CONFIG_HOME`.
+The `-` makes the file optional, so with authentication disabled (the default) nothing needs provisioning.
+
+**With a generated token**, the daemon only needs to be told authentication is on.
+The verifier is already in the palace, in the `auth_state` table, not in a file:
+
+```sh
+systemctl --user start memcastle                  # authentication still off: the routes are open
+memcastle auth generate                           # prints mc_... once; store it in your secret manager
+install -m 600 /dev/null ~/.config/memcastle/secret.env
+echo 'MEMCASTLE_AUTH_ENABLED=true' > ~/.config/memcastle/secret.env
+systemctl --user restart memcastle
+```
+
+The service never sees or stores the plaintext token.
+Your CLI and MCP clients read it from the secret manager, for example `op run --env-file=memcastle.env -- memcastle status`.
+
+**With a shared secret**, put it in the same file instead, created with mode `0600` before it gets any content:
+
+```sh
+install -m 600 /dev/null ~/.config/memcastle/secret.env
+op read op://Private/memcastle/password | sed 's/^/MEMCASTLE_AUTH_TOKEN=/' >> ~/.config/memcastle/secret.env
+echo 'MEMCASTLE_AUTH_ENABLED=true' >> ~/.config/memcastle/secret.env
+systemctl --user restart memcastle
+```
+
+The file holds the plaintext secret, so it is only as safe as your home directory permissions and backups;
+keep it out of dotfile repositories.
+The secret is not in the unit, the process arguments, `systemctl status` or the journal.
+To avoid a plaintext file entirely, use a drop-in (`systemctl --user edit memcastle`) that sets `LoadCredential=`
+and a wrapper `ExecStart=` exporting it as `MEMCASTLE_AUTH_TOKEN`, or one that runs `op run`.
+
+If authentication is enabled with neither a configured secret nor a stored verifier, the service fails to start with
+`memcastle::auth::not_configured`, visible in `journalctl --user -u memcastle`.
+A `secret.env` that exists but is unreadable fails the unit before `ExecStart`,
+and `systemctl --user status memcastle` names the file.
+
+Rotation and revocation change only the palace verifier or your own `secret.env`, never a package-owned file.
 
 ## Rotation
 
