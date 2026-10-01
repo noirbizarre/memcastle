@@ -113,8 +113,8 @@ Job leases keep them from running the same job twice, and a daemon that stalls l
 Only root sign-in is supported today, and these settings can only be set in the config file.
 `memcastle status` never prints the password.
 
-For both modes the database uses the SurrealDB namespace `memcastle` and database `palace` unless a remote store
-configures otherwise.
+An embedded store uses the SurrealDB namespace `memcastle` and database `palace`;
+a remote store uses the `namespace` and `database` set in `[store]`.
 
 ## The registry file
 
