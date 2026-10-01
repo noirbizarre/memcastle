@@ -478,6 +478,6 @@ Deliberately out of scope, and each is structurally possible without rework give
 - A web dashboard (the API is shaped so one can be built entirely as an API client, as the CLI is).
   Its packaging is settled, in [ADR-013](adr/013-release-packaging-and-asset-resolution.md);
   the daemon serves nothing from the asset directory yet.
-- Native `.deb` and `.rpm` packages, and any network-based asset download.
+- Any network-based asset download.
 
 Decisions and their rejected alternatives are collected in the [Architecture Decisions](adr/README.md).
