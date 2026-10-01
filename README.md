@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="docs/images/icon.svg" alt="memcastle" width="160">
+  <img src="docs/images/logo.svg" alt="MemCastle">
 </p>
-
-<h1 align="center">memcastle</h1>
 
 <p align="center"><strong>Local-first, always-on memory server for AI coding agents over MCP/HTTP</strong></p>
 
