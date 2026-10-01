@@ -24,6 +24,7 @@ flowchart LR
 ## Guides
 
 - [Running the daemon](daemon.md): start, stop, supervise and check it.
+- [Authentication](authentication.md): require a bearer token from every client.
 - [Memory modes](memory-modes.md): make a session read-only, or turn memory off for it.
 - [Storage and data](storage.md): where data lives, what is in it, how to back it up.
 - [Migrations and upgrades](migrations.md): how a palace is kept up to date across releases.
