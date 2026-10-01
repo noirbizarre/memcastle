@@ -77,7 +77,7 @@ src/
 ├── app/        application services — the one layer cli/mcp/api call into
 ├── server/     the daemon composition root + lifecycle (registry file)
 ├── mcp/        MCP tool surface, over HTTP
-├── api/        the REST API (health/status/jobs/search/recall/wake-up/diary/shutdown)
+├── api/        the REST API (health/status/jobs/search/recall/wake-up/diary/auth-token/shutdown)
 └── client/     the CLI's HTTP client for a running daemon
 ```
 
