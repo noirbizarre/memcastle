@@ -1,4 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:shaipe="https://shaipe.dev/ns/2026" width="512" height="512" viewBox="0 0 1254 1254"><symbol id="icon" viewBox="0 0 1254 1254">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:shaipe="https://shaipe.dev/ns/2026" viewBox="0 0 64 64" width="512" height="512">
+  <metadata>
+    <shaipe:project version="1" primary="icon">
+      <shaipe:generation agent="opencode" model="claude-sonnet-5" at="2026-09-27T00:00:00Z"/>
+      <shaipe:fonts>
+        <shaipe:font family="Geist" href="https://cdn.jsdelivr.net/gh/vercel/geist-font@1.4.01/out/proof/Geist-SemiBold.ttf" sha256="812ebed4fd2914bd52c780352c2073accbaeb49d2cab0db3ffdaf6f89947e362"/>
+        <shaipe:font family="Geist" href="https://cdn.jsdelivr.net/gh/vercel/geist-font@1.4.01/out/proof/Geist-Regular.ttf" sha256="56c503f7569a21c7b9ff790f827a33baa24b4558ff5837015293efe299e28f54"/>
+      </shaipe:fonts>
+      <shaipe:variants>
+        <shaipe:variant name="icon"/>
+        <shaipe:variant name="wordmark"/>
+        <shaipe:variant name="social"/>
+      </shaipe:variants>
+      <shaipe:renders output="docs/images">
+        <shaipe:render name="icon" variant="icon" width="512" format="svg"/>
+        <shaipe:render name="icon" variant="icon" width="512"/>
+        <shaipe:render name="logo" variant="wordmark" width="660" height="160" format="svg"/>
+        <shaipe:render name="social" variant="social" width="1280" height="640"/>
+      </shaipe:renders>
+    </shaipe:project>
+  </metadata>
+  <symbol id="icon" viewBox="0 0 1254 1254">
     <defs>
       <linearGradient id="g" x1="0.15" y1="1" x2="0.85" y2="0.1">
         <stop offset="0" stop-color="#4A2CF0"/>
@@ -11,12 +32,16 @@
       <path d="M262,420 L370,358 L394,385 L394,505 L366,540 L366,712 L425,748 L425,448 L435,436 L445,438 L627,540 L810,438 L822,436 L830,448 L830,748 L888,713 L888,540 L860,520 L860,385 L882,358 L990,415 L993,430 L993,825 L985,845 L860,915 L730,845 L727,676 C720,620 680,600 640,582 L627,578 L612,582 C570,605 530,630 527,676 L527,818 C460,840 390,865 366,900 L270,845 L262,830 Z"/>
       <path d="M553,746 C620,738 700,755 706,792 C700,830 610,850 602,878 C610,905 720,930 810,946 L640,1041 C630,1046 620,1045 610,1040 L440,948 C410,925 410,900 440,880 C480,850 560,830 620,800 C640,780 610,755 553,746 Z"/>
     </g>
-  </symbol><symbol id="wordmark" viewBox="0 0 330 80">
+  </symbol>
+  <symbol id="wordmark" viewBox="0 0 330 80">
     <use href="#icon" x="0" y="8" width="64" height="64"/>
     <text x="80" y="53" font-family="Geist" font-size="40" font-weight="600" letter-spacing="-1" fill="#1B1340">MemCastle</text>
-  </symbol><symbol id="social" viewBox="0 0 1280 640">
+  </symbol>
+  <symbol id="social" viewBox="0 0 1280 640">
     <rect width="1280" height="640" fill="#0E0B1F"/>
     <use href="#icon" x="130" y="200" width="240" height="240"/>
     <text x="410" y="350" font-family="Geist" font-size="140" font-weight="600" letter-spacing="-4" fill="#FFFFFF">MemCastle</text>
     <text x="414" y="425" font-family="Geist" font-size="38" font-weight="400" fill="#B9A8FF">A long-running memory server</text>
-  </symbol><use href="#icon"/></svg>
+  </symbol>
+  <use href="#icon" width="64" height="64"/>
+</svg>

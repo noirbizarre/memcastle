@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:shaipe="https://shaipe.dev/ns/2026" width="512" height="512" viewBox="0 0 1254 1254"><symbol id="icon" viewBox="0 0 1254 1254">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:shaipe="https://shaipe.dev/ns/2026" width="660" height="160" viewBox="0 0 330 80"><symbol id="icon" viewBox="0 0 1254 1254">
     <defs>
       <linearGradient id="g" x1="0.15" y1="1" x2="0.85" y2="0.1">
         <stop offset="0" stop-color="#4A2CF0"/>
@@ -19,4 +19,4 @@
     <use href="#icon" x="130" y="200" width="240" height="240"/>
     <text x="410" y="350" font-family="Geist" font-size="140" font-weight="600" letter-spacing="-4" fill="#FFFFFF">MemCastle</text>
     <text x="414" y="425" font-family="Geist" font-size="38" font-weight="400" fill="#B9A8FF">A long-running memory server</text>
-  </symbol><use href="#icon"/></svg>
+  </symbol><use href="#wordmark"/></svg>

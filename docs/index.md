@@ -1,4 +1,8 @@
-# memcastle
+# MemCastle
+
+<figure markdown="span">
+![Logo](images/icon.svg)
+</figure>
 
 Local-first, always-on memory server for AI coding agents over MCP/HTTP.
 
