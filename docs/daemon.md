@@ -124,7 +124,7 @@ A job that does not stop in time is left running, and the next start re-queues i
 Either way the daemon then removes its registry file and exits.
 
 `restart` stops the running daemon, starts a fresh detached one and waits until it serves.
-It passes on `--config`, `--bind`, `--port` and the palace it resolved.
+It passes on `--config`, `--bind`, `--port`, `--assets-dir` and the palace it resolved.
 The new daemon's log output is discarded, and `restart` is a best-effort convenience:
 under a supervisor, restart through the supervisor instead.
 

@@ -170,7 +170,7 @@ Each is chosen by, highest precedence first: the flag, the environment variable,
 so the same three sources work everywhere.
 Client commands (`status`, `search`, `jobs` and the rest) read the config file and the environment,
 but not the flags, so a daemon started on a non-default port with `--port` is found through its registry file.
-`restart` passes its `--bind` and `--port` on to the new daemon.
+`restart` passes its `--bind`, `--port` and `--assets-dir` on to the new daemon.
 
 `memcastle status` shows which of the two it used (`endpoint_source`: `registry` or `config`).
 It exits 0 for a healthy daemon, 1 for a degraded one and 3 when none is running, and takes `--json` for scripts:
