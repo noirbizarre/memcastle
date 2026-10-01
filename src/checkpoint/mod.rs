@@ -51,6 +51,11 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: CheckpointParams) -> R
     let CheckpointParams { payload } = params;
     let store = ctx.store();
     let start = JobContext::resume_index(job, "next_index");
+    tracing::info!(
+        items = payload.items.len(),
+        resume_from = start,
+        "writing checkpoint items"
+    );
 
     for (index, item) in payload.items.iter().enumerate().skip(start) {
         if ctx.is_cancelled() {

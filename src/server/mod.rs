@@ -94,6 +94,12 @@ pub async fn run(config: Config) -> Result<()> {
         scheduler = scheduler.with_shared_store();
     }
     let scheduler = Arc::new(scheduler);
+    info!(
+        max_concurrency = config.jobs.max_concurrency,
+        lease_ttl_secs = config.jobs.lease_ttl_secs,
+        shared_store = backend.is_shared(),
+        "job scheduler configured; recovering interrupted jobs"
+    );
     scheduler.recover().await?;
 
     let shutdown = CancellationToken::new();
@@ -104,6 +110,7 @@ pub async fn run(config: Config) -> Result<()> {
     };
 
     let backend_info = backend.describe();
+    let backend_info_kind = backend_info.kind.to_string();
     let app = AppServices::new(store, Arc::clone(&scheduler))
         .with_runtime(RuntimeContext {
             // The real bound address, not the requested one: `status` must agree
@@ -149,13 +156,31 @@ pub async fn run(config: Config) -> Result<()> {
         ))
         .layer(
             tower_http::trace::TraceLayer::new_for_http()
-                .make_span_with(
-                    tower_http::trace::DefaultMakeSpan::new().level(tracing::Level::DEBUG),
-                )
+                // Method, path and request id only: no query string (it can
+                // carry search terms) and no headers (`Authorization`).
+                .make_span_with(|request: &axum::http::Request<_>| {
+                    let request_id = request
+                        .headers()
+                        .get("x-request-id")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("-");
+                    tracing::debug_span!(
+                        "request",
+                        %request_id,
+                        method = %request.method(),
+                        path = request.uri().path(),
+                    )
+                })
                 .on_response(
                     tower_http::trace::DefaultOnResponse::new().level(tracing::Level::DEBUG),
                 ),
-        );
+        )
+        // Outside the trace layer so the span sees the id; echoed back so a
+        // client can quote it when reporting a failure.
+        .layer(tower_http::request_id::PropagateRequestIdLayer::x_request_id())
+        .layer(tower_http::request_id::SetRequestIdLayer::x_request_id(
+            UuidRequestId,
+        ));
 
     lifecycle::write(
         &config.palace.path,
@@ -166,7 +191,14 @@ pub async fn run(config: Config) -> Result<()> {
             version: env!("CARGO_PKG_VERSION").to_string(),
         },
     )?;
-    info!(bind = %actual_addr, palace = %config.palace.path.display(), "memcastle daemon listening");
+    info!(
+        version = env!("CARGO_PKG_VERSION"),
+        pid = std::process::id(),
+        bind = %actual_addr,
+        palace = %config.palace.path.display(),
+        backend = %backend_info_kind,
+        "memcastle daemon listening"
+    );
 
     let shutdown_signal = shutdown_signal(shutdown.clone());
     let serve_result = axum::serve(listener, router)
@@ -182,6 +214,21 @@ pub async fn run(config: Config) -> Result<()> {
     info!("memcastle daemon stopped");
 
     serve_result.map_err(|source| Error::server(source.to_string()))
+}
+
+/// Gives every request a fresh UUID unless the caller sent one.
+#[derive(Clone, Copy)]
+struct UuidRequestId;
+
+impl tower_http::request_id::MakeRequestId for UuidRequestId {
+    fn make_request_id<B>(
+        &mut self,
+        _request: &axum::http::Request<B>,
+    ) -> Option<tower_http::request_id::RequestId> {
+        axum::http::HeaderValue::from_str(&uuid::Uuid::new_v4().to_string())
+            .ok()
+            .map(tower_http::request_id::RequestId::new)
+    }
 }
 
 /// Resolve when SIGINT, SIGTERM (Unix only), or `shutdown` itself fires —

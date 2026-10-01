@@ -80,6 +80,8 @@ port = 8420
 
 [logging]
 level = "info"
+# "text" for a terminal, "json" (one object per line) for journald and log shippers.
+format = "text"
 
 # Optional bearer-token authentication. Prefer MEMCASTLE_AUTH_TOKEN to `token` here,
 # so the secret stays out of the file.
@@ -124,6 +126,7 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `server.port` (0 to 65535) | `MEMCASTLE_PORT` | `8420` |
 | `assets.dir` (an absolute path) | `MEMCASTLE_ASSETS_DIR` | none: installed, then embedded assets |
 | `logging.level` | `MEMCASTLE_LOG` | `info` |
+| `logging.format` | `MEMCASTLE_LOG_FORMAT` | `text` (`text` or `json`) |
 | `jobs.max_concurrency` (at least 1) | `MEMCASTLE_JOBS_MAX_CONCURRENCY` | `4` |
 | `jobs.drain_timeout_secs` (1 to 86400) | `MEMCASTLE_JOBS_DRAIN_TIMEOUT_SECS` | `10` |
 | `jobs.lease_ttl_secs` (3 to 86400) | `MEMCASTLE_JOBS_LEASE_TTL_SECS` | `30` |

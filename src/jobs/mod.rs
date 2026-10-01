@@ -289,6 +289,13 @@ impl Scheduler {
     ) -> Result<Job> {
         let job = Job::new(kind, priority, requested_by);
         self.store.save_job(&job).await?;
+        info!(
+            job_id = %job.id,
+            job_type = kind_name(&job.kind),
+            priority = ?job.priority,
+            requested_by = %job.requested_by,
+            "job queued"
+        );
         Ok(job)
     }
 
@@ -314,6 +321,7 @@ impl Scheduler {
             // transition below reports it precisely.
             if self.store.mark_pause_requested(id).await? {
                 control.request_pause();
+                info!(job_id = %id, "pause requested for running job");
                 return Ok(());
             }
         }
@@ -346,10 +354,12 @@ impl Scheduler {
                 // Persist first, signal second — see `request_pause`.
                 if self.store.mark_cancel_requested(id).await? {
                     control.request_cancel();
+                    info!(job_id = %id, "cancel requested for running job");
                     return Ok(());
                 }
             }
             if self.apply_guarded(id, JobEvent::Cancel).await? {
+                info!(job_id = %id, "job cancelled before it ran");
                 return Ok(());
             }
         }
@@ -363,7 +373,10 @@ impl Scheduler {
     ///
     /// Returns an error if the job doesn't exist or isn't `Paused`.
     pub async fn resume(&self, id: JobId) -> Result<()> {
-        self.apply_guarded_until_settled(id, JobEvent::Resume).await
+        self.apply_guarded_until_settled(id, JobEvent::Resume)
+            .await?;
+        info!(job_id = %id, "job resumed; queued again");
+        Ok(())
     }
 
     /// Reset a `Failed` job back to `Queued` for another attempt, clearing
@@ -374,7 +387,10 @@ impl Scheduler {
     ///
     /// Returns an error if the job doesn't exist or isn't `Failed`.
     pub async fn retry(&self, id: JobId) -> Result<()> {
-        self.apply_guarded_until_settled(id, JobEvent::Retry).await
+        self.apply_guarded_until_settled(id, JobEvent::Retry)
+            .await?;
+        info!(job_id = %id, "failed job retried; queued again");
+        Ok(())
     }
 
     /// Load `id`, apply `event`, and save the result only if the job is still
@@ -528,6 +544,14 @@ impl Scheduler {
         let claimed = self.store.claim_next_job(&self.worker, ttl).await;
         match claimed {
             Ok(Some(job)) => {
+                info!(
+                    job_id = %job.id,
+                    job_type = kind_name(&job.kind),
+                    priority = ?job.priority,
+                    attempt = job.attempt,
+                    worker_id = %self.worker,
+                    "job claimed by worker"
+                );
                 // Registered here, before the spawn, not inside `execute`:
                 // the job is already `Running` in the store, so a pause or
                 // cancel arriving in the gap would otherwise find no control
@@ -547,7 +571,15 @@ impl Scheduler {
         }
     }
 
-    async fn execute(&self, mut job: Job, control: JobControl) {
+    async fn execute(&self, job: Job, control: JobControl) {
+        // Every log line a handler emits inherits the job's identity.
+        let span = tracing::info_span!("job", job_id = %job.id, job_type = kind_name(&job.kind));
+        tracing::Instrument::instrument(self.execute_inner(job, control), span).await;
+    }
+
+    async fn execute_inner(&self, mut job: Job, control: JobControl) {
+        let started = std::time::Instant::now();
+        info!(attempt = job.attempt, "job started");
         if self.shutting_down.load(Ordering::SeqCst) {
             // Claimed just as shutdown began: `drain` may already have
             // walked `controls` without seeing this job.
@@ -601,12 +633,26 @@ impl Scheduler {
             return;
         }
 
+        let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         let event = match outcome {
-            Ok(JobOutcome::Completed) => JobEvent::Complete,
-            Ok(JobOutcome::Paused) => JobEvent::Pause,
-            Ok(JobOutcome::Cancelled) => JobEvent::Cancel,
+            Ok(JobOutcome::Completed) => {
+                info!(elapsed_ms, "job completed");
+                JobEvent::Complete
+            }
+            Ok(JobOutcome::Paused) => {
+                info!(
+                    elapsed_ms,
+                    interrupted = control.was_interrupted(),
+                    "job paused"
+                );
+                JobEvent::Pause
+            }
+            Ok(JobOutcome::Cancelled) => {
+                info!(elapsed_ms, "job cancelled");
+                JobEvent::Cancel
+            }
             Err(error) => {
-                warn!(job_id = %job.id, %error, "job failed");
+                warn!(job_id = %job.id, %error, elapsed_ms, attempt = job.attempt, "job failed");
                 job.error = Some(error.to_string());
                 JobEvent::Fail
             }
@@ -631,6 +677,18 @@ impl Scheduler {
             ),
             Err(error) => warn!(job_id = %job.id, %error, "failed to persist final job state"),
         }
+    }
+}
+
+/// The stable `snake_case` name of a job's kind, for log fields. Never
+/// includes parameters: those can hold paths or memory content.
+fn kind_name(kind: &JobKind) -> &'static str {
+    match kind {
+        JobKind::Demo { .. } => "demo",
+        JobKind::Mine { .. } => "mine",
+        JobKind::Checkpoint { .. } => "checkpoint",
+        JobKind::Audit { .. } => "audit",
+        JobKind::Repair { .. } => "repair",
     }
 }
 
@@ -1156,6 +1214,59 @@ mod tests {
             .submit(JobKind::Demo { steps: 1 }, Priority::Normal, "test")
             .await
             .unwrap()
+    }
+
+    /// Collects everything logged on this thread, so a test can read it.
+    #[derive(Clone, Default)]
+    struct LogBuffer(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for LogBuffer {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogBuffer {
+        type Writer = Self;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_job_leaves_a_queued_claimed_started_completed_trail_naming_its_id() {
+        let buffer = LogBuffer::default();
+        // Thread-local default is enough: `#[tokio::test]` runs the spawned
+        // worker on this same thread.
+        let _guard = tracing::subscriber::set_default(
+            tracing_subscriber::fmt()
+                .with_writer(buffer.clone())
+                .with_ansi(false)
+                .with_max_level(tracing::Level::INFO)
+                .finish(),
+        );
+        let scheduler = Arc::new(scheduler().await);
+        let job = submit_demo(&scheduler).await;
+        let shutdown = CancellationToken::new();
+        let run = tokio::spawn(Arc::clone(&scheduler).run(shutdown.clone()));
+        for _ in 0..200 {
+            if reload(&scheduler, &job).await.status == JobStatus::Completed {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        shutdown.cancel();
+        run.await.unwrap();
+
+        let log = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+        for event in ["job queued", "job claimed", "job started", "job completed"] {
+            assert!(log.contains(event), "missing `{event}` in: {log}");
+        }
+        assert!(log.contains(&job.id.to_string()), "{log}");
     }
 
     #[tokio::test]

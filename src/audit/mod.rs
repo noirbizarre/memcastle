@@ -122,6 +122,7 @@ pub struct AuditParams {
 pub async fn run(ctx: &JobContext, job: &mut Job, params: AuditParams) -> Result<JobOutcome> {
     let AuditParams { scope } = params;
     let store = ctx.store();
+    tracing::info!(scoped = scope.is_some(), "audit started");
     if let Some(stop) = ctx.stop_requested() {
         return Ok(stop);
     }

@@ -109,6 +109,7 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: RepairParams) -> Resul
         based_on_job,
     } = params;
     let store = ctx.store();
+    tracing::info!(dry_run, "repair started");
     if let Some(stop) = ctx.stop_requested() {
         return Ok(stop);
     }

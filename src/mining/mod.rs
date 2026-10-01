@@ -126,6 +126,13 @@ async fn mine_directory(
     };
 
     let start = JobContext::resume_index(job, "next_index");
+    // Counts only: file names and contents stay out of the log.
+    tracing::info!(
+        files = files.len(),
+        resume_from = start,
+        truncated,
+        "mining directory"
+    );
 
     for (index, file) in files.iter().enumerate().skip(start) {
         if ctx.is_cancelled() {
