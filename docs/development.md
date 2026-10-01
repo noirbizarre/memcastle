@@ -70,6 +70,9 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `tests/auth_lifecycle.rs` — the authentication lifecycle through the real CLI: generate, restart, enable, a
     rotated and a revoked token, the daemon refusing to start with nothing to check against, and no token ever reaching
     the log, the database or any file (subprocess).
+  - `tests/config_assets.rs` — the assets override is honoured and checked, and a standalone binary starts with no assets
+    (subprocess).
+  - `tests/dependencies.rs` — the lockfile never pulls a second storage engine into the binary (ADR-001).
   - `tests/config_bind.rs` — the listener itself: bind address and port precedence, and real bind failures
     (subprocess).
   - `tests/config_paths.rs` — the XDG config, data and state locations, resolved through the real binary
