@@ -225,6 +225,63 @@ jobs:
               | gzip -n -9 > "dist/memcastle_${TAG}_${asset}.tar.gz"
           done
 
+      # `.deb` and `.rpm` from the staged binaries. nfpm is not in
+      # install-action, so a pinned release is downloaded and verified against
+      # the checksums file published alongside it.
+      - name: Install nfpm
+        env:
+          NFPM_VERSION: 2.47.0
+        run: |
+          set -euo pipefail
+          base="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}"
+          tarball="nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+          curl -fsSL -o "/tmp/${tarball}" "${base}/${tarball}"
+          curl -fsSL -o /tmp/nfpm-checksums.txt "${base}/checksums.txt"
+          (cd /tmp && grep " ${tarball}\$" nfpm-checksums.txt | sha256sum -c -)
+          sudo tar -C /usr/local/bin -xzf "/tmp/${tarball}" nfpm
+
+      - name: Package the .deb and .rpm
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          # Deterministic package timestamps.
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          export SOURCE_DATE_EPOCH
+          for asset in linux-amd64 linux-arm64; do
+            export VERSION="${TAG}"
+            export BINARY="dist/memcastle_${TAG}_${asset}"
+            for format in deb rpm; do
+              # deb and rpm name the same architectures differently.
+              case "${format}-${asset}" in
+                deb-linux-amd64) NFPM_ARCH=amd64 ;;
+                deb-linux-arm64) NFPM_ARCH=arm64 ;;
+                rpm-linux-amd64) NFPM_ARCH=x86_64 ;;
+                rpm-linux-arm64) NFPM_ARCH=aarch64 ;;
+              esac
+              export NFPM_ARCH
+              nfpm package --config packaging/nfpm/nfpm.yaml --packager "${format}" \
+                --target "dist/memcastle_${TAG}_${asset}.${format}"
+            done
+          done
+
+      # Before upload, so a broken package never reaches the draft release.
+      # arm64 has no runner: metadata only.
+      - name: Smoke-test the packages
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          deb="memcastle_${TAG}_linux-amd64.deb"
+          rpm="memcastle_${TAG}_linux-amd64.rpm"
+          docker run --rm -v "${PWD}/dist:/dist:ro" debian:stable sh -euc \
+            "apt-get update -qq && apt-get install -y -qq /dist/${deb} && memcastle --version"
+          docker run --rm -v "${PWD}/dist:/dist:ro" fedora:latest sh -euc \
+            "dnf install -y -q /dist/${rpm} && memcastle --version"
+          dpkg-deb --info "dist/memcastle_${TAG}_linux-arm64.deb"
+          sudo apt-get install -y -qq rpm
+          rpm -qpi "dist/memcastle_${TAG}_linux-arm64.rpm"
+
       # A bill of materials for the whole release: every crate any target
       # links, taken from `Cargo.lock` and the manifest. `--target all` because
       # one SBOM describes five builds. Named with a hyphen so the `memcastle_*`

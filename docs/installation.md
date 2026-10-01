@@ -53,7 +53,51 @@ On Linux, use one of the other methods, including under Linuxbrew.
 paru -S memcastle-bin   # or your AUR helper of choice
 ```
 
-The `memcastle-bin` package installs the release binary for x86_64 and aarch64.
+The `memcastle-bin` package installs the release binary for x86_64 and aarch64,
+and a systemd user unit, `/usr/lib/systemd/user/memcastle.service`.
+
+The package owns only those two files under `/usr`.
+Your configuration (`~/.config/memcastle`), palace (`~/.local/share/memcastle`) and state (`~/.local/state/memcastle`)
+stay yours, and so does any secret: the package never writes to them.
+
+The unit runs as you, not as root, with your XDG environment.
+Authentication is off by default, so it starts without any provisioning:
+
+```sh
+systemctl --user start memcastle
+systemctl --user status memcastle
+systemctl --user restart memcastle
+systemctl --user stop memcastle
+```
+
+To start it at every login, and now:
+
+```sh
+systemctl --user enable --now memcastle
+```
+
+Logs are in the journal: `journalctl --user -u memcastle -f`.
+To enable authentication under this unit, see [Under systemd](authentication.md#under-systemd).
+
+### Debian, Ubuntu, Fedora and RHEL family (.deb, .rpm)
+
+Each release carries packages for linux-amd64 and linux-arm64:
+
+```sh
+sudo apt install ./memcastle_<version>_linux-amd64.deb
+sudo dnf install ./memcastle_<version>_linux-amd64.rpm
+```
+
+They install `/usr/bin/memcastle`, the systemd user unit `/usr/lib/systemd/user/memcastle.service`
+and `/usr/share/doc/memcastle/`, and nothing under your XDG directories,
+so removing the package leaves your configuration and palace alone.
+The unit is used as on Arch: `systemctl --user start memcastle`, as described in [Arch Linux](#arch-linux-aur).
+The package does not enable or start it.
+Verify them like any other download, as in [Verify a download](#verify-a-download).
+
+The packages are unsigned, there is no apt or dnf repository so upgrades are manual,
+and no dependencies are declared: the binary needs the glibc of its build image,
+so a distribution older than that fails at run time rather than at install.
 
 ### Release binary
 

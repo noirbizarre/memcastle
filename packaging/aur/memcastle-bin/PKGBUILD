@@ -36,12 +36,17 @@ sha256sums_aarch64=('@SHA256_AARCH64@')
 
 # Fetched separately: the raw binary asset carries no licence file, and MIT
 # is not one of the licences Arch keeps in /usr/share/licenses/common.
-source=("LICENSE-$pkgver::$url/raw/$pkgver/LICENSE")
-sha256sums=('@SHA256_LICENSE@')
+# The systemd user unit is fetched from the tag for the same reason.
+source=("LICENSE-$pkgver::$url/raw/$pkgver/LICENSE"
+        "memcastle-$pkgver.service::$url/raw/$pkgver/packaging/systemd/memcastle.service")
+sha256sums=('@SHA256_LICENSE@'
+            '@SHA256_SERVICE@')
 
 package() {
 	install -Dm755 "$srcdir/memcastle-$pkgver-$CARCH" "$pkgdir/usr/bin/memcastle"
 	install -Dm644 "$srcdir/LICENSE-$pkgver" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+	# Package-owned user unit: `systemctl --user start memcastle`. Config and secrets stay user-owned.
+	install -Dm644 "$srcdir/memcastle-$pkgver.service" "$pkgdir/usr/lib/systemd/user/memcastle.service"
 }
 
 # --- project-specific ---------------------------------------------------
