@@ -150,6 +150,8 @@ The Arch package (`memcastle-bin`) installs a systemd user unit, so there `syste
 see [Installation](installation.md#arch-linux-aur).
 Its `ExecStart` is `/usr/bin/memcastle serve`, and it reads an optional `~/.config/memcastle/secret.env`.
 Change it with `systemctl --user edit memcastle`, which writes a drop-in and leaves the package file alone.
+The packaged unit sets `MEMCASTLE_LOG=warn`, which outranks `-v` and `logging.level`;
+override it in the same drop-in if you want more output.
 If `systemctl --user status memcastle` shows a failed start, `journalctl --user -u memcastle -n 50` has the diagnostic.
 
 Elsewhere, a systemd user unit you can write by hand looks like this:
