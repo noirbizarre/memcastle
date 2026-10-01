@@ -38,7 +38,7 @@ A failure comes back as an MCP error result carrying the [error body](#errors) b
 Defaults are the same as the CLI's: `limit` is 10 for `memcastle_search` and `memcastle_recall`, 20 for
 `memcastle_diary_read`, and every read limit is capped at 200.
 `memcastle_wake_up` defaults to 10 items and 8192 bytes.
-`memcastle_mine` (and `POST /api/mine`) needs an absolute `path`, because the daemon does not share your shell's working directory.
+`memcastle_mine` (and a `mine` job over `POST /api/jobs`) needs an absolute `path`, because the daemon does not share your shell's working directory.
 Mining, checkpoint, audit and repair return the submitted job immediately;
 poll it with `memcastle_job_get` to see its progress and result.
 
