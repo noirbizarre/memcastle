@@ -166,7 +166,7 @@ pub enum JobKind {
 
 /// A repair that says nothing about `dry_run` must fail safe: destructive
 /// only when the caller asked for it explicitly.
-fn default_dry_run() -> bool {
+pub(crate) fn default_dry_run() -> bool {
     true
 }
 

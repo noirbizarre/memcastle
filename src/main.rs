@@ -409,7 +409,7 @@ async fn cmd_checkpoint(
     let payload: memcastle::domain::CheckpointPayload = serde_json::from_str(&raw)
         .map_err(|source| Error::invalid_input("checkpoint payload", source.to_string()))?;
     let job = client(config, mode)
-        .checkpoint(payload, args.emergency)
+        .submit_checkpoint(payload, args.emergency)
         .await?;
     print_json(&job)?;
     Ok(())
@@ -484,7 +484,7 @@ async fn cmd_jobs(config: &Config, mode: Option<MemoryMode>, command: JobsComman
             // own reachable from here without going through `/api/jobs`
             // with a `demo` kind — reuse the same generic endpoint the
             // `mine` command uses, just with a different JSON body.
-            let job: memcastle::domain::Job = daemon.demo(steps).await?;
+            let job: memcastle::domain::Job = daemon.submit_demo(steps).await?;
             print_json(&job)?;
         }
     }

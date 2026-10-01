@@ -380,7 +380,7 @@ impl AppServices {
 
     /// The gated search both `search` and `recall` run, taking the caller's
     /// own name so a rejected `recall` says `recall`, not the `search` it
-    /// never asked for (the same reason `submit_checkpoint` takes one).
+    /// never asked for (the same reason `enqueue_checkpoint` takes one).
     async fn gated_search(
         &self,
         operation: &'static str,
@@ -462,7 +462,7 @@ impl AppServices {
     /// pass, since there is exactly one `JobKind::Checkpoint` variant (see
     /// its doc comment). Also the single place that gates both public
     /// checkpoint methods on `mode`, so neither duplicates the check.
-    async fn submit_checkpoint(
+    async fn enqueue_checkpoint(
         &self,
         payload: CheckpointPayload,
         priority: Priority,
@@ -486,13 +486,13 @@ impl AppServices {
     /// Returns an error if the job cannot be persisted, or
     /// [`Error::ModeForbidden`] if `mode` doesn't permit writes
     /// (`ReadOnly`/`Disabled`).
-    pub async fn checkpoint(
+    pub async fn submit_checkpoint(
         &self,
         payload: CheckpointPayload,
         requested_by: &str,
         mode: MemoryMode,
     ) -> Result<Job> {
-        self.submit_checkpoint(payload, Priority::High, requested_by, "checkpoint", mode)
+        self.enqueue_checkpoint(payload, Priority::High, requested_by, "checkpoint", mode)
             .await
     }
 
@@ -503,8 +503,8 @@ impl AppServices {
     ///
     /// # Errors
     ///
-    /// As [`Self::checkpoint`] and [`Self::emergency_checkpoint`].
-    pub async fn checkpoint_with_urgency(
+    /// As [`Self::submit_checkpoint`] and [`Self::submit_emergency_checkpoint`].
+    pub async fn submit_checkpoint_with_urgency(
         &self,
         payload: CheckpointPayload,
         emergency: bool,
@@ -512,9 +512,10 @@ impl AppServices {
         mode: MemoryMode,
     ) -> Result<Job> {
         if emergency {
-            self.emergency_checkpoint(payload, requested_by, mode).await
+            self.submit_emergency_checkpoint(payload, requested_by, mode)
+                .await
         } else {
-            self.checkpoint(payload, requested_by, mode).await
+            self.submit_checkpoint(payload, requested_by, mode).await
         }
     }
 
@@ -526,13 +527,13 @@ impl AppServices {
     /// Returns an error if the job cannot be persisted, or
     /// [`Error::ModeForbidden`] if `mode` doesn't permit writes
     /// (`ReadOnly`/`Disabled`).
-    pub async fn emergency_checkpoint(
+    pub async fn submit_emergency_checkpoint(
         &self,
         payload: CheckpointPayload,
         requested_by: &str,
         mode: MemoryMode,
     ) -> Result<Job> {
-        self.submit_checkpoint(
+        self.enqueue_checkpoint(
             payload,
             Priority::Critical,
             requested_by,
@@ -1219,7 +1220,7 @@ mod tests {
     async fn a_disabled_session_cannot_read_checkpointed_content_through_the_job_list() {
         let app = test_app().await;
         let submitted = app
-            .checkpoint(
+            .submit_checkpoint(
                 one_item_payload("a secret preference"),
                 "test",
                 MemoryMode::Full,
@@ -1243,7 +1244,7 @@ mod tests {
     async fn a_read_only_session_can_still_list_and_show_jobs() {
         let app = test_app().await;
         let submitted = app
-            .checkpoint(one_item_payload("readable"), "test", MemoryMode::Full)
+            .submit_checkpoint(one_item_payload("readable"), "test", MemoryMode::Full)
             .await
             .expect("full-mode checkpoint");
 
@@ -1386,7 +1387,9 @@ mod tests {
                 fact: None,
             }],
         };
-        let result = app.checkpoint(payload, "test", MemoryMode::Disabled).await;
+        let result = app
+            .submit_checkpoint(payload, "test", MemoryMode::Disabled)
+            .await;
         assert_mode_forbidden(&result, MemoryMode::Disabled);
     }
 
@@ -1442,7 +1445,9 @@ mod tests {
                 fact: None,
             }],
         };
-        let result = app.checkpoint(payload, "test", MemoryMode::ReadOnly).await;
+        let result = app
+            .submit_checkpoint(payload, "test", MemoryMode::ReadOnly)
+            .await;
         assert_mode_forbidden(&result, MemoryMode::ReadOnly);
     }
 
@@ -1463,7 +1468,7 @@ mod tests {
                 fact: None,
             }],
         };
-        app.checkpoint(payload, "test", MemoryMode::Full)
+        app.submit_checkpoint(payload, "test", MemoryMode::Full)
             .await
             .expect("full-mode checkpoint must be accepted");
     }
@@ -1486,7 +1491,7 @@ mod tests {
             }],
         };
         let result = app
-            .emergency_checkpoint(payload, "test", MemoryMode::Disabled)
+            .submit_emergency_checkpoint(payload, "test", MemoryMode::Disabled)
             .await;
         assert_mode_forbidden(&result, MemoryMode::Disabled);
     }
@@ -1512,7 +1517,7 @@ mod tests {
     async fn a_read_only_emergency_checkpoint_is_rejected_and_queues_nothing() {
         let app = test_app().await;
         let result = app
-            .emergency_checkpoint(
+            .submit_emergency_checkpoint(
                 one_item_payload("never queued"),
                 "test",
                 MemoryMode::ReadOnly,
@@ -1532,7 +1537,7 @@ mod tests {
     async fn a_full_mode_emergency_checkpoint_is_queued_at_critical_priority() {
         let app = test_app().await;
         let job = app
-            .emergency_checkpoint(one_item_payload("save me"), "test", MemoryMode::Full)
+            .submit_emergency_checkpoint(one_item_payload("save me"), "test", MemoryMode::Full)
             .await
             .expect("full-mode emergency checkpoint must be accepted");
         assert_eq!(job.priority, Priority::Critical);
@@ -1542,7 +1547,7 @@ mod tests {
     async fn a_routine_checkpoint_is_queued_below_critical_priority() {
         let app = test_app().await;
         let job = app
-            .checkpoint(one_item_payload("routine"), "test", MemoryMode::Full)
+            .submit_checkpoint(one_item_payload("routine"), "test", MemoryMode::Full)
             .await
             .expect("full-mode checkpoint must be accepted");
         assert_eq!(job.priority, Priority::High);
@@ -1626,14 +1631,14 @@ mod tests {
     async fn a_rejected_emergency_checkpoint_names_the_operation_the_caller_asked_for() {
         let app = test_app().await;
         let result = app
-            .emergency_checkpoint(one_item_payload("x"), "test", MemoryMode::ReadOnly)
+            .submit_emergency_checkpoint(one_item_payload("x"), "test", MemoryMode::ReadOnly)
             .await;
         assert!(
             matches!(&result, Err(Error::ModeForbidden { operation, .. }) if operation == "emergency_checkpoint"),
             "got {result:?}"
         );
         let result = app
-            .checkpoint(one_item_payload("x"), "test", MemoryMode::ReadOnly)
+            .submit_checkpoint(one_item_payload("x"), "test", MemoryMode::ReadOnly)
             .await;
         assert!(
             matches!(&result, Err(Error::ModeForbidden { operation, .. }) if operation == "checkpoint"),

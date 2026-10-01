@@ -25,6 +25,7 @@ use rmcp::{ErrorData as McpError, ServerHandler, schemars, tool, tool_handler, t
 use tokio_util::sync::CancellationToken;
 
 use crate::app::{AppServices, WakeUpBudget};
+use crate::domain::default_dry_run; // one default for REST and MCP, so repair's dry-run-first cannot drift
 use crate::domain::{CheckpointPayload, Job, MemoryMode};
 use crate::error::Error;
 
@@ -189,10 +190,6 @@ struct RepairArgs {
     /// id from `memcastle_audit`). A live scan always decides what is
     /// removed; this can only narrow it.
     based_on_job: Option<String>,
-}
-
-fn default_dry_run() -> bool {
-    true
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -459,7 +456,7 @@ impl McpTools {
         };
         let job = self
             .app
-            .checkpoint_with_urgency(payload, args.emergency, CHANNEL, mode)
+            .submit_checkpoint_with_urgency(payload, args.emergency, CHANNEL, mode)
             .await;
         tool_result("memcastle_checkpoint", job)
     }

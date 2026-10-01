@@ -330,7 +330,7 @@ async fn the_client_reports_what_the_daemon_said_instead_of_blaming_the_connecti
 
     // A pause on a finished job must come back as the daemon's 400, with the
     // daemon's own advice attached — not as "is the daemon running?".
-    let job = client.demo(1).await.expect("submit");
+    let job = client.submit_demo(1).await.expect("submit");
     let http = reqwest::Client::new();
     wait_for_job_status(&http, &daemon.base_url, job.id, JobStatus::Completed).await;
     let error = client.pause_job(job.id).await.unwrap_err();
