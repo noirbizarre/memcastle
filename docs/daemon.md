@@ -187,6 +187,7 @@ Binding a non-loopback address such as `0.0.0.0` exposes the palace to that netw
 when it does so without authentication.
 Enable [authentication](authentication.md) when you do, and put a TLS-terminating proxy in front of it,
 because the token travels in cleartext over plain HTTP.
+`/mcp` also refuses a non-loopback `Host` header, so reach it through a loopback name or a proxy that rewrites `Host`.
 
 With a supervisor, inject the secret as `MEMCASTLE_AUTH_TOKEN` from an `EnvironmentFile=` or your secret manager,
 not as an argument; [Authentication](authentication.md#with-a-shared-secret-from-a-secret-manager) shows how.

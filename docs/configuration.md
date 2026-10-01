@@ -191,6 +191,7 @@ The default never listens on all network interfaces.
 Authentication is off unless you enable it, so use a non-loopback address such as `0.0.0.0` only on a network you trust,
 or with [authentication](authentication.md) enabled.
 The daemon logs a warning when it listens beyond loopback without it.
+The MCP endpoint additionally refuses a non-loopback `Host` header, see [Authentication](authentication.md#exposing-the-daemon).
 
 The listener is bound before anything else happens.
 If the address is taken, needs privileges, or does not exist on this machine,
