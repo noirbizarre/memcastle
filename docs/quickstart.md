@@ -34,6 +34,7 @@ MemCastle is running
   drawers    0
   jobs       0 queued, 0 running, 0 paused
   mode       full
+  auth       disabled
 Restart with `memcastle restart`, stop with `memcastle stop`.
 ```
 
