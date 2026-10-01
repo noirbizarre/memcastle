@@ -289,12 +289,39 @@ pub struct LoggingConfig {
     /// A `tracing_subscriber::EnvFilter` directive, e.g. `"info"` or
     /// `"memcastle=debug,tower_http=info"`.
     pub level: String,
+    /// Output format: human-readable text or one JSON object per line.
+    #[serde(default)]
+    pub format: LogFormat,
+}
+
+/// How log events are rendered on stderr.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogFormat {
+    /// Human-readable lines, for a terminal.
+    #[default]
+    Text,
+    /// One JSON object per line, for journald and log shippers.
+    Json,
+}
+
+impl std::str::FromStr for LogFormat {
+    type Err = String;
+
+    fn from_str(raw: &str) -> std::result::Result<Self, String> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "text" => Ok(Self::Text),
+            "json" => Ok(Self::Json),
+            _ => Err("expected `text` or `json`".to_string()),
+        }
+    }
 }
 
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
             level: "info".to_string(),
+            format: LogFormat::default(),
         }
     }
 }
@@ -410,6 +437,11 @@ impl Config {
         }
         if let Some(level) = lookup("MEMCASTLE_LOG") {
             self.logging.level = level;
+        }
+        if let Some(raw) = lookup("MEMCASTLE_LOG_FORMAT") {
+            self.logging.format = raw
+                .parse()
+                .map_err(|e| Error::config(format!("MEMCASTLE_LOG_FORMAT: {e}")))?;
         }
         if let Some(n) = lookup("MEMCASTLE_JOBS_MAX_CONCURRENCY") {
             self.jobs.max_concurrency = parse_override("MEMCASTLE_JOBS_MAX_CONCURRENCY", &n)?;
@@ -784,6 +816,28 @@ mod tests {
                 .unwrap_err();
             assert!(err.to_string().contains(name), "{name}: {err}");
         }
+    }
+
+    #[test]
+    fn the_log_format_env_override_selects_json_and_rejects_nonsense() {
+        let mut config = Config::default();
+        assert_eq!(config.logging.format, LogFormat::Text);
+        config
+            .apply_overrides_from(env(&[("MEMCASTLE_LOG_FORMAT", "JSON")]))
+            .unwrap();
+        assert_eq!(config.logging.format, LogFormat::Json);
+
+        let err = config
+            .apply_overrides_from(env(&[("MEMCASTLE_LOG_FORMAT", "xml")]))
+            .unwrap_err();
+        assert!(err.to_string().contains("MEMCASTLE_LOG_FORMAT"), "{err}");
+    }
+
+    #[test]
+    fn a_log_format_in_the_config_file_is_read() {
+        let config: Config =
+            toml::from_str("[logging]\nlevel = \"info\"\nformat = \"json\"").unwrap();
+        assert_eq!(config.logging.format, LogFormat::Json);
     }
 
     #[test]

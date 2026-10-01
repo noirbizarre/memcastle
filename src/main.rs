@@ -70,10 +70,16 @@ async fn async_main() -> ExitCode {
     // below, not tracing, so nothing is lost by initializing second.
     let config = Config::load(args.config.as_deref(), &overrides_from(&args));
     // A config that failed to load still honours `-v`, on top of the default.
-    init_tracing(match &config {
-        Ok(config) => config.log_filter(args.verbose),
-        Err(_) => Config::default().log_filter(args.verbose),
-    });
+    init_tracing(
+        match &config {
+            Ok(config) => config.log_filter(args.verbose),
+            Err(_) => Config::default().log_filter(args.verbose),
+        },
+        config
+            .as_ref()
+            .map(|c| c.logging.format)
+            .unwrap_or_default(),
+    );
 
     let outcome = match config {
         Ok(config) => run(args, config).await,
@@ -541,9 +547,15 @@ fn install_miette_hook(verbose: bool) {
 
 /// Structured logging with `filter` as the `EnvFilter` directive — see
 /// `Config::log_filter` for where it comes from and its precedence.
-fn init_tracing(filter: String) {
-    let _ = tracing_subscriber::fmt()
+fn init_tracing(filter: String, format: memcastle::config::LogFormat) {
+    use std::io::IsTerminal;
+    let builder = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
         .with_writer(std::io::stderr)
-        .try_init();
+        // Escape codes would pollute journald and log files.
+        .with_ansi(std::io::stderr().is_terminal());
+    let _ = match format {
+        memcastle::config::LogFormat::Text => builder.try_init(),
+        memcastle::config::LogFormat::Json => builder.json().try_init(),
+    };
 }

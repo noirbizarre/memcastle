@@ -137,6 +137,47 @@ The daemon logs to standard error only; there are no log files.
 `logging.level` in the config file is the lowest-precedence setting.
 At `debug`, every REST and MCP request and every MCP tool call is logged.
 
+### Format
+
+`MEMCASTLE_LOG_FORMAT=json` (or `format = "json"` under `[logging]`) writes one JSON object per line instead of text.
+Use it where a log shipper reads the output; the default `text` suits a terminal.
+Colour is only used when standard error is a terminal, so journald never receives escape codes.
+
+### What is logged
+
+At the default `info` level the daemon logs lifecycle transitions, not individual operations:
+
+| Event | Fields |
+| ----- | ------ |
+| Startup, listener ready, shutdown | version, pid, bind address, palace, backend |
+| Scheduler configured, jobs recovered | concurrency, lease TTL, job ID |
+| `job queued` | `job_id`, `job_type`, `priority`, `requested_by` |
+| `job claimed by worker` | `job_id`, `job_type`, `priority`, `attempt`, `worker_id` |
+| `job started`, `completed`, `paused`, `cancelled` | `job_id`, `job_type`, `elapsed_ms` |
+| `job failed` | `job_id`, `error`, `elapsed_ms`, `attempt` |
+| Pause, cancel, resume and retry requests | `job_id` |
+| Mining, checkpoint, audit and repair start | counts only (files, items, dry run) |
+
+Lines emitted while a job runs carry its `job_id` and `job_type` through the enclosing `job` span,
+so filtering on the ID gives the whole lifecycle.
+At `debug`, every REST and MCP request is logged with a `request_id`, method and path;
+the same ID is returned in the `x-request-id` response header, and a client-supplied one is kept.
+Failed requests and tool calls are logged at `warn` or `error` with the same ID and the diagnostic code.
+
+Logs never contain memory or file contents, file names, query strings, request headers, tokens or secrets:
+only identifiers, counts, types, durations, statuses and error messages.
+
+### Reading the logs under systemd
+
+```sh
+journalctl --user -u memcastle -f
+journalctl --user -u memcastle -o cat | grep <job-id>
+```
+
+With `MEMCASTLE_LOG_FORMAT=json`, `journalctl --user -u memcastle -o cat | jq 'select(.fields.job_id == "<job-id>")'` works.
+The packaged unit sets `MEMCASTLE_LOG=warn`, which hides the `info` lifecycle events above:
+override it with `systemctl --user edit memcastle` (`Environment=MEMCASTLE_LOG=info`) to see them.
+
 The default level also shows startup messages from the embedded database, which are noisy but harmless.
 Set `MEMCASTLE_LOG=warn` for a quiet daemon.
 
