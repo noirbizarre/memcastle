@@ -49,7 +49,7 @@ A token that was rotated or revoked stops working at once, and the message does 
 
 Authentication is enabled, but the daemon has no token to check: none in `MEMCASTLE_AUTH_TOKEN` or `auth.token`,
 and none generated.
-Nothing was started, created or changed.
+The palace was opened and migrated, but no job ran and nothing was served.
 Either set a secret, or start once with authentication disabled, run `memcastle auth generate`, store the token,
 and enable authentication.
 

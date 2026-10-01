@@ -39,6 +39,8 @@ sequenceDiagram
     D->>S: connect
     D->>S: apply pending migrations
     Note over D,S: a failed migration stops the daemon, nothing is served
+    D->>D: check authentication is configured
+    Note over D: enabled without a token stops here, before the scheduler starts
     D->>S: recover jobs left running by a crash
     D->>D: start the job scheduler
     D->>D: write the registry file
