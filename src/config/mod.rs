@@ -1134,7 +1134,8 @@ mod tests {
     #[test]
     fn a_non_loopback_db_bind_is_rejected_unless_remote_access_was_allowed() {
         let mut config = Config::default();
-        config.palace.path = PathBuf::from("/palace");
+        // Absolute on every platform; "/palace" is not on Windows.
+        config.palace.path = std::env::temp_dir();
         config.db.bind = "0.0.0.0".parse().unwrap();
 
         let err = config.validate().unwrap_err();
@@ -1147,7 +1148,8 @@ mod tests {
     #[test]
     fn the_db_port_may_not_collide_with_the_daemons_own() {
         let mut config = Config::default();
-        config.palace.path = PathBuf::from("/palace");
+        // Absolute on every platform; "/palace" is not on Windows.
+        config.palace.path = std::env::temp_dir();
         config.db.port = config.server.port;
         assert!(config.validate().is_err());
 
