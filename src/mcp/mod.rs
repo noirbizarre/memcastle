@@ -547,7 +547,7 @@ impl McpTools {
         description = "List jobs known to the daemon, newest first, optionally only those in one \
                         status (queued, running, paused, completed, failed or cancelled)"
     )]
-    async fn memcastle_jobs_list(
+    async fn memcastle_job_list(
         &self,
         Parameters(args): Parameters<JobsListArgs>,
         Extension(parts): Extension<http::request::Parts>,
@@ -562,7 +562,7 @@ impl McpTools {
             self.app.list_jobs(status, mode).await
         }
         .await;
-        tool_result("memcastle_jobs_list", jobs)
+        tool_result("memcastle_job_list", jobs)
     }
 
     #[tool(
@@ -999,7 +999,7 @@ mod tests {
                 .await
                 .unwrap();
             let list = tools
-                .memcastle_jobs_list(
+                .memcastle_job_list(
                     Parameters(JobsListArgs { status: None }),
                     Extension(parts(Some("s"))),
                 )
@@ -1008,7 +1008,7 @@ mod tests {
 
             let expected = (!allowed).then(|| MODE_FORBIDDEN.to_string());
             assert_eq!(code_of(&get), expected, "job_get in {mode} mode");
-            assert_eq!(code_of(&list), expected, "jobs_list in {mode} mode");
+            assert_eq!(code_of(&list), expected, "job_list in {mode} mode");
         }
     }
 
@@ -1018,7 +1018,7 @@ mod tests {
         queued_job(&tools).await;
 
         let queued = tools
-            .memcastle_jobs_list(
+            .memcastle_job_list(
                 Parameters(JobsListArgs {
                     status: Some("queued".to_string()),
                 }),
@@ -1027,7 +1027,7 @@ mod tests {
             .await
             .unwrap();
         let running = tools
-            .memcastle_jobs_list(
+            .memcastle_job_list(
                 Parameters(JobsListArgs {
                     status: Some("running".to_string()),
                 }),
@@ -1036,7 +1036,7 @@ mod tests {
             .await
             .unwrap();
         let bogus = tools
-            .memcastle_jobs_list(
+            .memcastle_job_list(
                 Parameters(JobsListArgs {
                     status: Some("done".to_string()),
                 }),

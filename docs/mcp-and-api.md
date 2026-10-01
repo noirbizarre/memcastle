@@ -28,7 +28,7 @@ A failure comes back as an MCP error result carrying the [error body](#errors) b
 | `memcastle_mine` | `path`, `wing?` | Submit a job that mines a directory. |
 | `memcastle_audit` | `scope?` | Submit a read-only consistency audit job. |
 | `memcastle_repair` | `dry_run?`, `based_on_job?` | Submit a repair job; a dry run unless `dry_run` is `false`. |
-| `memcastle_jobs_list` | `status?` | List jobs, newest first. |
+| `memcastle_job_list` | `status?` | List jobs, newest first. |
 | `memcastle_job_get` | `id` | Show one job. |
 | `memcastle_job_pause` | `id` | Ask a running job to pause at its next checkpoint. |
 | `memcastle_job_resume` | `id` | Resume a paused job. |

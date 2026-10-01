@@ -44,7 +44,7 @@
 //! a dry-run `submit_repair` (they only report). Over MCP that is
 //! `memcastle_status`, `memcastle_audit`, a dry-run `memcastle_repair` and the
 //! four `memcastle_job_*` control tools; `memcastle_job_get` and
-//! `memcastle_jobs_list` are reads, and an applied `memcastle_repair` is a
+//! `memcastle_job_list` are reads, and an applied `memcastle_repair` is a
 //! write. This resolves the
 //! "explicit daemon operations vs automatic memory operations" boundary the
 //! task brief calls out (§22-26).

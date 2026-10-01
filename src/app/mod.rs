@@ -620,7 +620,7 @@ impl AppServices {
     /// Returns an error if the store query fails, or
     /// [`Error::ModeForbidden`] if `mode` doesn't permit reads.
     pub async fn list_jobs(&self, status: Option<JobStatus>, mode: MemoryMode) -> Result<Vec<Job>> {
-        Self::require_read(mode, "jobs_list")?;
+        Self::require_read(mode, "job_list")?;
         self.store.list_jobs(status).await
     }
 
@@ -635,7 +635,7 @@ impl AppServices {
     /// query fails, or [`Error::ModeForbidden`] if `mode` doesn't permit
     /// reads.
     pub async fn get_job(&self, id: JobId, mode: MemoryMode) -> Result<Job> {
-        Self::require_read(mode, "jobs_show")?;
+        Self::require_read(mode, "job_get")?;
         self.store
             .get_job(id)
             .await?
