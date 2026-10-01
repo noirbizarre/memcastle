@@ -3,7 +3,7 @@
 //! Load order: hardcoded defaults -> optional TOML file -> `MEMCASTLE_*`
 //! environment overrides -> command-line [`Overrides`] -> [`Config::validate`].
 //! Deliberately hand-rolled rather than pulled in from a config-framework
-//! crate — there are five sections of settings, and a framework's abstraction
+//! crate — there are seven sections of settings, and a framework's abstraction
 //! cost would outweigh what it saves here.
 //!
 //! Default file locations follow the Unix XDG convention on Linux and macOS
