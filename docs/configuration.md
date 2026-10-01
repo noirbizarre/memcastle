@@ -153,7 +153,7 @@ Some variables are read by the command line rather than the config file:
 | `--bind <IP>` | `serve`, `restart` | `server.bind`, `MEMCASTLE_BIND` |
 | `--port <PORT>` | `serve`, `restart` | `server.port`, `MEMCASTLE_PORT` |
 | `--assets-dir <DIR>` | `serve`, `restart` | `assets.dir`, `MEMCASTLE_ASSETS_DIR` |
-| `--mode <MODE>` | client commands | the memory mode of the session |
+| `--mode <MODE>` | every command (acted on by client commands) | the memory mode of the session |
 | `-v`, `-vv` | every command | the log level of memcastle itself |
 
 ## The listener: address and port
