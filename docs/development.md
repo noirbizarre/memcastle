@@ -110,6 +110,14 @@ The authentication invariant has no hook, because a route or an MCP tool is not 
 It is enforced by tests instead: `tests/auth.rs` walks a list of the REST routes
 (and a route that does not exist) without a token, and fails if an MCP tool's name mentions credentials.
 
+The database admin endpoint ([ADR-015](adr/015-database-admin-endpoint.md)) is guarded the same way:
+a daemon that was only started has no second listener, a non-loopback bind needs the opt-in and authentication,
+a page from another origin is refused, and no MCP tool mentions the database.
+Those are `tests/db_endpoint.rs`, the `/api/db` entries in `tests/auth.rs` and a unit test that `serve` has no flag
+that starts it.
+`surrealdb-core` and `surrealdb-rpc` are pinned to the exact `surrealdb` version: they are SurrealDB internal API,
+so bump all three together.
+
 Two more hooks guard the remaining invariants.
 `job-status-only-via-apply` fails on any `.status =` assignment outside `src/domain/job.rs`,
 so a job's status only ever changes through `Job::apply`.

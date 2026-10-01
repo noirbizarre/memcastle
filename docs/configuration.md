@@ -88,6 +88,13 @@ format = "text"
 [auth]
 enabled = false
 
+# Defaults for `memcastle db serve`. Nothing here opens the endpoint; see "The database admin endpoint".
+[db]
+bind = "127.0.0.1"
+port = 8000
+allow_remote = false
+allowed_origins = []
+
 # Only to serve assets from somewhere other than the installed or embedded ones.
 [assets]
 dir = "/home/alice/src/memcastle-web/dist"
@@ -132,6 +139,10 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `jobs.lease_ttl_secs` (3 to 86400) | `MEMCASTLE_JOBS_LEASE_TTL_SECS` | `30` |
 | `auth.enabled` (`true` or `false`) | `MEMCASTLE_AUTH_ENABLED` | `false` |
 | `auth.token` (at least 16 characters) | `MEMCASTLE_AUTH_TOKEN` | none |
+| `db.bind` (an IP address) | `MEMCASTLE_DB_BIND` | `127.0.0.1` |
+| `db.port` (0 to 65535) | `MEMCASTLE_DB_PORT` | `8000` |
+| `db.allow_remote` (`true` or `false`) | `MEMCASTLE_DB_ALLOW_REMOTE` | `false` |
+| `db.allowed_origins` (a list) | `MEMCASTLE_DB_ALLOWED_ORIGINS` (comma-separated) | none |
 | `store.mode` and remote settings | none | `embedded` |
 
 `auth.token` is a secret, and is handled as one: MemCastle never logs it, prints it, serialises it, or writes it anywhere,
@@ -200,6 +211,23 @@ The listener is bound before anything else happens.
 If the address is taken, needs privileges, or does not exist on this machine,
 the start fails with `memcastle::server::bind_failed`, naming the address and what to change,
 and has not created the palace, migrated it or touched its jobs.
+
+## The database admin endpoint
+
+`memcastle db serve` opens a second, SurrealDB-compatible listener inside the running daemon, so SurrealDB Studio can
+inspect the live embedded database.
+The `[db]` settings are only the defaults for that command; no setting starts the endpoint.
+Each flag of `memcastle db serve` (`--bind`, `--port`, `--allow-remote`, `--allow-origin`) overrides its setting,
+and `--allow-origin` adds to `db.allowed_origins`.
+
+The address is `127.0.0.1` port `8000` unless configured otherwise, and the port must differ from `server.port`.
+A `db.bind` that is not a loopback address is refused when the configuration loads unless `db.allow_remote` is true,
+and the daemon refuses to open it at all unless `auth.enabled` is also true.
+`db.allowed_origins` lists web page origins, such as `https://app.surrealdb.com`, that may connect from a browser,
+in addition to pages served from this machine.
+The values are compared whole, never as patterns.
+
+See [Database access](database-access.md) for the workflow and the security model.
 
 ## Runtime assets
 

@@ -408,3 +408,71 @@ async fn a_too_short_environment_secret_is_rejected_without_echoing_it() {
     assert!(stderr.contains("MEMCASTLE_AUTH_TOKEN"), "{stderr}");
     assert!(!stderr.contains("hunter2"), "{stderr}");
 }
+
+#[tokio::test]
+async fn a_token_used_to_sign_in_to_the_database_endpoint_is_written_nowhere() {
+    use futures::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    const SECRET: &str = "mc_a_secret_for_the_database_endpoint_log_check";
+    const WRONG: &str = "mc_a_wrong_token_that_must_not_be_logged_either";
+    let sandbox = Sandbox::new();
+    let mut daemon = sandbox.start(true, Some(SECRET)).await;
+
+    // Opening the console is itself an authenticated, CLI-driven request.
+    let started = sandbox
+        .run(Some(SECRET), &["db", "serve", "--port", "0", "--json"])
+        .await;
+    assert!(started.status.success(), "{}", text(&started.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&started.stdout).expect("json");
+    assert_eq!(report["auth_required"], true, "{report}");
+    let addr = report["addr"].as_str().expect("addr").to_string();
+
+    // The way Studio does it: the token travels in-band, as the password.
+    let (mut socket, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/rpc"))
+        .await
+        .expect("connect");
+    for password in [WRONG, SECRET] {
+        let request = serde_json::json!({
+            "id": 1, "method": "signin", "params": [{ "user": "studio", "pass": password }],
+        });
+        socket
+            .send(Message::Text(request.to_string().into()))
+            .await
+            .expect("send");
+        socket.next().await.expect("an answer").expect("a frame");
+    }
+    let query = serde_json::json!({ "id": 2, "method": "query", "params": ["RETURN 1"] });
+    socket
+        .send(Message::Text(query.to_string().into()))
+        .await
+        .expect("send");
+    let Message::Text(answer) = socket.next().await.expect("an answer").expect("a frame") else {
+        panic!("a text answer");
+    };
+    assert!(
+        answer.contains("\"OK\""),
+        "signed in with the token: {answer}"
+    );
+    drop(socket);
+
+    let stopped = sandbox.run(Some(SECRET), &["db", "stop"]).await;
+    assert!(stopped.status.success(), "{}", text(&stopped.stderr));
+    sandbox.stop(&mut daemon, Some(SECRET)).await;
+
+    let log = sandbox.read_log();
+    for token in [SECRET, WRONG] {
+        assert!(!log.contains(token), "a token leaked into the daemon log");
+        assert!(
+            !log.contains(&token["mc_".len()..]),
+            "a token's entropy leaked into the daemon log"
+        );
+        let leaked = sandbox.files_containing(token);
+        assert!(leaked.is_empty(), "a token was written to {leaked:?}");
+    }
+    // The endpoint did log that it was used, so the assertions above had something to scan.
+    assert!(
+        log.contains("database admin connection opened"),
+        "the connection was logged, without its content:\n{log}"
+    );
+}

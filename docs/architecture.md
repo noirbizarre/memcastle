@@ -112,6 +112,27 @@ whose typed surface has already changed shape across SDK majors once.
 
 Where the data lives on disk, and how to back it up, is in [Storage and data](storage.md).
 
+### The database admin endpoint
+
+An embedded SurrealKV database has no server, so SurrealDB Studio cannot connect to it,
+and a second process may not open its directory.
+`memcastle db serve` therefore asks the *daemon* to open a second listener, on loopback and only on request.
+The listener speaks SurrealDB's WebSocket protocol and runs each connection on a clone of the handle `store` already holds,
+which is a separate session over the same datastore.
+It adds no storage layer, opens no database and leaves schema and migrations where they were.
+See [Database access](database-access.md) and [ADR-015](adr/015-database-admin-endpoint.md).
+
+```mermaid
+flowchart LR
+    studio([SurrealDB Studio]) -- "ws://127.0.0.1:8000/rpc" --> admin[dbadmin listener]
+    cli([memcastle db serve]) -- "POST /api/db" --> api[api]
+    api --> app[app: AppServices]
+    app -- starts and stops --> admin
+    admin -- "a clone of the handle: its own session" --> store[store: one Surreal handle]
+    app --> store
+    store --> kv[(SurrealKV)]
+```
+
 ### Migrations
 
 Two migration shapes are kept deliberately separate, both driven by one `crate::migrate::run`:
@@ -460,6 +481,12 @@ Generating and revoking a token are REST and CLI operations over `AppServices`, 
 The trace layer logs no headers, so the `Authorization` header never reaches the log.
 See [Authentication](authentication.md) and [ADR-014](adr/014-optional-token-authentication.md).
 
+**The database console is opt-in.**
+`memcastle serve` opens one listener and nothing else.
+The admin endpoint exists only after an explicit `db serve`, binds loopback unless `--allow-remote` and authentication are
+both given, refuses browser pages from other sites, and has no MCP tool.
+See [ADR-015](adr/015-database-admin-endpoint.md).
+
 ## Non-goals for now
 
 Deliberately out of scope, and each is structurally possible without rework given the module boundaries above:
@@ -471,6 +498,8 @@ Deliberately out of scope, and each is structurally possible without rework give
 - `wings`/`rooms`/`drawers`/`maintenance` commands (reserved names that return `not_implemented`).
 - Remote SurrealDB authentication beyond root sign-in.
 - TLS on the daemon's own listener (use a TLS-terminating proxy).
+- A read-only mode, live queries or transactions on the database admin endpoint
+  ([ADR-015](adr/015-database-admin-endpoint.md)).
 - OAuth/OIDC, users, roles and scopes: 0.1 has one optional shared bearer token,
   and the authentication layer is where those would attach ([ADR-014](adr/014-optional-token-authentication.md)).
 - Robust cross-platform process supervision for `memcastle restart`

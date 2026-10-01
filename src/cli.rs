@@ -100,6 +100,12 @@ pub enum Command {
     /// available to MCP clients.
     #[command(subcommand)]
     Auth(AuthCommand),
+    /// Open or close the daemon's database admin endpoint, so SurrealDB Studio
+    /// can inspect the live embedded database. A development and
+    /// administration tool, off unless asked for, and never available to MCP
+    /// clients.
+    #[command(subcommand)]
+    Db(DbCommand),
     /// List wings. Not yet implemented.
     Wings,
     /// List rooms. Not yet implemented.
@@ -298,6 +304,49 @@ pub enum AuthCommand {
     Revoke,
 }
 
+/// `memcastle db` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum DbCommand {
+    /// Ask the running daemon to expose its own embedded database to
+    /// SurrealDB Studio, then return. The endpoint lives in the daemon (the
+    /// only process that may open the database), so this never starts a
+    /// second database process: stop it again with `memcastle db stop`.
+    Serve(DbServeArgs),
+    /// Close the database admin endpoint.
+    Stop,
+    /// Report whether the database admin endpoint is open and where.
+    Status(StatusArgs),
+}
+
+/// Arguments for `memcastle db serve`. Anything left out falls back to the
+/// daemon's `[db]` configuration.
+#[derive(Debug, Args)]
+pub struct DbServeArgs {
+    /// Interface address to listen on, overriding `db.bind` and
+    /// `MEMCASTLE_DB_BIND` (default `127.0.0.1`). Anything but a loopback
+    /// address also needs `--allow-remote` and an authenticated daemon.
+    #[arg(long, value_name = "IP", value_parser = memcastle::config::parse_bind_host)]
+    pub bind: Option<IpAddr>,
+    /// TCP port to listen on, overriding `db.port` and `MEMCASTLE_DB_PORT`
+    /// (default 8000). `0` lets the OS pick a free one.
+    #[arg(long, value_name = "PORT")]
+    pub port: Option<u16>,
+    /// Allow a non-loopback `--bind`. The endpoint is a console onto the whole
+    /// palace database, so this is refused unless the daemon has
+    /// authentication enabled (`auth.enabled`). The token crosses the network
+    /// in cleartext: put it behind a TLS proxy or a tunnel.
+    #[arg(long)]
+    pub allow_remote: bool,
+    /// A web page origin allowed to connect from a browser, such as
+    /// `https://app.surrealdb.com` for the hosted Surrealist. Pages served
+    /// from this machine are always allowed. Repeatable.
+    #[arg(long = "allow-origin", value_name = "ORIGIN")]
+    pub allow_origin: Vec<String>,
+    /// Print the endpoint's details as JSON instead of text, for scripts.
+    #[arg(long)]
+    pub json: bool,
+}
+
 /// `memcastle jobs` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum JobsCommand {
@@ -410,6 +459,59 @@ mod tests {
             assert!(
                 serve_args(&["serve", "--port", port]).is_err(),
                 "{port} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn db_serve_defaults_leave_everything_to_the_daemons_configuration() {
+        let cli = Cli::try_parse_from(["memcastle", "db", "serve"]).unwrap();
+        let Command::Db(DbCommand::Serve(args)) = cli.command else {
+            panic!("a `db serve` command");
+        };
+        assert_eq!(args.bind, None);
+        assert_eq!(args.port, None);
+        assert!(!args.allow_remote);
+        assert!(args.allow_origin.is_empty());
+    }
+
+    #[test]
+    fn db_serve_accepts_a_bind_a_port_the_remote_opt_in_and_repeatable_origins() {
+        let cli = Cli::try_parse_from([
+            "memcastle",
+            "db",
+            "serve",
+            "--bind",
+            "0.0.0.0",
+            "--port",
+            "9000",
+            "--allow-remote",
+            "--allow-origin",
+            "https://a.example",
+            "--allow-origin",
+            "https://b.example",
+        ])
+        .unwrap();
+        let Command::Db(DbCommand::Serve(args)) = cli.command else {
+            panic!("a `db serve` command");
+        };
+        assert_eq!(args.bind, Some("0.0.0.0".parse().unwrap()));
+        assert_eq!(args.port, Some(9000));
+        assert!(args.allow_remote);
+        assert_eq!(
+            args.allow_origin,
+            ["https://a.example", "https://b.example"]
+        );
+    }
+
+    #[test]
+    fn serve_has_no_flag_that_starts_the_database_endpoint() {
+        // The endpoint is opened only by an explicit `db serve`, never as a side
+        // effect of starting the daemon.
+        for flag in ["--db", "--db-endpoint", "--allow-remote"] {
+            assert!(
+                Cli::try_parse_from(["memcastle", "serve", flag]).is_err(),
+                "`serve {flag}` must not exist"
             );
         }
     }

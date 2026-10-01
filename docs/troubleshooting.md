@@ -60,6 +60,35 @@ Stop the process with your supervisor (or `kill`), and start it again with authe
 (unset `MEMCASTLE_AUTH_ENABLED`) or with a new `MEMCASTLE_AUTH_TOKEN`.
 Nothing is lost, because authentication guards access and does not encrypt the palace.
 
+### `memcastle::db::unsafe_bind`
+
+`memcastle db serve` was asked to listen beyond loopback and the daemon refused.
+The [database admin endpoint](database-access.md) is a console onto the whole database,
+so a non-loopback `--bind` needs `--allow-remote` *and* a daemon started with `auth.enabled`.
+Nothing was opened.
+Leave `--bind` off to listen on `127.0.0.1`, which needs neither.
+
+### `memcastle::db::already_running` or `bind_failed`
+
+`already_running` means the endpoint is already open: `memcastle db status` says where, and `memcastle db stop` closes it.
+`bind_failed` means the address is taken.
+Port `8000` is also SurrealDB's own default, so a `surreal start` on the same machine is the usual cause.
+Pick another with `--port`, `MEMCASTLE_DB_PORT` or `db.port`, or use `--port 0` to let the OS choose
+(the answer prints the port).
+
+### `memcastle::db::unavailable`
+
+The palace uses a remote SurrealDB, which already has a server.
+Point SurrealDB Studio at that server directly.
+
+### SurrealDB Studio cannot connect to the database admin endpoint
+
+Check `memcastle db status` first: the endpoint only exists after `memcastle db serve`.
+A refusal with `403` means the page's origin is not allowed: the hosted Surrealist needs
+`--allow-origin https://app.surrealdb.com`, and pages served from this machine are always allowed.
+A refused sign-in on an authenticated daemon needs the MemCastle token as the *password*, with any username.
+See [Database access](database-access.md).
+
 ### `status` reports the registry as `stale`
 
 The registry file names a process that no longer exists, because the daemon was killed or crashed.

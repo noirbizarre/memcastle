@@ -16,7 +16,7 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-use crate::app::{AppServices, AuthPolicy, RuntimeContext};
+use crate::app::{AppServices, AuthPolicy, DbEndpoint, RuntimeContext};
 use crate::config::{Config, Secret};
 use crate::error::{Error, Result};
 use crate::jobs::Scheduler;
@@ -120,7 +120,11 @@ pub async fn run(config: Config) -> Result<()> {
             backend: backend_info.kind.to_string(),
             location: backend_info.location,
         })
-        .with_auth(auth_policy);
+        .with_auth(auth_policy)
+        // Constructed, never started: the admin endpoint listens only after an
+        // explicit `memcastle db serve` (`docs/adr/015`), so a plain daemon
+        // opens exactly the one listener it always did.
+        .with_db_endpoint(DbEndpoint::new(config.db.clone(), shutdown.clone()));
     if config.auth.enabled {
         info!(
             "authentication is enabled: every route except GET /api/health requires a bearer token"
@@ -135,6 +139,8 @@ pub async fn run(config: Config) -> Result<()> {
              address can read and write the palace; set auth.enabled (see docs/authentication.md)"
         );
     }
+    // Kept for the shutdown below: the layer takes `app` by value.
+    let services = app.clone();
     let mcp_service = crate::mcp::service(app.clone(), &shutdown);
     // One trace layer over both surfaces: a request line at `debug` on the
     // way in and a response line (status, latency) on the way out, so "what
@@ -204,6 +210,11 @@ pub async fn run(config: Config) -> Result<()> {
     let serve_result = axum::serve(listener, router)
         .with_graceful_shutdown(shutdown_signal)
         .await;
+
+    // Closed before the jobs drain: it shares the daemon's database handle, and
+    // a Studio connection left open must not outlive the daemon's storage.
+    // Idempotent, and a no-op when the endpoint was never started.
+    services.stop_db_endpoint().await;
 
     // The dispatch loop exits on the same `shutdown` token and then drains
     // in-flight jobs (`Scheduler::drain`); wait for it rather than aborting,

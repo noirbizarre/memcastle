@@ -201,6 +201,45 @@ pub struct AuthConfig {
     pub token: Option<Secret>,
 }
 
+/// The default admin endpoint address: loopback only, never a wildcard.
+const DEFAULT_DB_BIND: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+/// The default admin endpoint port: SurrealDB's own, so the URL Studio
+/// suggests (`ws://127.0.0.1:8000`) works unchanged.
+const DEFAULT_DB_PORT: u16 = 8000;
+
+/// Defaults for the database admin endpoint (`memcastle db serve`, see
+/// `docs/adr/015`).
+///
+/// Only defaults: the endpoint is never started by configuration. It is started
+/// by an explicit `memcastle db serve`, which may override each of these.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DbConfig {
+    /// Interface the endpoint listens on. Loopback by default, and anything
+    /// else is refused unless [`DbConfig::allow_remote`] is set.
+    pub bind: IpAddr,
+    /// TCP port. `0` asks the OS for a free port. Must differ from
+    /// `server.port`, since the two are separate listeners.
+    pub port: u16,
+    /// Permit a non-loopback bind. Also requires `auth.enabled`: a database
+    /// console on the network without a token would be the whole palace, writable.
+    pub allow_remote: bool,
+    /// Web page origins, beyond this machine's own, that may connect from a
+    /// browser (for example `https://app.surrealdb.com`). Exact matches only.
+    pub allowed_origins: Vec<String>,
+}
+
+impl Default for DbConfig {
+    fn default() -> Self {
+        Self {
+            bind: DEFAULT_DB_BIND,
+            port: DEFAULT_DB_PORT,
+            allow_remote: false,
+            allowed_origins: Vec::new(),
+        }
+    }
+}
+
 /// Parse a bind *interface* (`--bind`, `MEMCASTLE_BIND`).
 ///
 /// # Errors
@@ -350,6 +389,9 @@ pub struct Config {
     /// Authentication settings.
     #[serde(default)]
     pub auth: AuthConfig,
+    /// Database admin endpoint defaults.
+    #[serde(default)]
+    pub db: DbConfig,
 }
 
 impl Config {
@@ -455,6 +497,25 @@ impl Config {
         if let Some(raw) = lookup("MEMCASTLE_AUTH_ENABLED") {
             self.auth.enabled = parse_override("MEMCASTLE_AUTH_ENABLED", &raw)?;
         }
+        if let Some(bind) = lookup("MEMCASTLE_DB_BIND") {
+            self.db.bind = parse_bind_host(&bind)
+                .map_err(|e| Error::config(format!("MEMCASTLE_DB_BIND: {e}")))?;
+        }
+        if let Some(port) = lookup("MEMCASTLE_DB_PORT") {
+            self.db.port = parse_override("MEMCASTLE_DB_PORT", &port)?;
+        }
+        if let Some(raw) = lookup("MEMCASTLE_DB_ALLOW_REMOTE") {
+            self.db.allow_remote = parse_override("MEMCASTLE_DB_ALLOW_REMOTE", &raw)?;
+        }
+        if let Some(raw) = lookup("MEMCASTLE_DB_ALLOWED_ORIGINS") {
+            // Comma-separated, the way an environment variable carries a list.
+            self.db.allowed_origins = raw
+                .split(',')
+                .map(str::trim)
+                .filter(|origin| !origin.is_empty())
+                .map(str::to_string)
+                .collect();
+        }
         // Deliberately not `parse_override`: its error embeds the raw value,
         // and this one is a secret. An empty variable (a secret manager that
         // resolved to nothing) is kept so `validate` rejects it by name
@@ -558,6 +619,27 @@ impl Config {
             return Err(Error::config(
                 "jobs.lease_ttl_secs must be between 3 and 86400 seconds",
             ));
+        }
+        // Caught here rather than at `db serve` so a bad `[db]` section is
+        // reported when the config is loaded, not the first time it is used.
+        // That the endpoint then needs authentication is checked at start, where
+        // the daemon's real policy is known.
+        if !self.db.bind.is_loopback() && !self.db.allow_remote {
+            return Err(Error::config(format!(
+                "db.bind {} is not a loopback address; the admin endpoint exposes the whole database, \
+                 so listening elsewhere needs `db.allow_remote = true` (or MEMCASTLE_DB_ALLOW_REMOTE=true) \
+                 together with `auth.enabled`",
+                self.db.bind
+            )));
+        }
+        // Two listeners cannot share a port; port 0 is exempt because the OS
+        // picks a distinct one each time.
+        if self.db.port != 0 && self.db.port == self.server.port {
+            return Err(Error::config(format!(
+                "db.port {} is the same as server.port; the admin endpoint is a separate listener, \
+                 so give it its own port",
+                self.db.port
+            )));
         }
         // The message never includes the token itself, only what to do about it.
         if let Some(token) = &self.auth.token
@@ -997,6 +1079,84 @@ mod tests {
     fn a_config_file_that_sets_only_the_drain_timeout_keeps_the_default_lease_ttl() {
         let config: Config = toml::from_str("[jobs]\ndrain_timeout_secs = 5").unwrap();
         assert_eq!(config.jobs.lease_ttl_secs, 30);
+    }
+
+    #[test]
+    fn the_database_admin_endpoint_defaults_to_loopback_on_surrealdbs_own_port_and_no_remote() {
+        let db = Config::default().db;
+        assert_eq!(db.bind, IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(db.port, 8000);
+        assert!(!db.allow_remote);
+        assert!(db.allowed_origins.is_empty());
+    }
+
+    #[test]
+    fn the_db_settings_come_from_the_file_then_the_environment() {
+        let mut config: Config =
+            toml::from_str("[db]\nport = 9000\nallowed_origins = [\"https://a.example\"]").unwrap();
+        assert_eq!(config.db.port, 9000);
+        assert_eq!(config.db.bind, IpAddr::V4(Ipv4Addr::LOCALHOST));
+
+        config
+            .apply_overrides_from(env(&[
+                ("MEMCASTLE_DB_BIND", "127.0.0.3"),
+                ("MEMCASTLE_DB_PORT", "9100"),
+                ("MEMCASTLE_DB_ALLOW_REMOTE", "true"),
+                (
+                    "MEMCASTLE_DB_ALLOWED_ORIGINS",
+                    "https://b.example, https://c.example,",
+                ),
+            ]))
+            .unwrap();
+        assert_eq!(config.db.bind, "127.0.0.3".parse::<IpAddr>().unwrap());
+        assert_eq!(config.db.port, 9100);
+        assert!(config.db.allow_remote);
+        assert_eq!(
+            config.db.allowed_origins,
+            ["https://b.example", "https://c.example"]
+        );
+    }
+
+    #[test]
+    fn a_malformed_db_variable_is_named_in_the_error() {
+        for (name, value) in [
+            ("MEMCASTLE_DB_BIND", "nowhere"),
+            ("MEMCASTLE_DB_PORT", "eighty"),
+            ("MEMCASTLE_DB_ALLOW_REMOTE", "maybe"),
+        ] {
+            let err = Config::default()
+                .apply_overrides_from(env(&[(name, value)]))
+                .unwrap_err();
+            assert!(err.to_string().contains(name), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_non_loopback_db_bind_is_rejected_unless_remote_access_was_allowed() {
+        let mut config = Config::default();
+        // Absolute on every platform; "/palace" is not on Windows.
+        config.palace.path = std::env::temp_dir();
+        config.db.bind = "0.0.0.0".parse().unwrap();
+
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("db.allow_remote"), "{err}");
+
+        config.db.allow_remote = true;
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn the_db_port_may_not_collide_with_the_daemons_own() {
+        let mut config = Config::default();
+        // Absolute on every platform; "/palace" is not on Windows.
+        config.palace.path = std::env::temp_dir();
+        config.db.port = config.server.port;
+        assert!(config.validate().is_err());
+
+        // Port 0 means "the OS picks", so two zeros never collide.
+        config.db.port = 0;
+        config.server.port = 0;
+        assert!(config.validate().is_ok());
     }
 
     #[test]

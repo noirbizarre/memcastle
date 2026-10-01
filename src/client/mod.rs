@@ -19,7 +19,8 @@ pub mod status;
 pub use status::StatusView;
 
 use crate::app::{
-    GeneratedToken, JobControlResult, RevokeResult, StatusReport, WakeUpBudget, WakeUpContext,
+    DbEndpointRequest, DbEndpointStatus, GeneratedToken, JobControlResult, RevokeResult,
+    StatusReport, WakeUpBudget, WakeUpContext,
 };
 use crate::config::Secret;
 use crate::domain::channel::CLI as CHANNEL;
@@ -193,6 +194,41 @@ impl DaemonClient {
                 .delete(format!("{}/api/auth/token", self.base_url)),
         )
         .await
+    }
+
+    /// Ask the daemon to start its database admin endpoint (`POST /api/db`).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Remote`] when the daemon refuses (an unsafe bind, already
+    /// running, a remote palace, or 401), or [`Error::DaemonNotRunning`].
+    pub async fn db_start(&self, request: &DbEndpointRequest) -> Result<DbEndpointStatus> {
+        self.send(
+            self.http
+                .post(format!("{}/api/db", self.base_url))
+                .json(request),
+        )
+        .await
+    }
+
+    /// Ask the daemon to stop its database admin endpoint (`DELETE /api/db`).
+    ///
+    /// # Errors
+    ///
+    /// As for [`Self::db_start`].
+    pub async fn db_stop(&self) -> Result<DbEndpointStatus> {
+        self.send(self.http.delete(format!("{}/api/db", self.base_url)))
+            .await
+    }
+
+    /// Whether the database admin endpoint is listening (`GET /api/db`).
+    ///
+    /// # Errors
+    ///
+    /// As for [`Self::db_start`].
+    pub async fn db_status(&self) -> Result<DbEndpointStatus> {
+        self.send(self.http.get(format!("{}/api/db", self.base_url)))
+            .await
     }
 
     async fn send<T: DeserializeOwned>(&self, request: reqwest::RequestBuilder) -> Result<T> {

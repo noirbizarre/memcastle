@@ -6,6 +6,7 @@
 //! `memcastle serve` to shut down gracefully (see `server::lifecycle`).
 
 mod auth;
+mod db;
 mod error;
 mod extract;
 mod mode;
@@ -59,6 +60,9 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
             "/api/auth/token",
             post(auth::generate_token).delete(auth::revoke_token),
         )
+        // Also administrative and REST-only: an explicit, opt-in database console
+        // for developers, never started by `serve` (docs/adr/015).
+        .route("/api/db", get(db::status).post(db::start).delete(db::stop))
         .with_state(state)
 }
 

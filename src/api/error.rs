@@ -31,7 +31,12 @@ impl IntoResponse for ApiError {
             // The request is fine; the job's recorded state (Running, but with
             // no worker) is what conflicts with it, and a restart resolves it.
             // A 500 would blame the daemon for something the caller can fix.
-            Error::JobOrphaned { .. } => StatusCode::CONFLICT,
+            Error::JobOrphaned { .. } | Error::DbEndpointRunning { .. } => StatusCode::CONFLICT,
+            // The caller asked for something the daemon will not do (an unsafe
+            // bind, or an endpoint for a database it does not embed): theirs to fix.
+            Error::DbEndpointUnsafe { .. } | Error::DbEndpointUnavailable { .. } => {
+                StatusCode::BAD_REQUEST
+            }
             // Startup/internal conditions (auth not configured, migration lock,
             // lost lease, missing assets) and client-side errors never reach a
             // request handler as the caller's fault, so 500 is the right default.

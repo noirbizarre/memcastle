@@ -1,0 +1,427 @@
+//! The database admin endpoint's lifecycle: starting it, stopping it and
+//! reporting on it (`docs/adr/015`).
+//!
+//! This is where every safety decision is made, in the daemon and not in the
+//! CLI that asked: the endpoint binds loopback unless told otherwise, a
+//! non-loopback bind needs an explicit opt-in *and* authentication, and
+//! nothing starts it except an explicit request. `memcastle serve` never does.
+//!
+//! Like authentication, it is deliberately unreachable from MCP: an agent
+//! integration must not be able to open a database console.
+
+use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
+use std::time::Duration;
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
+use tracing::error;
+
+use crate::config::DbConfig;
+use crate::dbadmin::{self, Authenticator, OriginPolicy};
+use crate::error::{Error, Result};
+use crate::store::{EMBEDDED_DATABASE, EMBEDDED_NAMESPACE};
+
+use super::AppServices;
+
+/// How long stopping waits for open connections to close before the listener
+/// task is abandoned. Connections watch the same cancellation, so this only
+/// bounds a pathological stall.
+const STOP_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// What `db serve` asks for. Each field left out falls back to the daemon's
+/// `[db]` configuration, so `memcastle db serve` alone does the safe default.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DbEndpointRequest {
+    /// Interface to listen on.
+    #[serde(default)]
+    pub bind: Option<IpAddr>,
+    /// Port to listen on; `0` asks the OS for a free one.
+    #[serde(default)]
+    pub port: Option<u16>,
+    /// Permit a non-loopback bind.
+    #[serde(default)]
+    pub allow_remote: Option<bool>,
+    /// Further browser origins to allow, added to the configured ones.
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
+}
+
+/// Whether the admin endpoint is listening, and where.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DbEndpointStatus {
+    /// Whether the endpoint is listening.
+    pub running: bool,
+    /// The address it is listening on, when it is.
+    #[serde(default)]
+    pub addr: Option<String>,
+    /// The URL to give SurrealDB Studio, when it is listening.
+    #[serde(default)]
+    pub url: Option<String>,
+    /// The namespace to select in Studio.
+    #[serde(default)]
+    pub namespace: String,
+    /// The database to select in Studio.
+    #[serde(default)]
+    pub database: String,
+    /// Whether it listens beyond loopback.
+    #[serde(default)]
+    pub remote: bool,
+    /// Whether a connection must present the daemon's token.
+    #[serde(default)]
+    pub auth_required: bool,
+    /// When it was started.
+    #[serde(default)]
+    pub started_at: Option<DateTime<Utc>>,
+}
+
+/// A listener that is up.
+struct Running {
+    addr: SocketAddr,
+    remote: bool,
+    auth_required: bool,
+    started_at: DateTime<Utc>,
+    /// Stops this listener alone (a child of the daemon's shutdown token).
+    cancel: CancellationToken,
+    task: JoinHandle<()>,
+}
+
+/// Holds the endpoint's state. At most one listener exists at a time.
+pub struct DbEndpoint {
+    defaults: DbConfig,
+    /// The daemon's shutdown token: stopping the daemon stops the endpoint.
+    shutdown: CancellationToken,
+    state: Mutex<Option<Running>>,
+}
+
+impl DbEndpoint {
+    /// An endpoint controller with `defaults` for whatever a request omits.
+    #[must_use]
+    pub fn new(defaults: DbConfig, shutdown: CancellationToken) -> Self {
+        Self {
+            defaults,
+            shutdown,
+            state: Mutex::new(None),
+        }
+    }
+
+    fn status_of(running: Option<&Running>) -> DbEndpointStatus {
+        match running {
+            None => stopped(),
+            Some(running) => DbEndpointStatus {
+                running: true,
+                addr: Some(running.addr.to_string()),
+                url: Some(format!("ws://{}", running.addr)),
+                remote: running.remote,
+                auth_required: running.auth_required,
+                started_at: Some(running.started_at),
+                ..stopped()
+            },
+        }
+    }
+}
+
+impl Default for DbEndpoint {
+    fn default() -> Self {
+        Self::new(DbConfig::default(), CancellationToken::new())
+    }
+}
+
+/// The status for "not listening".
+fn stopped() -> DbEndpointStatus {
+    DbEndpointStatus {
+        namespace: EMBEDDED_NAMESPACE.to_string(),
+        database: EMBEDDED_DATABASE.to_string(),
+        ..DbEndpointStatus::default()
+    }
+}
+
+impl AppServices {
+    /// Replace the admin endpoint's controller. Set once by `server::run`, which
+    /// is the only place that knows the daemon's `[db]` configuration and
+    /// shutdown token.
+    #[must_use]
+    pub fn with_db_endpoint(mut self, endpoint: DbEndpoint) -> Self {
+        self.db_endpoint = Arc::new(endpoint);
+        self
+    }
+
+    /// Start the admin endpoint, returning where it listens.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::DbEndpointUnavailable`] for a remote palace, which has a
+    ///   server of its own.
+    /// - [`Error::DbEndpointRunning`] if it is already listening.
+    /// - [`Error::DbEndpointUnsafe`] for a non-loopback bind without the opt-in
+    ///   or without authentication enabled.
+    /// - [`Error::DbEndpointBind`] if the address cannot be bound.
+    pub async fn start_db_endpoint(&self, request: DbEndpointRequest) -> Result<DbEndpointStatus> {
+        let endpoint = &self.db_endpoint;
+        // Held across the whole start so two racing requests cannot both
+        // decide it is not running and both bind.
+        let mut state = endpoint.state.lock().await;
+
+        if self.runtime.backend == "remote" {
+            return Err(Error::DbEndpointUnavailable {
+                backend: self.runtime.backend.clone(),
+            });
+        }
+        // A listener that died on its own is not "running".
+        if state
+            .as_ref()
+            .is_some_and(|running| running.task.is_finished())
+        {
+            *state = None;
+        }
+        if let Some(running) = state.as_ref() {
+            return Err(Error::DbEndpointRunning {
+                addr: running.addr.to_string(),
+            });
+        }
+
+        let defaults = &endpoint.defaults;
+        let bind = request.bind.unwrap_or(defaults.bind);
+        let port = request.port.unwrap_or(defaults.port);
+        let allow_remote = request.allow_remote.unwrap_or(defaults.allow_remote);
+        let remote = !bind.is_loopback();
+        if remote && !allow_remote {
+            return Err(Error::DbEndpointUnsafe {
+                reason: format!(
+                    "{bind} is not a loopback address and `--allow-remote` was not given"
+                ),
+            });
+        }
+        // The token is the only thing between the network and a writable copy
+        // of the palace, so there is no "remote but open" combination.
+        if remote && !self.auth_enabled() {
+            return Err(Error::DbEndpointUnsafe {
+                reason: format!(
+                    "{bind} is not a loopback address and this daemon has authentication disabled"
+                ),
+            });
+        }
+
+        let addr = SocketAddr::new(bind, port);
+        let listener = tokio::net::TcpListener::bind(addr)
+            .await
+            .map_err(|source| Error::DbEndpointBind { addr, source })?;
+        // The real port: with `0` the OS chose it.
+        let addr = listener
+            .local_addr()
+            .map_err(|source| Error::DbEndpointBind { addr, source })?;
+
+        let origins = defaults
+            .allowed_origins
+            .iter()
+            .cloned()
+            .chain(request.allowed_origins);
+        let auth_required = self.auth_enabled();
+        let options = dbadmin::Options {
+            origins: OriginPolicy::new(origins),
+            auth: auth_required.then(|| self.authenticator()),
+        };
+        let cancel = endpoint.shutdown.child_token();
+        let task = tokio::spawn({
+            let session = self.store.session();
+            let cancel = cancel.clone();
+            async move {
+                if let Err(error) = dbadmin::serve(listener, session, options, cancel).await {
+                    error!(%error, "database admin endpoint stopped unexpectedly");
+                }
+            }
+        });
+        dbadmin::log_listening(addr, remote, auth_required);
+
+        let running = Running {
+            addr,
+            remote,
+            auth_required,
+            started_at: Utc::now(),
+            cancel,
+            task,
+        };
+        let status = DbEndpoint::status_of(Some(&running));
+        *state = Some(running);
+        Ok(status)
+    }
+
+    /// Stop the admin endpoint, closing its open connections. Succeeds when it
+    /// was not running: the caller wants it off, and it is.
+    pub async fn stop_db_endpoint(&self) -> DbEndpointStatus {
+        let running = self.db_endpoint.state.lock().await.take();
+        if let Some(running) = running {
+            running.cancel.cancel();
+            // Awaited so the port is free and the connections closed by the time
+            // this returns; bounded so a stuck connection cannot hang a
+            // shutdown.
+            let mut task = running.task;
+            if tokio::time::timeout(STOP_TIMEOUT, &mut task).await.is_err() {
+                task.abort();
+            }
+            tracing::info!(addr = %running.addr, "database admin endpoint stopped");
+        }
+        stopped()
+    }
+
+    /// Whether and where the admin endpoint is listening.
+    pub async fn db_endpoint_status(&self) -> DbEndpointStatus {
+        let mut state = self.db_endpoint.state.lock().await;
+        // A listener task that ended on its own (an I/O error, or the daemon's
+        // shutdown) must not be reported as up.
+        if state
+            .as_ref()
+            .is_some_and(|running| running.task.is_finished())
+        {
+            *state = None;
+        }
+        DbEndpoint::status_of(state.as_ref())
+    }
+
+    /// The check each connection's token goes through: the daemon's own
+    /// [`AppServices::authenticate`], so the admin endpoint accepts exactly the
+    /// credentials the REST API does and a revoked token stops working here too.
+    fn authenticator(&self) -> Authenticator {
+        let app = self.clone();
+        Arc::new(move |presented: Option<String>| {
+            let app = app.clone();
+            Box::pin(async move {
+                match presented {
+                    Some(token) => app.authenticate(Some(&token)).await.is_ok(),
+                    None => false,
+                }
+            })
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::AuthPolicy;
+
+    const SECRET: &str = "mc_a_secret_for_the_tests_0123456789";
+
+    async fn app(auth: bool) -> AppServices {
+        AppServices::for_tests()
+            .await
+            .with_auth(AuthPolicy::new(auth, auth.then_some(SECRET)))
+    }
+
+    fn loopback_ephemeral() -> DbEndpointRequest {
+        DbEndpointRequest {
+            port: Some(0),
+            ..DbEndpointRequest::default()
+        }
+    }
+
+    fn remote_ephemeral(allow_remote: bool) -> DbEndpointRequest {
+        DbEndpointRequest {
+            bind: Some("0.0.0.0".parse().unwrap()),
+            port: Some(0),
+            allow_remote: Some(allow_remote),
+            ..DbEndpointRequest::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_fresh_daemon_reports_the_endpoint_as_stopped() {
+        let status = app(false).await.db_endpoint_status().await;
+        assert!(!status.running);
+        assert_eq!(status.addr, None);
+    }
+
+    #[tokio::test]
+    async fn the_endpoint_listens_on_loopback_unless_told_otherwise() {
+        let app = app(false).await;
+        let status = app.start_db_endpoint(loopback_ephemeral()).await.unwrap();
+
+        assert!(status.running);
+        assert!(!status.remote);
+        assert!(status.addr.unwrap().starts_with("127.0.0.1:"));
+        app.stop_db_endpoint().await;
+    }
+
+    #[tokio::test]
+    async fn starting_twice_is_a_conflict_that_names_where_it_listens() {
+        let app = app(false).await;
+        let first = app.start_db_endpoint(loopback_ephemeral()).await.unwrap();
+
+        let error = app
+            .start_db_endpoint(loopback_ephemeral())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::DbEndpointRunning { addr } if Some(addr) == first.addr.as_ref()),
+            "{error}"
+        );
+        app.stop_db_endpoint().await;
+    }
+
+    #[tokio::test]
+    async fn a_non_loopback_bind_is_refused_without_the_explicit_opt_in() {
+        let app = app(true).await;
+        let error = app
+            .start_db_endpoint(remote_ephemeral(false))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::DbEndpointUnsafe { .. }), "{error}");
+        assert!(!app.db_endpoint_status().await.running);
+    }
+
+    #[tokio::test]
+    async fn a_non_loopback_bind_is_refused_while_authentication_is_disabled() {
+        let app = app(false).await;
+        let error = app
+            .start_db_endpoint(remote_ephemeral(true))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::DbEndpointUnsafe { reason } if reason.contains("authentication")),
+            "{error}"
+        );
+        assert!(!app.db_endpoint_status().await.running);
+    }
+
+    #[tokio::test]
+    async fn a_non_loopback_bind_with_the_opt_in_and_authentication_is_allowed() {
+        let app = app(true).await;
+        let status = app.start_db_endpoint(remote_ephemeral(true)).await.unwrap();
+        assert!(status.remote && status.auth_required);
+        app.stop_db_endpoint().await;
+    }
+
+    #[tokio::test]
+    async fn stopping_closes_the_endpoint_and_is_idempotent() {
+        let app = app(false).await;
+        app.start_db_endpoint(loopback_ephemeral()).await.unwrap();
+
+        assert!(!app.stop_db_endpoint().await.running);
+        assert!(!app.stop_db_endpoint().await.running);
+        assert!(!app.db_endpoint_status().await.running);
+        // Restartable after a stop.
+        app.start_db_endpoint(loopback_ephemeral()).await.unwrap();
+        app.stop_db_endpoint().await;
+    }
+
+    #[tokio::test]
+    async fn the_daemons_shutdown_stops_the_endpoint() {
+        let shutdown = CancellationToken::new();
+        let app = app(false)
+            .await
+            .with_db_endpoint(DbEndpoint::new(DbConfig::default(), shutdown.clone()));
+        app.start_db_endpoint(loopback_ephemeral()).await.unwrap();
+
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while app.db_endpoint_status().await.running {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the endpoint stopped with the daemon");
+    }
+}

@@ -47,3 +47,5 @@ The history is the value.
   and assets resolve override, installed, embedded
 - [ADR-014](014-optional-token-authentication.md) — authentication is an optional bearer token, checked at one layer,
   and never an MCP capability
+- [ADR-015](015-database-admin-endpoint.md) — the database admin endpoint is an opt-in listener inside the daemon,
+  over its own database handle

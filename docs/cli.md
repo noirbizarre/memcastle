@@ -40,6 +40,24 @@ client commands find the daemon through its registry file instead.
 see [Runtime assets](configuration.md#runtime-assets).
 See [Running the daemon](daemon.md) for the details of each, and [Migrations and upgrades](migrations.md) for `migrate`.
 
+### Database access
+
+| Command | What it does |
+|---|---|
+| `memcastle db serve [--bind <IP>] [--port <PORT>] [--allow-remote] [--allow-origin <ORIGIN>]... [--json]` | Ask the running daemon to open its database admin endpoint, then return. |
+| `memcastle db status [--json]` | Report whether the endpoint is open, and where. |
+| `memcastle db stop` | Close the endpoint and its connections. |
+
+These are client commands: the endpoint lives in the daemon, the only process that may open the embedded database,
+so `db serve` returns as soon as it is listening and never starts a second database process.
+It listens on `127.0.0.1` port `8000` unless told otherwise, and prints the URL, the namespace and the database to give
+SurrealDB Studio.
+A non-loopback `--bind` is refused (`memcastle::db::unsafe_bind`) unless `--allow-remote` is given and the daemon has
+authentication enabled.
+`--allow-origin` may be repeated, and lets a browser page from that origin connect.
+Flags left out fall back to the `[db]` [settings](configuration.md#the-database-admin-endpoint).
+See [Database access](database-access.md).
+
 ### Exit codes of `status`
 
 | Code | Meaning |

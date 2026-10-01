@@ -17,10 +17,10 @@ use miette::MietteHandlerOpts;
 mod cli;
 
 use cli::{
-    AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, DiaryCommand, JobsCommand, MigrateArgs,
-    MineArgs, RecallArgs, RepairArgs, SearchArgs, ServeArgs, StatusArgs, WakeUpArgs,
+    AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, DbCommand, DiaryCommand, JobsCommand,
+    MigrateArgs, MineArgs, RecallArgs, RepairArgs, SearchArgs, ServeArgs, StatusArgs, WakeUpArgs,
 };
-use memcastle::app::WakeUpBudget;
+use memcastle::app::{DbEndpointRequest, DbEndpointStatus, WakeUpBudget};
 use memcastle::client::{DaemonClient, StatusView};
 use memcastle::config::{Config, Overrides};
 use memcastle::domain::MemoryMode;
@@ -150,6 +150,7 @@ async fn run_command(
         Command::Diary(cmd) => cmd_diary(&config, mode, cmd).await,
         Command::Jobs(jobs) => cmd_jobs(&config, mode, jobs).await,
         Command::Auth(auth) => cmd_auth(&config, auth).await,
+        Command::Db(db) => cmd_db(&config, db).await,
         Command::Wings => Err(Error::not_implemented("memcastle wings")),
         Command::Rooms => Err(Error::not_implemented("memcastle rooms")),
         Command::Drawers => Err(Error::not_implemented("memcastle drawers")),
@@ -523,6 +524,57 @@ async fn cmd_auth(config: &Config, command: AuthCommand) -> Result<()> {
             print_json(&result)?;
         }
     }
+    Ok(())
+}
+
+/// `memcastle db`: ask the daemon to open, close or report on its database
+/// admin endpoint. A plain `DaemonClient` call like every other command: the
+/// endpoint lives in the daemon, the one process allowed to open the database.
+async fn cmd_db(config: &Config, command: DbCommand) -> Result<()> {
+    let daemon = client(config, None);
+    match command {
+        DbCommand::Serve(args) => {
+            let status = daemon
+                .db_start(&DbEndpointRequest {
+                    bind: args.bind,
+                    port: args.port,
+                    // `None`, not `Some(false)`: leaving the flag off means
+                    // "use the configured value", which may allow it.
+                    allow_remote: args.allow_remote.then_some(true),
+                    allowed_origins: args.allow_origin,
+                })
+                .await?;
+            print_db_status(&status, args.json)
+        }
+        DbCommand::Stop => print_db_status(&daemon.db_stop().await?, false),
+        DbCommand::Status(args) => print_db_status(&daemon.db_status().await?, args.json),
+    }
+}
+
+/// Print the admin endpoint's state, as JSON for scripts or as the few lines a
+/// person needs to point SurrealDB Studio at it.
+fn print_db_status(status: &DbEndpointStatus, json: bool) -> Result<()> {
+    if json {
+        return print_json(status);
+    }
+    let Some(url) = status.url.as_deref().filter(|_| status.running) else {
+        println!("database admin endpoint: not running (start it with `memcastle db serve`)");
+        return Ok(());
+    };
+    println!("database admin endpoint: listening on {url}");
+    println!("  namespace: {}", status.namespace);
+    println!("  database:  {}", status.database);
+    if status.auth_required {
+        println!("  sign in:   with the MemCastle token as the password (any username)");
+    } else {
+        println!("  sign in:   not required (loopback only, authentication is disabled)");
+    }
+    if status.remote {
+        println!(
+            "  warning:   listening beyond loopback; the token crosses the network in cleartext"
+        );
+    }
+    println!("Connect SurrealDB Studio to the URL above. Stop it with `memcastle db stop`.");
     Ok(())
 }
 
