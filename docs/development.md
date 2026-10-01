@@ -18,7 +18,7 @@ mise run lint       # cargo clippy --all-targets --all-features -- -D warnings
 mise run format     # cargo fmt --all
 mise run guards     # the architecture guard hooks, described below
 mise run check      # every lint, the guards and the tests, without modifying the tree
-mise run ci         # check plus the docs build: the local equivalent of CI's lint and test steps
+mise run ci         # check plus the docs build: the local equivalent of CI's lint, test and docs steps
 mise cli <args>      # run memcastle from source, e.g. `mise cli status`
 mise run docs       # serve this documentation locally
 mise run docs:build # build it into site/
