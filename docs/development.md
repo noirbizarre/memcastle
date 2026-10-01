@@ -102,7 +102,7 @@ The `single-writer` hook enforces the companion invariant, one daemon and one wr
 `SurrealStore::connect` may only be called from `src/server/`, `src/store/` and `src/main.rs` (for `migrate`).
 
 The authentication invariant has no hook, because a route or an MCP tool is not something a grep can recognise.
-It is enforced by tests instead: `tests/auth.rs` walks every REST route (and a route that does not exist) without a
+It is enforced by tests instead: `tests/auth.rs` walks a list of the REST routes (and a route that does not exist) without a
 token, and fails if an MCP tool's name mentions credentials.
 
 Two more hooks guard the remaining invariants.
