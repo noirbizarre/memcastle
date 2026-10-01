@@ -421,7 +421,7 @@ impl DaemonClient {
     /// # Errors
     ///
     /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
-    pub async fn demo(&self, steps: u32) -> Result<Job> {
+    pub async fn submit_demo(&self, steps: u32) -> Result<Job> {
         self.send(
             self.http
                 .post(format!("{}/api/jobs", self.base_url))
@@ -437,7 +437,11 @@ impl DaemonClient {
     /// # Errors
     ///
     /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
-    pub async fn checkpoint(&self, payload: CheckpointPayload, emergency: bool) -> Result<Job> {
+    pub async fn submit_checkpoint(
+        &self,
+        payload: CheckpointPayload,
+        emergency: bool,
+    ) -> Result<Job> {
         self.send(
             self.http.post(format!("{}/api/jobs", self.base_url)).json(
                 &json!({ "type": "checkpoint", "payload": payload, "requested_by": CHANNEL, "emergency": emergency }),

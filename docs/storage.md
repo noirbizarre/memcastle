@@ -76,7 +76,8 @@ That is why `embedding` is empty in every drawer you see.
 
 `memcastle mine <dir>` creates one drawer per file, in name order, with these rules:
 
-- It skips directories named `.git`, `target`, `node_modules`, `.venv`, `venv`, `dist`, `build` and `.cache`, at any depth.
+- It skips directories named `.git`, `target`, `node_modules`, `.venv`, `venv`, `dist`, `build` and `.cache`, at any depth,
+  along with any other directory whose name starts with `.` and any symlink.
 - It skips files larger than 256 KiB, empty files, and files that are not valid UTF-8.
 - It stops at 2000 files, and says so: the job's progress message names the limit and its result records
   `"truncated": true`.
@@ -113,8 +114,8 @@ Job leases keep them from running the same job twice, and a daemon that stalls l
 Only root sign-in is supported today, and these settings can only be set in the config file.
 `memcastle status` never prints the password.
 
-For both modes the database uses the SurrealDB namespace `memcastle` and database `palace` unless a remote store
-configures otherwise.
+An embedded store uses the SurrealDB namespace `memcastle` and database `palace`;
+a remote store uses the `namespace` and `database` set in `[store]`.
 
 ## The registry file
 

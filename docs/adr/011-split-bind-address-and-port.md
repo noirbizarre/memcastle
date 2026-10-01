@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted, amended by [ADR-014](014-optional-token-authentication.md) (non-loopback warning)
 
 ## Context
 
@@ -53,7 +53,8 @@ so the default must stay local-only and leaving it must be a deliberate act.
   Backward compatible, but a port in `bind` and a port in `port` need a precedence rule of their own,
   and every layer would have to document it.
 - **Warn when the address is not loopback.**
-  Considered and declined: the default is already loopback, and choosing another address is an explicit act.
+  Considered and declined here (reversed by ADR-014, see the amendment below):
+  the default is already loopback, and choosing another address is an explicit act.
 - **Bind after startup, as before.**
   Fewer moving parts in `run`, but every failed start pays for its side effects.
 

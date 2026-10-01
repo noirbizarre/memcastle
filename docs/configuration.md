@@ -153,7 +153,7 @@ Some variables are read by the command line rather than the config file:
 | `--bind <IP>` | `serve`, `restart` | `server.bind`, `MEMCASTLE_BIND` |
 | `--port <PORT>` | `serve`, `restart` | `server.port`, `MEMCASTLE_PORT` |
 | `--assets-dir <DIR>` | `serve`, `restart` | `assets.dir`, `MEMCASTLE_ASSETS_DIR` |
-| `--mode <MODE>` | client commands | the memory mode of the session |
+| `--mode <MODE>` | every command (acted on by client commands) | the memory mode of the session |
 | `-v`, `-vv` | every command | the log level of memcastle itself |
 
 ## The listener: address and port
@@ -170,7 +170,7 @@ Each is chosen by, highest precedence first: the flag, the environment variable,
 so the same three sources work everywhere.
 Client commands (`status`, `search`, `jobs` and the rest) read the config file and the environment,
 but not the flags, so a daemon started on a non-default port with `--port` is found through its registry file.
-`restart` passes its `--bind` and `--port` on to the new daemon.
+`restart` passes its `--bind`, `--port` and `--assets-dir` on to the new daemon.
 
 `memcastle status` shows which of the two it used (`endpoint_source`: `registry` or `config`).
 It exits 0 for a healthy daemon, 1 for a degraded one and 3 when none is running, and takes `--json` for scripts:
@@ -191,6 +191,7 @@ The default never listens on all network interfaces.
 Authentication is off unless you enable it, so use a non-loopback address such as `0.0.0.0` only on a network you trust,
 or with [authentication](authentication.md) enabled.
 The daemon logs a warning when it listens beyond loopback without it.
+The MCP endpoint additionally refuses a non-loopback `Host` header, see [Authentication](authentication.md#exposing-the-daemon).
 
 The listener is bound before anything else happens.
 If the address is taken, needs privileges, or does not exist on this machine,

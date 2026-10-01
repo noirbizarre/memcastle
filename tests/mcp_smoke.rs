@@ -266,7 +266,7 @@ async fn the_mcp_surface_serves_a_migrated_palace_and_survives_a_daemon_restart(
         "memcastle_diary_write",
         "memcastle_diary_read",
         "memcastle_repair",
-        "memcastle_jobs_list",
+        "memcastle_job_list",
         "memcastle_job_get",
     ] {
         assert!(

@@ -32,6 +32,9 @@ impl IntoResponse for ApiError {
             // no worker) is what conflicts with it, and a restart resolves it.
             // A 500 would blame the daemon for something the caller can fix.
             Error::JobOrphaned { .. } => StatusCode::CONFLICT,
+            // Startup/internal conditions (auth not configured, migration lock,
+            // lost lease, missing assets) and client-side errors never reach a
+            // request handler as the caller's fault, so 500 is the right default.
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         let body = self.0.body();

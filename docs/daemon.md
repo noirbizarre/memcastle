@@ -39,6 +39,8 @@ sequenceDiagram
     D->>S: connect
     D->>S: apply pending migrations
     Note over D,S: a failed migration stops the daemon, nothing is served
+    D->>D: check authentication is configured
+    Note over D: enabled without a token stops here, before the scheduler starts
     D->>S: recover jobs left running by a crash
     D->>D: start the job scheduler
     D->>D: write the registry file
@@ -68,6 +70,7 @@ MemCastle is running
   drawers    0
   jobs       0 queued, 0 running, 0 paused
   mode       full
+  auth       disabled
 Restart with `memcastle restart`, stop with `memcastle stop`.
 ```
 
@@ -122,7 +125,7 @@ A job that does not stop in time is left running, and the next start re-queues i
 Either way the daemon then removes its registry file and exits.
 
 `restart` stops the running daemon, starts a fresh detached one and waits until it serves.
-It passes on `--config`, `--bind`, `--port` and the palace it resolved.
+It passes on `--config`, `--bind`, `--port`, `--assets-dir` and the palace it resolved.
 The new daemon's log output is discarded, and `restart` is a best-effort convenience:
 under a supervisor, restart through the supervisor instead.
 
@@ -147,6 +150,8 @@ The Arch package (`memcastle-bin`) installs a systemd user unit, so there `syste
 see [Installation](installation.md#arch-linux-aur).
 Its `ExecStart` is `/usr/bin/memcastle serve`, and it reads an optional `~/.config/memcastle/secret.env`.
 Change it with `systemctl --user edit memcastle`, which writes a drop-in and leaves the package file alone.
+The packaged unit sets `MEMCASTLE_LOG=warn`, which outranks `-v` and `logging.level`;
+override it in the same drop-in if you want more output.
 If `systemctl --user status memcastle` shows a failed start, `journalctl --user -u memcastle -n 50` has the diagnostic.
 
 Elsewhere, a systemd user unit you can write by hand looks like this:
@@ -182,6 +187,7 @@ Binding a non-loopback address such as `0.0.0.0` exposes the palace to that netw
 when it does so without authentication.
 Enable [authentication](authentication.md) when you do, and put a TLS-terminating proxy in front of it,
 because the token travels in cleartext over plain HTTP.
+`/mcp` also refuses a non-loopback `Host` header, so reach it through a loopback name or a proxy that rewrites `Host`.
 
 With a supervisor, inject the secret as `MEMCASTLE_AUTH_TOKEN` from an `EnvironmentFile=` or your secret manager,
 not as an argument; [Authentication](authentication.md#with-a-shared-secret-from-a-secret-manager) shows how.

@@ -268,7 +268,7 @@ async fn submit_job(
         JobKind::Checkpoint { payload } => {
             state
                 .app
-                .checkpoint_with_urgency(payload, body.emergency, &body.requested_by, mode)
+                .submit_checkpoint_with_urgency(payload, body.emergency, &body.requested_by, mode)
                 .await?
         }
         JobKind::Audit { scope } => {

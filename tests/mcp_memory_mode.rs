@@ -316,11 +316,11 @@ async fn the_mcp_job_list_and_mine_tools_follow_the_sessions_mode() {
     set_mode(&read_only, "read_only").await;
 
     assert!(
-        call(&disabled, "memcastle_jobs_list", serde_json::json!({})).await,
+        call(&disabled, "memcastle_job_list", serde_json::json!({})).await,
         "a disabled session must not read job records, which carry checkpoint content"
     );
     assert!(
-        !call(&read_only, "memcastle_jobs_list", serde_json::json!({})).await,
+        !call(&read_only, "memcastle_job_list", serde_json::json!({})).await,
         "a read-only session may read job records"
     );
     assert!(
@@ -429,7 +429,7 @@ async fn an_mcp_client_can_submit_check_on_and_stop_its_own_jobs() {
     // The status filter narrows the list.
     let (_, text) = call_text(
         &client,
-        "memcastle_jobs_list",
+        "memcastle_job_list",
         serde_json::json!({ "status": "failed" }),
     )
     .await;

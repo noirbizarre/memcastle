@@ -20,7 +20,7 @@ CI uses `dtolnay/rust-toolchain` because it needs per-job components and cross-c
 |---|---|
 | `mise run default` | Format, lint, build and test |
 | `mise run build` | Build the binary |
-| `mise run cli` | Run `memcastle` from source (passes flags through) |
+| `mise cli <args>` | Run `memcastle` from source (passes flags through) |
 | `mise run setup` | Install `memcastle` into `~/.cargo/bin` |
 | `mise run test` | Run the tests (accepts nextest selectors) |
 | `mise run cover` | Run the tests with coverage |

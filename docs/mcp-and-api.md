@@ -28,7 +28,7 @@ A failure comes back as an MCP error result carrying the [error body](#errors) b
 | `memcastle_mine` | `path`, `wing?` | Submit a job that mines a directory. |
 | `memcastle_audit` | `scope?` | Submit a read-only consistency audit job. |
 | `memcastle_repair` | `dry_run?`, `based_on_job?` | Submit a repair job; a dry run unless `dry_run` is `false`. |
-| `memcastle_jobs_list` | `status?` | List jobs, newest first. |
+| `memcastle_job_list` | `status?` | List jobs, newest first. |
 | `memcastle_job_get` | `id` | Show one job. |
 | `memcastle_job_pause` | `id` | Ask a running job to pause at its next checkpoint. |
 | `memcastle_job_resume` | `id` | Resume a paused job. |
@@ -38,7 +38,8 @@ A failure comes back as an MCP error result carrying the [error body](#errors) b
 Defaults are the same as the CLI's: `limit` is 10 for `memcastle_search` and `memcastle_recall`, 20 for
 `memcastle_diary_read`, and every read limit is capped at 200.
 `memcastle_wake_up` defaults to 10 items and 8192 bytes.
-`memcastle_mine` needs an absolute `path`, because the daemon does not share your shell's working directory.
+`memcastle_mine` (and a `mine` job over `POST /api/jobs`) needs an absolute `path`,
+because the daemon does not share your shell's working directory.
 Mining, checkpoint, audit and repair return the submitted job immediately;
 poll it with `memcastle_job_get` to see its progress and result.
 
@@ -80,7 +81,8 @@ A job that is interrupted resumes where it stopped and never stores an item twic
 ## REST API
 
 Requests and responses are JSON.
-The routes that read or write memory, and `/api/status`, accept the optional `X-MemCastle-Mode` header
+The routes that read or write memory (including `GET /api/jobs*`) accept the optional `X-MemCastle-Mode` header,
+and `/api/status` accepts it only to report the mode
 (`full`, `read_only` or `disabled`; `full` when absent), and an unrecognized value is a `400`, never silently treated
 as `full`.
 `/api/health`, job control (pause, resume, cancel, retry) and `/api/shutdown` are never gated and ignore it.
