@@ -146,7 +146,7 @@ Check the job's `result`:
 `memcastle jobs show <id>` reports `files_considered` and whether the run was `truncated` at 2000 files.
 Skipped directories, large files and non-UTF-8 files are listed in [What mining reads](storage.md#what-mining-reads).
 The path given to `mine` is read by the daemon, so it must exist on the daemon's machine.
-Over MCP it must be absolute.
+Over MCP and REST it must be absolute; the CLI makes it absolute for you.
 
 ### Search returns nothing for a query that should match
 
