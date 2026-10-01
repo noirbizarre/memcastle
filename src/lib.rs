@@ -12,6 +12,9 @@
 //!      store                <- SurrealDB, embedded or remote
 //! ```
 //!
+//! `dbadmin` is a side listener, started on request by `app` (never by `serve`): SurrealDB's WebSocket
+//! protocol over a clone of the daemon's own database handle, for SurrealDB Studio.
+//!
 //! `main.rs`/`cli.rs` are thin: every subcommand either runs `server::run`
 //! (the `serve`/`daemon` command) or goes through `client::DaemonClient`
 //! (everything else), with two narrow exceptions: `migrate` connects to
@@ -28,6 +31,7 @@ pub mod audit;
 pub mod checkpoint;
 pub mod client;
 pub mod config;
+pub mod dbadmin;
 pub mod domain;
 pub mod error;
 pub mod jobs;

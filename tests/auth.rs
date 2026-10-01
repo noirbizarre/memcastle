@@ -139,6 +139,11 @@ async fn every_other_route_is_guarded_including_ones_that_do_not_exist() {
         (Method::POST, "/api/shutdown"),
         (Method::POST, "/api/auth/token"),
         (Method::DELETE, "/api/auth/token"),
+        // Opening a database console onto the palace is the most sensitive admin
+        // operation there is: all three methods are guarded like the rest.
+        (Method::GET, "/api/db"),
+        (Method::POST, "/api/db"),
+        (Method::DELETE, "/api/db"),
         (Method::POST, "/mcp"),
         // A path no route serves must not answer 404 to an anonymous caller,
         // or the router's shape could be probed without a token.
@@ -294,6 +299,24 @@ async fn mcp_offers_no_credential_management_when_authentication_is_off_either()
             .any(|n| n.contains("auth") || n.contains("token")),
         "{names:?}"
     );
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn mcp_offers_no_way_to_open_the_database_console() {
+    let daemon = TestDaemon::start().await;
+
+    let names = tool_names(&daemon, None).await;
+
+    // Like credentials, the admin endpoint (`docs/adr/015`) is REST and CLI only:
+    // an agent integration must not be able to expose the palace's database.
+    let forbidden = ["db", "database", "surreal", "console", "endpoint", "sql"];
+    for name in &names {
+        assert!(
+            !forbidden.iter().any(|word| name.contains(word)),
+            "`{name}` looks like database access, which must never be an MCP tool"
+        );
+    }
     daemon.shutdown().await;
 }
 

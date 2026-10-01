@@ -7,6 +7,7 @@
 //! dashboard or a new transport can only ever do what this struct exposes.
 
 mod auth;
+mod db_endpoint;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -23,6 +24,7 @@ use crate::jobs::Scheduler;
 use crate::store::{SearchHit, SurrealStore};
 
 pub use auth::{AuthPolicy, GeneratedToken, RevokeResult};
+pub use db_endpoint::{DbEndpoint, DbEndpointRequest, DbEndpointStatus};
 
 /// A point-in-time summary of daemon health, for `GET /api/status`,
 /// `memcastle status`, and the `memcastle_status` MCP tool alike.
@@ -232,6 +234,7 @@ pub struct AppServices {
     started_at: DateTime<Utc>,
     runtime: Arc<RuntimeContext>,
     auth: Arc<AuthPolicy>,
+    db_endpoint: Arc<DbEndpoint>,
 }
 
 impl AppServices {
@@ -244,6 +247,7 @@ impl AppServices {
             started_at: Utc::now(),
             runtime: Arc::new(RuntimeContext::default()),
             auth: Arc::new(AuthPolicy::default()),
+            db_endpoint: Arc::new(DbEndpoint::default()),
         }
     }
 

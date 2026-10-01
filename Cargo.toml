@@ -136,8 +136,20 @@ surrealdb = { version = "3.3.0", features = ["kv-surrealkv", "protocol-ws"] }
 # need — they operate on a caller-supplied `Surreal<Any>` handle.
 surrealkit = { version = "1.0.0-beta.2", default-features = false }
 
-# HTTP API + MCP-over-HTTP share one axum router.
-axum = "0.8.9"
+# The database admin endpoint (`dbadmin`, see docs/adr/015) speaks SurrealDB's
+# own wire protocol so SurrealDB Studio / Surrealist can connect. There is no
+# server library to reuse, so it borrows SurrealDB's codecs and RPC envelope
+# types. Both crates are documented as "SurrealDB internal API, not SemVer", so
+# they are pinned to the exact version `surrealdb` above is built against and
+# move with it. `default-features = false` keeps `surrealdb-core` from pulling
+# in its GraphQL stack or any storage engine of its own: it is already in the
+# lockfile through `surrealdb`, and `tests/dependencies.rs` guards the engines.
+surrealdb-core = { version = "=3.3.0", default-features = false }
+surrealdb-rpc = "=3.3.0"
+
+# HTTP API + MCP-over-HTTP share one axum router. `ws` backs the admin
+# endpoint's `/rpc` WebSocket.
+axum = { version = "0.8.9", features = ["ws"] }
 # The request-trace layer on the shared router, so REST and MCP are both logged.
 tower-http = { version = "0.6", default-features = false, features = ["trace", "request-id"] }
 reqwest = { version = "0.13.5", features = ["json", "query"] }
@@ -188,6 +200,15 @@ features = ["kv-mem"]
 version = "3.4.1"
 default-features = false
 features = ["client", "transport-streamable-http-client-reqwest"]
+
+# Only `tests/db_endpoint.rs` needs a raw WebSocket client: the JSON and CBOR
+# wire formats the admin endpoint also speaks are not ones the Rust SDK sends
+# (it only speaks `flatbuffers`), and a custom `Origin` header cannot be set
+# through the SDK at all.
+[dev-dependencies.tokio-tungstenite]
+version = "0.29"
+default-features = false
+features = ["connect"]
 
 [target."cfg(unix)".dependencies]
 libc = "0.2.189"

@@ -243,6 +243,12 @@ fn strip_userinfo(url: &str) -> String {
     format!("{scheme}://{host}{tail}")
 }
 
+/// The namespace an embedded palace lives in. Named so the admin endpoint can
+/// tell SurrealDB Studio which one to select, instead of repeating the literal.
+pub const EMBEDDED_NAMESPACE: &str = "memcastle";
+/// The database an embedded palace lives in.
+pub const EMBEDDED_DATABASE: &str = "palace";
+
 /// A connected handle to one palace's storage. Connecting does not migrate —
 /// see [`SurrealStore::connect`].
 #[derive(Clone)]
@@ -268,7 +274,7 @@ impl SurrealStore {
         let db = any::connect(backend.endpoint()).await?;
 
         let (namespace, database) = match backend {
-            Backend::Embedded { .. } => ("memcastle", "palace"),
+            Backend::Embedded { .. } => (EMBEDDED_NAMESPACE, EMBEDDED_DATABASE),
             Backend::Remote {
                 namespace,
                 database,
@@ -289,6 +295,18 @@ impl SurrealStore {
         db.use_ns(namespace).use_db(database).await?;
 
         Ok(Self { db })
+    }
+
+    /// A new session over this store's own database, for the admin endpoint
+    /// (`crate::dbadmin`).
+    ///
+    /// Cloning a `Surreal` handle does not open anything: it creates another
+    /// session over the same connection, starting from this one's namespace,
+    /// database and variables. That is what lets Studio query the *live* embedded
+    /// database without a second process ever opening the SurrealKV directory,
+    /// and what keeps a Studio `USE` from moving the daemon's own queries.
+    pub(crate) fn session(&self) -> Surreal<Any> {
+        self.db.clone()
     }
 
     /// Prove the datastore answers a query right now, touching no table.

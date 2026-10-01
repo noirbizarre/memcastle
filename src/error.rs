@@ -440,6 +440,67 @@ pub enum Error {
         )
     )]
     AuthNotConfigured,
+
+    /// The database admin endpoint was asked to listen somewhere it would not
+    /// be safe: beyond loopback without the explicit opt-in, or beyond loopback
+    /// with authentication disabled.
+    ///
+    /// `reason` is a complete sentence naming which of the two it was.
+    #[error("refusing to expose the database admin endpoint: {reason}")]
+    #[diagnostic(
+        code(memcastle::db::unsafe_bind),
+        help(
+            "the default is 127.0.0.1, which needs nothing; to listen elsewhere pass `--allow-remote` \
+             (or set `db.allow_remote`) and enable authentication (`auth.enabled` with a token)"
+        )
+    )]
+    DbEndpointUnsafe {
+        /// Why the request was refused.
+        reason: String,
+    },
+
+    /// The database admin endpoint is already listening.
+    #[error("the database admin endpoint is already listening on {addr}")]
+    #[diagnostic(
+        code(memcastle::db::already_running),
+        help("connect to it, or stop it first with `memcastle db stop`")
+    )]
+    DbEndpointRunning {
+        /// Where it is listening.
+        addr: String,
+    },
+
+    /// The database admin endpoint could not listen on the requested address.
+    #[error("cannot start the database admin endpoint on {addr}: {source}")]
+    #[diagnostic(
+        code(memcastle::db::bind_failed),
+        help(
+            "pick a free port with `--port`, MEMCASTLE_DB_PORT or `db.port` (it must differ from the \
+             daemon's own port), or use port 0 to let the OS choose"
+        )
+    )]
+    DbEndpointBind {
+        /// The address that could not be bound.
+        addr: std::net::SocketAddr,
+        /// The OS error.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// The palace is on a remote SurrealDB server, so the daemon has no
+    /// embedded database to expose.
+    #[error("the palace uses a {backend} database, which the admin endpoint does not expose")]
+    #[diagnostic(
+        code(memcastle::db::unavailable),
+        help(
+            "the admin endpoint exists because an embedded SurrealKV database has no server of its own; \
+             point SurrealDB Studio at the remote SurrealDB server directly"
+        )
+    )]
+    DbEndpointUnavailable {
+        /// The configured backend kind.
+        backend: String,
+    },
 }
 
 /// What every interface reports about a failure: the message, and the two
@@ -729,6 +790,19 @@ mod tests {
             Error::assets_not_found("/nowhere"),
             Error::Unauthorized { reason: "missing" },
             Error::AuthNotConfigured,
+            Error::DbEndpointUnsafe {
+                reason: "not loopback".to_string(),
+            },
+            Error::DbEndpointRunning {
+                addr: "127.0.0.1:8000".to_string(),
+            },
+            Error::DbEndpointBind {
+                addr: std::net::SocketAddr::from(([127, 0, 0, 1], 8000)),
+                source: std::io::Error::from(std::io::ErrorKind::AddrInUse),
+            },
+            Error::DbEndpointUnavailable {
+                backend: "remote".to_string(),
+            },
         ]
     }
 
@@ -763,7 +837,11 @@ mod tests {
             | Error::MigrationFailed { .. }
             | Error::AssetsNotFound { .. }
             | Error::Unauthorized { .. }
-            | Error::AuthNotConfigured => {}
+            | Error::AuthNotConfigured
+            | Error::DbEndpointUnsafe { .. }
+            | Error::DbEndpointRunning { .. }
+            | Error::DbEndpointBind { .. }
+            | Error::DbEndpointUnavailable { .. } => {}
         }
     }
 

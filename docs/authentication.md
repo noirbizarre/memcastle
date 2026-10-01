@@ -200,6 +200,21 @@ The MCP endpoint also checks the `Host` header against the loopback names (`loca
 which is independent of authentication.
 Reaching `/mcp` through another name or address is refused until that changes, even with a valid token.
 
+## The database admin endpoint
+
+The [database admin endpoint](database-access.md) is a separate listener, so the layer above does not wrap it.
+It applies the same token itself, whenever `auth.enabled` is true.
+Starting, stopping and inspecting it (`/api/db`) goes through the layer like any other route.
+
+A browser cannot set a header on a WebSocket, so Studio presents the token in-band:
+sign in with any username and the token as the password.
+A client that is not a browser may send `Authorization: Bearer <token>` on the upgrade instead.
+Both are checked by the same code as the REST API, so a token you rotate or revoke stops working for the next sign-in.
+A connection that is already signed in is not closed by a revocation.
+Five refused sign-ins close the connection, and until a session has signed in only the handshake methods work.
+
+The endpoint listens beyond loopback only when `auth.enabled` is true, and never otherwise.
+
 ## Exposing the daemon
 
 Authentication is not encryption.
@@ -219,6 +234,7 @@ The daemon logs a warning at startup when it listens beyond loopback with authen
 |---|---|
 | `memcastle auth generate` | `POST /api/auth/token` |
 | `memcastle auth revoke` | `DELETE /api/auth/token` |
+| `memcastle db serve`, `status`, `stop` | `POST`, `GET`, `DELETE /api/db` |
 
 While authentication is disabled these two are open, which is how the first token is made.
 Once it is enabled they need a valid token like every other route.

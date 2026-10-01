@@ -228,3 +228,68 @@ async fn status_json_reports_the_endpoint_palace_and_datastore_for_scripts() {
 
     daemon.shutdown().await;
 }
+
+#[tokio::test]
+async fn db_serve_opens_the_endpoint_tells_where_to_connect_and_db_stop_closes_it() {
+    let daemon = TestDaemon::start().await;
+
+    let output = memcastle(&daemon)
+        .args(["db", "serve", "--port", "0"])
+        .output()
+        .await
+        .expect("run memcastle");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ws://127.0.0.1:"), "{stdout}");
+    // What Studio needs to select, so the user is not left guessing.
+    assert!(
+        stdout.contains("memcastle") && stdout.contains("palace"),
+        "{stdout}"
+    );
+
+    let status = memcastle(&daemon)
+        .args(["db", "status", "--json"])
+        .output()
+        .await
+        .expect("run memcastle");
+    let report: serde_json::Value = serde_json::from_slice(&status.stdout).expect("json");
+    assert_eq!(report["running"], true, "{report}");
+
+    let stopped = memcastle(&daemon)
+        .args(["db", "stop"])
+        .output()
+        .await
+        .expect("run memcastle");
+    assert!(stopped.status.success());
+    assert!(String::from_utf8_lossy(&stopped.stdout).contains("not running"));
+    let status = memcastle(&daemon)
+        .args(["db", "status", "--json"])
+        .output()
+        .await
+        .expect("run memcastle");
+    let report: serde_json::Value = serde_json::from_slice(&status.stdout).expect("json");
+    assert_eq!(report["running"], false, "{report}");
+
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn db_serve_beyond_loopback_is_refused_with_a_diagnostic_that_says_what_to_do() {
+    let daemon = TestDaemon::start().await;
+
+    let output = memcastle(&daemon)
+        .args(["db", "serve", "--bind", "0.0.0.0", "--port", "0"])
+        .output()
+        .await
+        .expect("run memcastle");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("memcastle::db::unsafe_bind"), "{stderr}");
+    assert!(stderr.contains("--allow-remote"), "{stderr}");
+    daemon.shutdown().await;
+}

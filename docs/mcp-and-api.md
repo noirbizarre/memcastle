@@ -90,8 +90,10 @@ as `full`.
 A mode the daemon refuses is a `403` with the code `memcastle::app::mode_forbidden`.
 A request without a valid token, on a daemon with [authentication](authentication.md) enabled,
 is a `401` with the code `memcastle::auth::unauthorized` and a `WWW-Authenticate: Bearer` header.
-Other statuses are `400` for invalid input or a transition the job's state does not allow, `404` for an unknown job,
-`409` for a job recorded as running that has no worker (restart the daemon), and `500` for a server failure.
+Other statuses are `400` for invalid input, a transition the job's state does not allow, or a database admin endpoint
+that would be unsafe (`memcastle::db::unsafe_bind`), `404` for an unknown job,
+`409` for a job recorded as running that has no worker (restart the daemon) or a database admin endpoint that is already
+open, and `500` for a server failure.
 
 | Route | Purpose | Parameters |
 |---|---|---|
@@ -112,6 +114,9 @@ Other statuses are `400` for invalid input or a transition the job's state does 
 | `POST /api/shutdown` | Shut the daemon down gracefully. | none |
 | `POST /api/auth/token` | Generate a token, replacing any previous one: `{token, algorithm, version, created_at}`. | none |
 | `DELETE /api/auth/token` | Revoke the generated token: `{"revoked": true}`. | none |
+| `GET /api/db` | Whether the [database admin endpoint](database-access.md) is listening, and where. | none |
+| `POST /api/db` | Open the database admin endpoint. | JSON body, all optional: `bind`, `port`, `allow_remote`, `allowed_origins` |
+| `DELETE /api/db` | Close the database admin endpoint. Succeeds when it was not open. | none |
 
 `requested_by` records which channel a write came through; it defaults to `http` (the CLI sends `cli`, MCP uses `mcp`).
 The status report keeps `/api/health` cheap: an unhealthy datastore is reported inside `/api/status` with a `200`,
@@ -139,6 +144,16 @@ The token in the response to `POST /api/auth/token` is the only time it is ever 
 `Cache-Control: no-store`.
 Neither route has an MCP tool: MCP exposes memory capabilities and never credential management.
 The status report's `auth_enabled` says whether the daemon requires a token, and never includes one.
+
+### The database admin endpoint
+
+The three `/api/db` routes open and close a separate listener that speaks SurrealDB's own protocol, so SurrealDB Studio
+can inspect the live database.
+They are guarded by [authentication](authentication.md) like every other route, and have no MCP tool:
+an agent must not be able to open a database console onto the palace.
+The listener itself is not part of this API: it is not MemCastle's REST or MCP, and its protocol is SurrealDB's.
+The routes answer with `{running, addr, url, namespace, database, remote, auth_required, started_at}`.
+[Database access](database-access.md) describes the workflow and the security model.
 
 ### Submitting jobs
 
