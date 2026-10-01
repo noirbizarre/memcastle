@@ -58,5 +58,6 @@ A daemon and a client started from different working directories would disagree 
   A user who has one moves it by hand, or points `--palace` at it.
 - A machine with no home directory and no usable `XDG_DATA_HOME` needs an explicit palace path.
   The error says so, rather than creating a palace in the current directory.
-- Windows compiles and uses the same dot-directories under the home directory; it is built and tested, but has no dedicated layout.
+- Windows compiles and uses the same dot-directories under the home directory;
+  it is built and tested, but has no dedicated layout.
 - The `dirs` crate is still used, but only to find the home directory.

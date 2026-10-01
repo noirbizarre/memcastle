@@ -18,7 +18,8 @@ mise run lint       # cargo clippy --all-targets --all-features -- -D warnings
 mise run format     # cargo fmt --all
 mise run guards     # the architecture guard hooks, described below
 mise run check      # every lint, the guards and the tests, without modifying the tree
-mise run ci         # check plus the docs build: the local equivalent of CI's lint, test and docs steps
+mise run ci         # check plus the docs build: the local equivalent of CI's lint,
+                    # test and docs steps
 mise cli <args>      # run memcastle from source, e.g. `mise cli status`
 mise run docs       # serve this documentation locally
 mise run docs:build # build it into site/
@@ -93,7 +94,8 @@ mise run test -- --filter-expr 'test(job)'
 The non-negotiable invariant in `AGENTS.md` — "the CLI has no business logic MCP/HTTP can't reuse" —
 is enforced by the `store-isolation` `prek` hook.
 It greps `src/main.rs`, `src/cli.rs`, `src/client/`, `src/mcp/` and `src/api/`
-for a direct `store` or `jobs` import (including grouped `use crate::{store::..}` imports, even when rustfmt spreads them over several lines).
+for a direct `store` or `jobs` import (including grouped `use crate::{store::..}` imports,
+even when rustfmt spreads them over several lines).
 The one allowed exception is `main.rs`'s `SurrealStore` import, which `memcastle migrate` needs.
 The pattern matches text, not syntax, so a diagnostic-code string such as `memcastle::jobs::not_found` trips it too:
 tests should read a code from the error (`Error::body().code`) rather than spell it out in these directories.
@@ -105,8 +107,8 @@ The `single-writer` hook enforces the companion invariant, one daemon and one wr
 `SurrealStore::connect` may only be called from `src/server/`, `src/store/` and `src/main.rs` (for `migrate`).
 
 The authentication invariant has no hook, because a route or an MCP tool is not something a grep can recognise.
-It is enforced by tests instead: `tests/auth.rs` walks a list of the REST routes (and a route that does not exist) without a
-token, and fails if an MCP tool's name mentions credentials.
+It is enforced by tests instead: `tests/auth.rs` walks a list of the REST routes
+(and a route that does not exist) without a token, and fails if an MCP tool's name mentions credentials.
 
 Two more hooks guard the remaining invariants.
 `job-status-only-via-apply` fails on any `.status =` assignment outside `src/domain/job.rs`,
