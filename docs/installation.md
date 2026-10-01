@@ -56,7 +56,7 @@ paru -S memcastle-bin   # or your AUR helper of choice
 The `memcastle-bin` package installs the release binary for x86_64 and aarch64,
 and a systemd user unit, `/usr/lib/systemd/user/memcastle.service`.
 
-The package owns only those two files under `/usr`.
+The package owns only those two files and its licence under `/usr`.
 Your configuration (`~/.config/memcastle`), palace (`~/.local/share/memcastle`) and state (`~/.local/state/memcastle`)
 stay yours, and so does any secret: the package never writes to them.
 
