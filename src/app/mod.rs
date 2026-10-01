@@ -644,6 +644,9 @@ impl AppServices {
 
     /// Request that a running job pause.
     ///
+    /// Job control is deliberately not mode-gated: it needs a job id, which a
+    /// session that cannot list jobs never learns (ADR-007).
+    ///
     /// # Errors
     ///
     /// Returns [`crate::Error::JobNotFound`] if the job doesn't exist, or
