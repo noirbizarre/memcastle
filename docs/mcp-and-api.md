@@ -80,7 +80,8 @@ A job that is interrupted resumes where it stopped and never stores an item twic
 ## REST API
 
 Requests and responses are JSON.
-The routes that read or write memory, and `/api/status`, accept the optional `X-MemCastle-Mode` header
+The routes that read or write memory (including `GET /api/jobs*`) accept the optional `X-MemCastle-Mode` header,
+and `/api/status` accepts it only to report the mode
 (`full`, `read_only` or `disabled`; `full` when absent), and an unrecognized value is a `400`, never silently treated
 as `full`.
 `/api/health`, job control (pause, resume, cancel, retry) and `/api/shutdown` are never gated and ignore it.
