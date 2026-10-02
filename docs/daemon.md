@@ -154,7 +154,8 @@ At the default `info` level the daemon logs lifecycle transitions, not individua
 | Scheduler configured, jobs recovered | concurrency, lease TTL, job ID |
 | `job queued` | `job_id`, `job_type`, `priority`, `requested_by` |
 | `job claimed by worker` | `job_id`, `job_type`, `priority`, `attempt`, `worker_id` |
-| `job started`, `completed`, `paused`, `cancelled` | `job_id`, `job_type`, `elapsed_ms` |
+| `job started` | `job_id`, `job_type`, `attempt` |
+| `job completed`, `paused`, `cancelled` | `job_id`, `job_type`, `elapsed_ms` |
 | `job failed` | `job_id`, `error`, `elapsed_ms`, `attempt` |
 | Pause, cancel, resume and retry requests | `job_id` |
 | Mining, checkpoint, audit and repair start | counts only (files, items, dry run) |
