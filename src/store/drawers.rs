@@ -156,6 +156,10 @@ impl SurrealStore {
             .query(
                 // Truthiness (`!x`, `x`) rather than `= NULL`: a `None` may be
                 // stored as `NONE` or `NULL` — see `entities`'s module doc.
+                // The channel names are literals on purpose, not
+                // `domain::channel`: a migration describes the data as it was
+                // when it ran, so a later rename of a constant must not change
+                // which drawers an already-shipped step rewrites.
                 "UPDATE drawer SET provenance.requested_by = $channel \
                  WHERE !provenance.job_id AND source.agent \
                    AND provenance.requested_by = source.agent \

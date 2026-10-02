@@ -16,8 +16,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    CheckpointPayload, Drawer, DrawerId, Job, JobId, JobKind, JobStatus, MemoryMode, MiningSource,
-    Priority, Provenance, Source, SourceKind,
+    CheckpointDestination, CheckpointPayload, Drawer, DrawerId, Job, JobId, JobKind, JobStatus,
+    MemoryMode, MiningSource, Priority, Provenance, Source, SourceKind,
 };
 use crate::error::{Error, Result};
 use crate::jobs::Scheduler;
@@ -725,7 +725,11 @@ impl AppServices {
         let wing_record = self.store.get_or_create_wing(wing, None).await?;
         let room = self
             .store
-            .get_or_create_room(wing_record.id, "diary", None)
+            .get_or_create_room(
+                wing_record.id,
+                CheckpointDestination::Diary.room_name(),
+                None,
+            )
             .await?;
 
         let drawer = Drawer::new(
@@ -776,7 +780,11 @@ impl AppServices {
         let Some(wing_record) = self.store.get_wing(wing).await? else {
             return Ok(Vec::new());
         };
-        let Some(room) = self.store.get_room(wing_record.id, "diary").await? else {
+        let Some(room) = self
+            .store
+            .get_room(wing_record.id, CheckpointDestination::Diary.room_name())
+            .await?
+        else {
             return Ok(Vec::new());
         };
         self.store

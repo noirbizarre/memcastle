@@ -278,6 +278,14 @@ pub struct JobsConfig {
     pub lease_ttl_secs: u64,
 }
 
+/// The default shutdown drain, in seconds. Public so the scheduler's own
+/// fallback (used by direct `Scheduler::new` callers and tests) is this value
+/// and not a second copy that could drift from the configured default.
+pub const DEFAULT_DRAIN_TIMEOUT_SECS: u64 = 10;
+/// The default job lease TTL, in seconds; shared with the scheduler for the
+/// same reason as [`DEFAULT_DRAIN_TIMEOUT_SECS`].
+pub const DEFAULT_LEASE_TTL_SECS: u64 = 30;
+
 impl Default for JobsConfig {
     fn default() -> Self {
         Self {
@@ -288,11 +296,11 @@ impl Default for JobsConfig {
             // Long enough for every handler's unit of work (a file, a
             // checkpoint item, an audit chunk) to finish, short enough that
             // a stuck job cannot hold up a service manager's stop timeout.
-            drain_timeout_secs: 10,
+            drain_timeout_secs: DEFAULT_DRAIN_TIMEOUT_SECS,
             // Long enough to ride out a garbage-collection pause or a
             // dropped packet or two, short enough that a dead daemon's jobs
             // move within the minute.
-            lease_ttl_secs: 30,
+            lease_ttl_secs: DEFAULT_LEASE_TTL_SECS,
         }
     }
 }
