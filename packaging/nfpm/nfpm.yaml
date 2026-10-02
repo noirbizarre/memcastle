@@ -1,6 +1,6 @@
 # Builds the .deb and .rpm from the binary already staged in dist/.
-# Driven by .github/workflows/publish-release.yaml, which exports
-# VERSION, NFPM_ARCH and BINARY.
+# Driven by packaging/nfpm/build.sh (run by publish-release.yaml and by CI),
+# which exports VERSION, NFPM_ARCH and BINARY.
 name: memcastle
 arch: "${NFPM_ARCH}"
 platform: linux
@@ -14,6 +14,10 @@ license: MIT
 contents:
   - src: "${BINARY}"
     dst: /usr/bin/memcastle
+    # nfpm expands env vars in top-level fields by default but not in
+    # `contents`; without this the path is globbed literally and the build
+    # fails with "Glob failed: ${BINARY}: no matching files".
+    expand: true
     file_info:
       mode: 0755
   - src: packaging/systemd/memcastle.service

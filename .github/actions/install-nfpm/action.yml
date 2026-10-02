@@ -1,0 +1,20 @@
+name: Install nfpm
+description: Install a pinned nfpm release, verified against the checksums published alongside it.
+
+# nfpm is not in install-action, and the pin lives here so 📦 Publish Release and
+# CI's packaging check can never disagree about the version they build with.
+runs:
+  using: composite
+  steps:
+    - name: Install nfpm
+      shell: bash
+      env:
+        NFPM_VERSION: 2.47.0
+      run: |
+        set -euo pipefail
+        base="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}"
+        tarball="nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+        curl -fsSL -o "/tmp/${tarball}" "${base}/${tarball}"
+        curl -fsSL -o /tmp/nfpm-checksums.txt "${base}/checksums.txt"
+        (cd /tmp && grep " ${tarball}\$" nfpm-checksums.txt | sha256sum -c -)
+        sudo tar -C /usr/local/bin -xzf "/tmp/${tarball}" nfpm
