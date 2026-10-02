@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted, amended by a dated note at the end of this record (2026-10-02: the submission methods were renamed)
 
 ## Context
 
@@ -62,3 +62,10 @@ the sync-vs-job split is only about scheduler necessity, never about bypassing c
 - Diary writes have no queue-provided retry/attempt-budget:
   a failed diary write returns `Err` straight to the caller, which must retry itself if it wants to.
   Acceptable because a diary write is never decomposed into resumable units in the first place.
+
+## Amendment (2026-10-02)
+
+The decision stands; only the method names changed.
+`AppServices::emergency_checkpoint` and `AppServices::checkpoint` are now `submit_emergency_checkpoint` and
+`submit_checkpoint`, matching the other `submit_*` methods that enqueue a job.
+The operation name a refused session sees in `Error::ModeForbidden` is still `emergency_checkpoint` (ADR-007).

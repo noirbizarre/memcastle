@@ -3,7 +3,7 @@
 ## Status
 
 Accepted; the list of gated operations is amended by [ADR-007](007-memory-mode-gate-follows-data-access.md),
-and the session-mode mechanism by the amendment at the end of this record.
+and the session-mode mechanism by the amendment (2026-09-29) at the end of this record.
 
 ## Context
 
@@ -80,8 +80,9 @@ reads are rejected with the same typed `Error::ModeForbidden` as writes, never a
   since "no results" and "not allowed to read" are only distinguishable through the error type, by design.
 - `Audit`/`Repair` remaining ungated is provisional
   (open to future reclassification, and recorded here rather than in `domain::memory_mode`), not a settled boundary.
+  *(Amended by ADR-007: an applied `repair` is gated; a dry run and `audit` are not.)*
 
-## Amendment: how the session's mode is held
+## Amendment (2026-09-29): how the session's mode is held
 
 The decision above stands; only the mechanism changed (issue #72).
 rmcp constructs one `McpTools` per session and drops it when the session closes,
