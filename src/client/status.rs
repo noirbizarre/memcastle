@@ -13,9 +13,10 @@ use serde::Serialize;
 use super::{DaemonClient, EndpointSource};
 use crate::app::StatusReport;
 use crate::config::Secret;
-use crate::domain::MemoryMode;
+use crate::domain::{JobStatus, MemoryMode};
 use crate::error::{Error, Result};
 use crate::server::lifecycle::{self, Registry};
+use crate::term::Painter;
 
 /// Exit code for a daemon that is up and whose datastore is healthy.
 pub const EXIT_HEALTHY: u8 = 0;
@@ -123,41 +124,56 @@ impl StatusView {
     /// read but not to parse (that is what `--json` is for).
     #[must_use]
     pub fn render_human(&self) -> String {
+        self.render_styled(Painter::PLAIN)
+    }
+
+    /// The same report as [`Self::render_human`], coloured by `painter`.
+    ///
+    /// With [`Painter::PLAIN`] the two are byte-for-byte identical: colour is
+    /// added around words, never instead of them, so a report read in a log or
+    /// through `NO_COLOR` says exactly what the coloured one does.
+    #[must_use]
+    pub fn render_styled(&self, painter: Painter) -> String {
         match &self.daemon {
-            Some(report) => self.render_running(report),
-            None => self.render_stopped(),
+            Some(report) => self.render_running(report, painter),
+            None => self.render_stopped(painter),
         }
     }
 
-    fn render_running(&self, report: &StatusReport) -> String {
+    fn render_running(&self, report: &StatusReport, p: Painter) -> String {
         let datastore = &report.datastore;
         let mut lines = vec![
             if datastore.is_healthy() {
-                "MemCastle is running".to_string()
+                format!("MemCastle is {}", p.ok("running"))
             } else {
-                "MemCastle is running, but DEGRADED".to_string()
+                format!("MemCastle is running, but {}", p.error("DEGRADED"))
             },
             format!(
-                "  version    {} (pid {}, up {})",
+                "{}{} (pid {}, up {})",
+                label("version", p),
                 report.version,
                 report.pid,
                 format_uptime(report.uptime_secs)
             ),
             format!(
-                "  endpoint   {} ({})",
-                self.endpoint,
+                "{}{} ({})",
+                label("endpoint", p),
+                p.accent(&self.endpoint),
                 source_label(self.endpoint_source)
             ),
-            format!("  mcp        {}", self.mcp_url),
+            format!("{}{}", label("mcp", p), p.accent(&self.mcp_url)),
             format!(
-                "  palace     {} ({})",
+                "{}{} ({})",
+                label("palace", p),
                 report.palace_name,
                 non_empty(&report.palace_path, &self.palace_path)
             ),
         ];
         if datastore.ok {
             lines.push(format!(
-                "  datastore  ok - {} {}, migrations {}/{}",
+                "{}{} - {} {}, migrations {}/{}",
+                label("datastore", p),
+                p.ok("ok"),
                 non_empty(&datastore.backend, "unknown"),
                 datastore.location,
                 datastore.migration_version,
@@ -165,7 +181,9 @@ impl StatusView {
             ));
         } else {
             lines.push(format!(
-                "  datastore  UNAVAILABLE - {} {}: {}",
+                "{}{} - {} {}: {}",
+                label("datastore", p),
+                p.error("UNAVAILABLE"),
                 non_empty(&datastore.backend, "unknown"),
                 datastore.location,
                 datastore.error.as_deref().unwrap_or("no detail reported")
@@ -173,50 +191,82 @@ impl StatusView {
         }
         if !datastore.pending.is_empty() {
             lines.push(format!(
-                "  migrations pending: {} (run `memcastle migrate`)",
-                datastore.pending.join(", ")
+                "  {} {} (run {})",
+                p.warn("migrations pending:"),
+                datastore.pending.join(", "),
+                p.accent("`memcastle migrate`")
             ));
         }
-        lines.push(format!("  drawers    {}", report.drawer_count));
+        lines.push(format!("{}{}", label("drawers", p), report.drawer_count));
         lines.push(format!(
-            "  jobs       {} queued, {} running, {} paused",
-            report.jobs_queued, report.jobs_running, report.jobs_paused
+            "{}{}, {}, {}",
+            label("jobs", p),
+            job_count(report.jobs_queued, JobStatus::Queued, p),
+            job_count(report.jobs_running, JobStatus::Running, p),
+            job_count(report.jobs_paused, JobStatus::Paused, p),
         ));
-        lines.push(format!("  mode       {}", report.mode.as_str()));
+        lines.push(format!("{}{}", label("mode", p), report.mode.as_str()));
         lines.push(format!(
-            "  auth       {}",
+            "{}{}",
+            label("auth", p),
             if report.auth_enabled {
-                "enabled (bearer token required)"
+                p.ok("enabled (bearer token required)")
             } else {
-                "disabled"
+                p.warn("disabled")
             }
         ));
-        lines.push("Restart with `memcastle restart`, stop with `memcastle stop`.".to_string());
+        lines.push(format!(
+            "Restart with {}, stop with {}.",
+            p.accent("`memcastle restart`"),
+            p.accent("`memcastle stop`")
+        ));
         lines.join("\n")
     }
 
-    fn render_stopped(&self) -> String {
+    fn render_stopped(&self, p: Painter) -> String {
         let mut lines = vec![
-            "MemCastle is not running".to_string(),
+            format!("MemCastle is {}", p.error("not running")),
             format!(
-                "  endpoint   {} ({}, nothing answered)",
-                self.endpoint,
+                "{}{} ({}, nothing answered)",
+                label("endpoint", p),
+                p.accent(&self.endpoint),
                 source_label(self.endpoint_source)
             ),
-            format!("  palace     {}", self.palace_path),
+            format!("{}{}", label("palace", p), self.palace_path),
         ];
         match (self.registry.state, self.registry.pid) {
             ("stale", Some(pid)) => lines.push(format!(
-                "  registry   stale: it names pid {pid}, which is gone (the daemon was killed or crashed); it is ignored"
+                "{}{} it names pid {pid}, which is gone (the daemon was killed or crashed); it is ignored",
+                label("registry", p),
+                p.warn("stale:")
             )),
             ("live", Some(pid)) => lines.push(format!(
-                "  registry   names pid {pid}, which is alive, but it did not answer at {} (starting up, or a reused pid?)",
+                "{}names pid {pid}, which is alive, but it did not answer at {} (starting up, or a reused pid?)",
+                label("registry", p),
                 self.registry.bind_addr.as_deref().unwrap_or("its address")
             )),
             _ => {}
         }
-        lines.push("Start it with `memcastle serve`.".to_string());
+        lines.push(format!("Start it with {}.", p.accent("`memcastle serve`")));
         lines.join("\n")
+    }
+}
+
+/// A report line's left column: two spaces of indent and the label padded to
+/// a common width, so values line up. The padding is part of the dimmed text
+/// so a plain rendering keeps the exact column layout.
+fn label(name: &str, p: Painter) -> String {
+    format!("  {}", p.dim(&format!("{name:<11}")))
+}
+
+/// `3 running`, with the status word in its colour only when there is
+/// something in that state: a zero is the quiet, expected answer and should
+/// not draw the eye.
+fn job_count(count: u64, status: JobStatus, p: Painter) -> String {
+    if count == 0 {
+        format!("{count} {status}")
+    } else {
+        format!("{count} {}", p.job_status(status))
     }
 }
 
@@ -398,6 +448,54 @@ mod tests {
         let text = view(None, registry).render_human();
         assert!(text.contains("stale"), "{text}");
         assert!(text.contains("pid 999"), "{text}");
+    }
+
+    #[test]
+    fn a_plain_styled_report_is_byte_for_byte_the_unstyled_one() {
+        // Colour is decoration only: a log, a pipe and `NO_COLOR` must read
+        // exactly what the coloured terminal shows, minus the escapes.
+        let degraded = DatastoreStatus {
+            ok: false,
+            error: Some("connection refused".into()),
+            pending: vec!["diary-provenance".into()],
+            ..healthy()
+        };
+        let stale = RegistryView {
+            state: "stale",
+            pid: Some(999),
+            bind_addr: Some("127.0.0.1:9000".into()),
+        };
+        for view in [
+            view(Some(report(healthy())), absent()),
+            view(Some(report(degraded)), absent()),
+            view(None, absent()),
+            view(None, stale),
+        ] {
+            assert_eq!(view.render_styled(Painter::PLAIN), view.render_human());
+        }
+    }
+
+    #[test]
+    fn a_coloured_report_has_the_same_words_as_the_plain_one_once_escapes_are_stripped() {
+        let degraded = DatastoreStatus {
+            ok: false,
+            error: Some("connection refused".into()),
+            pending: vec!["diary-provenance".into()],
+            ..healthy()
+        };
+        for view in [
+            view(Some(report(healthy())), absent()),
+            view(Some(report(degraded)), absent()),
+            view(None, absent()),
+        ] {
+            let coloured = view.render_styled(Painter::forced());
+            assert!(coloured.contains('\u{1b}'), "{coloured:?}");
+            assert_eq!(
+                console::strip_ansi_codes(&coloured),
+                view.render_human(),
+                "colouring changed the words"
+            );
+        }
     }
 
     #[test]

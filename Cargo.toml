@@ -93,6 +93,18 @@ miette = { version = "7", features = ["fancy"] }
 
 # CLI
 clap = { version = "4", features = ["derive", "env", "wrap_help"] }
+# Shell completion scripts for `memcastle completions <shell>`.
+clap_complete = "4"
+# Terminal presentation. `console` is the one colour/TTY stack (dialoguer and
+# comfy-table both build on it, and it is already in the lockfile through
+# `insta`), so styling never needs a second ANSI crate. `comfy-table`'s
+# `custom_styling` makes it measure coloured cells by their visible width (it
+# implies its `tty` feature, hence crossterm); the table width itself comes
+# from `console` and `force_no_tty()`, see `client::table`.
+console = "0.16"
+comfy-table = { version = "7", default-features = false, features = ["custom_styling"] }
+# Confirmations only: no history, fuzzy matching, completion or editor prompts.
+dialoguer = { version = "0.12", default-features = false }
 
 # Configuration & serialisation
 serde = { version = "1", features = ["derive"] }

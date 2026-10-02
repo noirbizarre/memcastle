@@ -31,6 +31,10 @@ class Memcastle < Formula
     # the way in because the downloaded asset's name carries the platform
     # suffix, not the command users are meant to type.
     bin.install Dir["*"].first => "memcastle"
+
+    # Generated from the installed binary, so the scripts always match its
+    # commands and flags; `memcastle completions <shell>` needs no daemon.
+    generate_completions_from_executable(bin/"memcastle", "completions", shells: [:bash, :zsh, :fish])
   end
 
   test do

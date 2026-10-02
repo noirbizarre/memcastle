@@ -7,11 +7,63 @@
 use std::net::IpAddr;
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::builder::styling::{AnsiColor, Effects, Styles};
+use clap::builder::{PossibleValuesParser, TypedValueParser};
+use clap::{Args, Parser, Subcommand, ValueHint};
+use memcastle::domain::{JobStatus, MemoryMode};
+
+/// The colours of `--help` and of clap's own error messages.
+///
+/// Plain ANSI palette colours (not RGB), so they follow the user's terminal
+/// theme. clap only emits them on a terminal and honours `NO_COLOR`, so piped
+/// help (and the tests that read it) stays plain.
+fn styles() -> Styles {
+    Styles::styled()
+        .header(AnsiColor::Yellow.on_default() | Effects::BOLD)
+        .usage(AnsiColor::Yellow.on_default() | Effects::BOLD)
+        .literal(AnsiColor::Cyan.on_default() | Effects::BOLD)
+        .placeholder(AnsiColor::Green.on_default())
+        .error(AnsiColor::Red.on_default() | Effects::BOLD)
+        .valid(AnsiColor::Green.on_default())
+        .invalid(AnsiColor::Yellow.on_default())
+}
+
+/// The names `--mode` accepts, as a clap value parser: it lists them in the
+/// error for an unknown one and offers them to shell completion, which a bare
+/// `FromStr` cannot.
+fn mode_parser() -> impl TypedValueParser<Value = MemoryMode> {
+    PossibleValuesParser::new([
+        MemoryMode::Full.as_str(),
+        MemoryMode::ReadOnly.as_str(),
+        MemoryMode::Disabled.as_str(),
+    ])
+    .try_map(|name| name.parse::<MemoryMode>())
+}
+
+/// The names `jobs list --status` accepts; see [`mode_parser`].
+fn status_parser() -> PossibleValuesParser {
+    PossibleValuesParser::new([
+        JobStatus::Queued.as_str(),
+        JobStatus::Running.as_str(),
+        JobStatus::Paused.as_str(),
+        JobStatus::Completed.as_str(),
+        JobStatus::Failed.as_str(),
+        JobStatus::Cancelled.as_str(),
+    ])
+}
 
 /// Local-first, always-on memory server for AI coding agents over MCP/HTTP
 #[derive(Debug, Parser)]
-#[command(name = "memcastle", version, about, long_about = None)]
+#[command(
+    name = "memcastle",
+    version,
+    about,
+    long_about = None,
+    styles = styles(),
+    // `memcastle help` only repeats `--help`, and adds a `help` entry to every
+    // command group (`jobs help`, `diary help`, ...) that does the same.
+    disable_help_subcommand = true,
+)]
 pub struct Cli {
     /// Increase verbosity: `-v` logs memcastle at debug level, `-vv` at
     /// trace, and either prints the full cause chain of an error.
@@ -23,12 +75,12 @@ pub struct Cli {
     /// `read_only` or `disabled` — exactly as an agent session in that mode
     /// would: the daemon rejects what the mode forbids. Useful to check what
     /// a restricted session can and cannot do.
-    #[arg(long, global = true, env = "MEMCASTLE_MODE")]
-    pub mode: Option<memcastle::domain::MemoryMode>,
+    #[arg(long, global = true, env = "MEMCASTLE_MODE", value_parser = mode_parser())]
+    pub mode: Option<MemoryMode>,
 
     /// Path to a config file. Defaults to `$XDG_CONFIG_HOME/memcastle/config.toml`
     /// (`~/.config/memcastle/config.toml`) if it exists.
-    #[arg(long, global = true, env = "MEMCASTLE_CONFIG")]
+    #[arg(long, global = true, env = "MEMCASTLE_CONFIG", value_hint = ValueHint::FilePath)]
     pub config: Option<PathBuf>,
 
     /// The palace directory to use, overriding `palace.path` and
@@ -36,7 +88,7 @@ pub struct Cli {
     /// (`~/.local/share/memcastle/default`). Must be an absolute path.
     /// Deliberately not bound to the environment variable here: that one is
     /// applied by the config loader, one layer below this flag.
-    #[arg(long, global = true, value_name = "PATH")]
+    #[arg(long, global = true, value_name = "PATH", value_hint = ValueHint::DirPath)]
     pub palace: Option<PathBuf>,
 
     /// The subcommand to run.
@@ -106,6 +158,10 @@ pub enum Command {
     /// clients.
     #[command(subcommand)]
     Db(DbCommand),
+    /// Print a shell completion script to standard output, for `bash`, `zsh`,
+    /// `fish`, `powershell` or `elvish`. Needs neither a daemon nor a
+    /// configuration file.
+    Completions(CompletionsArgs),
     /// List wings. Not yet implemented.
     Wings,
     /// List rooms. Not yet implemented.
@@ -114,6 +170,22 @@ pub enum Command {
     Drawers,
     /// Maintenance operations (dedup, stale-data sweep, ...). Not yet implemented.
     Maintenance,
+}
+
+/// Arguments for `memcastle completions`.
+#[derive(Debug, Args)]
+pub struct CompletionsArgs {
+    /// The shell to generate completions for.
+    pub shell: clap_complete::Shell,
+}
+
+/// The `--yes` flag shared by every command that asks before it acts.
+#[derive(Debug, Args)]
+pub struct ConfirmArgs {
+    /// Do not ask for confirmation. Only needed in a terminal: without one
+    /// (a script, CI, a pipe) these commands never ask.
+    #[arg(short, long)]
+    pub yes: bool,
 }
 
 /// Arguments for `memcastle status`.
@@ -250,12 +322,16 @@ pub struct RepairArgs {
     /// Actually perform the planned actions. Without this flag, repair
     /// always runs in dry-run mode: it reports what it would do without
     /// mutating anything (see `memcastle::repair`'s module doc).
+    /// In a terminal this asks for confirmation first (see `--yes`).
     #[arg(long)]
     pub apply: bool,
     /// Restrict repair actions to what a specific prior `memcastle audit`
     /// job (its job id) found, rather than scanning the whole palace fresh.
     #[arg(long)]
     pub based_on_job: Option<String>,
+    /// Skip the confirmation `--apply` asks for in a terminal.
+    #[arg(short, long)]
+    pub yes: bool,
 }
 
 /// `memcastle diary` subcommands.
@@ -297,11 +373,13 @@ pub enum AuthCommand {
     /// Generating again replaces the previous token, which is rotation.
     /// While authentication is enabled this needs a valid token
     /// (MEMCASTLE_AUTH_TOKEN) like every other command.
-    Generate,
+    /// In a terminal this asks for confirmation first.
+    Generate(ConfirmArgs),
     /// Revoke the generated token, so it stops working immediately. A shared
     /// secret set through MEMCASTLE_AUTH_TOKEN or `auth.token` is not
     /// affected: change the configuration and restart to revoke that one.
-    Revoke,
+    /// In a terminal this asks for confirmation first.
+    Revoke(ConfirmArgs),
 }
 
 /// `memcastle db` subcommands.
@@ -353,10 +431,11 @@ pub struct DbStartArgs {
 /// `memcastle jobs` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum JobsCommand {
-    /// List jobs, optionally filtered by status.
+    /// List jobs, optionally filtered by status. A table in a terminal, JSON
+    /// when standard output is piped or redirected.
     List {
-        /// One of: queued, running, paused, completed, failed, cancelled.
-        #[arg(long)]
+        /// Only jobs in this status.
+        #[arg(long, value_parser = status_parser())]
         status: Option<String>,
     },
     /// Show one job's full detail, including progress and checkpoint.
@@ -374,10 +453,14 @@ pub enum JobsCommand {
         /// The job id.
         id: String,
     },
-    /// Cancel a queued, paused, or running job.
+    /// Cancel a queued, paused, or running job. In a terminal this asks for
+    /// confirmation first.
     Cancel {
         /// The job id.
         id: String,
+        /// Skip the confirmation asked for in a terminal.
+        #[arg(short, long)]
+        yes: bool,
     },
     /// Retry a failed job.
     Retry {
@@ -436,10 +519,10 @@ mod tests {
 
     #[test]
     fn auth_generate_and_revoke_parse_and_take_no_token_argument() {
-        for (word, expected) in [("generate", "Generate"), ("revoke", "Revoke")] {
+        for (word, expected) in [("generate", "Generate("), ("revoke", "Revoke(")] {
             let cli = Cli::try_parse_from(["memcastle", "auth", word]).unwrap();
             assert!(
-                matches!(&cli.command, Command::Auth(auth) if format!("{auth:?}") == expected),
+                matches!(&cli.command, Command::Auth(auth) if format!("{auth:?}").starts_with(expected)),
                 "{:?}",
                 cli.command
             );
@@ -512,6 +595,97 @@ mod tests {
         // It was renamed to `start`: it starts the adapter, it does not serve
         // the database.
         assert!(Cli::try_parse_from(["memcastle", "db", "serve"]).is_err());
+    }
+
+    #[test]
+    fn there_is_no_help_subcommand_at_the_top_or_in_any_group() {
+        // `--help` is the one way to ask: `help` only duplicated it.
+        assert!(Cli::try_parse_from(["memcastle", "help"]).is_err());
+        for group in ["jobs", "diary", "auth", "db"] {
+            assert!(
+                Cli::try_parse_from(["memcastle", group, "help"]).is_err(),
+                "`{group} help` must not exist"
+            );
+        }
+        let command = Cli::command();
+        assert!(command.find_subcommand("help").is_none());
+        assert!(
+            command
+                .get_subcommands()
+                .all(|sub| sub.find_subcommand("help").is_none())
+        );
+    }
+
+    #[test]
+    fn help_flags_still_work() {
+        for args in [
+            vec!["memcastle", "--help"],
+            vec!["memcastle", "jobs", "--help"],
+        ] {
+            let error = Cli::try_parse_from(&args).unwrap_err();
+            assert_eq!(
+                error.kind(),
+                clap::error::ErrorKind::DisplayHelp,
+                "{args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn completions_take_a_known_shell_and_reject_others() {
+        for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
+            let cli = Cli::try_parse_from(["memcastle", "completions", shell]).unwrap();
+            assert!(matches!(cli.command, Command::Completions(_)), "{shell}");
+        }
+        assert!(Cli::try_parse_from(["memcastle", "completions", "tcsh"]).is_err());
+        assert!(Cli::try_parse_from(["memcastle", "completions"]).is_err());
+    }
+
+    #[test]
+    fn jobs_list_has_no_json_flag_because_a_pipe_already_gets_json() {
+        assert!(Cli::try_parse_from(["memcastle", "jobs", "list", "--json"]).is_err());
+    }
+
+    #[test]
+    fn jobs_list_offers_the_valid_statuses_and_rejects_others() {
+        for status in [
+            "queued",
+            "running",
+            "paused",
+            "completed",
+            "failed",
+            "cancelled",
+        ] {
+            Cli::try_parse_from(["memcastle", "jobs", "list", "--status", status]).unwrap();
+        }
+        let error = Cli::try_parse_from(["memcastle", "jobs", "list", "--status", "done"])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("completed"), "{error}");
+    }
+
+    #[test]
+    fn mode_parses_to_a_memory_mode_and_rejects_unknown_names_listing_the_valid_ones() {
+        let cli = Cli::try_parse_from(["memcastle", "--mode", "read_only", "status"]).unwrap();
+        assert_eq!(cli.mode, Some(MemoryMode::ReadOnly));
+        let error = Cli::try_parse_from(["memcastle", "--mode", "readonly", "status"])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("read_only"), "{error}");
+    }
+
+    #[test]
+    fn every_command_that_asks_for_confirmation_accepts_yes_in_both_spellings() {
+        for args in [
+            vec!["repair", "--apply", "--yes"],
+            vec!["repair", "--apply", "-y"],
+            vec!["auth", "generate", "--yes"],
+            vec!["auth", "revoke", "-y"],
+            vec!["jobs", "cancel", "some-id", "--yes"],
+        ] {
+            let all = std::iter::once("memcastle").chain(args.iter().copied());
+            Cli::try_parse_from(all).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+        }
     }
 
     #[test]

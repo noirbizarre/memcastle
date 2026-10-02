@@ -125,6 +125,27 @@ notably after `memcastle migrate`.
 Judge a command by its exit code and output.
 Set `MEMCASTLE_LOG=warn` to quieten the daemon.
 
+## The command line
+
+### `memcastle::cli::aborted`
+
+You answered "no" (or just pressed Enter, which means no) to a confirmation, and nothing was changed.
+`repair --apply`, `auth generate`, `auth revoke` and `jobs cancel` ask before they act when run in a terminal.
+Run the command again and answer `y`, or pass `--yes` to skip the question.
+In a script, CI job or pipe they never ask, so this error only appears at a keyboard.
+
+### `memcastle::cli::prompt_failed`
+
+A confirmation could not be shown or read, for example because you pressed Ctrl-C at the prompt.
+Pass `--yes` to skip it, or run the command from an interactive terminal.
+
+### Colours look wrong, or escape codes show up in a file
+
+Colour follows the output stream: it is on for a terminal and off for a pipe or a file.
+Set `NO_COLOR=1` to turn it off everywhere, or `CLICOLOR_FORCE=1` to turn it on for a pipe,
+see [Output, colour and prompts](cli.md#output-colour-and-prompts).
+A `CLICOLOR_FORCE` left in your environment is the usual reason escape codes reach a log.
+
 ## Configuration
 
 ### `memcastle::config::invalid`

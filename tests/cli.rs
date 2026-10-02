@@ -2,6 +2,7 @@
 //! sensibly with no daemon around.
 
 use assert_cmd::Command;
+use predicates::prelude::*;
 use predicates::str::contains;
 
 #[test]
@@ -28,6 +29,144 @@ fn serve_help_documents_the_daemon_alias() {
         .assert()
         .success()
         .stdout(contains("daemon"));
+}
+
+#[test]
+fn there_is_no_help_subcommand_because_the_flag_already_does_the_job() {
+    Command::cargo_bin("memcastle")
+        .unwrap()
+        .arg("help")
+        .assert()
+        .failure()
+        .stderr(contains("unrecognized subcommand 'help'"));
+}
+
+#[test]
+fn command_groups_do_not_list_a_help_entry_either() {
+    let output = Command::cargo_bin("memcastle")
+        .unwrap()
+        .args(["jobs", "--help"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Matching the indented entry, not the word: `--help` itself is listed.
+    assert!(!stdout.contains("\n  help "), "{stdout}");
+    assert!(stdout.contains("\n  list "), "{stdout}");
+}
+
+#[test]
+fn piped_help_is_plain_text_without_escape_codes() {
+    let output = Command::cargo_bin("memcastle")
+        .unwrap()
+        .env_remove("CLICOLOR_FORCE")
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(!String::from_utf8_lossy(&output.stdout).contains('\u{1b}'));
+}
+
+#[test]
+fn forcing_colour_colours_help_and_no_color_wins_over_a_terminal_default() {
+    let forced = Command::cargo_bin("memcastle")
+        .unwrap()
+        .env_remove("NO_COLOR")
+        .env("CLICOLOR_FORCE", "1")
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&forced.stdout).contains("\u{1b}["));
+
+    let opted_out = Command::cargo_bin("memcastle")
+        .unwrap()
+        .env("NO_COLOR", "1")
+        .env_remove("CLICOLOR_FORCE")
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(!String::from_utf8_lossy(&opted_out.stdout).contains('\u{1b}'));
+}
+
+#[test]
+fn completions_print_a_script_for_every_supported_shell() {
+    for (shell, marker) in [
+        ("bash", "_memcastle"),
+        ("zsh", "#compdef memcastle"),
+        ("fish", "complete -c memcastle"),
+        ("powershell", "memcastle"),
+        ("elvish", "memcastle"),
+    ] {
+        Command::cargo_bin("memcastle")
+            .unwrap()
+            .args(["completions", shell])
+            .assert()
+            .success()
+            .stdout(contains(marker));
+    }
+}
+
+#[test]
+fn completions_offer_the_subcommands_and_the_enumerated_values() {
+    let output = Command::cargo_bin("memcastle")
+        .unwrap()
+        .args(["completions", "fish"])
+        .output()
+        .unwrap();
+    let script = String::from_utf8_lossy(&output.stdout);
+    assert!(script.contains("completions"), "{script}");
+    // `--status` and `--mode` are enumerated, so tab completion can offer them.
+    assert!(script.contains("cancelled"), "--status values: {script}");
+    assert!(script.contains("read_only"), "--mode values: {script}");
+    assert!(
+        !script.contains("-a \"help\""),
+        "no help subcommand: {script}"
+    );
+}
+
+#[test]
+fn completions_do_not_need_a_valid_configuration() {
+    // Installing tab completion must work even when the config is what is broken.
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config.toml");
+    std::fs::write(&config, "this is = [not valid").unwrap();
+    Command::cargo_bin("memcastle")
+        .unwrap()
+        .arg("--config")
+        .arg(&config)
+        .args(["completions", "bash"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn an_unknown_shell_is_rejected_listing_the_supported_ones() {
+    Command::cargo_bin("memcastle")
+        .unwrap()
+        .args(["completions", "tcsh"])
+        .assert()
+        .failure()
+        .stderr(contains("bash").and(contains("zsh")));
+}
+
+#[test]
+fn the_stopped_report_is_coloured_only_when_colour_is_forced() {
+    let (state, palace) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let plain = status_without_a_daemon(&state, &palace)
+        .env_remove("CLICOLOR_FORCE")
+        .env_remove("NO_COLOR")
+        .output()
+        .unwrap();
+    let plain = String::from_utf8_lossy(&plain.stdout);
+    assert!(!plain.contains('\u{1b}'), "{plain:?}");
+
+    let forced = status_without_a_daemon(&state, &palace)
+        .env("CLICOLOR_FORCE", "1")
+        .env_remove("NO_COLOR")
+        .output()
+        .unwrap();
+    let forced = String::from_utf8_lossy(&forced.stdout);
+    assert!(forced.contains('\u{1b}'), "{forced:?}");
+    // Colour surrounds the words; it never replaces them.
+    assert_eq!(console::strip_ansi_codes(&forced), plain);
 }
 
 /// A `memcastle status` with no daemon, pointed at an empty palace and a

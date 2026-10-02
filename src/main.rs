@@ -11,20 +11,22 @@
 
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use miette::MietteHandlerOpts;
 
 mod cli;
 
 use cli::{
-    AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, DbCommand, DiaryCommand, JobsCommand,
-    MigrateArgs, MineArgs, RecallArgs, RepairArgs, SearchArgs, ServeArgs, StatusArgs, WakeUpArgs,
+    AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, CompletionsArgs, DbCommand, DiaryCommand,
+    JobsCommand, MigrateArgs, MineArgs, RecallArgs, RepairArgs, SearchArgs, ServeArgs, StatusArgs,
+    WakeUpArgs,
 };
 use memcastle::app::{DbEndpointRequest, DbEndpointStatus, WakeUpBudget};
 use memcastle::client::{DaemonClient, StatusView};
 use memcastle::config::{Config, Overrides};
 use memcastle::domain::MemoryMode;
 use memcastle::store::SurrealStore;
+use memcastle::term::{self, Painter};
 use memcastle::{Error, Result};
 
 /// Not `#[tokio::main]`: that runs the runtime's `block_on` — and so, for
@@ -61,6 +63,12 @@ fn main() -> ExitCode {
 
 async fn async_main() -> ExitCode {
     let args = Cli::parse();
+    // Before the configuration is loaded: a completion script depends on
+    // nothing but the command definition, and a broken config file must not
+    // stop someone from installing tab completion to help fix it.
+    if let Command::Completions(completions) = &args.command {
+        return cmd_completions(completions);
+    }
     let verbose = args.verbose > 0 || std::env::var_os("RUST_BACKTRACE").is_some();
     install_miette_hook(verbose);
 
@@ -151,6 +159,9 @@ async fn run_command(
         Command::Jobs(jobs) => cmd_jobs(&config, mode, jobs).await,
         Command::Auth(auth) => cmd_auth(&config, auth).await,
         Command::Db(db) => cmd_db(&config, db).await,
+        // Handled before the configuration is loaded (see `async_main`); the
+        // arm exists only so this match stays exhaustive.
+        Command::Completions(_) => Ok(()),
         Command::Wings => Err(Error::not_implemented("memcastle wings")),
         Command::Rooms => Err(Error::not_implemented("memcastle rooms")),
         Command::Drawers => Err(Error::not_implemented("memcastle drawers")),
@@ -171,6 +182,20 @@ fn client(config: &Config, mode: Option<MemoryMode>) -> DaemonClient {
         Some(mode) => daemon.with_mode(mode),
         None => daemon,
     }
+}
+
+/// Print the shell completion script for `args.shell` on stdout.
+///
+/// Generated into memory and written once, ignoring a write error: with
+/// `memcastle completions zsh | head` the reader goes away early, and
+/// `clap_complete` writing straight to stdout would panic on the broken pipe
+/// instead of just stopping.
+fn cmd_completions(args: &CompletionsArgs) -> ExitCode {
+    use std::io::Write;
+    let mut script = Vec::new();
+    clap_complete::generate(args.shell, &mut Cli::command(), "memcastle", &mut script);
+    let _ = std::io::stdout().write_all(&script);
+    ExitCode::SUCCESS
 }
 
 /// Print `value` as pretty JSON — or fail loudly. A serialization error used
@@ -201,7 +226,9 @@ async fn cmd_status(
     if args.json {
         print_json(&view)?;
     } else {
-        println!("{}", view.render_human());
+        // Coloured only on a terminal that wants it, so a pipe or a log gets
+        // the exact plain text.
+        println!("{}", view.render_styled(Painter::for_stdout()));
     }
     Ok(ExitCode::from(view.exit_code()))
 }
@@ -316,9 +343,11 @@ async fn cmd_restart(
         // bound.
         for _ in 0..600 {
             if let Some(info) = memcastle::server::lifecycle::read_if_live(&config.palace.path) {
+                let paint = Painter::for_stdout();
                 println!(
-                    "restarted: memcastle is serving on http://{}",
-                    info.bind_addr
+                    "{} memcastle is serving on {}",
+                    paint.ok("restarted:"),
+                    paint.accent(&format!("http://{}", info.bind_addr))
                 );
                 return Ok(());
             }
@@ -436,6 +465,15 @@ async fn cmd_repair(config: &Config, mode: Option<MemoryMode>, args: RepairArgs)
         .as_deref()
         .map(Error::parse_job_id)
         .transpose()?;
+    // Only the destructive run asks: a dry run changes nothing. After the
+    // argument checks, so a typo in the id fails before any question is asked.
+    if args.apply {
+        term::confirm(
+            "Apply repairs? This permanently changes palace data (run without --apply for a dry run).",
+            "applying repairs",
+            args.yes,
+        )?;
+    }
     let job = client(config, mode)
         .submit_repair(!args.apply, based_on_job)
         .await?;
@@ -471,7 +509,22 @@ async fn cmd_jobs(config: &Config, mode: Option<MemoryMode>, command: JobsComman
     match command {
         JobsCommand::List { status } => {
             let status = status.map(|s| Error::parse_job_status(&s)).transpose()?;
-            print_json(&daemon.list_jobs(status).await?)?;
+            let jobs = daemon.list_jobs(status).await?;
+            // A table for a person, JSON for anything else: whatever reads a
+            // pipe (`jq`, a script, a test) gets data it can parse without
+            // asking for it, and a terminal gets something it can read.
+            if term::stdout_is_terminal() {
+                println!(
+                    "{}",
+                    memcastle::client::table::render_jobs(
+                        &jobs,
+                        Painter::for_stdout(),
+                        term::terminal_width()
+                    )
+                );
+            } else {
+                print_json(&jobs)?;
+            }
         }
         JobsCommand::Show { id } => print_json(&daemon.get_job(Error::parse_job_id(&id)?).await?)?,
         JobsCommand::Pause { id } => {
@@ -480,8 +533,14 @@ async fn cmd_jobs(config: &Config, mode: Option<MemoryMode>, command: JobsComman
         JobsCommand::Resume { id } => {
             print_json(&daemon.resume_job(Error::parse_job_id(&id)?).await?)?;
         }
-        JobsCommand::Cancel { id } => {
-            print_json(&daemon.cancel_job(Error::parse_job_id(&id)?).await?)?;
+        JobsCommand::Cancel { id, yes } => {
+            let job_id = Error::parse_job_id(&id)?;
+            term::confirm(
+                &format!("Cancel job {job_id}?"),
+                &format!("cancelling job {job_id}"),
+                yes,
+            )?;
+            print_json(&daemon.cancel_job(job_id).await?)?;
         }
         JobsCommand::Retry { id } => {
             print_json(&daemon.retry_job(Error::parse_job_id(&id)?).await?)?;
@@ -504,22 +563,35 @@ async fn cmd_jobs(config: &Config, mode: Option<MemoryMode>, command: JobsComman
 async fn cmd_auth(config: &Config, command: AuthCommand) -> Result<()> {
     let daemon = client(config, None);
     match command {
-        AuthCommand::Generate => {
+        AuthCommand::Generate(confirm) => {
+            // Asked on stderr, so the token on stdout is still all a pipe sees.
+            term::confirm(
+                "Generate a new token? Any token generated before stops working.",
+                "generating a new token",
+                confirm.yes,
+            )?;
             let generated = daemon.auth_generate().await?;
             // The token alone on stdout, so `memcastle auth generate | op item
             // create ...` captures exactly it. It is printed here and nowhere
             // else: not logged, not written to a file, not in any JSON.
             println!("{}", generated.token);
             // Guidance goes to stderr so it never ends up in the captured token.
+            let paint = Painter::for_stderr();
             eprintln!(
-                "Store this token now (in 1Password or another secret manager): it is shown once \
+                "{} (in 1Password or another secret manager): it is shown once \
                  and MemCastle keeps only a digest.\n\
                  To require it, set `auth.enabled = true` (or MEMCASTLE_AUTH_ENABLED=true), \
                  provide the token to clients as MEMCASTLE_AUTH_TOKEN, and restart the daemon \
-                 (`memcastle restart`)."
+                 (`memcastle restart`).",
+                paint.warn("Store this token now")
             );
         }
-        AuthCommand::Revoke => {
+        AuthCommand::Revoke(confirm) => {
+            term::confirm(
+                "Revoke the generated token? Clients using it are refused immediately.",
+                "revoking the token",
+                confirm.yes,
+            )?;
             let result = daemon.auth_revoke().await?;
             print_json(&result)?;
         }
@@ -557,38 +629,59 @@ fn print_db_status(status: &DbEndpointStatus, json: bool) -> Result<()> {
     if json {
         return print_json(status);
     }
+    // Coloured only on a terminal that wants it; the words are the same plain.
+    let paint = Painter::for_stdout();
     let Some(url) = status.url.as_deref().filter(|_| status.running) else {
-        println!("database admin endpoint: not running (start it with `memcastle db start`)");
+        println!(
+            "database admin endpoint: {} (start it with {})",
+            paint.warn("not running"),
+            paint.accent("`memcastle db start`")
+        );
         return Ok(());
     };
     // A repeated `db start` is not an error, but say so: otherwise the output
     // reads as if this command had just opened it.
     if status.already_running {
-        println!("database admin endpoint: already running on {url}");
+        println!(
+            "database admin endpoint: {} on {}",
+            paint.warn("already running"),
+            paint.accent(url)
+        );
     } else {
-        println!("database admin endpoint: listening on {url}");
+        println!(
+            "database admin endpoint: {} on {}",
+            paint.ok("listening"),
+            paint.accent(url)
+        );
     }
-    println!("  namespace: {}", status.namespace);
-    println!("  database:  {}", status.database);
+    println!("  {} {}", paint.dim("namespace:"), status.namespace);
+    println!("  {}  {}", paint.dim("database:"), status.database);
     // Studio's login form wants a user and a password even when there is no
     // token, so say what to type in both cases.
     if status.auth_required {
         println!(
-            "  sign in:   user `{}`, password: the MemCastle token",
+            "  {}   user `{}`, password: the MemCastle token",
+            paint.dim("sign in:"),
             status.user
         );
     } else {
         println!(
-            "  sign in:   user `{0}`, password `{0}` (loopback only, authentication is disabled)",
+            "  {}   user `{1}`, password `{1}` (loopback only, authentication is disabled)",
+            paint.dim("sign in:"),
             status.user
         );
     }
     if status.remote {
         println!(
-            "  warning:   listening beyond loopback; the token crosses the network in cleartext"
+            "  {}   {}",
+            paint.error("warning:"),
+            paint.warn("listening beyond loopback; the token crosses the network in cleartext")
         );
     }
-    println!("Connect SurrealDB Studio to the URL above. Stop it with `memcastle db stop`.");
+    println!(
+        "Connect SurrealDB Studio to the URL above. Stop it with {}.",
+        paint.accent("`memcastle db stop`")
+    );
     Ok(())
 }
 
