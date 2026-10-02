@@ -54,3 +54,6 @@ package() {
 # `depends=(...)` belongs here once `namcap` on a built package says what the
 # binary actually links: a vendored dependency needs nothing declared, a
 # dynamically linked one (a system OpenSSL, for example) does.
+
+# What `namcap` reports the gnu binary links: glibc, plus libgcc_s for stack unwinding.
+depends=('glibc' 'gcc-libs')

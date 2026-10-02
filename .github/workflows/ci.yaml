@@ -154,6 +154,33 @@ jobs:
           directory: target/nextest/ci
           report_type: test_results
 
+  # The .deb and .rpm are otherwise first built by 📦 Publish Release, after the
+  # tag exists, which is the worst moment to learn the nfpm config is broken.
+  # Stub binaries are enough: nfpm only packages the bytes it is given.
+  packaging:
+    name: 📦 Packaging
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/install-nfpm
+
+      - name: Build the packages from stub binaries
+        run: |
+          mkdir dist
+          for asset in linux-amd64 linux-arm64; do
+            printf '#!/bin/sh\n' > "dist/memcastle_0.0.0_${asset}"
+          done
+          packaging/nfpm/build.sh 0.0.0 dist
+
+      # Building without error is not enough: the binary must land where the
+      # systemd unit expects it.
+      - name: Check the package contents
+        run: |
+          for asset in linux-amd64 linux-arm64; do
+            dpkg-deb --contents "dist/memcastle_0.0.0_${asset}.deb" | grep -q ' ./usr/bin/memcastle$'
+            dpkg-deb --contents "dist/memcastle_0.0.0_${asset}.deb" | grep -q ' ./usr/lib/systemd/user/memcastle.service$'
+          done
+
   # gh-ship runs the release. Its configuration and the workflows it names must
   # satisfy the contract it enforces, and finding out otherwise mid-release is
   # the worst possible moment — so it is checked on every pull request instead.
