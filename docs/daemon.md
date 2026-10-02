@@ -189,8 +189,10 @@ The daemon does its own graceful shutdown on `SIGTERM`, does not fork, and logs 
 which is what supervisors expect.
 The binary neither generates nor installs service files: integrating with an init system is a package's job,
 not the core binary's (see [ADR-013](adr/013-release-packaging-and-asset-resolution.md)).
-The Arch package (`memcastle-bin`) installs a systemd user unit, so there `systemctl --user start memcastle` is enough;
-see [Installation](installation.md#arch-linux-aur).
+The Arch package (`memcastle-bin`) and the `.deb` and `.rpm` packages install a systemd user unit,
+so there `systemctl --user start memcastle` is enough;
+see [Installation](installation.md#arch-linux-aur) and
+[Installation](installation.md#standalone-binary-or-native-package).
 Its `ExecStart` is `/usr/bin/memcastle serve`, and it reads an optional `~/.config/memcastle/secret.env`.
 Change it with `systemctl --user edit memcastle`, which writes a drop-in and leaves the package file alone.
 The packaged unit sets `MEMCASTLE_LOG=warn`, which outranks `-v` and `logging.level`;
