@@ -65,7 +65,7 @@ The wire types and codecs, in `surrealdb-core` and `surrealdb-rpc`, are usable.
   It identifies, it does not authenticate: there is one shared credential.
   With authentication disabled there is no token, so the password is `memcastle` too:
   Studio's login form insists on a user and a password, and a known pair is better than accepting anything.
-  Studio's "no authentication" mode sends no sign-in and works as before.
+  A client that never signs in, such as a script, can still use an endpoint whose daemon has authentication disabled.
 - **A browser page from another site is refused.**
   Any page in the developer's browser can dial `ws://127.0.0.1`, whatever its origin.
   The endpoint refuses a request whose `Origin` is not a page served from this machine or one added with

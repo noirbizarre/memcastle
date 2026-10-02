@@ -266,7 +266,7 @@ async fn a_wrong_username_or_password_is_refused_even_without_authentication() {
     let addr = open_endpoint(&daemon, None).await;
     let mut socket = json_socket(&addr).await;
 
-    // Without a sign-in the open endpoint works, so Studio's "no auth" mode does too.
+    // A client that never signs in, such as a script, can query an open endpoint.
     let open = call(&mut socket, "query", json!(["RETURN 1"])).await;
     assert_eq!(rows(&open), &json!(1));
 
