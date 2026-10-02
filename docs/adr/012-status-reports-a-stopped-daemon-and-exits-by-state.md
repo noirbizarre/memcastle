@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, amended by [ADR-015](015-database-admin-endpoint.md) (`--json` on `db serve` and `db status`)
+Accepted, amended by [ADR-015](015-database-admin-endpoint.md) (`--json` on `db start` and `db status`)
 
 ## Context
 
@@ -27,7 +27,7 @@ The registry file is a hint and never the source of truth for "is a daemon runni
   configuration, the MCP URL, the palace name and path, the datastore's backend, health and migration state, the counts,
   and the next command to run.
   `--json` prints the same report for scripts.
-  The flag lives on the commands that have a human rendering, `status` here and `db serve` and `db status` since
+  The flag lives on the commands that have a human rendering, `status` here and `db start` and `db status` since
   ADR-015, so a global flag would promise one to the commands that have none.
 - **A stopped daemon is an answer.**
   With nothing listening, `status` prints the configured endpoint, the palace path and the registry file's state
@@ -76,7 +76,7 @@ The registry file is a hint and never the source of truth for "is a daemon runni
 
 ## Amendment (2026-10-02)
 
-[ADR-015](015-database-admin-endpoint.md) added `memcastle db serve` and `memcastle db status`, which also print a
+[ADR-015](015-database-admin-endpoint.md) added `memcastle db start` and `memcastle db status`, which also print a
 readable report and accept `--json`.
 `status` is therefore no longer the only command with a human rendering.
 The decision stands: the flag is still per command rather than global, because most commands print JSON and have no

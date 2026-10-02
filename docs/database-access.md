@@ -2,7 +2,7 @@
 
 An embedded palace is a SurrealKV database that only the daemon may open.
 When you want to look inside it, or run a query the MemCastle commands do not offer,
-`memcastle db serve` opens a SurrealDB-compatible endpoint on the daemon, and
+`memcastle db start` opens a SurrealDB-compatible endpoint on the daemon, and
 [SurrealDB Studio](https://surrealdb.com/surrealist) (Surrealist) connects to that.
 
 This is a developer and administrator tool.
@@ -33,7 +33,7 @@ flowchart LR
         endpoint -- "its own session" --> store
         app --> store
     end
-    cli([memcastle db serve]) -- "POST /api/db" --> app
+    cli([memcastle db start]) -- "POST /api/db" --> app
 ```
 
 Every Studio connection is its own session over the daemon's database.
@@ -51,7 +51,7 @@ The endpoint adds no second storage layer and does not touch the schema or the m
 2. In another terminal, ask the daemon to open the endpoint:
 
     ```sh
-    memcastle db serve
+    memcastle db start
     ```
 
     ```text
@@ -74,9 +74,21 @@ The endpoint adds no second storage layer and does not touch the schema or the m
     memcastle db stop
     ```
 
+Running `memcastle db start` again while it is open changes nothing and prints the same details,
+with `already running on` in place of `listening on`:
+
+```text
+database admin endpoint: already running on ws://127.0.0.1:8000
+  namespace: memcastle
+  ...
+```
+
+Only flags that contradict the open endpoint are refused, with `memcastle::db::already_running`;
+`db stop` first, then start it again with the new ones.
+
 `memcastle db status` says whether it is open and where, and `--json` gives the same for a script.
 Stopping the daemon closes the endpoint too, and so does `db stop`, which also closes any open Studio connections.
-The endpoint exists only after `db serve`: `memcastle serve` alone opens the one listener it always did.
+The endpoint exists only after `db start`: `memcastle serve` alone opens the one listener it always did.
 
 ## Defaults and options
 
@@ -87,7 +99,7 @@ The endpoint exists only after `db serve`: `memcastle serve` alone opens the one
 | `db.allow_remote` | `--allow-remote` | `MEMCASTLE_DB_ALLOW_REMOTE` | `false` |
 | `db.allowed_origins` | `--allow-origin <ORIGIN>` | `MEMCASTLE_DB_ALLOWED_ORIGINS` | none |
 
-The flags apply to the `db serve` call; the settings are the defaults the daemon uses when a flag is left out,
+The flags apply to the `db start` call; the settings are the defaults the daemon uses when a flag is left out,
 and [Configuration](configuration.md#the-database-admin-endpoint) says how they combine.
 The port must differ from the daemon's own `server.port`.
 
@@ -103,7 +115,7 @@ a record written from Studio that the application does not expect is yours to re
 What keeps it safe:
 
 - **It is off until asked.**
-  Nothing starts it but `memcastle db serve`, so a daemon that was only started exposes nothing extra.
+  Nothing starts it but `memcastle db start`, so a daemon that was only started exposes nothing extra.
   It is not an MCP tool either, so an agent cannot open it.
 - **It listens on `127.0.0.1` unless you say otherwise.**
   The daemon refuses any other address unless `--allow-remote` is given *and* the daemon was started with
@@ -134,7 +146,7 @@ an authenticated daemon, a non-loopback `--bind`, and `--allow-remote`.
 ```sh
 export MEMCASTLE_AUTH_TOKEN=...   # at least 16 characters, ideally from `memcastle auth generate`
 MEMCASTLE_AUTH_ENABLED=true memcastle serve &
-memcastle db serve --bind 0.0.0.0 --allow-remote
+memcastle db start --bind 0.0.0.0 --allow-remote
 ```
 
 The token crosses the network in cleartext, as it does for the REST API, and there is no TLS on the listener.
@@ -167,5 +179,5 @@ Studio's query editor, table explorer and graph views are built on `query`.
 
 ## When it is not available
 
-A palace on a [remote SurrealDB](storage.md#embedded-and-remote-stores) already has a server, so `db serve` is refused with
+A palace on a [remote SurrealDB](storage.md#embedded-and-remote-stores) already has a server, so `db start` is refused with
 `memcastle::db::unavailable`: point Studio at that server directly.

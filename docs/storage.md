@@ -119,7 +119,7 @@ Only root sign-in is supported today, and these settings can only be set in the 
 An embedded store uses the SurrealDB namespace `memcastle` and database `palace`;
 a remote store uses the `namespace` and `database` set in `[store]`.
 
-To look inside an embedded store with SurrealDB Studio, use `memcastle db serve`
+To look inside an embedded store with SurrealDB Studio, use `memcastle db start`
 ([Database access](database-access.md)), never a separate `surreal start` on the directory:
 SurrealKV admits one process, and that process is the daemon.
 

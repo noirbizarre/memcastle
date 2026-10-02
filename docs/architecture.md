@@ -116,7 +116,7 @@ Where the data lives on disk, and how to back it up, is in [Storage and data](st
 
 An embedded SurrealKV database has no server, so SurrealDB Studio cannot connect to it,
 and a second process may not open its directory.
-`memcastle db serve` therefore asks the *daemon* to open a second listener, on loopback and only on request.
+`memcastle db start` therefore asks the *daemon* to open a second listener, on loopback and only on request.
 The listener speaks SurrealDB's WebSocket protocol and runs each connection on a clone of the handle `store` already holds,
 which is a separate session over the same datastore.
 It adds no storage layer, opens no database and leaves schema and migrations where they were.
@@ -125,7 +125,7 @@ See [Database access](database-access.md) and [ADR-015](adr/015-database-admin-e
 ```mermaid
 flowchart LR
     studio([SurrealDB Studio]) -- "ws://127.0.0.1:8000/rpc" --> admin[dbadmin listener]
-    cli([memcastle db serve]) -- "POST /api/db" --> api[api]
+    cli([memcastle db start]) -- "POST /api/db" --> api[api]
     api --> app[app: AppServices]
     app -- starts and stops --> admin
     admin -- "a clone of the handle: its own session" --> store[store: one Surreal handle]
@@ -483,7 +483,7 @@ See [Authentication](authentication.md) and [ADR-014](adr/014-optional-token-aut
 
 **The database console is opt-in.**
 `memcastle serve` opens one listener and nothing else.
-The admin endpoint exists only after an explicit `db serve`, binds loopback unless `--allow-remote` and authentication are
+The admin endpoint exists only after an explicit `db start`, binds loopback unless `--allow-remote` and authentication are
 both given, refuses browser pages from other sites, and has no MCP tool.
 See [ADR-015](adr/015-database-admin-endpoint.md).
 

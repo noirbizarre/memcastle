@@ -230,11 +230,11 @@ async fn status_json_reports_the_endpoint_palace_and_datastore_for_scripts() {
 }
 
 #[tokio::test]
-async fn db_serve_opens_the_endpoint_tells_where_to_connect_and_db_stop_closes_it() {
+async fn db_start_opens_the_endpoint_tells_where_to_connect_and_db_stop_closes_it() {
     let daemon = TestDaemon::start().await;
 
     let output = memcastle(&daemon)
-        .args(["db", "serve", "--port", "0"])
+        .args(["db", "start", "--port", "0"])
         .output()
         .await
         .expect("run memcastle");
@@ -278,11 +278,89 @@ async fn db_serve_opens_the_endpoint_tells_where_to_connect_and_db_stop_closes_i
 }
 
 #[tokio::test]
-async fn db_serve_beyond_loopback_is_refused_with_a_diagnostic_that_says_what_to_do() {
+async fn db_start_again_says_it_is_already_running_and_shows_the_same_details() {
+    let daemon = TestDaemon::start().await;
+    let first = memcastle(&daemon)
+        .args(["db", "start", "--port", "0"])
+        .output()
+        .await
+        .expect("run memcastle");
+    assert!(first.status.success());
+    let first = String::from_utf8_lossy(&first.stdout).into_owned();
+    assert!(first.contains("listening on ws://127.0.0.1:"), "{first}");
+
+    let again = memcastle(&daemon)
+        .args(["db", "start"])
+        .output()
+        .await
+        .expect("run memcastle");
+
+    // A repeat is not a failure, or a script running it twice would break.
+    assert!(
+        again.status.success(),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    let again = String::from_utf8_lossy(&again.stdout);
+    assert!(
+        again.contains("already running on ws://127.0.0.1:"),
+        "{again}"
+    );
+    // Everything after the headline is what the first start printed.
+    assert_eq!(
+        first.lines().skip(1).collect::<Vec<_>>(),
+        again.lines().skip(1).collect::<Vec<_>>()
+    );
+    // The URL is the same one, not a second endpoint.
+    let url = |text: &str| {
+        text.lines()
+            .next()
+            .and_then(|line| line.rsplit(' ').next())
+            .map(str::to_string)
+    };
+    assert_eq!(url(&first), url(&again));
+
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn db_start_with_settings_that_differ_from_the_running_endpoint_points_at_db_stop() {
+    let daemon = TestDaemon::start().await;
+    let first = memcastle(&daemon)
+        .args(["db", "start", "--port", "0", "--json"])
+        .output()
+        .await
+        .expect("run memcastle");
+    let report: serde_json::Value = serde_json::from_slice(&first.stdout).expect("json");
+    let running: u16 = report["addr"]
+        .as_str()
+        .and_then(|addr| addr.rsplit(':').next())
+        .and_then(|port| port.parse().ok())
+        .expect("port");
+    let other = if running == 65000 { 65001 } else { 65000 };
+
+    let output = memcastle(&daemon)
+        .args(["db", "start", "--port", &other.to_string()])
+        .output()
+        .await
+        .expect("run memcastle");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("memcastle::db::already_running"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("memcastle db stop"), "{stderr}");
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn db_start_beyond_loopback_is_refused_with_a_diagnostic_that_says_what_to_do() {
     let daemon = TestDaemon::start().await;
 
     let output = memcastle(&daemon)
-        .args(["db", "serve", "--bind", "0.0.0.0", "--port", "0"])
+        .args(["db", "start", "--bind", "0.0.0.0", "--port", "0"])
         .output()
         .await
         .expect("run memcastle");

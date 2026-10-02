@@ -63,7 +63,7 @@ Nothing is lost, because authentication guards access and does not encrypt the p
 
 ### `memcastle::db::unsafe_bind`
 
-`memcastle db serve` was asked to listen beyond loopback and the daemon refused.
+`memcastle db start` was asked to listen beyond loopback and the daemon refused.
 The [database admin endpoint](database-access.md) is a console onto the whole database,
 so a non-loopback `--bind` needs `--allow-remote` *and* a daemon started with `auth.enabled`.
 Nothing was opened.
@@ -71,7 +71,10 @@ Leave `--bind` off to listen on `127.0.0.1`, which needs neither.
 
 ### `memcastle::db::already_running` or `bind_failed`
 
-`already_running` means the endpoint is already open: `memcastle db status` says where, and `memcastle db stop` closes it.
+`already_running` means the endpoint is already open with different settings than the ones you passed
+(another `--bind`, another `--port` or an `--allow-origin` it does not allow).
+`memcastle db start` without flags just reports the open endpoint, `memcastle db status` says where it is,
+and `memcastle db stop` closes it so you can start it again with the new settings.
 `bind_failed` means the address is taken.
 Port `8000` is also SurrealDB's own default, so a `surreal start` on the same machine is the usual cause.
 Pick another with `--port`, `MEMCASTLE_DB_PORT` or `db.port`, or use `--port 0` to let the OS choose
@@ -84,7 +87,7 @@ Point SurrealDB Studio at that server directly.
 
 ### SurrealDB Studio cannot connect to the database admin endpoint
 
-Check `memcastle db status` first: the endpoint only exists after `memcastle db serve`.
+Check `memcastle db status` first: the endpoint only exists after `memcastle db start`.
 A refusal with `403` means the client's origin is not allowed, and the daemon's log names it
 (`database admin request from a disallowed origin refused`).
 The hosted Surrealist needs `--allow-origin https://app.surrealdb.com`;

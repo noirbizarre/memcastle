@@ -1,4 +1,4 @@
-//! The database admin endpoint (`memcastle db serve`), against an in-process daemon and a real
+//! The database admin endpoint (`memcastle db start`), against an in-process daemon and a real
 //! WebSocket (`docs/adr/015-database-admin-endpoint.md`).
 //!
 //! The Rust SDK is the `flatbuffers` client (the format SurrealDB's own tools use); a raw WebSocket
@@ -531,15 +531,82 @@ async fn an_authenticated_daemon_may_listen_beyond_loopback_once_asked_to() {
 }
 
 #[tokio::test]
-async fn starting_the_endpoint_twice_is_a_conflict() {
+async fn starting_the_endpoint_twice_reports_it_is_already_running() {
+    let daemon = TestDaemon::start().await;
+    let (status, first) = start_endpoint(&daemon, None, json!({ "port": 0 })).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(first["already_running"], false);
+
+    // `port: 0` means "any free port", which the running endpoint is.
+    let (status, second) = start_endpoint(&daemon, None, json!({ "port": 0 })).await;
+
+    assert_eq!(status, StatusCode::OK, "{second}");
+    assert_eq!(second["already_running"], true);
+    assert_eq!(second["addr"], first["addr"]);
+    assert_eq!(second["url"], first["url"]);
+    // A status read is not a start, so it never claims to be a repeat.
+    assert_eq!(
+        daemon_json(&daemon, "/api/db", None).await["already_running"],
+        false
+    );
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn starting_the_endpoint_again_without_any_setting_reports_it_is_already_running() {
     let daemon = TestDaemon::start().await;
     let addr = open_endpoint(&daemon, None).await;
 
-    let (status, body) = start_endpoint(&daemon, None, json!({ "port": 0 })).await;
+    let (status, body) = start_endpoint(&daemon, None, json!({})).await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["already_running"], true);
+    assert_eq!(body["addr"], addr.as_str());
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn starting_the_endpoint_again_on_another_port_is_a_conflict() {
+    let daemon = TestDaemon::start().await;
+    let addr = open_endpoint(&daemon, None).await;
+    let running: u16 = addr.rsplit(':').next().unwrap().parse().unwrap();
+    let other = if running == 65000 { 65001 } else { 65000 };
+
+    let (status, body) = start_endpoint(&daemon, None, json!({ "port": other })).await;
 
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(body["code"], "memcastle::db::already_running");
     assert!(body["error"].as_str().unwrap().contains(&addr));
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn starting_the_endpoint_again_with_a_new_origin_is_a_conflict() {
+    let daemon = TestDaemon::start().await;
+    let (_, first) = start_endpoint(
+        &daemon,
+        None,
+        json!({ "port": 0, "allowed_origins": ["https://studio.example"] }),
+    )
+    .await;
+
+    let (status, known) = start_endpoint(
+        &daemon,
+        None,
+        json!({ "allowed_origins": ["https://studio.example"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{known}");
+    assert_eq!(known["addr"], first["addr"]);
+
+    let (status, body) = start_endpoint(
+        &daemon,
+        None,
+        json!({ "allowed_origins": ["https://other.example"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "memcastle::db::already_running");
     daemon.shutdown().await;
 }
 

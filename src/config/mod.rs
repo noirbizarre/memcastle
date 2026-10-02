@@ -182,11 +182,11 @@ const DEFAULT_DB_BIND: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 /// suggests (`ws://127.0.0.1:8000`) works unchanged.
 const DEFAULT_DB_PORT: u16 = 8000;
 
-/// Defaults for the database admin endpoint (`memcastle db serve`, see
+/// Defaults for the database admin endpoint (`memcastle db start`, see
 /// `docs/adr/015`).
 ///
 /// Only defaults: the endpoint is never started by configuration. It is started
-/// by an explicit `memcastle db serve`, which may override each of these.
+/// by an explicit `memcastle db start`, which may override each of these.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DbConfig {
@@ -603,7 +603,7 @@ impl Config {
                 "jobs.lease_ttl_secs must be between 3 and 86400 seconds",
             ));
         }
-        // Caught here rather than at `db serve` so a bad `[db]` section is
+        // Caught here rather than at `db start` so a bad `[db]` section is
         // reported when the config is loaded, not the first time it is used.
         // That the endpoint then needs authentication is checked at start, where
         // the daemon's real policy is known.

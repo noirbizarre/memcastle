@@ -115,7 +115,7 @@ open, and `500` for a server failure.
 | `POST /api/auth/token` | Generate a token, replacing any previous one: `{token, algorithm, version, created_at}`. | none |
 | `DELETE /api/auth/token` | Revoke the generated token: `{"revoked": true}`. | none |
 | `GET /api/db` | Whether the [database admin endpoint](database-access.md) is listening, and where. | none |
-| `POST /api/db` | Open the database admin endpoint. | JSON body, all optional: `bind`, `port`, `allow_remote`, `allowed_origins` |
+| `POST /api/db` | Open the database admin endpoint, or report it when it is already open. | JSON body, all optional: `bind`, `port`, `allow_remote`, `allowed_origins` |
 | `DELETE /api/db` | Close the database admin endpoint. Succeeds when it was not open. | none |
 
 `requested_by` records which channel a write came through; it defaults to `http` (the CLI sends `cli`, MCP uses `mcp`).
@@ -152,7 +152,11 @@ can inspect the live database.
 They are guarded by [authentication](authentication.md) like every other route, and have no MCP tool:
 an agent must not be able to open a database console onto the palace.
 The listener itself is not part of this API: it is not MemCastle's REST or MCP, and its protocol is SurrealDB's.
-The routes answer with `{running, addr, url, namespace, database, user, remote, auth_required, started_at}`.
+The routes answer with `{running, addr, url, namespace, database, user, remote, auth_required, started_at, already_running}`.
+`already_running` is `true` only on a `POST` that found the endpoint already open and asked for nothing different:
+that answer is a `200` with the open endpoint's details.
+A `POST` asking for another `bind`, `port` or origin than the open endpoint has is a `409` with
+`memcastle::db::already_running`; a `port` of `0` means "any free port" and so never conflicts.
 [Database access](database-access.md) describes the workflow and the security model.
 
 ### Submitting jobs

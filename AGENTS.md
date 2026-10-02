@@ -56,7 +56,7 @@ Each of these should be enforced by a hook or a test. An invariant nothing check
    Enforced by `tests/auth.rs` (every route and an unknown path refused without a token, no credential-named MCP tool)
    and `tests/auth_lifecycle.rs` (no token in the log, the database or any file).
 7. **The database admin endpoint is opt-in, loopback by default, and runs on the daemon's own handle** —
-   only an explicit `memcastle db serve` (REST `/api/db`) opens it, `serve` never does, and it never binds beyond loopback
+   only an explicit `memcastle db start` (REST `/api/db`) opens it, `serve` never does, and it never binds beyond loopback
    without `--allow-remote` *and* authentication.
    It serves each connection from a clone of the daemon's `Surreal<Any>`, never a second connection or process,
    and has no MCP tool — see `docs/adr/015-database-admin-endpoint.md`.

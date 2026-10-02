@@ -533,7 +533,7 @@ async fn cmd_auth(config: &Config, command: AuthCommand) -> Result<()> {
 async fn cmd_db(config: &Config, command: DbCommand) -> Result<()> {
     let daemon = client(config, None);
     match command {
-        DbCommand::Serve(args) => {
+        DbCommand::Start(args) => {
             let status = daemon
                 .db_start(&DbEndpointRequest {
                     bind: args.bind,
@@ -558,10 +558,16 @@ fn print_db_status(status: &DbEndpointStatus, json: bool) -> Result<()> {
         return print_json(status);
     }
     let Some(url) = status.url.as_deref().filter(|_| status.running) else {
-        println!("database admin endpoint: not running (start it with `memcastle db serve`)");
+        println!("database admin endpoint: not running (start it with `memcastle db start`)");
         return Ok(());
     };
-    println!("database admin endpoint: listening on {url}");
+    // A repeated `db start` is not an error, but say so: otherwise the output
+    // reads as if this command had just opened it.
+    if status.already_running {
+        println!("database admin endpoint: already running on {url}");
+    } else {
+        println!("database admin endpoint: listening on {url}");
+    }
     println!("  namespace: {}", status.namespace);
     println!("  database:  {}", status.database);
     // Studio's login form wants a user and a password even when there is no

@@ -122,7 +122,7 @@ pub async fn run(config: Config) -> Result<()> {
         })
         .with_auth(auth_policy)
         // Constructed, never started: the admin endpoint listens only after an
-        // explicit `memcastle db serve` (`docs/adr/015`), so a plain daemon
+        // explicit `memcastle db start` (`docs/adr/015`), so a plain daemon
         // opens exactly the one listener it always did.
         .with_db_endpoint(DbEndpoint::new(config.db.clone(), shutdown.clone()));
     if config.auth.enabled {
