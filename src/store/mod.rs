@@ -60,6 +60,7 @@ use surrealdb::Surreal;
 use surrealdb::engine::any::{self, Any};
 use surrealdb::opt::auth::Root;
 
+use crate::domain::Secret;
 use crate::error::{Error, Result};
 
 pub use drawers::SearchHit;
@@ -172,8 +173,8 @@ pub enum Backend {
         database: String,
         /// Root username (`connect` always signs in as root).
         username: String,
-        /// Root password.
-        password: String,
+        /// Root password. A [`Secret`] so the derived `Debug` redacts it.
+        password: Secret,
     },
 }
 
@@ -286,7 +287,7 @@ impl SurrealStore {
                 // borrowed) — `backend` is `&Backend`, so these are `&String`.
                 db.signin(Root {
                     username: username.clone(),
-                    password: password.clone(),
+                    password: password.expose().to_string(),
                 })
                 .await?;
                 (namespace.as_str(), database.as_str())
@@ -390,7 +391,7 @@ mod tests {
             namespace: "n".into(),
             database: "d".into(),
             username: "root".into(),
-            password: "hunter2".into(),
+            password: Secret::new("hunter2"),
         }
     }
 

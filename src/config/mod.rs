@@ -19,6 +19,10 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::store::Backend;
 
+// Defined in `domain` so `store::Backend` can hold it too; re-exported because
+// configuration is where callers have always found it.
+pub use crate::domain::Secret;
+
 /// Settings given on the command line, the highest-precedence layer.
 ///
 /// Kept separate from `cli` (which only defines argument types) so that
@@ -74,8 +78,11 @@ pub enum StoreConfig {
         database: String,
         /// Root username (only root sign-in is supported today).
         username: String,
-        /// Root password.
-        password: String,
+        /// Root password. A [`Secret`] so a derived `Debug` prints a placeholder,
+        /// and never serialised, for the same reason as `auth.token`: the root
+        /// password is the more powerful of the two credentials.
+        #[serde(skip_serializing)]
+        password: Secret,
     },
 }
 
@@ -143,38 +150,6 @@ impl ServerConfig {
     #[must_use]
     pub fn socket_addr(&self) -> SocketAddr {
         SocketAddr::new(self.bind, self.port)
-    }
-}
-
-/// A configuration value that must never reach a log line, a status report or a
-/// serialised config.
-///
-/// `Debug` is redacted by hand and `Serialize` is skipped on the owning field:
-/// `Config` derives both, and a derived `Debug` on a bare `String` would print
-/// the token the first time someone wrote `tracing::debug!("{config:?}")`.
-#[derive(Clone, Deserialize, PartialEq, Eq)]
-#[serde(transparent)]
-pub struct Secret(String);
-
-impl Secret {
-    /// Wrap a secret value.
-    #[must_use]
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    /// The plaintext, for the two places that genuinely need it: hashing it on
-    /// the daemon and sending it as a bearer header from the client.
-    #[must_use]
-    pub fn expose(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Debug for Secret {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // A fixed placeholder, not even the length: the length narrows a brute force.
-        f.write_str("[REDACTED]")
     }
 }
 
@@ -766,6 +741,28 @@ mod tests {
         assert!(format!("{config:?}").contains("[REDACTED]"));
         assert!(!toml::to_string(&config).unwrap().contains(TOKEN));
         assert!(!serde_json::to_string(&config).unwrap().contains(TOKEN));
+    }
+
+    #[test]
+    fn the_remote_database_password_never_appears_in_debug_output_or_a_serialised_config() {
+        const PASSWORD: &str = "root-password-hunter2";
+        let config = Config {
+            store: StoreConfig::Remote {
+                url: "ws://db.example.com".into(),
+                namespace: "n".into(),
+                database: "d".into(),
+                username: "root".into(),
+                password: Secret::new(PASSWORD),
+            },
+            ..Config::default()
+        };
+
+        assert!(!format!("{config:?}").contains(PASSWORD));
+        assert!(!toml::to_string(&config).unwrap().contains(PASSWORD));
+        assert!(!serde_json::to_string(&config).unwrap().contains(PASSWORD));
+        // The resolved backend is what the store logs and holds, so it must redact too.
+        let backend = config.store.into_backend(Path::new("/unused"));
+        assert!(!format!("{backend:?}").contains(PASSWORD));
     }
 
     #[test]
