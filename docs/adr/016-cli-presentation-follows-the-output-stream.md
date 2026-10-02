@@ -73,7 +73,7 @@ Adding the same flag to `jobs list` would make scripts opt in to what they alway
 - `jobs list` on a terminal is not stable to parse, and a script that wants JSON from a terminal session must pipe.
 - An interactive session that wanted to skip a confirmation must say `--yes`, and a script that relied on a
   command executing without a question is unaffected.
-- A terminal narrower than the table lets the free-text column shrink first and then overflows,
-  rather than breaking identifiers across lines.
+- A terminal narrower than the table lets the free-text column shrink first, wrapping its text without losing any of it,
+  and then overflows, rather than breaking identifiers across lines.
 - The package builds (Homebrew, deb and rpm, AUR) generate the completion files by running the released binary.
 - Four new dependencies: `clap_complete`, `console`, `dialoguer` and `comfy-table` (with `crossterm` behind it).

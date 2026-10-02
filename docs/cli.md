@@ -243,7 +243,9 @@ memcastle jobs demo [--steps <N>]
 
 `--status` is one of `queued`, `running`, `paused`, `completed`, `failed` or `cancelled`.
 `jobs list` prints a table in a terminal, with the full id (copy it into `jobs show`), the kind, the coloured status,
-the progress, when it was created and, for a failed job, the cut-down error.
+the progress, when it was created and the detail: the error of a failed job, otherwise the latest progress message.
+The detail column is only as wide as its text needs, and wraps onto further lines, never cut, when the terminal is narrower.
+The other columns are never wrapped, so on a very narrow terminal the table overflows instead.
 When standard output is a pipe or a file it prints the same jobs as a JSON array, so `memcastle jobs list | jq` works
 without a flag.
 `jobs cancel` asks for confirmation in a terminal, see [Output, colour and prompts](#output-colour-and-prompts).
