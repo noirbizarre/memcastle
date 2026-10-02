@@ -468,7 +468,7 @@ impl DaemonClient {
 
     /// Submit a checkpoint job. `emergency` selects `Priority::Critical`
     /// instead of the default `Priority::High` — see
-    /// `AppServices::emergency_checkpoint`.
+    /// `AppServices::submit_emergency_checkpoint`.
     ///
     /// # Errors
     ///

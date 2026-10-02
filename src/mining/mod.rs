@@ -2,8 +2,8 @@
 //!
 //! Intentionally the simplest thing that is still real mining, not a stub:
 //! one drawer per file, verbatim (no chunking, no entity extraction, no
-//! embeddings — see the architecture doc's non-goals list for what's
-//! deliberately deferred). What matters for this bootstrap is that the
+//! embeddings; the architecture doc's non-goals list covers the last two, and
+//! chunking is deferred along with them). What matters for this bootstrap is that the
 //! *pipeline* — job submission -> scheduler -> checkpointed execution ->
 //! durable writes -> lexical search over the result — is genuinely
 //! end-to-end, so later chunking/extraction phases slot into

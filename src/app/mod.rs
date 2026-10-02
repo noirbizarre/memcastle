@@ -281,12 +281,9 @@ impl AppServices {
     /// Never returns an error for an unhealthy datastore: that is the very
     /// thing being reported, so it comes back as `datastore.ok == false` with
     /// zeroed counts. An error here would make the daemon look absent (a 500)
-    /// exactly when a caller most needs to know it is up but degraded.
-    ///
-    /// # Errors
-    ///
-    /// Currently infallible; the `Result` is kept so a future fallible
-    /// field does not change every caller.
+    /// exactly when a caller most needs to know it is up but degraded. The
+    /// `Result` is kept so a future fallible field does not change every
+    /// caller.
     pub async fn status(&self, mode: MemoryMode) -> Result<StatusReport> {
         let mut report = StatusReport {
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -801,10 +798,12 @@ impl AppServices {
     /// paraphrases or truncates: every `SearchHit::drawer.content` returned
     /// is exactly what was stored.
     ///
-    /// Deliberately does not re-check `mode` itself — it delegates entirely
-    /// to [`Self::search`], which is the one place that gate lives, so
-    /// there is exactly one `MemoryMode` match to audit for this path, not
-    /// two copies that could drift apart.
+    /// Deliberately does not match on `mode` itself — it delegates entirely
+    /// to `gated_search`, which is the one place that read gate lives (and
+    /// which [`Self::search`] shares), so there is exactly one `MemoryMode`
+    /// match to audit for this path, not two copies that could drift apart.
+    /// The operation is named `recall` there, so a refusal says which tool was
+    /// forbidden.
     ///
     /// # Errors
     ///
