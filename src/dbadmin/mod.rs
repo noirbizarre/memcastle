@@ -42,6 +42,7 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
+pub use connection::SIGNIN_USER;
 pub use origin::OriginPolicy;
 
 use wire::{Format, PROTOCOLS};
@@ -67,7 +68,8 @@ pub struct Options {
     /// Which browser origins may connect.
     pub origins: OriginPolicy,
     /// Checks a token, or `None` when the daemon has authentication disabled
-    /// (then every client is accepted, as on the daemon's own listener).
+    /// (then a client is accepted without a token and may sign in as
+    /// [`SIGNIN_USER`] with that same value as the password).
     pub auth: Option<Authenticator>,
 }
 
@@ -138,10 +140,15 @@ async fn origin_guard(State(shared): State<Arc<Shared>>, request: Request, next:
             // The origin is attacker-chosen text, but it is also the one fact
             // that tells an operator which page tried; it is not a secret.
             warn!(origin = %refused, "database admin request from a disallowed origin refused");
+            // Echoed back so a client we did not anticipate can be allowed with
+            // the exact flag value; bounded because the text is client-chosen.
+            let shown: String = refused.chars().take(100).collect();
             return (
                 StatusCode::FORBIDDEN,
-                "this origin is not allowed to use the MemCastle database admin endpoint; \
-                 add it with `--allow-origin` (see docs/database-access.md)",
+                format!(
+                    "the origin `{shown}` is not allowed to use the MemCastle database admin \
+                     endpoint; add it with `--allow-origin {shown}` (see docs/database-access.md)"
+                ),
             )
                 .into_response();
         }

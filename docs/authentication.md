@@ -207,7 +207,7 @@ It applies the same token itself, whenever `auth.enabled` is true.
 Starting, stopping and inspecting it (`/api/db`) goes through the layer like any other route.
 
 A browser cannot set a header on a WebSocket, so Studio presents the token in-band:
-sign in with any username and the token as the password.
+sign in as the user `memcastle` with the token as the password.
 A client that is not a browser may send `Authorization: Bearer <token>` on the upgrade instead.
 Both are checked by the same code as the REST API, so a token you rotate or revoke stops working for the next sign-in.
 A connection that is already signed in is not closed by a revocation.

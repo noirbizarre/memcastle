@@ -9,9 +9,16 @@
 
 use axum::http::{HeaderMap, Uri, header::ORIGIN};
 
-/// The schemes a local development tool is served from. `tauri` is the desktop
-/// Surrealist app's own scheme.
+/// The schemes a local development tool is served from. `tauri` is the scheme
+/// of Tauri-based desktop apps.
 const LOCAL_SCHEMES: [&str; 3] = ["http", "https", "tauri"];
+
+/// Origins of desktop apps that are not served from a local host name. The
+/// SurrealDB Studio desktop app sends `app://surrealdb-studio`: refusing it made
+/// a correct sign-in look like a login failure. Compared whole, like the
+/// operator's own origins: a web page cannot send an `app://` origin, so this is
+/// no hole, but a pattern here would still be one.
+const DESKTOP_APP_ORIGINS: [&str; 1] = ["app://surrealdb-studio"];
 
 /// The origins allowed to use the endpoint: any page served from this machine,
 /// plus the exact origins the operator added.
@@ -42,6 +49,9 @@ impl OriginPolicy {
         self.extra
             .iter()
             .any(|allowed| allowed.eq_ignore_ascii_case(origin))
+            || DESKTOP_APP_ORIGINS
+                .iter()
+                .any(|app| app.eq_ignore_ascii_case(origin))
             || is_local_origin(origin)
     }
 
@@ -102,6 +112,20 @@ mod tests {
             "http://tauri.localhost",
         ] {
             assert!(policy.allows(origin), "{origin}");
+        }
+    }
+
+    #[test]
+    fn the_surrealdb_studio_desktop_app_is_allowed_and_lookalikes_are_not() {
+        let policy = OriginPolicy::default();
+        assert!(policy.allows("app://surrealdb-studio"));
+        for origin in [
+            "app://evil",
+            "app://surrealdb-studio.evil.example",
+            "app://surrealdb-studio:1",
+            "https://surrealdb-studio",
+        ] {
+            assert!(!policy.allows(origin), "{origin}");
         }
     }
 

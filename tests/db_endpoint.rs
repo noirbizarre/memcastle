@@ -244,10 +244,10 @@ async fn the_rust_sdk_speaks_the_flatbuffers_format_to_the_endpoint() {
 
     let db = sdk_client(&addr).await;
     db.use_ns("memcastle").use_db("palace").await.unwrap();
-    // Open endpoint, so any credentials are accepted: Studio's login form still works.
+    // Open endpoint: Studio's login form still works with the advertised user.
     db.signin(Root {
-        username: "studio".to_string(),
-        password: "anything".to_string(),
+        username: "memcastle".to_string(),
+        password: "memcastle".to_string(),
     })
     .await
     .unwrap();
@@ -257,6 +257,62 @@ async fn the_rust_sdk_speaks_the_flatbuffers_format_to_the_endpoint() {
         .unwrap();
     let rows: Vec<surrealdb::types::Value> = response.take(0).unwrap();
     assert_eq!(rows.len(), 1);
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_wrong_username_or_password_is_refused_even_without_authentication() {
+    let daemon = TestDaemon::start().await;
+    let addr = open_endpoint(&daemon, None).await;
+    let mut socket = json_socket(&addr).await;
+
+    // Without a sign-in the open endpoint works, so Studio's "no auth" mode does too.
+    let open = call(&mut socket, "query", json!(["RETURN 1"])).await;
+    assert_eq!(rows(&open), &json!(1));
+
+    // `admin`/`admin` is what a person tries first; neither half may be guessed.
+    for credentials in [
+        json!({ "user": "admin", "pass": "admin" }),
+        json!({ "user": "studio", "pass": "memcastle" }),
+        json!({ "user": "memcastle", "pass": "admin" }),
+        json!({ "user": "memcastle" }),
+    ] {
+        let refused = call(&mut socket, "signin", json!([credentials])).await;
+        assert!(refused.get("result").is_none(), "{credentials}: {refused}");
+    }
+    // A refused sign-in leaves the session without access, as on an authenticated daemon.
+    let locked = call(&mut socket, "query", json!(["RETURN 1"])).await;
+    assert!(locked.get("result").is_none(), "{locked}");
+
+    let accepted = call(
+        &mut socket,
+        "signin",
+        json!([{ "user": "memcastle", "pass": "memcastle" }]),
+    )
+    .await;
+    assert!(accepted.get("error").is_none(), "{accepted}");
+    let allowed = call(&mut socket, "query", json!(["RETURN 1"])).await;
+    assert_eq!(rows(&allowed), &json!(1));
+
+    // The long field names are accepted too.
+    let mut other = json_socket(&addr).await;
+    let accepted = call(
+        &mut other,
+        "signin",
+        json!([{ "username": "memcastle", "password": "memcastle" }]),
+    )
+    .await;
+    assert!(accepted.get("error").is_none(), "{accepted}");
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_status_names_the_user_to_sign_in_with() {
+    let daemon = TestDaemon::start().await;
+    let (status, body) = start_endpoint(&daemon, None, json!({ "port": 0 })).await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["user"], "memcastle");
     daemon.shutdown().await;
 }
 
@@ -397,7 +453,12 @@ async fn a_local_page_and_an_explicitly_allowed_site_can_connect() {
     .1;
     let addr = started["addr"].as_str().unwrap();
 
-    for origin in ["http://localhost:3000", "https://app.surrealdb.com"] {
+    // The desktop app's own origin needs no flag: it is not a web page.
+    for origin in [
+        "http://localhost:3000",
+        "https://app.surrealdb.com",
+        "app://surrealdb-studio",
+    ] {
         let mut request = format!("ws://{addr}/rpc").into_client_request().unwrap();
         request
             .headers_mut()
@@ -508,7 +569,7 @@ async fn an_authenticated_endpoint_refuses_queries_until_the_token_is_presented(
     let wrong = call(
         &mut socket,
         "signin",
-        json!([{ "user": "studio", "pass": "mc_not_the_token" }]),
+        json!([{ "user": "memcastle", "pass": "mc_not_the_token" }]),
     )
     .await;
     assert!(wrong.get("result").is_none(), "{wrong}");
@@ -516,11 +577,21 @@ async fn an_authenticated_endpoint_refuses_queries_until_the_token_is_presented(
     let still_refused = call(&mut socket, "query", json!(["SELECT * FROM job"])).await;
     assert!(still_refused.get("result").is_none());
 
-    // The right one, as the password, does.
-    let signed_in = call(
+    // The right token under another username does not, and is not echoed back.
+    let wrong_user = call(
         &mut socket,
         "signin",
         json!([{ "user": "studio", "pass": SECRET }]),
+    )
+    .await;
+    assert!(wrong_user.get("result").is_none(), "{wrong_user}");
+    assert!(!wrong_user.to_string().contains(SECRET));
+
+    // The right one, as the password of the right user, does.
+    let signed_in = call(
+        &mut socket,
+        "signin",
+        json!([{ "user": "memcastle", "pass": SECRET }]),
     )
     .await;
     assert!(signed_in.get("error").is_none(), "{signed_in}");
@@ -538,7 +609,7 @@ async fn the_token_a_signin_returns_authenticates_a_later_connection() {
     let signed_in = call(
         &mut first,
         "signin",
-        json!([{ "user": "u", "pass": SECRET }]),
+        json!([{ "user": "memcastle", "pass": SECRET }]),
     )
     .await;
     let token = signed_in["result"].as_str().expect("a token").to_string();
@@ -578,7 +649,7 @@ async fn repeated_wrong_tokens_close_the_connection() {
         call(
             &mut socket,
             "signin",
-            json!([{ "user": "u", "pass": "mc_wrong" }]),
+            json!([{ "user": "memcastle", "pass": "mc_wrong" }]),
         )
         .await;
     }

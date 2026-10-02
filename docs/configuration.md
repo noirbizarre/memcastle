@@ -224,7 +224,7 @@ The address is `127.0.0.1` port `8000` unless configured otherwise, and the port
 A `db.bind` that is not a loopback address is refused when the configuration loads unless `db.allow_remote` is true,
 and the daemon refuses to open it at all unless `auth.enabled` is also true.
 `db.allowed_origins` lists web page origins, such as `https://app.surrealdb.com`, that may connect from a browser,
-in addition to pages served from this machine.
+in addition to pages served from this machine and the SurrealDB Studio desktop app, which are always allowed.
 The values are compared whole, never as patterns.
 
 See [Database access](database-access.md) for the workflow and the security model.

@@ -85,9 +85,13 @@ Point SurrealDB Studio at that server directly.
 ### SurrealDB Studio cannot connect to the database admin endpoint
 
 Check `memcastle db status` first: the endpoint only exists after `memcastle db serve`.
-A refusal with `403` means the page's origin is not allowed: the hosted Surrealist needs
-`--allow-origin https://app.surrealdb.com`, and pages served from this machine are always allowed.
-A refused sign-in on an authenticated daemon needs the MemCastle token as the *password*, with any username.
+A refusal with `403` means the client's origin is not allowed, and the daemon's log names it
+(`database admin request from a disallowed origin refused`).
+The hosted Surrealist needs `--allow-origin https://app.surrealdb.com`;
+the SurrealDB Studio desktop app and pages served from this machine are always allowed.
+Studio may report that refusal as a failed login.
+A refused sign-in needs the user `memcastle`, and as the password the MemCastle token on an authenticated daemon
+or `memcastle` when authentication is disabled.
 See [Database access](database-access.md).
 
 ### `status` reports the registry as `stale`
