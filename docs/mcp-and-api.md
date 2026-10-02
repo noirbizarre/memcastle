@@ -152,7 +152,7 @@ can inspect the live database.
 They are guarded by [authentication](authentication.md) like every other route, and have no MCP tool:
 an agent must not be able to open a database console onto the palace.
 The listener itself is not part of this API: it is not MemCastle's REST or MCP, and its protocol is SurrealDB's.
-The routes answer with `{running, addr, url, namespace, database, remote, auth_required, started_at}`.
+The routes answer with `{running, addr, url, namespace, database, user, remote, auth_required, started_at}`.
 [Database access](database-access.md) describes the workflow and the security model.
 
 ### Submitting jobs

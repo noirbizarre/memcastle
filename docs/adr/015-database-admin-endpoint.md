@@ -59,12 +59,20 @@ The wire types and codecs, in `surrealdb-core` and `surrealdb-rpc`, are usable.
   Five refused sign-ins close the connection.
   `signin` answers with the token the client presented, which is what lets Studio's `authenticate` on reconnect be checked
   the same way.
-  With authentication disabled, any credentials are accepted, as on the daemon's own listener.
+  The user is the fixed name `memcastle`, and any other is refused before the password is looked at.
+  It is a fixed name rather than the operating-system user because that is the same on every machine and in every
+  container, and there is nothing to resolve or document per host.
+  It identifies, it does not authenticate: there is one shared credential.
+  With authentication disabled there is no token, so the password is `memcastle` too:
+  Studio's login form insists on a user and a password, and a known pair is better than accepting anything.
+  A client that never signs in, such as a script, can still use an endpoint whose daemon has authentication disabled.
 - **A browser page from another site is refused.**
   Any page in the developer's browser can dial `ws://127.0.0.1`, whatever its origin.
   The endpoint refuses a request whose `Origin` is not a page served from this machine or one added with
   `--allow-origin`, on every route.
   Clients that send no `Origin` are unaffected and are held to authentication instead.
+  The SurrealDB Studio desktop app, which sends the fixed origin `app://surrealdb-studio`, is allowed too:
+  a web page cannot send an `app://` origin, and the match is on the whole value, never a pattern.
   The hosted Surrealist (`https://app.surrealdb.com`) is *not* allowed by default.
 - **Administration is REST and CLI only.**
   `/api/db` sits behind the same authentication layer as every other route, and there is no MCP tool for it.

@@ -59,7 +59,9 @@ It listens on `127.0.0.1` port `8000` unless told otherwise, and prints the URL,
 SurrealDB Studio.
 A non-loopback `--bind` is refused (`memcastle::db::unsafe_bind`) unless `--allow-remote` is given and the daemon has
 authentication enabled.
-`--allow-origin` may be repeated, and lets a browser page from that origin connect.
+`--allow-origin` may be repeated, and lets a browser page from that origin connect;
+pages served from this machine and the SurrealDB Studio desktop app need no flag.
+`db status` prints the user to sign in with, which is `memcastle`.
 Flags left out fall back to the `[db]` [settings](configuration.md#the-database-admin-endpoint).
 See [Database access](database-access.md).
 

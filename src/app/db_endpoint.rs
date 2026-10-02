@@ -67,6 +67,10 @@ pub struct DbEndpointStatus {
     /// The database to select in Studio.
     #[serde(default)]
     pub database: String,
+    /// The username to sign in with in Studio (the password is the token, or
+    /// the same value when authentication is disabled).
+    #[serde(default)]
+    pub user: String,
     /// Whether it listens beyond loopback.
     #[serde(default)]
     pub remote: bool,
@@ -135,6 +139,7 @@ fn stopped() -> DbEndpointStatus {
     DbEndpointStatus {
         namespace: EMBEDDED_NAMESPACE.to_string(),
         database: EMBEDDED_DATABASE.to_string(),
+        user: dbadmin::SIGNIN_USER.to_string(),
         ..DbEndpointStatus::default()
     }
 }

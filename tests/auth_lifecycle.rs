@@ -434,7 +434,7 @@ async fn a_token_used_to_sign_in_to_the_database_endpoint_is_written_nowhere() {
         .expect("connect");
     for password in [WRONG, SECRET] {
         let request = serde_json::json!({
-            "id": 1, "method": "signin", "params": [{ "user": "studio", "pass": password }],
+            "id": 1, "method": "signin", "params": [{ "user": "memcastle", "pass": password }],
         });
         socket
             .send(Message::Text(request.to_string().into()))

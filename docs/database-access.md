@@ -58,14 +58,15 @@ The endpoint adds no second storage layer and does not touch the schema or the m
     database admin endpoint: listening on ws://127.0.0.1:8000
       namespace: memcastle
       database:  palace
-      sign in:   not required (loopback only, authentication is disabled)
+      sign in:   user `memcastle`, password `memcastle` (loopback only, authentication is disabled)
     Connect SurrealDB Studio to the URL above. Stop it with `memcastle db stop`.
     ```
 
 3. In Studio, add a connection to that URL, choose the `memcastle` namespace and the `palace` database.
-   If the daemon has [authentication](authentication.md) enabled, sign in with any username and the MemCastle token
-   as the password.
-   With authentication disabled, whatever you enter is accepted.
+   Sign in as the user `memcastle`.
+   If the daemon has [authentication](authentication.md) enabled, the password is the MemCastle token.
+   With authentication disabled there is no token, so the password is `memcastle` as well:
+   Studio's form asks for both, and any other user or password is refused.
 4. Inspect and query the live database.
 5. Close the endpoint when you are done:
 
@@ -109,16 +110,19 @@ What keeps it safe:
   `auth.enabled`, and it warns in its log when it listens beyond loopback.
   A refusal is `memcastle::db::unsafe_bind`.
 - **It uses the daemon's own authentication.**
-  When enabled, a connection can do nothing until it has signed in with the token, five refused sign-ins close it,
-  and a token you rotate or revoke stops working for the next sign-in.
+  When enabled, a connection can do nothing until it has signed in as `memcastle` with the token, five refused sign-ins
+  close it, and a token you rotate or revoke stops working for the next sign-in.
   Studio cannot send a header on a WebSocket, so it sends the token as the password.
+  The user name is a fixed identifier, not a secret: with authentication disabled, `memcastle`/`memcastle` guards only
+  against a mistyped login, and the protection is the loopback listener and the origin check below.
   See [Authentication](authentication.md#the-database-admin-endpoint).
 - **A web page from another site cannot use it.**
   Any page open in your browser can reach `127.0.0.1`, so the endpoint refuses a request whose `Origin` is not a page
   served from this machine.
   The hosted Surrealist at `https://app.surrealdb.com` is therefore refused until you allow it
   with `--allow-origin https://app.surrealdb.com`.
-  The Surrealist desktop app and your own local pages need nothing.
+  The SurrealDB Studio desktop app (which sends `app://surrealdb-studio`) and your own local pages need nothing.
+  A refusal names the origin in the daemon's log and in the `403` body, so an unlisted client can be allowed with it.
   Some browsers also block a page served over HTTPS from opening a plain `ws://` connection, even to `127.0.0.1`;
   use the desktop app if yours does.
 

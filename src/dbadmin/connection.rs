@@ -23,6 +23,12 @@ use uuid::Uuid;
 use super::Shared;
 use super::wire::Format;
 
+/// The one username `signin` accepts. MemCastle has a single shared credential
+/// (`docs/adr/014`), so this is a fixed identifier, not an account: stable across
+/// machines and containers, and printed by `memcastle db status`. It is also the
+/// password when the daemon has authentication disabled.
+pub const SIGNIN_USER: &str = "memcastle";
+
 /// Wrong credentials allowed before the connection is dropped. A browser
 /// retrying a stale saved token needs a couple of attempts; a guessing script
 /// does not get an unbounded number.
@@ -270,8 +276,8 @@ impl Session {
     ) -> Result<DbResult, TypesError> {
         if !self.authenticated && !allowed_before_auth(method) {
             return Err(TypesError::not_allowed(
-                "authentication required: sign in with the MemCastle token as the password \
-                 (see docs/database-access.md)"
+                "authentication required: sign in as `memcastle` with the MemCastle token as the \
+                 password (see docs/database-access.md)"
                     .to_string(),
                 NotAllowedError::Auth(AuthError::InvalidAuth),
             ));
@@ -315,13 +321,17 @@ impl Session {
         Ok(DbResult::Other(Value::None))
     }
 
-    /// `signin`: accept the MemCastle token as the password.
+    /// `signin`: accept [`SIGNIN_USER`] with the MemCastle token as the password.
     ///
-    /// The username is ignored: there is one shared credential, as everywhere
-    /// else in MemCastle (`docs/adr/014`). The reply is the token the client
-    /// just presented, so that a later `authenticate` with it (which Studio
-    /// does on reconnect) is checked the same way and a revoked token stops
-    /// working at the next connection.
+    /// There is one shared credential, as everywhere else in MemCastle
+    /// (`docs/adr/014`), so the username is a fixed identifier rather than an
+    /// account: a different one is refused before the password is looked at, so
+    /// a mistyped login fails the same way whether or not the token was right.
+    /// With authentication disabled there is no token, so the password must be
+    /// [`SIGNIN_USER`] too, which gives Studio's login form a known value to fill.
+    /// The reply is the password the client just presented, so that a later
+    /// `authenticate` with it (which Studio does on reconnect) is checked the
+    /// same way and a revoked token stops working at the next connection.
     async fn signin(
         &mut self,
         shared: &Shared,
@@ -330,15 +340,23 @@ impl Session {
         let Some(Value::Object(credentials)) = params.into_iter().next() else {
             return Err(invalid_params("Expected (params:object)"));
         };
-        let password = ["pass", "password"]
-            .iter()
-            .find_map(|key| match credentials.get(*key) {
-                Some(Value::String(password)) => Some(password.clone()),
+        // Studio and the SDK send `user`/`pass`; the long names are the
+        // documented alternative, so accept both.
+        let text = |keys: [&str; 2]| {
+            keys.iter().find_map(|key| match credentials.get(*key) {
+                Some(Value::String(text)) => Some(text.clone()),
                 _ => None,
-            });
-        self.check_credential(shared, password.as_deref()).await?;
+            })
+        };
+        let user = text(["user", "username"]);
+        let password = text(["pass", "password"]);
+        if user.as_deref() == Some(SIGNIN_USER) {
+            self.check_credential(shared, password.as_deref()).await?;
+        } else {
+            self.refuse().await?;
+        }
         Ok(DbResult::Other(Value::String(
-            password.unwrap_or_else(|| "memcastle".to_string()),
+            password.unwrap_or_else(|| SIGNIN_USER.to_string()),
         )))
     }
 
@@ -356,25 +374,33 @@ impl Session {
     }
 
     /// Run `presented` through the daemon's authentication, recording the
-    /// outcome on the session. Succeeds for anything when the daemon has
-    /// authentication disabled, so Studio's login form works there too.
+    /// outcome on the session. With authentication disabled the only value
+    /// accepted is [`SIGNIN_USER`], what `signin` asks for as the password.
     async fn check_credential(
         &mut self,
         shared: &Shared,
         presented: Option<&str>,
     ) -> Result<(), TypesError> {
         let accepted = match &shared.auth {
-            None => true,
+            None => presented == Some(SIGNIN_USER),
             Some(authenticate) => authenticate(presented.map(str::to_string)).await,
         };
-        self.authenticated = accepted;
         if accepted {
+            self.authenticated = true;
             return Ok(());
         }
+        self.refuse().await
+    }
+
+    /// Record a refused sign-in: the session loses any authentication it had,
+    /// and the answer is delayed so guessing is slow.
+    async fn refuse(&mut self) -> Result<(), TypesError> {
+        self.authenticated = false;
         tokio::time::sleep(FAILED_SIGNIN_DELAY).await;
-        // Fixed wording: nothing the client sent is echoed.
+        // Fixed wording: nothing the client sent is echoed, and it does not say
+        // whether the user or the password was the wrong one.
         Err(TypesError::not_allowed(
-            "the token was not accepted".to_string(),
+            "the user or password was not accepted".to_string(),
             NotAllowedError::Auth(AuthError::InvalidAuth),
         ))
     }

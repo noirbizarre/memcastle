@@ -564,10 +564,18 @@ fn print_db_status(status: &DbEndpointStatus, json: bool) -> Result<()> {
     println!("database admin endpoint: listening on {url}");
     println!("  namespace: {}", status.namespace);
     println!("  database:  {}", status.database);
+    // Studio's login form wants a user and a password even when there is no
+    // token, so say what to type in both cases.
     if status.auth_required {
-        println!("  sign in:   with the MemCastle token as the password (any username)");
+        println!(
+            "  sign in:   user `{}`, password: the MemCastle token",
+            status.user
+        );
     } else {
-        println!("  sign in:   not required (loopback only, authentication is disabled)");
+        println!(
+            "  sign in:   user `{0}`, password `{0}` (loopback only, authentication is disabled)",
+            status.user
+        );
     }
     if status.remote {
         println!(
