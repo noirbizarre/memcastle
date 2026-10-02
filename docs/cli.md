@@ -4,10 +4,15 @@ The `memcastle` binary is one daemon plus a set of thin clients.
 `serve` (alias `daemon`) runs the daemon, and `migrate` talks to storage directly.
 Every other subcommand is an HTTP call to a running daemon, so it fails with `memcastle::client::not_running`
 (and points you at `memcastle serve`) when none is running.
+Three things differ:
+`status` reports a stopped daemon instead of failing, `restart` starts a daemon when none is running,
+and the reserved commands (see [Not implemented yet](#not-implemented-yet)) fail with `memcastle::cli::not_implemented`
+without contacting a daemon.
 Run `memcastle <command> --help` for the authoritative text of any flag.
 
 Client commands print the daemon's JSON answer, so the output pipes into `jq`.
-`status` is the exception: it prints a readable report, and `--json` gives the same report as JSON.
+`status`, `db serve` and `db status` are the exceptions: they print a readable report,
+and `--json` gives the same report as JSON.
 
 ## Global flags
 
