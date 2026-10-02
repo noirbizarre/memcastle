@@ -32,7 +32,8 @@ A non-loopback `--bind` may also need privileges or an address that exists on th
 
 The palace could not be opened.
 For an embedded palace this almost always means another process holds it:
-a second `serve` on the same palace, or `memcastle migrate` while the daemon runs.
+`memcastle migrate` while the daemon runs, or a second `serve` on the same palace and a different port
+(on the same port it fails earlier, with `memcastle::server::bind_failed`).
 Check `memcastle status`, stop that process, and try again.
 For a remote palace, check the URL and credentials in `[store]`.
 
