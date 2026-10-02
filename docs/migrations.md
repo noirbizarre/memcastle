@@ -41,7 +41,8 @@ sequenceDiagram
     R->>DB: release the lock
 ```
 
-`memcastle serve` runs this before it opens the listener for clients, so an MCP client never sees a half-migrated palace.
+`memcastle serve` runs this before it starts answering requests, so an MCP client never sees a half-migrated palace.
+The listener is already bound by then, and connections wait in its backlog.
 If a step fails, the daemon exits with `memcastle::migrate::failed` instead of serving.
 The version stays at the last step that succeeded, so once the cause is fixed a later start resumes rather than starts over.
 The lock is a lease, so a crashed run does not block the next one forever;

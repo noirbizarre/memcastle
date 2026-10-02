@@ -34,6 +34,7 @@ sequenceDiagram
     participant C as Clients
 
     D->>D: load and validate configuration
+    D->>D: locate the runtime assets (read-only)
     D->>D: bind the listener
     Note over D: a taken port fails here, before anything is touched
     D->>S: connect
