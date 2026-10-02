@@ -62,12 +62,13 @@ const TRANSITION_ATTEMPTS: usize = 5;
 /// unit must not hang the daemon's exit; a job still running after this is
 /// left `Running` and re-queued by [`Scheduler::recover`] on the next start,
 /// losing only the work since its last checkpoint.
-const DEFAULT_DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
+const DEFAULT_DRAIN_TIMEOUT: Duration =
+    Duration::from_secs(crate::config::DEFAULT_DRAIN_TIMEOUT_SECS);
 
 /// How long a job's lease lasts without being renewed, unless configured
 /// otherwise (`jobs.lease_ttl_secs`). The heartbeat renews it every third of
 /// this, so a live daemon survives two missed beats before it is reaped.
-const DEFAULT_LEASE_TTL: Duration = Duration::from_secs(30);
+const DEFAULT_LEASE_TTL: Duration = Duration::from_secs(crate::config::DEFAULT_LEASE_TTL_SECS);
 
 /// A label unique to this scheduler instance, recorded as `lease_owner` on
 /// the jobs it claims. Load-bearing: it is what a fenced write and a lease

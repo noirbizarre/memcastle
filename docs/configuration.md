@@ -207,7 +207,7 @@ or with [authentication](authentication.md) enabled.
 The daemon logs a warning when it listens beyond loopback without it.
 The MCP endpoint additionally refuses a non-loopback `Host` header, see [Authentication](authentication.md#exposing-the-daemon).
 
-The listener is bound before anything else happens.
+The listener is bound before anything that changes state: the runtime assets are only located, not yet used.
 If the address is taken, needs privileges, or does not exist on this machine,
 the start fails with `memcastle::server::bind_failed`, naming the address and what to change,
 and has not created the palace, migrated it or touched its jobs.

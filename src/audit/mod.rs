@@ -1,13 +1,12 @@
 //! The audit job handler: a read-only palace consistency report.
 //!
-//! `docs/architecture.md` frames MemCastle's single-SurrealDB design as
-//! avoiding needing a repair/audit subsystem "by construction" — one store,
-//! one writer, no second index file to desync — in direct contrast to
-//! `mempalace-rs`'s SQLite + separate `usearch` vector index, which needs an
-//! entire watchdog/auto-repair/re-embed-everything subsystem specifically
-//! because that pairing can drift apart. This module's checks are therefore
-//! scoped to what's **structurally still possible** here, not a port of
-//! `pi-palace`'s `/palace-audit` feature list:
+//! MemCastle keeps everything in one SurrealDB — one store, one writer, no
+//! second index file to desync (see `PLAN.md` and `docs/storage.md`) — so it
+//! does not need the watchdog/auto-repair/re-embed-everything subsystem that
+//! a SQLite plus separate vector-index design needs, because that pairing can
+//! drift apart. This module's checks are therefore scoped to what's
+//! **structurally still possible** here, not a port of `pi-palace`'s
+//! `/palace-audit` feature list:
 //!
 //! - Orphan drawers: `Drawer.room` doesn't resolve to any `room` record.
 //! - Dangling provenance: `Drawer.provenance.job_id` points at a job that no

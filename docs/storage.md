@@ -92,8 +92,10 @@ The store is chosen with `store.mode` in the config file.
 
 **Embedded** (the default) keeps the database in `<palace>/db`.
 SurrealKV's file lock lets only one daemon open it at a time, which is what guarantees a single writer.
-A second `memcastle serve` on the same palace, or `memcastle migrate` while the daemon runs,
-fails with `memcastle::store::backend_failed`.
+`memcastle migrate` while the daemon runs fails with `memcastle::store::backend_failed`,
+and so does a second `memcastle serve` on the same palace that listens on a different port.
+A second `serve` on the same address never gets that far: the listener is bound first,
+so it fails with `memcastle::server::bind_failed`.
 Stop the daemon first, or point at a different palace.
 
 **Remote** connects to a SurrealDB server over `ws://` or `wss://`:

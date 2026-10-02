@@ -101,7 +101,7 @@ without being passed on the command line.
 
 ### Under systemd
 
-The packaged user unit (Arch `memcastle-bin`, `/usr/lib/systemd/user/memcastle.service`)
+The packaged user unit (the Arch `memcastle-bin`, `.deb` and `.rpm` packages, `/usr/lib/systemd/user/memcastle.service`)
 is package-owned and holds no secret.
 It reads an optional, user-owned `EnvironmentFile=-%E/memcastle/secret.env`, which is `~/.config/memcastle/secret.env`
 unless you moved `XDG_CONFIG_HOME`.

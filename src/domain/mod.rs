@@ -15,6 +15,7 @@ mod ids;
 mod job;
 mod memory_mode;
 mod palace;
+mod secret;
 
 pub use checkpoint::{CheckpointDestination, CheckpointItem, CheckpointPayload, FactMutation};
 pub use drawer::{Drawer, Provenance, Source, SourceKind, content_hash, sha256_hex};
@@ -26,6 +27,7 @@ pub use job::{
     TransitionError,
 };
 pub use memory_mode::MemoryMode;
+pub use secret::Secret;
 
 /// The channels a write can come through, recorded as `Job::requested_by` and
 /// `provenance.requested_by`. Named once so a spelling drift between the

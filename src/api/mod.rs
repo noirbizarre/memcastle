@@ -254,11 +254,40 @@ fn default_requested_by() -> String {
     crate::domain::channel::HTTP.to_string()
 }
 
+/// Deserialize a job submission, naming a bad job id or checkpoint payload the
+/// way MCP and the CLI do.
+///
+/// Letting serde reject the whole body would report both as
+/// `memcastle::input::invalid` on `body`, while the other two channels say
+/// `memcastle::jobs::invalid_id` and `payload`: the same mistake with a
+/// different diagnostic per channel. The two checks run on the raw JSON first,
+/// so those cases get the shared diagnostic and everything else still falls
+/// through to the single serde pass below.
+fn parse_submit_body(raw: &serde_json::Value) -> Result<SubmitJobBody, crate::Error> {
+    match raw.get("type").and_then(serde_json::Value::as_str) {
+        Some("repair") => {
+            if let Some(id) = raw.get("based_on_job").and_then(serde_json::Value::as_str) {
+                crate::Error::parse_job_id(id)?;
+            }
+        }
+        Some("checkpoint") => {
+            if let Some(payload) = raw.get("payload") {
+                serde_json::from_value::<crate::domain::CheckpointPayload>(payload.clone())
+                    .map_err(|source| crate::Error::invalid_input("payload", source.to_string()))?;
+            }
+        }
+        _ => {}
+    }
+    serde_json::from_value(raw.clone())
+        .map_err(|source| crate::Error::invalid_input("body", source.to_string()))
+}
+
 async fn submit_job(
     State(state): State<ApiState>,
     ModeHeader(mode): ModeHeader,
-    ApiJson(body): ApiJson<SubmitJobBody>,
+    ApiJson(raw): ApiJson<serde_json::Value>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let body = parse_submit_body(&raw)?;
     let job = match body.kind {
         JobKind::Mine { source, wing } => {
             let MiningSource::Directory { path } = source;

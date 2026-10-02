@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted, amended by a dated note under Alternatives rejected (2026-09-30: `.deb` and `.rpm` packages)
 
 ## Context
 
@@ -95,8 +95,8 @@ A release that cannot be rebuilt to the same bytes cannot be checked by anyone b
 - **Ship `.deb` and `.rpm` packages now.**
   There is nothing to put in them beyond the binary that the AUR and Homebrew recipes already install.
   The layout is the contract; the formats can follow when a second installable file exists.
-  *Amended: the release now attaches `.deb` and `.rpm` packages built with nfpm, with the same contents as the tarball
-  plus the systemd user unit.
+  *Amended 2026-09-30: the release now attaches `.deb` and `.rpm` packages built with nfpm,
+  with the same contents as the tarball plus the systemd user unit.
   They are unsigned, have no apt or dnf repository, and declare no dependencies.
   The Arch package installs the same unit.*
 - **Generate the systemd unit from the binary, such as `memcastle install-service`.**

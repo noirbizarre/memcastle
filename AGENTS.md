@@ -26,7 +26,8 @@ Each of these should be enforced by a hook or a test. An invariant nothing check
    `crate::migrate::run`/`status`, the same runner `serve` calls on every startup) because migration must work
    without, and before, a daemon exists — see `docs/adr/004-versioned-database-migrations.md`.
    Enforced by the `prek` `store-isolation` hook: it greps `main.rs`, `cli.rs`, `client/`, `mcp/` and `api/`
-   for any `crate::`/`memcastle::` `store` or `jobs` import, allowing only `main.rs`'s `SurrealStore` import for `migrate`.
+   for any `crate::`/`memcastle::` `store` or `jobs` path, in code or in a string, allowing only `main.rs`'s `SurrealStore`
+   import for `migrate`.
 2. **Job status only changes through `domain::Job::apply`** — no other code assigns `job.status` directly.
    Enforced by `domain::job`'s table-driven test over every (status, event) pair, including the rejected ones,
    and by the prek `job-status-only-via-apply` hook, which fails on any `.status =` assignment outside `domain/job.rs`.
@@ -84,14 +85,15 @@ src/
 ├── audit/      the audit job handler (read-only consistency report)
 ├── repair/     the repair job handler (narrow, dry-run-first fixes)
 ├── search/     the search abstraction (lexical today; semantic later)
-├── app/        application services — the one layer cli/mcp/api call into
+├── app/        application services — the one layer mcp/api call into (the CLI reaches it over HTTP, via `client/`)
 ├── server/     the daemon composition root + lifecycle (registry file)
 ├── mcp/        MCP tool surface, over HTTP
 ├── api/        the REST API (health/status/jobs/search/recall/wake-up/diary/auth-token/db/shutdown)
 └── client/     the CLI's HTTP client for a running daemon
 ```
 
-Dependencies point inward: `cli / mcp / api -> app -> domain + store/jobs/search -> store`.
+Dependencies point inward: `cli / mcp / api -> app -> domain + store/jobs/search -> store`,
+where the `cli` arrow is an HTTP call to the daemon through `client/`, not a Rust call into `app`.
 Nothing in `domain` knows SurrealDB exists; nothing in `cli`/`mcp`/`api` knows `store` exists.
 
 ## Style

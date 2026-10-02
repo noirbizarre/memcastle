@@ -238,8 +238,6 @@ async fn a_malformed_job_submission_is_a_400_with_the_shared_error_body() {
         // An unknown job type, and a known one missing its required field.
         serde_json::json!({ "type": "no-such-kind" }),
         serde_json::json!({ "type": "demo" }),
-        // A repair whose `based_on_job` is not a UUID.
-        serde_json::json!({ "type": "repair", "based_on_job": "not-a-uuid" }),
     ] {
         let response = client
             .post(format!("{}/api/jobs", daemon.base_url))
@@ -257,6 +255,49 @@ async fn a_malformed_job_submission_is_a_400_with_the_shared_error_body() {
         );
         assert_eq!(body["code"], "memcastle::input::invalid", "{payload}");
         assert!(body["help"].is_string(), "{payload}: {body}");
+    }
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_bad_job_id_or_checkpoint_payload_gets_the_same_diagnostic_over_rest_as_over_mcp_and_the_cli()
+ {
+    let daemon = TestDaemon::start().await;
+    let client = reqwest::Client::new();
+
+    for (payload, code, blamed) in [
+        // The job-id parser every channel shares reports `invalid_id`...
+        (
+            serde_json::json!({ "type": "repair", "based_on_job": "not-a-uuid" }),
+            "memcastle::jobs::invalid_id",
+            "not-a-uuid",
+        ),
+        // ...and a bad checkpoint payload is blamed on `payload`, not `body`.
+        (
+            serde_json::json!({ "type": "checkpoint", "payload": { "nonsense": true } }),
+            "memcastle::input::invalid",
+            "invalid payload",
+        ),
+    ] {
+        let response = client
+            .post(format!("{}/api/jobs", daemon.base_url))
+            .json(&payload)
+            .send()
+            .await
+            .expect("request");
+        let status = response.status();
+        let body: serde_json::Value = response.json().await.expect("json error body");
+
+        assert_eq!(
+            status,
+            reqwest::StatusCode::BAD_REQUEST,
+            "{payload}: {body}"
+        );
+        assert_eq!(body["code"], code, "{payload}: {body}");
+        assert!(
+            body["error"].as_str().is_some_and(|m| m.contains(blamed)),
+            "{payload}: {body}"
+        );
     }
     daemon.shutdown().await;
 }

@@ -414,7 +414,7 @@ async fn cmd_checkpoint(
     // payload should fail fast with a clear local error, not round-trip to
     // the API just to bounce back as a generic 400.
     let payload: memcastle::domain::CheckpointPayload = serde_json::from_str(&raw)
-        .map_err(|source| Error::invalid_input("checkpoint payload", source.to_string()))?;
+        .map_err(|source| Error::invalid_input("payload", source.to_string()))?;
     let job = client(config, mode)
         .submit_checkpoint(payload, args.emergency)
         .await?;

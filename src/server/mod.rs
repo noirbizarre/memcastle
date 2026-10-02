@@ -31,19 +31,19 @@ use crate::store::SurrealStore;
 /// Returns [`Error::ServerBind`] if the listener can't bind, or an error if
 /// storage can't be connected/migrated or the registry file can't be written.
 pub async fn run(config: Config) -> Result<()> {
-    // Bound first, before any side effect: a taken or invalid port is by far
-    // the most common startup failure, and discovering it after creating the
-    // palace directory, migrating, and recovering (re-queueing) jobs would
-    // leave a failed start having changed things. The listener just holds
-    // connections in its backlog until `axum::serve` below; the registry
-    // file, which clients discover the daemon by, is still written only once
-    // everything is ready.
     // Resolved before the listener binds, so a mistyped `--assets-dir` fails
-    // before anything else happens. Purely local: it reads directories and
+    // before anything is bound or changed. Purely local: it reads directories and
     // never the network, which is what lets a standalone binary start offline.
     let assets = crate::assets::Assets::resolve_for_process(config.assets.dir.as_deref())?;
     info!(source = %assets.source(), "runtime assets resolved");
 
+    // Bound before any side effect (resolving assets above only reads): a
+    // taken or invalid port is by far the most common startup failure, and
+    // discovering it after creating the palace directory, migrating, and
+    // recovering (re-queueing) jobs would leave a failed start having changed
+    // things. The listener just holds connections in its backlog until
+    // `axum::serve` below; the registry file, which clients discover the
+    // daemon by, is still written only once everything is ready.
     let requested_addr = config.server.socket_addr();
     let listener = tokio::net::TcpListener::bind(requested_addr)
         .await

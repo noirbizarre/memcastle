@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted, amended by a dated note in Consequences (2026-09-30: the build is C-free for storage only)
 
 ## Context
 
@@ -26,6 +26,8 @@ and the project is a single-writer, single-palace, local-first tool.
 The alternative already available in the same `surrealdb` crate's `any` engine is `kv-surrealkv`:
 SurrealDB's own embedded engine, pure Rust (confirmed by inspecting its resolved dependency tree —
 `arc-swap`, `crossbeam-skiplist`, `lz4_flex`, `snap`, etc., no `cc`/`cmake` build-dependency from the engine itself).
+
+The alternatives are argued here rather than in a separate section: RocksDB, the engine this replaces, against SurrealKV.
 
 ## Decision
 

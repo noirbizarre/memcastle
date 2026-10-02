@@ -34,6 +34,7 @@ sequenceDiagram
     participant C as Clients
 
     D->>D: load and validate configuration
+    D->>D: locate the runtime assets (read-only)
     D->>D: bind the listener
     Note over D: a taken port fails here, before anything is touched
     D->>S: connect
@@ -153,7 +154,8 @@ At the default `info` level the daemon logs lifecycle transitions, not individua
 | Scheduler configured, jobs recovered | concurrency, lease TTL, job ID |
 | `job queued` | `job_id`, `job_type`, `priority`, `requested_by` |
 | `job claimed by worker` | `job_id`, `job_type`, `priority`, `attempt`, `worker_id` |
-| `job started`, `completed`, `paused`, `cancelled` | `job_id`, `job_type`, `elapsed_ms` |
+| `job started` | `job_id`, `job_type`, `attempt` |
+| `job completed`, `paused`, `cancelled` | `job_id`, `job_type`, `elapsed_ms` |
 | `job failed` | `job_id`, `error`, `elapsed_ms`, `attempt` |
 | Pause, cancel, resume and retry requests | `job_id` |
 | Mining, checkpoint, audit and repair start | counts only (files, items, dry run) |
@@ -187,8 +189,10 @@ The daemon does its own graceful shutdown on `SIGTERM`, does not fork, and logs 
 which is what supervisors expect.
 The binary neither generates nor installs service files: integrating with an init system is a package's job,
 not the core binary's (see [ADR-013](adr/013-release-packaging-and-asset-resolution.md)).
-The Arch package (`memcastle-bin`) installs a systemd user unit, so there `systemctl --user start memcastle` is enough;
-see [Installation](installation.md#arch-linux-aur).
+The Arch package (`memcastle-bin`) and the `.deb` and `.rpm` packages install a systemd user unit,
+so there `systemctl --user start memcastle` is enough;
+see [Installation](installation.md#arch-linux-aur) and
+[Installation](installation.md#standalone-binary-or-native-package).
 Its `ExecStart` is `/usr/bin/memcastle serve`, and it reads an optional `~/.config/memcastle/secret.env`.
 Change it with `systemctl --user edit memcastle`, which writes a drop-in and leaves the package file alone.
 The packaged unit sets `MEMCASTLE_LOG=warn`, which outranks `-v` and `logging.level`;

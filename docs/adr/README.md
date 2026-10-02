@@ -40,9 +40,9 @@ The history is the value.
 - [ADR-009](009-shutdown-drains-jobs.md) — shutdown drains running jobs and hands them back to the queue
 - [ADR-010](010-unix-xdg-paths.md) — configuration, data and state follow the Unix XDG layout on Linux and macOS
 - [ADR-011](011-split-bind-address-and-port.md) — the listener's address and port are separate settings,
-  bound before the daemon does anything else
+  bound before the daemon does anything else (non-loopback warning added by ADR-014)
 - [ADR-012](012-status-reports-a-stopped-daemon-and-exits-by-state.md) — `status` answers for a stopped daemon too,
-  and its exit code says which state it found
+  and its exit code says which state it found (`--json` extended by ADR-015)
 - [ADR-013](013-release-packaging-and-asset-resolution.md) — releases are one binary plus an optional package layout,
   and assets resolve override, installed, embedded
 - [ADR-014](014-optional-token-authentication.md) — authentication is an optional bearer token, checked at one layer,

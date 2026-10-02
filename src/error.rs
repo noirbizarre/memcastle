@@ -192,7 +192,7 @@ pub enum Error {
     },
 
     /// A job transition was rejected by the state machine.
-    #[error("job {id} cannot go from {from:?} to {event:?}")]
+    #[error("job {id} cannot go from {from} to {event}")]
     #[diagnostic(
         code(memcastle::jobs::invalid_transition),
         help(
@@ -359,7 +359,7 @@ pub enum Error {
     /// [`crate::domain::MemoryMode`]: `ReadOnly` rejects writes, `Disabled`
     /// rejects everything (see that type's doc comment for the full
     /// allow/deny matrix). Returned before the store is ever touched.
-    #[error("`{operation}` is not permitted in {mode:?} mode")]
+    #[error("`{operation}` is not permitted in {mode} mode")]
     #[diagnostic(
         code(memcastle::app::mode_forbidden),
         help(
@@ -698,8 +698,8 @@ impl From<crate::domain::TransitionError> for Error {
     fn from(err: crate::domain::TransitionError) -> Self {
         Self::InvalidJobTransition {
             id: err.id.to_string(),
-            from: format!("{:?}", err.from),
-            event: format!("{:?}", err.event),
+            from: err.from.to_string(),
+            event: err.event.to_string(),
         }
     }
 }
@@ -755,8 +755,8 @@ mod tests {
             },
             Error::InvalidJobTransition {
                 id: "x".to_string(),
-                from: "Queued".to_string(),
-                event: "Pause".to_string(),
+                from: "queued".to_string(),
+                event: "pause".to_string(),
             },
             Error::JobNotFound {
                 id: "x".to_string(),

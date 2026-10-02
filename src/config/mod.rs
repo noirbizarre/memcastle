@@ -3,7 +3,7 @@
 //! Load order: hardcoded defaults -> optional TOML file -> `MEMCASTLE_*`
 //! environment overrides -> command-line [`Overrides`] -> [`Config::validate`].
 //! Deliberately hand-rolled rather than pulled in from a config-framework
-//! crate — there are seven sections of settings, and a framework's abstraction
+//! crate — there are eight sections of settings, and a framework's abstraction
 //! cost would outweigh what it saves here.
 //!
 //! Default file locations follow the Unix XDG convention on Linux and macOS
@@ -18,6 +18,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::store::Backend;
+
+// Defined in `domain` so `store::Backend` can hold it too; re-exported because
+// configuration is where callers have always found it.
+pub use crate::domain::Secret;
 
 /// Settings given on the command line, the highest-precedence layer.
 ///
@@ -74,8 +78,11 @@ pub enum StoreConfig {
         database: String,
         /// Root username (only root sign-in is supported today).
         username: String,
-        /// Root password.
-        password: String,
+        /// Root password. A [`Secret`] so a derived `Debug` prints a placeholder,
+        /// and never serialised, for the same reason as `auth.token`: the root
+        /// password is the more powerful of the two credentials.
+        #[serde(skip_serializing)]
+        password: Secret,
     },
 }
 
@@ -143,38 +150,6 @@ impl ServerConfig {
     #[must_use]
     pub fn socket_addr(&self) -> SocketAddr {
         SocketAddr::new(self.bind, self.port)
-    }
-}
-
-/// A configuration value that must never reach a log line, a status report or a
-/// serialised config.
-///
-/// `Debug` is redacted by hand and `Serialize` is skipped on the owning field:
-/// `Config` derives both, and a derived `Debug` on a bare `String` would print
-/// the token the first time someone wrote `tracing::debug!("{config:?}")`.
-#[derive(Clone, Deserialize, PartialEq, Eq)]
-#[serde(transparent)]
-pub struct Secret(String);
-
-impl Secret {
-    /// Wrap a secret value.
-    #[must_use]
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    /// The plaintext, for the two places that genuinely need it: hashing it on
-    /// the daemon and sending it as a bearer header from the client.
-    #[must_use]
-    pub fn expose(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Debug for Secret {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // A fixed placeholder, not even the length: the length narrows a brute force.
-        f.write_str("[REDACTED]")
     }
 }
 
@@ -303,6 +278,14 @@ pub struct JobsConfig {
     pub lease_ttl_secs: u64,
 }
 
+/// The default shutdown drain, in seconds. Public so the scheduler's own
+/// fallback (used by direct `Scheduler::new` callers and tests) is this value
+/// and not a second copy that could drift from the configured default.
+pub const DEFAULT_DRAIN_TIMEOUT_SECS: u64 = 10;
+/// The default job lease TTL, in seconds; shared with the scheduler for the
+/// same reason as [`DEFAULT_DRAIN_TIMEOUT_SECS`].
+pub const DEFAULT_LEASE_TTL_SECS: u64 = 30;
+
 impl Default for JobsConfig {
     fn default() -> Self {
         Self {
@@ -313,11 +296,11 @@ impl Default for JobsConfig {
             // Long enough for every handler's unit of work (a file, a
             // checkpoint item, an audit chunk) to finish, short enough that
             // a stuck job cannot hold up a service manager's stop timeout.
-            drain_timeout_secs: 10,
+            drain_timeout_secs: DEFAULT_DRAIN_TIMEOUT_SECS,
             // Long enough to ride out a garbage-collection pause or a
             // dropped packet or two, short enough that a dead daemon's jobs
             // move within the minute.
-            lease_ttl_secs: 30,
+            lease_ttl_secs: DEFAULT_LEASE_TTL_SECS,
         }
     }
 }
@@ -766,6 +749,28 @@ mod tests {
         assert!(format!("{config:?}").contains("[REDACTED]"));
         assert!(!toml::to_string(&config).unwrap().contains(TOKEN));
         assert!(!serde_json::to_string(&config).unwrap().contains(TOKEN));
+    }
+
+    #[test]
+    fn the_remote_database_password_never_appears_in_debug_output_or_a_serialised_config() {
+        const PASSWORD: &str = "root-password-hunter2";
+        let config = Config {
+            store: StoreConfig::Remote {
+                url: "ws://db.example.com".into(),
+                namespace: "n".into(),
+                database: "d".into(),
+                username: "root".into(),
+                password: Secret::new(PASSWORD),
+            },
+            ..Config::default()
+        };
+
+        assert!(!format!("{config:?}").contains(PASSWORD));
+        assert!(!toml::to_string(&config).unwrap().contains(PASSWORD));
+        assert!(!serde_json::to_string(&config).unwrap().contains(PASSWORD));
+        // The resolved backend is what the store logs and holds, so it must redact too.
+        let backend = config.store.into_backend(Path::new("/unused"));
+        assert!(!format!("{backend:?}").contains(PASSWORD));
     }
 
     #[test]
