@@ -421,7 +421,7 @@ async fn a_token_used_to_sign_in_to_the_database_endpoint_is_written_nowhere() {
 
     // Opening the console is itself an authenticated, CLI-driven request.
     let started = sandbox
-        .run(Some(SECRET), &["db", "serve", "--port", "0", "--json"])
+        .run(Some(SECRET), &["db", "start", "--port", "0", "--json"])
         .await;
     assert!(started.status.success(), "{}", text(&started.stderr));
     let report: serde_json::Value = serde_json::from_slice(&started.stdout).expect("json");

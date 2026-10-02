@@ -234,7 +234,7 @@ The daemon logs a warning at startup when it listens beyond loopback with authen
 |---|---|
 | `memcastle auth generate` | `POST /api/auth/token` |
 | `memcastle auth revoke` | `DELETE /api/auth/token` |
-| `memcastle db serve`, `status`, `stop` | `POST`, `GET`, `DELETE /api/db` |
+| `memcastle db start`, `status`, `stop` | `POST`, `GET`, `DELETE /api/db` |
 
 While authentication is disabled these two are open, which is how the first token is made.
 Once it is enabled they need a valid token like every other route.

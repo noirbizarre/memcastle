@@ -32,8 +32,8 @@ use super::AppServices;
 /// bounds a pathological stall.
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// What `db serve` asks for. Each field left out falls back to the daemon's
-/// `[db]` configuration, so `memcastle db serve` alone does the safe default.
+/// What `db start` asks for. Each field left out falls back to the daemon's
+/// `[db]` configuration, so `memcastle db start` alone does the safe default.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DbEndpointRequest {
     /// Interface to listen on.
@@ -80,6 +80,20 @@ pub struct DbEndpointStatus {
     /// When it was started.
     #[serde(default)]
     pub started_at: Option<DateTime<Utc>>,
+    /// Set only on the response to a start that found the endpoint already
+    /// listening; every other report leaves it `false`.
+    #[serde(default)]
+    pub already_running: bool,
+}
+
+impl DbEndpointStatus {
+    /// This status, marked as the answer to a start that changed nothing.
+    fn already_running(self) -> Self {
+        Self {
+            already_running: true,
+            ..self
+        }
+    }
 }
 
 /// A listener that is up.
@@ -87,10 +101,34 @@ struct Running {
     addr: SocketAddr,
     remote: bool,
     auth_required: bool,
+    /// The origin policy it was started with, kept to tell whether a later
+    /// start asks for something it already allows.
+    origins: OriginPolicy,
     started_at: DateTime<Utc>,
     /// Stops this listener alone (a child of the daemon's shutdown token).
     cancel: CancellationToken,
     task: JoinHandle<()>,
+}
+
+impl Running {
+    /// Whether `request` asks for nothing this listener does not already do.
+    ///
+    /// Only what the request states explicitly is compared: a field left out
+    /// means "whatever is configured", which cannot contradict a running
+    /// listener. `allow_remote` is ignored because it only gates a new bind.
+    fn satisfies(&self, request: &DbEndpointRequest) -> bool {
+        request.bind.is_none_or(|bind| bind == self.addr.ip())
+            // `0` asks the OS for any free port, which the running one is.
+            && request
+                .port
+                .is_none_or(|port| port == 0 || port == self.addr.port())
+            // Local pages are always allowed, so only origins beyond them can
+            // be a mismatch.
+            && request
+                .allowed_origins
+                .iter()
+                .all(|origin| self.origins.allows(origin.trim_end_matches('/')))
+    }
 }
 
 /// Holds the endpoint's state. At most one listener exists at a time.
@@ -156,11 +194,16 @@ impl AppServices {
 
     /// Start the admin endpoint, returning where it listens.
     ///
+    /// Starting an endpoint that is already listening succeeds with its
+    /// current status, marked `already_running`, as long as the request does
+    /// not contradict it.
+    ///
     /// # Errors
     ///
     /// - [`Error::DbEndpointUnavailable`] for a remote palace, which has a
     ///   server of its own.
-    /// - [`Error::DbEndpointRunning`] if it is already listening.
+    /// - [`Error::DbEndpointRunning`] if it is already listening and the
+    ///   request asks for a different bind, port or origin.
     /// - [`Error::DbEndpointUnsafe`] for a non-loopback bind without the opt-in
     ///   or without authentication enabled.
     /// - [`Error::DbEndpointBind`] if the address cannot be bound.
@@ -183,6 +226,15 @@ impl AppServices {
             *state = None;
         }
         if let Some(running) = state.as_ref() {
+            // Starting what is already started is a success: the caller wants
+            // the endpoint up and it is, so report where instead of failing
+            // a script that simply runs `db start` twice.
+            if running.satisfies(&request) {
+                return Ok(DbEndpoint::status_of(Some(running)).already_running());
+            }
+            // The caller asked for something else (another port, a new
+            // origin). Reporting the old endpoint as if it matched would
+            // leave them connecting to the wrong place, so refuse.
             return Err(Error::DbEndpointRunning {
                 addr: running.addr.to_string(),
             });
@@ -219,14 +271,16 @@ impl AppServices {
             .local_addr()
             .map_err(|source| Error::DbEndpointBind { addr, source })?;
 
-        let origins = defaults
-            .allowed_origins
-            .iter()
-            .cloned()
-            .chain(request.allowed_origins);
+        let origins = OriginPolicy::new(
+            defaults
+                .allowed_origins
+                .iter()
+                .cloned()
+                .chain(request.allowed_origins),
+        );
         let auth_required = self.auth_enabled();
         let options = dbadmin::Options {
-            origins: OriginPolicy::new(origins),
+            origins: origins.clone(),
             auth: auth_required.then(|| self.authenticator()),
         };
         let cancel = endpoint.shutdown.child_token();
@@ -245,6 +299,7 @@ impl AppServices {
             addr,
             remote,
             auth_required,
+            origins,
             started_at: Utc::now(),
             cancel,
             task,
@@ -351,18 +406,121 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn starting_twice_is_a_conflict_that_names_where_it_listens() {
+    async fn starting_twice_reports_the_running_endpoint_instead_of_failing() {
         let app = app(false).await;
         let first = app.start_db_endpoint(loopback_ephemeral()).await.unwrap();
+        assert!(!first.already_running);
+
+        let second = app
+            .start_db_endpoint(loopback_ephemeral())
+            .await
+            .expect("a repeated start is not an error");
+        assert!(second.already_running);
+        assert_eq!(second.addr, first.addr);
+        assert_eq!(second.started_at, first.started_at);
+        // Only a start reports it: a plain status read does not.
+        assert!(!app.db_endpoint_status().await.already_running);
+        app.stop_db_endpoint().await;
+    }
+
+    #[tokio::test]
+    async fn starting_again_without_any_setting_reports_the_running_endpoint() {
+        let app = app(false).await;
+        app.start_db_endpoint(loopback_ephemeral()).await.unwrap();
+
+        let again = app
+            .start_db_endpoint(DbEndpointRequest::default())
+            .await
+            .unwrap();
+        assert!(again.already_running);
+        app.stop_db_endpoint().await;
+    }
+
+    #[tokio::test]
+    async fn starting_again_on_another_port_is_a_conflict_that_names_where_it_listens() {
+        let app = app(false).await;
+        let first = app.start_db_endpoint(loopback_ephemeral()).await.unwrap();
+        let running_port = first.addr.as_ref().unwrap().rsplit(':').next().unwrap();
+        let other = if running_port == "65000" {
+            65001
+        } else {
+            65000
+        };
 
         let error = app
-            .start_db_endpoint(loopback_ephemeral())
+            .start_db_endpoint(DbEndpointRequest {
+                port: Some(other),
+                ..DbEndpointRequest::default()
+            })
             .await
             .unwrap_err();
         assert!(
             matches!(&error, Error::DbEndpointRunning { addr } if Some(addr) == first.addr.as_ref()),
             "{error}"
         );
+        app.stop_db_endpoint().await;
+    }
+
+    #[tokio::test]
+    async fn starting_again_on_the_running_port_is_not_a_conflict() {
+        let app = app(false).await;
+        let first = app.start_db_endpoint(loopback_ephemeral()).await.unwrap();
+        let port = first.addr.as_ref().unwrap().rsplit(':').next().unwrap();
+
+        let again = app
+            .start_db_endpoint(DbEndpointRequest {
+                port: Some(port.parse().unwrap()),
+                ..DbEndpointRequest::default()
+            })
+            .await
+            .unwrap();
+        assert!(again.already_running);
+        app.stop_db_endpoint().await;
+    }
+
+    #[tokio::test]
+    async fn starting_again_on_another_interface_is_a_conflict() {
+        let app = app(false).await;
+        app.start_db_endpoint(loopback_ephemeral()).await.unwrap();
+
+        let error = app
+            .start_db_endpoint(DbEndpointRequest {
+                bind: Some("::1".parse().unwrap()),
+                ..DbEndpointRequest::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::DbEndpointRunning { .. }), "{error}");
+        app.stop_db_endpoint().await;
+    }
+
+    #[tokio::test]
+    async fn starting_again_with_an_origin_it_does_not_allow_is_a_conflict() {
+        let app = app(false).await;
+        app.start_db_endpoint(DbEndpointRequest {
+            allowed_origins: vec!["https://studio.example".to_string()],
+            ..loopback_ephemeral()
+        })
+        .await
+        .unwrap();
+
+        let known = app
+            .start_db_endpoint(DbEndpointRequest {
+                allowed_origins: vec!["https://studio.example/".to_string()],
+                ..DbEndpointRequest::default()
+            })
+            .await
+            .unwrap();
+        assert!(known.already_running);
+
+        let error = app
+            .start_db_endpoint(DbEndpointRequest {
+                allowed_origins: vec!["https://other.example".to_string()],
+                ..DbEndpointRequest::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::DbEndpointRunning { .. }), "{error}");
         app.stop_db_endpoint().await;
     }
 

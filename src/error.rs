@@ -459,11 +459,17 @@ pub enum Error {
         reason: String,
     },
 
-    /// The database admin endpoint is already listening.
-    #[error("the database admin endpoint is already listening on {addr}")]
+    /// The database admin endpoint is already listening, and the start request
+    /// asked for a different bind, port or origin than it has.
+    #[error(
+        "the database admin endpoint is already listening on {addr}, which differs from what was requested"
+    )]
     #[diagnostic(
         code(memcastle::db::already_running),
-        help("connect to it, or stop it first with `memcastle db stop`")
+        help(
+            "stop it first with `memcastle db stop` to change its settings, \
+             or run `memcastle db start` without them to use it as it is"
+        )
     )]
     DbEndpointRunning {
         /// Where it is listening.

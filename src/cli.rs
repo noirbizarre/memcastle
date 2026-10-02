@@ -311,17 +311,20 @@ pub enum DbCommand {
     /// SurrealDB Studio, then return. The endpoint lives in the daemon (the
     /// only process that may open the database), so this never starts a
     /// second database process: stop it again with `memcastle db stop`.
-    Serve(DbServeArgs),
+    /// Running it while the endpoint is already open just reports where it
+    /// listens.
+    Start(DbStartArgs),
     /// Close the database admin endpoint.
     Stop,
     /// Report whether the database admin endpoint is open and where.
     Status(StatusArgs),
 }
 
-/// Arguments for `memcastle db serve`. Anything left out falls back to the
-/// daemon's `[db]` configuration.
+/// Arguments for `memcastle db start`. Anything left out falls back to the
+/// daemon's `[db]` configuration. Settings that contradict an endpoint that is
+/// already open are refused: stop it first.
 #[derive(Debug, Args)]
-pub struct DbServeArgs {
+pub struct DbStartArgs {
     /// Interface address to listen on, overriding `db.bind` and
     /// `MEMCASTLE_DB_BIND` (default `127.0.0.1`). Anything but a loopback
     /// address also needs `--allow-remote` and an authenticated daemon.
@@ -464,10 +467,10 @@ mod tests {
     }
 
     #[test]
-    fn db_serve_defaults_leave_everything_to_the_daemons_configuration() {
-        let cli = Cli::try_parse_from(["memcastle", "db", "serve"]).unwrap();
-        let Command::Db(DbCommand::Serve(args)) = cli.command else {
-            panic!("a `db serve` command");
+    fn db_start_defaults_leave_everything_to_the_daemons_configuration() {
+        let cli = Cli::try_parse_from(["memcastle", "db", "start"]).unwrap();
+        let Command::Db(DbCommand::Start(args)) = cli.command else {
+            panic!("a `db start` command");
         };
         assert_eq!(args.bind, None);
         assert_eq!(args.port, None);
@@ -476,11 +479,11 @@ mod tests {
     }
 
     #[test]
-    fn db_serve_accepts_a_bind_a_port_the_remote_opt_in_and_repeatable_origins() {
+    fn db_start_accepts_a_bind_a_port_the_remote_opt_in_and_repeatable_origins() {
         let cli = Cli::try_parse_from([
             "memcastle",
             "db",
-            "serve",
+            "start",
             "--bind",
             "0.0.0.0",
             "--port",
@@ -492,8 +495,8 @@ mod tests {
             "https://b.example",
         ])
         .unwrap();
-        let Command::Db(DbCommand::Serve(args)) = cli.command else {
-            panic!("a `db serve` command");
+        let Command::Db(DbCommand::Start(args)) = cli.command else {
+            panic!("a `db start` command");
         };
         assert_eq!(args.bind, Some("0.0.0.0".parse().unwrap()));
         assert_eq!(args.port, Some(9000));
@@ -505,8 +508,15 @@ mod tests {
     }
 
     #[test]
+    fn db_has_no_serve_subcommand_any_more() {
+        // It was renamed to `start`: it starts the adapter, it does not serve
+        // the database.
+        assert!(Cli::try_parse_from(["memcastle", "db", "serve"]).is_err());
+    }
+
+    #[test]
     fn serve_has_no_flag_that_starts_the_database_endpoint() {
-        // The endpoint is opened only by an explicit `db serve`, never as a side
+        // The endpoint is opened only by an explicit `db start`, never as a side
         // effect of starting the daemon.
         for flag in ["--db", "--db-endpoint", "--allow-remote"] {
             assert!(

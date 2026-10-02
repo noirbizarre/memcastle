@@ -88,7 +88,7 @@ format = "text"
 [auth]
 enabled = false
 
-# Defaults for `memcastle db serve`. Nothing here opens the endpoint; see "The database admin endpoint".
+# Defaults for `memcastle db start`. Nothing here opens the endpoint; see "The database admin endpoint".
 [db]
 bind = "127.0.0.1"
 port = 8000
@@ -214,10 +214,10 @@ and has not created the palace, migrated it or touched its jobs.
 
 ## The database admin endpoint
 
-`memcastle db serve` opens a second, SurrealDB-compatible listener inside the running daemon, so SurrealDB Studio can
+`memcastle db start` opens a second, SurrealDB-compatible listener inside the running daemon, so SurrealDB Studio can
 inspect the live embedded database.
 The `[db]` settings are only the defaults for that command; no setting starts the endpoint.
-Each flag of `memcastle db serve` (`--bind`, `--port`, `--allow-remote`, `--allow-origin`) overrides its setting,
+Each flag of `memcastle db start` (`--bind`, `--port`, `--allow-remote`, `--allow-origin`) overrides its setting,
 and `--allow-origin` adds to `db.allowed_origins`.
 
 The address is `127.0.0.1` port `8000` unless configured otherwise, and the port must differ from `server.port`.

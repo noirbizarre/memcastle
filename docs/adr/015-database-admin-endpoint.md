@@ -28,7 +28,7 @@ The wire types and codecs, in `surrealdb-core` and `surrealdb-rpc`, are usable.
 ## Decision
 
 - **The endpoint is a second listener inside the daemon, started and stopped at runtime.**
-  `memcastle db serve` is a thin client: it calls `POST /api/db`, and `db stop` and `db status` call `DELETE` and `GET`.
+  `memcastle db start` is a thin client: it calls `POST /api/db`, and `db stop` and `db status` call `DELETE` and `GET`.
   The daemon binds the listener, so there is still one process, one writer and one open storage directory.
   `memcastle serve` never starts it, and no flag or setting does either.
 - **It is an adapter over the daemon's own handle.**
@@ -84,7 +84,7 @@ The wire types and codecs, in `surrealdb-core` and `surrealdb-rpc`, are usable.
 
 ## Alternatives rejected
 
-- **A standalone `memcastle db serve` process.**
+- **A standalone database server process launched by `memcastle db`.**
   It cannot open the palace while the daemon runs, because of the file lock, so it would only work with no daemon,
   which is not "the live database".
   It would also be a third direct user of `store`, after `serve` and `migrate`, and a change to invariants 1 and 4.
@@ -127,3 +127,23 @@ The wire types and codecs, in `surrealdb-core` and `surrealdb-rpc`, are usable.
   A `LIVE SELECT` inside `query` answers with an id that never delivers.
 - Revoking a token does not close connections that already authenticated; it applies to the next sign-in.
 - Stopping the endpoint, or the daemon, ends every Studio session; Studio has to reconnect.
+
+## Amendment: `db start`, and a repeated start is not an error
+
+The command was first called `db serve`.
+It was renamed `db start` because it does not serve the database: it starts the adapter inside the daemon, and the daemon
+is what serves.
+There is no alias for the old name.
+
+A start that finds the endpoint already listening now succeeds instead of failing with a conflict,
+so a script or a person can run `memcastle db start` without checking first.
+The decision lives in the application layer, so REST and any future dashboard behave the same as the CLI:
+`POST /api/db` answers `200` with the open endpoint's details and `already_running: true`,
+and the CLI prints `already running on` the URL followed by the usual details.
+
+The answer is only honest when the request does not contradict the open endpoint.
+A different `bind`, a `port` other than the one in use (`0` means any free port, so it never conflicts),
+or an origin the endpoint does not allow still answers `409` with `memcastle::db::already_running`,
+because reporting the old endpoint would leave the caller connecting to the wrong place.
+The remedy is `memcastle db stop`, then a start with the new settings.
+`allow_remote` is not compared: it only gates a new bind.
