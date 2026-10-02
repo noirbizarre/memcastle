@@ -181,7 +181,7 @@ Whichever interface you use, a failure has the same three fields:
 
 ```json
 {
-  "error": "`diary_write` is not permitted in ReadOnly mode",
+  "error": "`diary_write` is not permitted in read_only mode",
   "code": "memcastle::app::mode_forbidden",
   "help": "switch the session/request to Full mode to allow writes, or to Full/ReadOnly to allow reads"
 }

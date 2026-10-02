@@ -48,6 +48,14 @@ impl JobStatus {
     }
 }
 
+impl std::fmt::Display for JobStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The wire name, so a message says `queued` exactly as `jobs list` and
+        // the `--status` help do, not the `Queued` a derived `Debug` would print.
+        f.write_str(self.as_str())
+    }
+}
+
 impl std::str::FromStr for JobStatus {
     type Err = String;
 
@@ -210,9 +218,33 @@ pub enum JobEvent {
     RecoverToQueued,
 }
 
+impl JobEvent {
+    /// The event's name as a message shows it: lowercase words, like the
+    /// statuses beside it.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Claim => "claim",
+            Self::Pause => "pause",
+            Self::Resume => "resume",
+            Self::Complete => "complete",
+            Self::Fail => "fail",
+            Self::Cancel => "cancel",
+            Self::Retry => "retry",
+            Self::RecoverToQueued => "recover_to_queued",
+        }
+    }
+}
+
+impl std::fmt::Display for JobEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// A transition was requested that the state machine does not allow.
 #[derive(Debug, Clone, thiserror::Error)]
-#[error("job {id} cannot go from {from:?} to {event:?}")]
+#[error("job {id} cannot go from {from} to {event}")]
 pub struct TransitionError {
     /// The job that rejected the transition.
     pub id: JobId,
@@ -474,6 +506,20 @@ mod tests {
 
     fn demo_job() -> Job {
         Job::new(JobKind::Demo { steps: 3 }, Priority::Normal, "test")
+    }
+
+    #[test]
+    fn a_rejected_transition_names_the_status_and_event_in_lowercase_like_the_wire() {
+        // The message must say `queued`, as `jobs list` does, not `Queued`.
+        let mut job = demo_job();
+        let error = job.apply(JobEvent::Pause).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .ends_with("cannot go from queued to pause"),
+            "{error}"
+        );
     }
 
     #[test]

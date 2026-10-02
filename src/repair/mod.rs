@@ -237,7 +237,7 @@ pub(crate) async fn load_audited_orphan_ids(
         return Err(Error::InvalidBasedOnJob {
             id: audit_id.to_string(),
             message: format!(
-                "the referenced audit is {:?}, not Completed",
+                "the referenced audit is {}, not completed",
                 audit_job.status
             ),
         });
