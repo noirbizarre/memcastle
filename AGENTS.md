@@ -105,7 +105,8 @@ src/
 └── client/     the CLI's HTTP client for a running daemon, and the human renderings of its answers (status, tables)
 
 integrations/   per-agent lifecycle adapters (Pi, OpenCode, ...), in each agent's own language, over MCP and HTTP only
-skills/         reusable agent instructions shared by every integration
+skills/         reusable agent instructions shared by every integration; `tests/skills.rs` holds them to the
+                tools, commands and routes they name (docs/skills.md)
 tests/fixtures/integration/   the language-neutral conformance fixtures every integration is held to
 ```
 

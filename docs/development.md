@@ -93,6 +93,8 @@ Every path, environment variable, flag and the precedence between them is in [Co
     a real MCP session replays the language-neutral fixtures in `tests/fixtures/integration/`
     (modes, checkpoint payloads, failure classes), and fails when the contract page, the capability manifest
     and the test names disagree (in-process).
+  - `tests/skills.rs` — the shared [agent skills](skills.md): every skill is discoverable, and every tool, CLI command
+    and REST route it names exists in this release (in-process daemon, plus the real binary's help).
 
 Run a subset with nextest's filter syntax, e.g.:
 

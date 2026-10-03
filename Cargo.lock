@@ -2810,6 +2810,7 @@ dependencies = [
  "predicates",
  "reqwest 0.13.5",
  "rmcp",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.11.0",

@@ -121,7 +121,7 @@ description = "Lint the documentation Markdown"
 #
 # Scoped to the same files as the prek hook, minus CHANGELOG.md, which is
 # git-cliff's output, not prose to wrap.
-run = 'npx -y -p markdownlint-cli2 -p markdownlint-cli2-formatter-pretty -- markdownlint-cli2 "AGENTS.md" "CONTRIBUTING.md" "README.md" "docs/**/*.md"'
+run = 'npx -y -p markdownlint-cli2 -p markdownlint-cli2-formatter-pretty -- markdownlint-cli2 "AGENTS.md" "CONTRIBUTING.md" "README.md" "docs/**/*.md" "skills/*/SKILL.md"'
 
 [tasks.snapshots]
 description = "Review and update insta snapshots interactively"

@@ -55,6 +55,13 @@ this is not forced into Rust, and there is no shared plugin runtime or package
 manager across them. A MemCastle release can still ship the complete
 integration ecosystem from this one repository.
 
+## Skills
+
+An integration never keeps its own copy of agent instructions: it loads them from [`skills/`](../skills/README.md),
+which is also installable on its own (see [Agent skills](../docs/skills.md)).
+What stays here is the lifecycle: when to load a skill, when to call MemCastle, and refusing to load one into a session
+whose memory mode is off.
+
 ## Non-goals
 
 No plugin marketplace, no dynamic plugin runtime, no package manager across

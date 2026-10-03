@@ -61,3 +61,5 @@ The history is the value.
   with cascading transactional deletes, optional drawer names and no MCP tool
 - [ADR-019](019-shared-integration-contract.md) — integrations share one documented contract and language-neutral
   fixtures, not a framework, and reach MemCastle only over MCP and HTTP
+- [ADR-020](020-skills-are-versioned-with-the-repository.md) — agent skills are plain files versioned with the
+  repository and installed by copying, and a test holds them to the tools, commands and routes they name

@@ -190,6 +190,9 @@ insta = { version = "1", features = ["filters"] }
 # Only `tests/concurrency.rs` needs this (`join_all` over many simulated
 # clients) — not a real dependency, so it stays out of `[dependencies]`.
 futures = "0.3.34"
+# Only `tests/skills.rs` needs this: it parses each skill's `memcastle-version` range and checks the crate satisfies it.
+# Already in the lockfile through other dependencies, so it adds no new package.
+semver = "1"
 
 # The integration tests spawn the `memcastle` binary as a subprocess and need
 # tokio's `process` for that; the daemon itself never does.
