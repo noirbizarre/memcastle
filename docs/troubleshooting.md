@@ -153,7 +153,7 @@ In a mined room, only the first copy of a file keeps its name, see [Storage and 
 
 A wing or room delete was refused because a mining job, a checkpoint job, or a repair that applies is queued, running
 or paused: it files into wings and rooms by name, so it could quietly bring back what you removed.
-`memcastle jobs list` shows which, and `memcastle jobs cancel <id>` stops one.
+`memcastle job list` shows which, and `memcastle job cancel <id>` stops one.
 Nothing was deleted.
 
 ## The command line
@@ -161,7 +161,7 @@ Nothing was deleted.
 ### `memcastle::cli::aborted`
 
 You answered "no" (or just pressed Enter, which means no) to a confirmation, and nothing was changed.
-`repair --apply`, `auth generate`, `auth revoke`, `jobs cancel` and the `delete` commands of `wing`, `room` and `drawer`
+`repair --apply`, `auth generate`, `auth revoke`, `job cancel` and the `delete` commands of `wing`, `room` and `drawer`
 ask before they act when run in a terminal.
 Run the command again and answer `y`, or pass `--yes` to skip the question.
 In a script, CI job or pipe they never ask, so this error only appears at a keyboard.
@@ -221,19 +221,19 @@ Use a client that keeps an MCP session open, or send `X-MemCastle-Mode` over RES
 
 ### `memcastle::jobs::invalid_id` or `not_found`
 
-Job ids are UUIDs, as printed by `memcastle jobs list`.
+Job ids are UUIDs, as printed by `memcastle job list`.
 A well-formed id the daemon does not know may belong to a different palace.
 
 ### `memcastle::jobs::invalid_transition`
 
 The job is not in a state the action applies to:
 only a failed job can be retried, only a paused one resumed, and only a queued, paused or running one cancelled.
-`memcastle jobs show <id>` prints its status.
+`memcastle job show <id>` prints its status.
 
 ### `mine` finds nothing or stops early
 
 Check the job's `result`:
-`memcastle jobs show <id>` reports `files_considered` and whether the run was `truncated` at 2000 files.
+`memcastle job show <id>` reports `files_considered` and whether the run was `truncated` at 2000 files.
 Skipped directories, large files and non-UTF-8 files are listed in [What mining reads](storage.md#what-mining-reads).
 The path given to `mine` is read by the daemon, so it must exist on the daemon's machine.
 Over MCP and REST it must be absolute; the CLI makes it absolute for you.

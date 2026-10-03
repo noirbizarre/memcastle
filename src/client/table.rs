@@ -1,7 +1,7 @@
 //! Human-readable listings for the CLI.
 //!
 //! Only used when stdout is a terminal. A pipe gets the same data as JSON
-//! (see `main.rs`), so `memcastle jobs list | jq` keeps working and the table
+//! (see `main.rs`), so `memcastle job list | jq` keeps working and the table
 //! never needs to be parseable.
 
 use comfy_table::presets::UTF8_FULL_CONDENSED;
@@ -79,7 +79,7 @@ pub fn render_jobs(jobs: &[Job], painter: Painter, width: Option<u16>) -> String
         .iter()
         .map(|job| {
             vec![
-                // The full id, never a prefix: `jobs show`/`cancel` take it
+                // The full id, never a prefix: `job show`/`cancel` take it
                 // verbatim, and a column you cannot copy from is no use.
                 job.id.to_string(),
                 kind_label(&job.kind),

@@ -71,7 +71,7 @@ pub enum Error {
     #[error("`{raw}` is not a job id")]
     #[diagnostic(
         code(memcastle::jobs::invalid_id),
-        help("job ids are UUIDs, as printed by `memcastle jobs list`")
+        help("job ids are UUIDs, as printed by `memcastle job list`")
     )]
     InvalidJobId {
         /// What was given.
@@ -239,7 +239,7 @@ pub enum Error {
     #[error("job {id} not found")]
     #[diagnostic(
         code(memcastle::jobs::not_found),
-        help("list the jobs this daemon knows about with `memcastle jobs list`")
+        help("list the jobs this daemon knows about with `memcastle job list`")
     )]
     JobNotFound {
         /// The id that was looked up.
@@ -628,7 +628,7 @@ pub enum Error {
     #[diagnostic(
         code(memcastle::palace::busy),
         help(
-            "wait for the jobs to finish, or cancel them: see `memcastle jobs list` and `memcastle jobs cancel`"
+            "wait for the jobs to finish, or cancel them: see `memcastle job list` and `memcastle job cancel`"
         )
     )]
     PalaceBusy {

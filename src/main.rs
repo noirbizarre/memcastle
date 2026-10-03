@@ -19,7 +19,7 @@ mod cli;
 
 use cli::{
     AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, CompletionsArgs, DaemonCommand,
-    DbCommand, DiaryCommand, DrawerCommand, JobsCommand, MigrateArgs, MineArgs, RecallArgs,
+    DbCommand, DiaryCommand, DrawerCommand, JobCommand, MigrateArgs, MineArgs, RecallArgs,
     RepairArgs, RoomCommand, SearchArgs, ServeArgs, StatusArgs, WakeUpArgs, WingCommand,
 };
 use memcastle::app::{DbEndpointRequest, DbEndpointStatus, WakeUpBudget};
@@ -163,7 +163,7 @@ async fn run_command(
         Command::Audit(args) => cmd_audit(&config, mode, args).await,
         Command::Repair(args) => cmd_repair(&config, mode, args).await,
         Command::Diary(cmd) => cmd_diary(&config, mode, cmd).await,
-        Command::Jobs(jobs) => cmd_jobs(&config, mode, jobs).await,
+        Command::Job(cmd) => cmd_job(&config, mode, cmd).await,
         Command::Wing(cmd) => cmd_wing(&config, mode, cmd).await,
         Command::Room(cmd) => cmd_room(&config, mode, cmd).await,
         Command::Drawer(cmd) => cmd_drawer(&config, mode, cmd).await,
@@ -528,7 +528,7 @@ async fn cmd_audit(config: &Config, mode: Option<MemoryMode>, args: AuditArgs) -
 
 async fn cmd_repair(config: &Config, mode: Option<MemoryMode>, args: RepairArgs) -> Result<()> {
     // Parsed client-side, before ever contacting the daemon — same
-    // reasoning as `parse_job_id`'s other call sites in `cmd_jobs`.
+    // reasoning as `parse_job_id`'s other call sites in `cmd_job`.
     let based_on_job = args
         .based_on_job
         .as_deref()
@@ -573,10 +573,10 @@ async fn cmd_diary(config: &Config, mode: Option<MemoryMode>, command: DiaryComm
     Ok(())
 }
 
-async fn cmd_jobs(config: &Config, mode: Option<MemoryMode>, command: JobsCommand) -> Result<()> {
+async fn cmd_job(config: &Config, mode: Option<MemoryMode>, command: JobCommand) -> Result<()> {
     let daemon = client(config, mode);
     match command {
-        JobsCommand::List { status } => {
+        JobCommand::List { status } => {
             let status = status.map(|s| Error::parse_job_status(&s)).transpose()?;
             let jobs = daemon.list_jobs(status).await?;
             // A table for a person, JSON for anything else: whatever reads a
@@ -595,14 +595,14 @@ async fn cmd_jobs(config: &Config, mode: Option<MemoryMode>, command: JobsComman
                 print_json(&jobs)?;
             }
         }
-        JobsCommand::Show { id } => print_json(&daemon.get_job(Error::parse_job_id(&id)?).await?)?,
-        JobsCommand::Pause { id } => {
+        JobCommand::Show { id } => print_json(&daemon.get_job(Error::parse_job_id(&id)?).await?)?,
+        JobCommand::Pause { id } => {
             print_json(&daemon.pause_job(Error::parse_job_id(&id)?).await?)?;
         }
-        JobsCommand::Resume { id } => {
+        JobCommand::Resume { id } => {
             print_json(&daemon.resume_job(Error::parse_job_id(&id)?).await?)?;
         }
-        JobsCommand::Cancel { id, yes } => {
+        JobCommand::Cancel { id, yes } => {
             let job_id = Error::parse_job_id(&id)?;
             term::confirm(
                 &format!("Cancel job {job_id}?"),
@@ -611,10 +611,10 @@ async fn cmd_jobs(config: &Config, mode: Option<MemoryMode>, command: JobsComman
             )?;
             print_json(&daemon.cancel_job(job_id).await?)?;
         }
-        JobsCommand::Retry { id } => {
+        JobCommand::Retry { id } => {
             print_json(&daemon.retry_job(Error::parse_job_id(&id)?).await?)?;
         }
-        JobsCommand::Demo { steps } => {
+        JobCommand::Demo { steps } => {
             // The daemon has no "submit a demo job" REST endpoint of its
             // own reachable from here without going through `/api/jobs`
             // with a `demo` kind — reuse the same generic endpoint the
@@ -627,7 +627,7 @@ async fn cmd_jobs(config: &Config, mode: Option<MemoryMode>, command: JobsComman
 }
 
 /// Print `human` when stdout is a terminal, `json` otherwise: the same rule
-/// `jobs list` follows, so a pipe always gets data it can parse.
+/// `job list` follows, so a pipe always gets data it can parse.
 fn print_for_terminal_or_json(
     human: impl FnOnce(Painter, Option<u16>) -> String,
     json: &impl serde::Serialize,

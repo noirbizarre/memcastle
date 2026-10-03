@@ -92,7 +92,7 @@ async fn the_mode_can_also_come_from_the_environment() {
 
     let output = memcastle(&daemon)
         .env("MEMCASTLE_MODE", "disabled")
-        .args(["jobs", "list"])
+        .args(["job", "list"])
         .output()
         .await
         .expect("run memcastle");
@@ -375,7 +375,7 @@ async fn db_start_beyond_loopback_is_refused_with_a_diagnostic_that_says_what_to
 /// Submit a demo job through the CLI and return it.
 async fn submit_demo(daemon: &TestDaemon, steps: &str) -> Job {
     let output = memcastle(daemon)
-        .args(["jobs", "demo", "--steps", steps])
+        .args(["job", "demo", "--steps", steps])
         .output()
         .await
         .expect("run memcastle");
@@ -393,7 +393,7 @@ async fn jobs_list_prints_json_when_stdout_is_a_pipe_with_no_flag_needed() {
     let submitted = submit_demo(&daemon, "1").await;
 
     let output = memcastle(&daemon)
-        .args(["jobs", "list"])
+        .args(["job", "list"])
         .output()
         .await
         .expect("run memcastle");
@@ -415,7 +415,7 @@ async fn jobs_list_filtered_by_status_stays_valid_json_when_nothing_matches() {
     let daemon = TestDaemon::start().await;
 
     let output = memcastle(&daemon)
-        .args(["jobs", "list", "--status", "failed"])
+        .args(["job", "list", "--status", "failed"])
         .output()
         .await
         .expect("run memcastle");
@@ -436,7 +436,7 @@ async fn confirming_commands_never_prompt_without_a_terminal() {
 
     for args in [
         vec!["repair".to_string(), "--apply".to_string()],
-        vec!["jobs".to_string(), "cancel".to_string(), job.id.to_string()],
+        vec!["job".to_string(), "cancel".to_string(), job.id.to_string()],
         vec!["auth".to_string(), "revoke".to_string()],
     ] {
         let output = memcastle(&daemon)
@@ -464,7 +464,7 @@ async fn yes_is_accepted_everywhere_a_confirmation_would_be_asked() {
             "--yes".to_string(),
         ],
         vec![
-            "jobs".to_string(),
+            "job".to_string(),
             "cancel".to_string(),
             job.id.to_string(),
             "-y".to_string(),
@@ -643,7 +643,7 @@ async fn the_delete_commands_never_prompt_without_a_terminal_and_accept_yes() {
         .await;
     }
 
-    // No terminal: deleting proceeds without asking (as `jobs cancel` does).
+    // No terminal: deleting proceeds without asking (as `job cancel` does).
     for args in [["drawer", "delete", "a/r/d"], ["room", "delete", "a/r"]] {
         let output = memcastle(&daemon).args(args).output().await.unwrap();
         let stderr = String::from_utf8_lossy(&output.stderr);

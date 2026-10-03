@@ -50,7 +50,7 @@ impl JobStatus {
 
 impl std::fmt::Display for JobStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // The wire name, so a message says `queued` exactly as `jobs list` and
+        // The wire name, so a message says `queued` exactly as `job list` and
         // the `--status` help do, not the `Queued` a derived `Debug` would print.
         f.write_str(self.as_str())
     }
@@ -510,7 +510,7 @@ mod tests {
 
     #[test]
     fn a_rejected_transition_names_the_status_and_event_in_lowercase_like_the_wire() {
-        // The message must say `queued`, as `jobs list` does, not `Queued`.
+        // The message must say `queued`, as `job list` does, not `Queued`.
         let mut job = demo_job();
         let error = job.apply(JobEvent::Pause).unwrap_err();
 

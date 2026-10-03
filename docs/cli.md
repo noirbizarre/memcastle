@@ -15,7 +15,7 @@ There is no `help` subcommand: `--help` is the one way to ask.
 Client commands print the daemon's JSON answer, so the output pipes into `jq`.
 `status`, `db start` and `db status` are the exceptions: they print a readable report,
 and `--json` gives the same report as JSON.
-`jobs list`, and the `list` and `show` commands of `wing`, `room` and `drawer`, are the others:
+`job list`, and the `list` and `show` commands of `wing`, `room` and `drawer`, are the others:
 they print a table or a readable view when standard output is a terminal, and JSON when it is not.
 See [Output, colour and prompts](#output-colour-and-prompts).
 
@@ -33,13 +33,13 @@ a terminal gets decoration, and a pipe or a file gets plain data.
 
 Colour is added around words and never replaces them.
 It colours `--help`, `status` and `db status` reports (healthy in green, degraded or unavailable in red,
-things that need attention in yellow), the table of `jobs list`, and the diagnostics printed on failure.
+things that need attention in yellow), the table of `job list`, and the diagnostics printed on failure.
 A job status has the same colour wherever it is shown:
 queued yellow, running cyan, paused magenta, completed green, failed red and cancelled dim.
 Standard output and standard error are decided separately:
 with `memcastle status 2> errors.log` the report stays coloured and the log stays plain.
 
-`repair --apply`, `auth generate`, `auth revoke`, `jobs cancel` and the `delete` commands of `wing`, `room` and `drawer`
+`repair --apply`, `auth generate`, `auth revoke`, `job cancel` and the `delete` commands of `wing`, `room` and `drawer`
 ask for confirmation, with a prompt on standard error that defaults to "no".
 `--yes` (or `-y`) skips the question.
 When standard input or standard error is not a terminal, a script or CI job for instance,
@@ -87,7 +87,7 @@ memcastle completions <SHELL>
 
 `<SHELL>` is `bash`, `zsh`, `fish`, `powershell` or `elvish`.
 The script goes to standard output, and the command needs neither a daemon nor a working configuration file.
-Completion offers subcommands, flags and the values of `--mode` and `jobs list --status`.
+Completion offers subcommands, flags and the values of `--mode` and `job list --status`.
 It does not complete job ids, which would need a running daemon.
 Install it once, for your shell:
 
@@ -194,7 +194,7 @@ memcastle mine <PATH> [--wing <WING>]
 
 Submits a job that reads a directory into drawers, one per file.
 `--wing` defaults to the directory's name.
-The command returns the job immediately; follow it with `memcastle jobs show <id>`.
+The command returns the job immediately; follow it with `memcastle job show <id>`.
 See [Storage and data](storage.md#what-mining-reads) for which files are read.
 
 ### `checkpoint`
@@ -288,7 +288,7 @@ memcastle audit [--scope <WING>]
 
 Submits a read-only consistency report job.
 `--scope` restricts only the embedding counts to one wing; orphan and dangling-reference findings are always palace-wide.
-Read the report with `memcastle jobs show <id>`.
+Read the report with `memcastle job show <id>`.
 
 ### `repair`
 
@@ -305,23 +305,25 @@ In a terminal `--apply` asks for confirmation first, unless `--yes` is given.
 ## Jobs
 
 ```sh
-memcastle jobs list [--status <STATUS>]
-memcastle jobs show <ID>
-memcastle jobs pause <ID>
-memcastle jobs resume <ID>
-memcastle jobs cancel <ID> [--yes]
-memcastle jobs retry <ID>
-memcastle jobs demo [--steps <N>]
+memcastle job list [--status <STATUS>]
+memcastle job show <ID>
+memcastle job pause <ID>
+memcastle job resume <ID>
+memcastle job cancel <ID> [--yes]
+memcastle job retry <ID>
+memcastle job demo [--steps <N>]
 ```
 
+`jobs` is an alias of the `job` group, like `wings`, `rooms` and `drawers` for the hierarchy commands.
+
 `--status` is one of `queued`, `running`, `paused`, `completed`, `failed` or `cancelled`.
-`jobs list` prints a table in a terminal, with the full id (copy it into `jobs show`), the kind, the coloured status,
+`job list` prints a table in a terminal, with the full id (copy it into `job show`), the kind, the coloured status,
 the progress, when it was created and the detail: the error of a failed job, otherwise the latest progress message.
 The detail column is only as wide as its text needs, and wraps onto further lines, never cut, when the terminal is narrower.
 The other columns are never wrapped, so on a very narrow terminal the table overflows instead.
-When standard output is a pipe or a file it prints the same jobs as a JSON array, so `memcastle jobs list | jq` works
+When standard output is a pipe or a file it prints the same jobs as a JSON array, so `memcastle job list | jq` works
 without a flag.
-`jobs cancel` asks for confirmation in a terminal, see [Output, colour and prompts](#output-colour-and-prompts).
+`job cancel` asks for confirmation in a terminal, see [Output, colour and prompts](#output-colour-and-prompts).
 Pausing and cancelling are requests: a running job stops at its next unit of work, not instantly.
 `retry` only applies to a failed job, and `resume` only to a paused one.
 `demo` submits a synthetic job (5 steps by default) that touches no palace content,

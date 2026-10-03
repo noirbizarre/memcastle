@@ -17,7 +17,7 @@ fn help_lists_the_top_level_commands() {
         .stdout(contains("mine"))
         .stdout(contains("audit"))
         .stdout(contains("repair"))
-        .stdout(contains("jobs"))
+        .stdout(contains("  job "))
         .stdout(contains("recall"))
         .stdout(contains("wake-up"));
 }
@@ -69,7 +69,7 @@ fn there_is_no_help_subcommand_because_the_flag_already_does_the_job() {
 fn command_groups_do_not_list_a_help_entry_either() {
     let output = Command::cargo_bin("memcastle")
         .unwrap()
-        .args(["jobs", "--help"])
+        .args(["job", "--help"])
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -299,7 +299,7 @@ fn jobs_show_rejects_a_malformed_job_id_before_ever_reaching_the_network() {
         .unwrap()
         .env("MEMCASTLE_BIND", "127.0.0.1")
         .env("MEMCASTLE_PORT", "1")
-        .args(["jobs", "show", "not-a-uuid"])
+        .args(["job", "show", "not-a-uuid"])
         .assert()
         .failure()
         // The diagnostic code, not just a non-zero exit: a malformed id must

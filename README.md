@@ -60,7 +60,7 @@ Then, from another terminal:
 ```bash
 memcastle status                       # is it up, where, and is its datastore healthy?
 memcastle mine ./project               # submits a durable, resumable job — doesn't block
-memcastle jobs list                    # follow it
+memcastle job list                     # follow it
 memcastle search "why did we switch to GraphQL?"
 ```
 

@@ -36,8 +36,8 @@ mise cli serve
 # in another terminal:
 mise cli status
 mise cli mine ./src
-mise cli jobs list
-mise cli jobs demo --steps 5   # exercise the scheduler without mining anything
+mise cli job list
+mise cli job demo --steps 5   # exercise the scheduler without mining anything
 mise cli search "job scheduler"
 mise cli stop
 ```
