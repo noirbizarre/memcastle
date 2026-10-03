@@ -239,6 +239,9 @@ which is why everything after the second `/` is the drawer.
 A name cannot be empty, cannot have leading or trailing whitespace, and cannot look like a UUID.
 A wing or room name cannot contain `/`.
 A path that breaks these rules is refused locally, before the daemon is contacted, with `memcastle::palace::invalid_path`.
+The same rules apply to a new wing named by `mine --wing`, a checkpoint item or a diary write,
+which the daemon refuses at submission with the same code.
+A wing that already exists is always accepted, whatever its name.
 
 `list` and `show` print a table or a readable view in a terminal, and JSON when standard output is a pipe or a file.
 `wing show` prints the wing's totals and its rooms.
