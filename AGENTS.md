@@ -7,7 +7,7 @@ Notes for anyone — human or otherwise — changing this repository.
 MemCastle is **a long-running memory server, not a CLI process that happens to expose MCP.**
 One daemon serves one palace; `memcastle serve` is the only command that does real work locally
 (`daemon start` just spawns it in the background) —
-every other subcommand (`status`, `search`, `mine`, `jobs ...`) is a thin HTTP client to that daemon,
+every other subcommand (`status`, `search`, `mine`, `job ...`) is a thin HTTP client to that daemon,
 so a web dashboard could do everything the CLI does by calling the same API.
 The one exception is `memcastle migrate`, which touches storage directly because it must work before a daemon
 exists (see invariant 1).

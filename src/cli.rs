@@ -40,7 +40,7 @@ fn mode_parser() -> impl TypedValueParser<Value = MemoryMode> {
     .try_map(|name| name.parse::<MemoryMode>())
 }
 
-/// The names `jobs list --status` accepts; see [`mode_parser`].
+/// The names `job list --status` accepts; see [`mode_parser`].
 fn status_parser() -> PossibleValuesParser {
     PossibleValuesParser::new([
         JobStatus::Queued.as_str(),
@@ -61,7 +61,7 @@ fn status_parser() -> PossibleValuesParser {
     long_about = None,
     styles = styles(),
     // `memcastle help` only repeats `--help`, and adds a `help` entry to every
-    // command group (`jobs help`, `diary help`, ...) that does the same.
+    // command group (`job help`, `diary help`, ...) that does the same.
     disable_help_subcommand = true,
 )]
 pub struct Cli {
@@ -140,9 +140,9 @@ pub enum Command {
     /// Read or write diary entries scoped to an agent identity.
     #[command(subcommand)]
     Diary(DiaryCommand),
-    /// Inspect and control jobs.
-    #[command(subcommand)]
-    Jobs(JobsCommand),
+    /// Inspect and control jobs. `jobs` is an alias.
+    #[command(subcommand, alias = "jobs")]
+    Job(JobCommand),
     /// List, show, create and delete wings: the top-level buckets of the
     /// palace, typically one per project. `wings` is an alias.
     #[command(subcommand, alias = "wings")]
@@ -562,9 +562,9 @@ pub struct DbStartArgs {
     pub json: bool,
 }
 
-/// `memcastle jobs` subcommands.
+/// `memcastle job` subcommands.
 #[derive(Debug, Subcommand)]
-pub enum JobsCommand {
+pub enum JobCommand {
     /// List jobs, optionally filtered by status. A table in a terminal, JSON
     /// when standard output is piped or redirected.
     List {
@@ -807,7 +807,7 @@ mod tests {
         // `--help` is the one way to ask: `help` only duplicated it.
         assert!(Cli::try_parse_from(["memcastle", "help"]).is_err());
         for group in [
-            "jobs", "diary", "auth", "db", "daemon", "wing", "room", "drawer",
+            "job", "diary", "auth", "db", "daemon", "wing", "room", "drawer",
         ] {
             assert!(
                 Cli::try_parse_from(["memcastle", group, "help"]).is_err(),
@@ -827,7 +827,7 @@ mod tests {
     fn help_flags_still_work() {
         for args in [
             vec!["memcastle", "--help"],
-            vec!["memcastle", "jobs", "--help"],
+            vec!["memcastle", "job", "--help"],
         ] {
             let error = Cli::try_parse_from(&args).unwrap_err();
             assert_eq!(
@@ -849,12 +849,12 @@ mod tests {
     }
 
     #[test]
-    fn jobs_list_has_no_json_flag_because_a_pipe_already_gets_json() {
-        assert!(Cli::try_parse_from(["memcastle", "jobs", "list", "--json"]).is_err());
+    fn job_list_has_no_json_flag_because_a_pipe_already_gets_json() {
+        assert!(Cli::try_parse_from(["memcastle", "job", "list", "--json"]).is_err());
     }
 
     #[test]
-    fn jobs_list_offers_the_valid_statuses_and_rejects_others() {
+    fn job_list_offers_the_valid_statuses_and_rejects_others() {
         for status in [
             "queued",
             "running",
@@ -863,9 +863,9 @@ mod tests {
             "failed",
             "cancelled",
         ] {
-            Cli::try_parse_from(["memcastle", "jobs", "list", "--status", status]).unwrap();
+            Cli::try_parse_from(["memcastle", "job", "list", "--status", status]).unwrap();
         }
-        let error = Cli::try_parse_from(["memcastle", "jobs", "list", "--status", "done"])
+        let error = Cli::try_parse_from(["memcastle", "job", "list", "--status", "done"])
             .unwrap_err()
             .to_string();
         assert!(error.contains("completed"), "{error}");
@@ -888,7 +888,7 @@ mod tests {
             vec!["repair", "--apply", "-y"],
             vec!["auth", "generate", "--yes"],
             vec!["auth", "revoke", "-y"],
-            vec!["jobs", "cancel", "some-id", "--yes"],
+            vec!["job", "cancel", "some-id", "--yes"],
             vec!["wing", "delete", "work", "--yes"],
             vec!["wing", "delete", "work", "-y"],
             vec!["room", "delete", "work/x", "--yes"],
@@ -915,7 +915,12 @@ mod tests {
 
     #[test]
     fn the_plural_spellings_are_aliases_of_the_singular_groups() {
-        for (plural, singular) in [("wings", "wing"), ("rooms", "room"), ("drawers", "drawer")] {
+        for (plural, singular) in [
+            ("wings", "wing"),
+            ("rooms", "room"),
+            ("drawers", "drawer"),
+            ("jobs", "job"),
+        ] {
             let a = Cli::try_parse_from(["memcastle", plural, "list", "--help"]);
             let b = Cli::try_parse_from(["memcastle", singular, "list", "--help"]);
             assert_eq!(

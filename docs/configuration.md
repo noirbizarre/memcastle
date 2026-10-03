@@ -182,7 +182,7 @@ The address and the port are separate settings, so either can be changed alone.
 Each is chosen by, highest precedence first: the flag, the environment variable, the config file, the default.
 `serve`, `daemon start`, `daemon restart` and a supervisor such as systemd all start the daemon through the same path,
 so the same three sources work everywhere.
-Client commands (`status`, `search`, `jobs` and the rest) read the config file and the environment,
+Client commands (`status`, `search`, `job` and the rest) read the config file and the environment,
 but not the flags, so a daemon started on a non-default port with `--port` is found through its registry file.
 `daemon start` and `daemon restart` pass their `--bind`, `--port` and `--assets-dir` on to the new daemon.
 

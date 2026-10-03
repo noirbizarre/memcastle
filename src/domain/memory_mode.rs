@@ -89,7 +89,7 @@ impl MemoryMode {
     }
 
     /// Whether this mode permits `search`/`recall`/`wake_up`/`diary_read`
-    /// and the job reads (`jobs list`/`show`), which can expose memory
+    /// and the job reads (`job list`/`show`), which can expose memory
     /// content — see ADR-007.
     #[must_use]
     pub fn allows_read(self) -> bool {

@@ -19,7 +19,7 @@
 //!   The population `AuditReport::stuck_failed_jobs` counts is already
 //!   `Failed`, not `Running` — a repair action to "fail" it again would be
 //!   a no-op; the only real way out of that state is the existing,
-//!   deliberately human-triggered `JobEvent::Retry` (`memcastle jobs
+//!   deliberately human-triggered `JobEvent::Retry` (`memcastle job
 //!   retry`).
 //!
 //! `dry_run` (`true` by default at every CLI/API entry point) never
