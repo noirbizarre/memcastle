@@ -16,10 +16,11 @@
 //! protocol over a clone of the daemon's own database handle, for SurrealDB Studio.
 //!
 //! `main.rs`/`cli.rs` are thin: every subcommand either runs `server::run`
-//! (the `serve`/`daemon` command) or goes through `client::DaemonClient`
+//! (the `serve` command) or goes through `client::DaemonClient`
 //! (everything else), with two narrow exceptions: `migrate` connects to
-//! storage itself, and `restart` also manages the daemon process (registry
-//! file plus respawn) — see `docs/architecture.md` for the full rationale.
+//! storage itself, and `daemon start`/`daemon restart` also manage the daemon
+//! process (registry file plus spawning `serve`) — see `docs/architecture.md`
+//! for the full rationale.
 
 #![allow(clippy::result_large_err)]
 #![warn(missing_docs)]

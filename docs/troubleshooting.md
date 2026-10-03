@@ -56,7 +56,7 @@ and enable authentication.
 
 ### Everything is refused after `memcastle auth revoke`
 
-Revoking the only credential leaves nothing that can authenticate, so even `memcastle stop` is refused.
+Revoking the only credential leaves nothing that can authenticate, so even `memcastle daemon stop` is refused.
 Stop the process with your supervisor (or `kill`), and start it again with authentication disabled
 (unset `MEMCASTLE_AUTH_ENABLED`) or with a new `MEMCASTLE_AUTH_TOKEN`.
 Nothing is lost, because authentication guards access and does not encrypt the palace.

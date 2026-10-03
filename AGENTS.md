@@ -5,7 +5,8 @@ Notes for anyone — human or otherwise — changing this repository.
 ## What this project is
 
 MemCastle is **a long-running memory server, not a CLI process that happens to expose MCP.**
-One daemon serves one palace; `memcastle serve`/`daemon` is the only command that does real work locally —
+One daemon serves one palace; `memcastle serve` is the only command that does real work locally
+(`daemon start` just spawns it in the background) —
 every other subcommand (`status`, `search`, `mine`, `jobs ...`) is a thin HTTP client to that daemon,
 so a web dashboard could do everything the CLI does by calling the same API.
 The one exception is `memcastle migrate`, which touches storage directly because it must work before a daemon
@@ -19,9 +20,9 @@ See `docs/architecture.md` for the full rationale, including what this deliberat
 Each of these should be enforced by a hook or a test. An invariant nothing checks is a comment, and it will be violated.
 
 1. **The CLI has no business logic MCP/HTTP can't reuse** —
-   every subcommand except `serve`/`daemon`/`migrate` only calls `client::DaemonClient`, never `store` or `jobs`
-   directly. (`restart` also manages the daemon *process* — it reads the registry file via `server::lifecycle`
-   and respawns `serve` — but touches neither `store` nor `jobs`.)
+   every subcommand except `serve`/`migrate` only calls `client::DaemonClient`, never `store` or `jobs`
+   directly. (`daemon start` and `daemon restart` also manage the daemon *process* — they read the registry file
+   via `server::lifecycle` and spawn `serve` detached — but touch neither `store` nor `jobs`.)
    `migrate` is a second, narrow exception alongside `serve`: it connects to storage directly (via
    `crate::migrate::run`/`status`, the same runner `serve` calls on every startup) because migration must work
    without, and before, a daemon exists — see `docs/adr/004-versioned-database-migrations.md`.

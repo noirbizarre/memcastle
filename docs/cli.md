@@ -1,11 +1,12 @@
 # CLI reference
 
 The `memcastle` binary is one daemon plus a set of thin clients.
-`serve` (alias `daemon`) runs the daemon, and `migrate` talks to storage directly.
+`serve` runs the daemon in the foreground, `daemon start` runs it in the background,
+and `migrate` talks to storage directly.
 Every other subcommand is an HTTP call to a running daemon, so it fails with `memcastle::client::not_running`
-(and points you at `memcastle serve`) when none is running.
+(and points you at `memcastle daemon start`) when none is running.
 Three things differ:
-`status` reports a stopped daemon instead of failing, `restart` starts a daemon when none is running,
+`status` reports a stopped daemon instead of failing, `daemon restart` starts a daemon when none is running,
 and the reserved commands (see [Not implemented yet](#not-implemented-yet)) fail with `memcastle::cli::not_implemented`
 without contacting a daemon.
 Run `memcastle <command> --help` for the authoritative text of any flag.
@@ -63,14 +64,15 @@ See [Configuration](configuration.md) for how these flags combine with the confi
 
 | Command | What it does |
 |---|---|
-| `memcastle serve [--bind <IP>] [--port <PORT>] [--assets-dir <DIR>]` | Run the daemon in the foreground. `daemon` is an alias. |
-| `memcastle restart [--bind <IP>] [--port <PORT>] [--assets-dir <DIR>]` | Stop the running daemon, start a detached new one and wait until it serves. |
-| `memcastle stop` | Ask the running daemon to shut down gracefully. |
+| `memcastle serve [--bind <IP>] [--port <PORT>] [--assets-dir <DIR>]` | Run the daemon in the foreground. |
+| `memcastle daemon start [--bind <IP>] [--port <PORT>] [--assets-dir <DIR>]` | Start a detached daemon and wait until it serves. Fails if one is already running. |
+| `memcastle daemon stop` | Ask the running daemon to shut down gracefully. |
+| `memcastle daemon restart [--bind <IP>] [--port <PORT>] [--assets-dir <DIR>]` | Stop the running daemon, start a detached new one and wait until it serves. |
 | `memcastle status [--json]` | Report whether the daemon is running, where, which palace, and whether the datastore is healthy. |
 | `memcastle migrate [--check \| --status]` | Apply, or just inspect, the palace's migrations without a daemon. |
 | `memcastle completions <SHELL>` | Print a shell completion script, see [Shell completion](#shell-completion). |
 
-`--bind`, `--port` and `--assets-dir` only exist on `serve` and `restart`;
+`--bind`, `--port` and `--assets-dir` only exist on `serve`, `daemon start` and `daemon restart`;
 client commands find the daemon through its registry file instead.
 `--assets-dir` names a directory of runtime assets that outranks the installed and built-in ones,
 see [Runtime assets](configuration.md#runtime-assets).

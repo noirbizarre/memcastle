@@ -78,10 +78,12 @@ Nothing in `domain` knows SurrealDB exists, and nothing in `cli`, `mcp` or `api`
 The dotted line is the important one: the CLI is an HTTP client of the daemon, exactly as a script or dashboard would be.
 
 **The CLI has no business logic MCP/HTTP can't reuse.**
-Every subcommand except `serve`/`daemon`/`migrate` is a thin `client::DaemonClient` call —
+Every subcommand except `serve`/`daemon start`/`daemon restart`/`migrate` is a thin `client::DaemonClient` call —
 `memcastle mine ./project` submits a job over HTTP the way an MCP tool call would, rather than mining anything itself.
-`restart` adds only process management: it reads the daemon's registry file (`server::lifecycle`)
-to know when the old daemon is really gone, then respawns `serve`, and never touches `store` or `jobs`.
+`daemon stop` is one of them: it only asks the daemon to shut down.
+`daemon start` and `daemon restart` add only process management:
+they read the daemon's registry file (`server::lifecycle`) to know when the old daemon is really gone,
+then spawn `serve` detached, and never touch `store` or `jobs`.
 `serve` is the composition root (`server::run`): it owns the store, the scheduler and the HTTP/MCP listeners.
 `migrate` is a second, narrow exception: it connects to storage directly through `crate::migrate`,
 the same runner `serve` calls on every startup, because migration must work before a daemon exists
@@ -396,7 +398,8 @@ Two fields mean "where do I read progress from" and "where do I read what it fou
 
 ## The daemon lifecycle
 
-`memcastle serve` runs in the **foreground**; backgrounding it is a supervisor's job (systemd, launchd, Docker, your shell).
+`memcastle serve` runs in the **foreground**, which is what a supervisor (systemd, launchd, Docker) runs.
+`memcastle daemon start` is the convenience for everyone else: it spawns `serve` detached and waits until it is serving.
 The startup order, and what an operator sees, is in [Running the daemon](daemon.md#what-happens-on-startup).
 The design points worth knowing:
 
@@ -502,8 +505,8 @@ Deliberately out of scope, and each is structurally possible without rework give
   ([ADR-015](adr/015-database-admin-endpoint.md)).
 - OAuth/OIDC, users, roles and scopes: 0.1 has one optional shared bearer token,
   and the authentication layer is where those would attach ([ADR-014](adr/014-optional-token-authentication.md)).
-- Robust cross-platform process supervision for `memcastle restart`
-  (it is a best-effort respawn; use a real supervisor in production).
+- Robust cross-platform process supervision for `memcastle daemon start` and `daemon restart`
+  (they are a best-effort detached spawn; use a real supervisor in production).
 - A web dashboard (the API is shaped so one can be built entirely as an API client, as the CLI is).
   Its packaging is settled, in [ADR-013](adr/013-release-packaging-and-asset-resolution.md);
   the daemon serves nothing from the asset directory yet.

@@ -111,11 +111,11 @@ async fn start_daemon(root: &Path, palace: &Path) -> (Child, String) {
 /// so the palace lock is released before the next daemon (or `migrate --status`) opens it.
 async fn stop_daemon(root: &Path, palace: &Path, child: &mut Child) {
     let status = memcastle(root, palace)
-        .arg("stop")
+        .args(["daemon", "stop"])
         .status()
         .await
-        .expect("run `memcastle stop`");
-    assert!(status.success(), "`memcastle stop` should succeed");
+        .expect("run `memcastle daemon stop`");
+    assert!(status.success(), "`memcastle daemon stop` should succeed");
     tokio::time::timeout(Duration::from_secs(15), child.wait())
         .await
         .expect("daemon exits within 15s of being asked to stop")

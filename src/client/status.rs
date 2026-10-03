@@ -27,7 +27,7 @@ pub const EXIT_HEALTHY: u8 = 0;
 pub const EXIT_DEGRADED: u8 = 1;
 
 /// Exit code for "no daemon is running". Distinct from [`EXIT_DEGRADED`] so
-/// `memcastle status || memcastle serve` style scripts can tell a stopped
+/// `memcastle status || memcastle daemon start` style scripts can tell a stopped
 /// daemon from a broken one; 3 is what `systemctl status` uses for "inactive".
 pub const EXIT_NOT_RUNNING: u8 = 3;
 
@@ -217,8 +217,8 @@ impl StatusView {
         ));
         lines.push(format!(
             "Restart with {}, stop with {}.",
-            p.accent("`memcastle restart`"),
-            p.accent("`memcastle stop`")
+            p.accent("`memcastle daemon restart`"),
+            p.accent("`memcastle daemon stop`")
         ));
         lines.join("\n")
     }
@@ -247,7 +247,10 @@ impl StatusView {
             )),
             _ => {}
         }
-        lines.push(format!("Start it with {}.", p.accent("`memcastle serve`")));
+        lines.push(format!(
+            "Start it with {}.",
+            p.accent("`memcastle daemon start`")
+        ));
         lines.join("\n")
     }
 }
@@ -411,7 +414,7 @@ mod tests {
             text.contains("embedded /data/palace/db, migrations 2/2"),
             "{text}"
         );
-        assert!(text.contains("memcastle restart"), "{text}");
+        assert!(text.contains("memcastle daemon restart"), "{text}");
     }
 
     #[test]
@@ -435,7 +438,7 @@ mod tests {
         assert!(text.contains("not running"), "{text}");
         assert!(text.contains("http://127.0.0.1:8420"), "{text}");
         assert!(text.contains("/data/palace"), "{text}");
-        assert!(text.contains("memcastle serve"), "{text}");
+        assert!(text.contains("memcastle daemon start"), "{text}");
     }
 
     #[test]

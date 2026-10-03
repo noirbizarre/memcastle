@@ -3,6 +3,8 @@
 ## Status
 
 Accepted, amended by [ADR-014](014-optional-token-authentication.md) (non-loopback warning)
+and [ADR-017](017-daemon-lifecycle-commands-live-under-daemon.md) (`restart` is now `daemon restart`, and `daemon start`
+takes the same flags)
 
 ## Context
 

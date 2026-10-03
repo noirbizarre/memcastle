@@ -18,7 +18,7 @@ use crate::error::Error;
 
 /// The one request that never needs a token: the liveness probe.
 ///
-/// `memcastle restart`, supervisors and the client's own "is a daemon there?"
+/// `memcastle daemon restart`, supervisors and the client's own "is a daemon there?"
 /// check poll it, and it answers only `{"status":"ok"}`. Keeping it open also
 /// keeps "the daemon is down" (no answer) distinct from "you are not
 /// authenticated" (a 401).

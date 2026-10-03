@@ -7,19 +7,30 @@ Nothing starts it for you, so you start it once and leave it running.
 ## Start it
 
 ```sh
+memcastle daemon start
+```
+
+`daemon start` runs the daemon in the **background**: it spawns `serve` detached from your terminal,
+waits until the daemon is really serving, and reports where.
+It fails with `memcastle::client::already_running` when a daemon already answers for the palace;
+use `daemon restart` to replace it.
+The background daemon's log output is discarded.
+
+```sh
 memcastle serve
 ```
 
 `serve` runs in the **foreground** and logs to standard error.
-Backgrounding it is your shell's or your supervisor's job: run it in a terminal multiplexer,
-or hand it to systemd, launchd or Docker (see [Under a supervisor](#under-a-supervisor)).
-`daemon` is an alias for `serve`.
+It is what a supervisor runs (see [Under a supervisor](#under-a-supervisor)),
+and what to use when you need to see the log, for instance when `daemon start` reports that the daemon did not come up.
 
 With no configuration it listens on `127.0.0.1:8420` and serves the palace at `~/.local/share/memcastle/default`.
-Change either from the command line, the environment or the config file:
+Change either from the command line, the environment or the config file;
+`daemon start` and `daemon restart` take the same `--bind`, `--port` and `--assets-dir` as `serve`:
 
 ```sh
 memcastle serve --bind 127.0.0.1 --port 8787
+memcastle daemon start --bind 127.0.0.1 --port 8787
 memcastle --palace ~/palaces/work serve
 ```
 
@@ -72,7 +83,7 @@ MemCastle is running
   jobs       0 queued, 0 running, 0 paused
   mode       full
   auth       disabled
-Restart with `memcastle restart`, stop with `memcastle stop`.
+Restart with `memcastle daemon restart`, stop with `memcastle daemon stop`.
 ```
 
 With no daemon, `status` says so, shows where it looked and how to start one.
@@ -92,7 +103,7 @@ memcastle status > /dev/null || echo "exit $?"
 ```
 
 !!! note
-    `status || serve` also starts a daemon when `status` exits `1`.
+    `status || memcastle daemon start` also starts a daemon when `status` exits `1`.
     Test for exit code 3 explicitly if a degraded daemon must not be replaced.
 
 ## How clients find the daemon
@@ -113,11 +124,11 @@ Its location and contents are in [Storage and data](storage.md#the-registry-file
 ## Stop and restart
 
 ```sh
-memcastle stop
-memcastle restart
+memcastle daemon stop
+memcastle daemon restart
 ```
 
-`stop` asks the daemon to shut down gracefully, and so does `SIGINT` or `SIGTERM` sent to a foreground `serve`.
+`daemon stop` asks the daemon to shut down gracefully, and so does `SIGINT` or `SIGTERM` sent to a foreground `serve`.
 The daemon stops accepting new jobs and asks every running job to stop at its next unit of work.
 Each such job saves its checkpoint and goes back to the queue, so the next daemon resumes it on its own;
 a job you had paused stays paused.
@@ -125,9 +136,10 @@ The wait is bounded by `jobs.drain_timeout_secs` (10 seconds by default).
 A job that does not stop in time is left running, and the next start re-queues it.
 Either way the daemon then removes its registry file and exits.
 
-`restart` stops the running daemon, starts a fresh detached one and waits until it serves.
-It passes on `--config`, `--bind`, `--port`, `--assets-dir` and the palace it resolved.
-The new daemon's log output is discarded, and `restart` is a best-effort convenience:
+`daemon restart` stops the running daemon, starts a fresh detached one and waits until it serves.
+With no daemon running it just starts one.
+Like `daemon start`, it passes on `--config`, `--bind`, `--port`, `--assets-dir` and the palace it resolved.
+The new daemon's log output is discarded, and `daemon restart` is a best-effort convenience:
 under a supervisor, restart through the supervisor instead.
 
 ## Logging
