@@ -22,6 +22,29 @@ pub struct SearchHit {
     pub score: f32,
 }
 
+/// How a multi-word query's terms combine in the full-text match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchMode {
+    /// Every query term must appear in the drawer (SurrealDB's default `@1@`).
+    All,
+    /// A single matching term is enough; BM25 still ranks drawers with more
+    /// matching terms higher.
+    Any,
+}
+
+impl MatchMode {
+    /// The full-text operator for this mode. A closed set of literals,
+    /// because SurrealDB cannot bind an operator as a parameter and
+    /// interpolating anything caller-supplied into the query would be an
+    /// injection hole.
+    const fn operator(self) -> &'static str {
+        match self {
+            Self::All => "@1@",
+            Self::Any => "@1,OR@",
+        }
+    }
+}
+
 /// The column list every drawer read projects, so a native `id`/`room`
 /// `RecordId` never has to be handled on the Rust side (see `store::mod`'s
 /// module doc) and every datetime round-trips through a plain RFC3339
@@ -206,16 +229,21 @@ impl SurrealStore {
     /// method fetching an unscoped page and filtering it in Rust, which
     /// would let an out-of-scope but higher-scoring hit crowd a requested
     /// scope's matches out of a capped result set.
+    ///
+    /// `mode` picks whether every query term must match or any one will
+    /// (see [`MatchMode`]); the `search` module decides which to try.
     pub async fn list_drawers_matching(
         &self,
         query: &str,
         limit: u32,
         wing: Option<&str>,
         room: Option<&str>,
+        mode: MatchMode,
     ) -> Result<Vec<SearchHit>> {
+        let operator = mode.operator();
         let sql = format!(
             "SELECT {DRAWER_COLUMNS}, search::score(1) AS score FROM drawer \
-             WHERE content @1@ $query \
+             WHERE content {operator} $query \
                AND ($wing = NULL OR room IN ( \
                      SELECT VALUE record::id(id) FROM room WHERE wing IN ( \
                        SELECT VALUE record::id(id) FROM wing WHERE name = $wing))) \

@@ -152,6 +152,7 @@ memcastle search <QUERY> [--limit <N>] [--wing <WING>] [--room <ROOM>]
 ```
 
 Full-text (BM25) search over drawer content.
+Drawers containing every word of the query are returned; if there are none, drawers containing any of them are.
 `--limit` defaults to 10 and is capped at 200.
 `--wing` restricts results to a wing, `--room` to a room directly.
 

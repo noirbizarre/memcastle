@@ -10,7 +10,7 @@
 //! `app` or the interfaces above it changing shape.
 
 use crate::error::Result;
-use crate::store::SurrealStore;
+use crate::store::{MatchMode, SurrealStore};
 
 // Re-exported so the interface layers (notably `client`, which only needs
 // the wire type) can name a search result without importing `crate::store`
@@ -19,6 +19,12 @@ pub use crate::store::SearchHit;
 
 /// Search drawer content lexically, returning at most `limit` hits ordered
 /// by BM25 relevance, optionally scoped to one wing and/or room by name.
+///
+/// Every query term must match first, so an exact query stays precise.
+/// Only when that finds nothing does it retry with any single term
+/// sufficing: SurrealDB has no stop-word filter, so a natural-language
+/// query ("programming languages I use preferences") carries words the
+/// stored text never contains and would otherwise return nothing at all.
 ///
 /// # Errors
 ///
@@ -30,5 +36,15 @@ pub async fn lexical_search(
     wing: Option<&str>,
     room: Option<&str>,
 ) -> Result<Vec<SearchHit>> {
-    store.list_drawers_matching(query, limit, wing, room).await
+    let strict = store
+        .list_drawers_matching(query, limit, wing, room, MatchMode::All)
+        .await?;
+    // A single term (or none) means AND and OR are the same query, so a
+    // retry could only repeat the empty answer at the cost of a query.
+    if !strict.is_empty() || query.split_whitespace().nth(1).is_none() {
+        return Ok(strict);
+    }
+    store
+        .list_drawers_matching(query, limit, wing, room, MatchMode::Any)
+        .await
 }

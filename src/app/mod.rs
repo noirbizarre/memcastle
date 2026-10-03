@@ -476,6 +476,26 @@ impl AppServices {
         // The caller's own name, so a rejected emergency checkpoint says
         // `emergency_checkpoint`, not the `checkpoint` it never asked for.
         Self::require_write(mode, operation)?;
+        // An empty payload would complete as a "successful" job that wrote
+        // nothing, and the agent would believe it had stored a memory.
+        if payload.items.is_empty() {
+            return Err(Error::invalid_input(
+                "payload",
+                "`items` must contain at least one item",
+            ));
+        }
+        // The same rule `create_drawer` applies: a blank drawer is never
+        // recallable, so storing one silently loses what the caller meant.
+        if let Some(index) = payload
+            .items
+            .iter()
+            .position(|item| item.content.trim().is_empty())
+        {
+            return Err(Error::invalid_input(
+                "payload",
+                format!("`items[{index}].content` must not be empty"),
+            ));
+        }
         // Up front, so a bad name is a 400 at submission and not a job that
         // fails halfway through after writing the items before it.
         for name in payload.items.iter().filter_map(|item| item.name.as_deref()) {
@@ -1535,6 +1555,99 @@ mod tests {
                 fact: None,
             }],
         }
+    }
+
+    #[tokio::test]
+    async fn a_checkpoint_without_items_is_rejected_and_queues_nothing() {
+        let app = test_app().await;
+        let result = app
+            .submit_checkpoint(
+                CheckpointPayload { items: vec![] },
+                "test",
+                MemoryMode::Full,
+            )
+            .await;
+        assert!(
+            matches!(&result, Err(Error::InvalidInput { field, .. }) if field == "payload"),
+            "an empty payload must be refused, got {result:?}"
+        );
+        assert!(
+            app.list_jobs(None, MemoryMode::Full)
+                .await
+                .expect("list")
+                .is_empty(),
+            "a refused checkpoint must not leave a job behind"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_checkpoint_with_blank_content_is_rejected() {
+        let app = test_app().await;
+        let result = app
+            .submit_checkpoint(one_item_payload("  \n "), "test", MemoryMode::Full)
+            .await;
+        assert!(
+            matches!(&result, Err(Error::InvalidInput { field, .. }) if field == "payload"),
+            "blank content must be refused, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn recall_finds_a_stored_fact_from_a_natural_language_question() {
+        let app = test_app().await;
+        app.diary_write(
+            "agent-a",
+            "project-x",
+            "my main programming languages are Rust and Python".to_string(),
+            "test",
+            MemoryMode::Full,
+        )
+        .await
+        .expect("write");
+
+        let hits = app
+            .recall(
+                "programming languages I use preferences",
+                None,
+                10,
+                MemoryMode::Full,
+            )
+            .await
+            .expect("recall");
+        assert_eq!(
+            hits.len(),
+            1,
+            "extra words in the question must not hide the stored fact, got {hits:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_exact_multi_word_match_does_not_pull_in_partial_matches() {
+        let app = test_app().await;
+        for content in [
+            "my main programming languages are Rust and Python",
+            "the garden needs languages of water",
+        ] {
+            app.diary_write(
+                "agent-a",
+                "project-x",
+                content.to_string(),
+                "test",
+                MemoryMode::Full,
+            )
+            .await
+            .expect("write");
+        }
+
+        let hits = app
+            .recall("programming languages", None, 10, MemoryMode::Full)
+            .await
+            .expect("recall");
+        assert_eq!(
+            hits.len(),
+            1,
+            "a query every term of which matches must stay strict, got {hits:?}"
+        );
     }
 
     #[tokio::test]

@@ -82,6 +82,8 @@ A JSON-encoded string of that object is accepted too, because some clients seria
 A string that is not valid JSON is refused as `memcastle::input::invalid`, blamed on `payload`.
 
 Every item produces a drawer.
+A payload with no items, or an item whose `content` is blank, is refused at submission as `memcastle::input::invalid`,
+blamed on `payload`, so a job never completes having stored nothing.
 A job that is interrupted resumes where it stopped and never stores an item twice.
 
 ## REST API
