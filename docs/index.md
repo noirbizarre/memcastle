@@ -29,9 +29,9 @@ flowchart LR
 
 - [Running the daemon](daemon.md): start, stop, supervise and check it.
 - [Authentication](authentication.md): require a bearer token from every client.
-- [Database access](database-access.md): open the daemon's database to SurrealDB Studio.
 - [Memory modes](memory-modes.md): make a session read-only, or turn memory off for it.
 - [Storage and data](storage.md): where data lives, what is in it, how to back it up.
+- [Database access](database-access.md): open the daemon's database to SurrealDB Studio.
 - [Migrations and upgrades](migrations.md): how a palace is kept up to date across releases.
 - [Troubleshooting](troubleshooting.md): diagnostic codes and what to do about them.
 

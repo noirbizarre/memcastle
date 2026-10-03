@@ -28,7 +28,7 @@ And mining, checkpoint and diary files into wings and rooms by name, creating th
 - **A drawer may have a name,** unique within its room, held in an optional `drawer.name`
   with a unique index on `(room, name)`.
   Unnamed drawers do not collide on the index.
-  Four writers set it: `drawer create`, a checkpoint item's `name`, and mining, which names a file's drawer after its path.
+  Three writers set it: `drawer create`, a checkpoint item's `name`, and mining, which names a file's drawer after its path.
   A re-mine finds the name taken by the first copy and leaves the new one unnamed, because failing a re-mine
   would turn an existing duplication into an error.
   A checkpoint item that asks for a taken name fails, because the caller named it on purpose.

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted, amended by a dated section at the end of this record (`db serve` renamed `db start`)
 
 ## Context
 

@@ -25,9 +25,11 @@ The history is the value.
 ## Index
 
 - [ADR-001](001-surrealkv-embedded-storage-engine.md) — SurrealKV as the only embedded storage engine in Phase 1
+  (C-free claim narrowed by a dated note)
 - [ADR-002](002-memory-mode-session-scoping.md) — memory mode is per-session/per-request, never daemon-global
   (gated operations amended by ADR-007)
 - [ADR-003](003-checkpoint-as-a-durable-job.md) — checkpoint is a durable job; diary writes are a direct call
+  (submission methods renamed by a dated note)
 - [ADR-004](004-versioned-database-migrations.md) — versioned MemCastle data migrations,
   decoupled from the SurrealDB engine and storage backend
 - [ADR-005](005-timestamp-representation.md) — timestamps are `datetime` when required,
@@ -35,7 +37,7 @@ The history is the value.
 - [ADR-006](006-job-leases.md) — running jobs are held by a heartbeat lease,
   not by an assumption of one daemon
 - [ADR-007](007-memory-mode-gate-follows-data-access.md) — the memory-mode gate follows what an operation
-  reads or writes, not its method name
+  reads or writes, not its method name (extended by ADR-018)
 - [ADR-008](008-replay-safe-job-resume.md) — resuming a job is replay-safe
 - [ADR-009](009-shutdown-drains-jobs.md) — shutdown drains running jobs and hands them back to the queue
 - [ADR-010](010-unix-xdg-paths.md) — configuration, data and state follow the Unix XDG layout on Linux and macOS
@@ -46,10 +48,11 @@ The history is the value.
   and its exit code says which state it found (`--json` extended by ADR-015, form by stream amended by ADR-016)
 - [ADR-013](013-release-packaging-and-asset-resolution.md) — releases are one binary plus an optional package layout,
   and assets resolve override, installed, embedded
+  (`.deb` and `.rpm` packages added by a dated note)
 - [ADR-014](014-optional-token-authentication.md) — authentication is an optional bearer token, checked at one layer,
-  and never an MCP capability
+  and never an MCP capability (commands renamed by ADR-017)
 - [ADR-015](015-database-admin-endpoint.md) — the database admin endpoint is an opt-in listener inside the daemon,
-  over its own database handle
+  over its own database handle (`db serve` renamed `db start` by an amendment)
 - [ADR-016](016-cli-presentation-follows-the-output-stream.md) — the CLI shows tables, colour and prompts to a terminal
   and plain data to a pipe, with no flag to choose
 - [ADR-017](017-daemon-lifecycle-commands-live-under-daemon.md) — the daemon's background lifecycle lives under

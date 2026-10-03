@@ -160,7 +160,7 @@ Reads are gated as reads and creates and deletes as writes, see [Memory modes](m
 There is deliberately no MCP tool for these routes, as for token generation and the database endpoint:
 deleting a wing is a human decision, and an agent that can file memories can already do so through
 `memcastle_checkpoint` and `memcastle_diary_write`.
-The decision is recorded in [ADR 018](adr/018-palace-hierarchy-management.md).
+The decision is recorded in [ADR-018](adr/018-palace-hierarchy-management.md).
 
 ### Authentication
 

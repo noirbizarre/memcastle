@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted, extended by [ADR-018](018-palace-hierarchy-management.md)
+(wing, room and drawer management follows the same gate)
 
 ## Context
 

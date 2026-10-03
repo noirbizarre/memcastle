@@ -21,7 +21,8 @@ Each of these should be enforced by a hook or a test. An invariant nothing check
 
 1. **The CLI has no business logic MCP/HTTP can't reuse** —
    every subcommand except `serve`/`migrate` only calls `client::DaemonClient`, never `store` or `jobs`
-   directly. (`daemon start` and `daemon restart` also manage the daemon *process* — they read the registry file
+   directly (`completions` calls neither: it prints a script locally).
+   (`daemon start` and `daemon restart` also manage the daemon *process* — they read the registry file
    via `server::lifecycle` and spawn `serve` detached — but touch neither `store` nor `jobs`.)
    `migrate` is a second, narrow exception alongside `serve`: it connects to storage directly (via
    `crate::migrate::run`/`status`, the same runner `serve` calls on every startup) because migration must work
@@ -90,7 +91,7 @@ src/
 ├── app/        application services — the one layer mcp/api call into (the CLI reaches it over HTTP, via `client/`)
 ├── server/     the daemon composition root + lifecycle (registry file)
 ├── mcp/        MCP tool surface, over HTTP
-├── api/        the REST API (health/status/jobs/search/recall/wake-up/diary/auth-token/db/shutdown)
+├── api/        the REST API (health/status/jobs/search/recall/wake-up/diary/wings/rooms/drawers/auth-token/db/shutdown)
 └── client/     the CLI's HTTP client for a running daemon, and the human renderings of its answers (status, tables)
 ```
 

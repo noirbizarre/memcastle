@@ -79,7 +79,7 @@ That is why `embedding` is empty in every drawer you see.
 
 ### Limits
 
-- Read commands return 10 results by default (20 for the diary) and never more than 200.
+- Read commands return 10 results by default (20 for the diary, 50 for `drawer list`) and never more than 200.
 - A `wake-up` returns at most 10 highlights and 8192 bytes unless told otherwise.
 
 ### What mining reads
