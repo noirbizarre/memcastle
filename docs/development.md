@@ -39,7 +39,7 @@ mise cli mine ./src
 mise cli job list
 mise cli job demo --steps 5   # exercise the scheduler without mining anything
 mise cli search "job scheduler"
-mise cli stop
+mise cli daemon stop
 ```
 
 By default the palace lives under `~/.local/share/memcastle/default` and the daemon listens on `127.0.0.1` port `8420`.
