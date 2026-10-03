@@ -2790,7 +2790,7 @@ dependencies = [
 
 [[package]]
 name = "memcastle"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "assert_cmd",
  "axum",

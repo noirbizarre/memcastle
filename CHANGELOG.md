@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0](https://github.com/noirbizarre/memcastle/compare/0.2.0..0.3.0) - 2026-10-03
+
+### 💫 Features
+
+- **search** SurrealDB-native semantic, hybrid, temporal and graph-aware retrieval ([#149](https://github.com/noirbizarre/memcastle/issues/149)) - ([645539d](https://github.com/noirbizarre/memcastle/commit/645539df58e476012dc3fca8f474fcaec9ad2881))
+- **skills** Distribute reusable agent skills with the repository ([#148](https://github.com/noirbizarre/memcastle/issues/148)) - ([0e1ca74](https://github.com/noirbizarre/memcastle/commit/0e1ca74a5dcb52b241f2b814400cfe0c3cace559))
+
+### 🐛 Bug Fixes
+
+- **ci** Restore the pinned Rust toolchain in the release workflow ([#145](https://github.com/noirbizarre/memcastle/issues/145)) - ([0c6e4c5](https://github.com/noirbizarre/memcastle/commit/0c6e4c5b2ade2a91060ed1f601e42585bdb6a1cc))
+
+### 📚 Documentation
+
+- **integrations** Define the shared Pi/OpenCode integration contract ([#147](https://github.com/noirbizarre/memcastle/issues/147)) - ([c937e0f](https://github.com/noirbizarre/memcastle/commit/c937e0fc3fa3be89b0315bdaf2ddd0281408c615))
+
 ## [0.2.0](https://github.com/noirbizarre/memcastle/compare/0.1.0..0.2.0) - 2026-10-03
 
 ### 💫 Features
