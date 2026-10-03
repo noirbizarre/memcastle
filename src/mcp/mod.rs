@@ -123,16 +123,100 @@ struct CheckpointArgs {
     /// "preference"|"project"|"diary"|"general", "wing": string|null,
     /// "content": string, "tags": [string], "source": {"kind":
     /// "file"|"manual", "uri": string|null, "agent": string|null}, "fact":
-    /// null|{"op": "add"|"supersede"|"invalidate", ...}}]}`. Kept as a raw
-    /// object here rather than a fully-typed schema — the shape is already
-    /// enforced by `CheckpointPayload`'s own deserialization, and this
-    /// avoids threading `schemars::JsonSchema` through every
+    /// null|{"op": "add"|"supersede"|"invalidate", ...}}]}`. Passed as a
+    /// JSON object, not a JSON-encoded string. Held as a raw value and
+    /// validated by `CheckpointPayload`'s own deserialization, with a
+    /// hand-written advertised schema ([`checkpoint_payload_schema`]) rather
+    /// than `schemars::JsonSchema` derives threaded through every
     /// knowledge-graph domain type for one argument.
+    #[schemars(schema_with = "checkpoint_payload_schema")]
     payload: serde_json::Value,
     /// Escalate to `Priority::Critical`, preempting all other queued work —
     /// reserved for save-before-crash situations, not routine checkpoints.
     #[serde(default)]
     emergency: bool,
+}
+
+/// The JSON Schema advertised for [`CheckpointArgs::payload`].
+///
+/// A bare `serde_json::Value` renders as the schema `true`, which tells a
+/// model nothing about the argument's shape; models then guess, and some
+/// JSON-encode the payload into a string. Spelling the object out steers
+/// them to send an object. Keep it in step with
+/// `domain::CheckpointPayload` (a test checks the enum values and required
+/// fields against the real type).
+fn checkpoint_payload_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "object",
+        "description": "The checkpoint payload, as a JSON object (not a JSON-encoded string).",
+        "properties": {
+            "items": {
+                "type": "array",
+                "description": "The memories to persist, in order.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "destination": {
+                            "type": "string",
+                            "enum": ["preference", "project", "diary", "general"],
+                            "description": "Which bucket the content belongs to."
+                        },
+                        "wing": {
+                            "type": ["string", "null"],
+                            "description": "Optional wing override; null uses the destination's default wing."
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "The text to store, verbatim."
+                        },
+                        "tags": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Free-form labels; may be empty."
+                        },
+                        "source": {
+                            "type": "object",
+                            "properties": {
+                                "kind": { "type": "string", "enum": ["file", "manual"] },
+                                "uri": { "type": ["string", "null"] },
+                                "agent": { "type": ["string", "null"] }
+                            },
+                            "required": ["kind"],
+                            "description": "Where the memory came from."
+                        },
+                        "fact": {
+                            "type": ["object", "null"],
+                            "description": "Optional knowledge-graph change: {\"op\": \"add\"|\"supersede\"|\"invalidate\", ...}.",
+                            "properties": {
+                                "op": { "type": "string", "enum": ["add", "supersede", "invalidate"] }
+                            },
+                            "required": ["op"]
+                        }
+                    },
+                    "required": ["destination", "content", "tags", "source"]
+                }
+            }
+        },
+        "required": ["items"]
+    })
+}
+
+/// Accept a checkpoint payload sent as a JSON-encoded string.
+///
+/// Some clients and models serialise the object into a string before
+/// sending it; the intent is unambiguous, and rejecting it sent an agent
+/// to the CLI instead of storing the memory. Anything else passes through
+/// untouched for `CheckpointPayload`'s own deserialization to judge.
+fn unwrap_stringified_payload(raw: serde_json::Value) -> Result<serde_json::Value, Error> {
+    match raw {
+        serde_json::Value::String(text) => serde_json::from_str(&text).map_err(|source| {
+            Error::invalid_input(
+                "payload",
+                format!("expected a JSON object, got a string that is not valid JSON: {source}"),
+            )
+        }),
+        other => Ok(other),
+    }
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -445,14 +529,13 @@ impl McpTools {
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
         let mode = self.mode_for(&parts);
-        let payload: CheckpointPayload = match serde_json::from_value(args.payload) {
+        let parsed = unwrap_stringified_payload(args.payload).and_then(|value| {
+            serde_json::from_value::<CheckpointPayload>(value)
+                .map_err(|source| Error::invalid_input("payload", source.to_string()))
+        });
+        let payload = match parsed {
             Ok(payload) => payload,
-            Err(source) => {
-                return tool_result::<Job>(
-                    "memcastle_checkpoint",
-                    Err(Error::invalid_input("payload", source.to_string())),
-                );
-            }
+            Err(error) => return tool_result::<Job>("memcastle_checkpoint", Err(error)),
         };
         let job = self
             .app
@@ -850,6 +933,123 @@ mod tests {
         let body: serde_json::Value = serde_json::from_str(&text_of(&result)).unwrap();
         assert_eq!(body["code"], "memcastle::input::invalid");
         assert!(body["error"].as_str().unwrap().contains("read_only"));
+    }
+
+    fn one_item_payload() -> serde_json::Value {
+        serde_json::json!({ "items": [{
+            "destination": "preference",
+            "wing": null,
+            "content": "The user's main programming languages are Rust and Python.",
+            "tags": ["user"],
+            "source": { "kind": "manual", "uri": null, "agent": null },
+            "fact": null,
+        }] })
+    }
+
+    async fn checkpoint(tools: &McpTools, payload: serde_json::Value) -> CallToolResult {
+        tools
+            .memcastle_checkpoint(
+                Parameters(CheckpointArgs {
+                    payload,
+                    emergency: false,
+                }),
+                Extension(parts(Some("s"))),
+            )
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_checkpoint_payload_sent_as_a_json_string_is_accepted_like_the_object() {
+        let tools = tools().await;
+        let stringified = serde_json::Value::String(one_item_payload().to_string());
+
+        let result = checkpoint(&tools, stringified).await;
+
+        assert_eq!(code_of(&result), None, "{}", text_of(&result));
+        let job: serde_json::Value = serde_json::from_str(&text_of(&result)).unwrap();
+        assert_eq!(job["kind"]["type"], "checkpoint");
+        assert_eq!(
+            job["kind"]["payload"]["items"][0]["destination"],
+            "preference"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_checkpoint_payload_string_that_is_not_json_is_an_input_error_on_payload() {
+        let tools = tools().await;
+
+        let result = checkpoint(&tools, serde_json::json!("not json at all")).await;
+
+        assert_eq!(
+            code_of(&result).as_deref(),
+            Some("memcastle::input::invalid")
+        );
+        assert!(text_of(&result).contains("payload"), "{}", text_of(&result));
+    }
+
+    #[tokio::test]
+    async fn the_checkpoint_tool_advertises_an_object_schema_for_its_payload() {
+        let tools = tools().await;
+        let tool = tools
+            .tool_router
+            .list_all()
+            .into_iter()
+            .find(|tool| tool.name == "memcastle_checkpoint")
+            .expect("checkpoint tool registered");
+
+        let schema = serde_json::to_value(&*tool.input_schema).unwrap();
+
+        // `true` (the schema of a bare `Value`) is what let a model send a string.
+        let payload = &schema["properties"]["payload"];
+        assert_eq!(payload["type"], "object", "{schema}");
+        assert_eq!(
+            payload["required"],
+            serde_json::json!(["items"]),
+            "{schema}"
+        );
+        let item = &payload["properties"]["items"]["items"];
+        assert_eq!(
+            item["required"],
+            serde_json::json!(["destination", "content", "tags", "source"]),
+            "required fields must match `CheckpointItem`: {schema}"
+        );
+    }
+
+    #[test]
+    fn the_advertised_checkpoint_enum_values_are_exactly_the_ones_the_domain_accepts() {
+        let schema = serde_json::to_value(checkpoint_payload_schema(
+            &mut schemars::SchemaGenerator::default(),
+        ))
+        .unwrap();
+        let item = &schema["properties"]["items"]["items"]["properties"];
+
+        // Each advertised value must deserialize, so the schema cannot promise what the domain refuses.
+        for destination in item["destination"]["enum"].as_array().unwrap() {
+            let payload = serde_json::json!({ "items": [{
+                "destination": destination,
+                "content": "c",
+                "tags": [],
+                "source": { "kind": "manual" },
+            }] });
+            serde_json::from_value::<CheckpointPayload>(payload)
+                .unwrap_or_else(|e| panic!("{destination} is advertised but refused: {e}"));
+        }
+        for kind in item["source"]["properties"]["kind"]["enum"]
+            .as_array()
+            .unwrap()
+        {
+            let payload = serde_json::json!({ "items": [{
+                "destination": "general",
+                "content": "c",
+                "tags": [],
+                "source": { "kind": kind },
+            }] });
+            serde_json::from_value::<CheckpointPayload>(payload)
+                .unwrap_or_else(|e| panic!("{kind} is advertised but refused: {e}"));
+        }
+        // And the doc example (one item, every field present) is accepted.
+        serde_json::from_value::<CheckpointPayload>(one_item_payload()).expect("example payload");
     }
 
     /// The diagnostic code of a failed tool call, or `None` if it succeeded.

@@ -306,6 +306,32 @@ async fn the_mcp_surface_serves_a_migrated_palace_and_survives_a_daemon_restart(
     .await;
     wait_for_completion(&session_a, job["id"].as_str().expect("job has an id")).await;
 
+    // Write path 3: some MCP clients JSON-encode the payload into a string;
+    // that must be stored too, not bounce the agent over to the CLI.
+    let stringified_marker = "smokestringifiedmarker payload sent as a json string";
+    let job = call(
+        &session_a,
+        "memcastle_checkpoint",
+        json!({
+            "payload": json!({ "items": [{
+                "destination": "general",
+                "content": stringified_marker,
+                "tags": [],
+                "source": { "kind": "manual", "uri": null, "agent": "smoke" },
+                "fact": null,
+            }] }).to_string(),
+        }),
+    )
+    .await;
+    wait_for_completion(&session_a, job["id"].as_str().expect("job has an id")).await;
+    let hits = call(
+        &session_a,
+        "memcastle_search",
+        json!({ "query": "smokestringifiedmarker" }),
+    )
+    .await;
+    assert_eq!(contents(&hits), [stringified_marker]);
+
     // Read paths: diary read and lexical search see both writes.
     let diary = call(
         &session_a,
