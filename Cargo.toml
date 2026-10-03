@@ -102,7 +102,7 @@ clap_complete = "4"
 # implies its `tty` feature, hence crossterm); the table width itself comes
 # from `console` and `force_no_tty()`, see `client::table`.
 console = "0.16"
-comfy-table = { version = "7", default-features = false, features = ["custom_styling"] }
+comfy-table = { version = "8", default-features = false, features = ["custom_styling"] }
 # Confirmations only: no history, fuzzy matching, completion or editor prompts.
 dialoguer = { version = "0.12", default-features = false }
 
