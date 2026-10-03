@@ -6,6 +6,8 @@
 //! The race is intermittent, so each test repeats the stop a few times.
 //!
 //! Subprocesses, because the runtime teardown being tested only happens at process exit.
+//! They keep the default `store.sync`: the flush on close that this guards is the
+//! one production runs, and a relaxed sync would change what is being exercised.
 
 use std::path::Path;
 use std::process::{Command, Stdio};

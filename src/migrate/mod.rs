@@ -10,8 +10,9 @@
 //!
 //! - Schema: declarative `.surql` files under `database/schema/`, embedded
 //!   into the binary and applied through SurrealKit's `Sync` (see
-//!   `store::mod`'s `SurrealStore::sync_schema`) — synced both first (so the
-//!   bookkeeping table exists before the lock is taken) and last in [`run`], never gated by the version watermark below, since
+//!   `store::mod`'s `SurrealStore::sync_schema`) — synced first (so the
+//!   bookkeeping table exists before the lock is taken) and again in [`run`]
+//!   after any data migration that ran, never gated by the version watermark below, since
 //!   SurrealKit's own content-hash tracking already makes re-applying an
 //!   unchanged file a no-op. MemCastle does not reimplement that diffing.
 //! - Data migrations ([`DataMigration`]): versioned Rust steps for a
@@ -113,7 +114,7 @@ pub struct MigrationStatus {
 /// Bring `store` up to the latest known data-migration version: sync the
 /// declarative schema (so the lock table exists), acquire the exclusive
 /// migration lock, apply every pending step in order, re-synchronize the
-/// schema, then release the lock. The same
+/// schema if any step ran, then release the lock. The same
 /// function `server::run` calls on every daemon startup and `memcastle
 /// migrate` calls directly — there is exactly one runner.
 ///
@@ -157,9 +158,9 @@ async fn run_with(store: &SurrealStore, migrations: &[DataMigration]) -> Result<
     // this bookkeeping table has to exist before `ensure_migration_state`/
     // the lock/the watermark can be read or written at all. Harmless to
     // repeat here even on an already-migrated palace (idempotent), and
-    // distinct in purpose from the second call inside `apply_pending`
-    // (which re-syncs *after* data migrations, per the ADR's ordering, to
-    // pick up any schema growth this release also shipped).
+    // distinct in purpose from the call inside `apply_pending` (which
+    // re-syncs *after* data migrations, per the ADR's ordering, to pick up
+    // any schema growth this release also shipped — only if one ran).
     store.sync_schema().await?;
     store.ensure_migration_state().await?;
 
@@ -202,10 +203,14 @@ async fn apply_pending(
         applied.push(step.name.to_string());
     }
 
-    // Always re-synced, even if nothing was pending: cheap and idempotent,
-    // and this is the one place both entry points agree schema sync has
-    // definitely happened as part of *this* run, not just at connect time.
-    store.sync_schema().await?;
+    // Only re-synced after a step ran: `run_with` synced just before taking the
+    // lock, so with nothing applied the schema is already current. Repeating it
+    // is not free — SurrealKit rewrites its setup and entity catalogue on every
+    // call, tens of separately committed (and, on the embedded backend, fsynced)
+    // statements that dominated a no-op boot on Windows.
+    if !applied.is_empty() {
+        store.sync_schema().await?;
+    }
 
     let to_version = store.migration_version().await?;
     Ok(MigrationReport {

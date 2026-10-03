@@ -107,6 +107,9 @@ lease_ttl_secs = 30
 # Embedded SurrealKV under palace.path (the default), or a remote SurrealDB.
 [store]
 mode = "embedded"
+# When an embedded palace forces its writes to disk: "every" (each commit, the default),
+# "never" (leave it to the operating system) or an interval over 100ms such as "500ms", "5s" or "1m".
+sync = "every"
 ```
 
 A remote store also needs a URL and credentials:
@@ -143,6 +146,7 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `db.port` (0 to 65535) | `MEMCASTLE_DB_PORT` | `8000` |
 | `db.allow_remote` (`true` or `false`) | `MEMCASTLE_DB_ALLOW_REMOTE` | `false` |
 | `db.allowed_origins` (a list) | `MEMCASTLE_DB_ALLOWED_ORIGINS` (comma-separated) | none |
+| `store.sync` (`every`, `never` or an interval over 100ms) | `MEMCASTLE_STORE_SYNC` | `every` |
 | `store.mode` and remote settings | none | `embedded` |
 
 `auth.token` is a secret, and is handled as one: MemCastle never logs it, prints it, serialises it, or writes it anywhere,

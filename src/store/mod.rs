@@ -156,6 +156,89 @@ pub(crate) fn take_rows<T: serde::de::DeserializeOwned>(
         .collect()
 }
 
+/// How often an embedded palace forces its writes to disk.
+///
+/// Every commit is its own fsync by default, which is what makes a crash lose
+/// nothing acknowledged, and also what makes a fresh boot (a few hundred
+/// schema statements) take seconds on a disk with a slow flush, such as the
+/// one on a Windows CI runner. The relaxed modes trade that guarantee for
+/// speed and exist for tests and throwaway palaces.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+// A single string in the config file (`sync = "never"`), validated by `FromStr`.
+#[serde(try_from = "String", into = "String")]
+pub enum StoreSync {
+    /// Flush on every commit: nothing acknowledged is lost on a crash.
+    #[default]
+    Every,
+    /// Leave flushing to the operating system: fastest, and the last
+    /// commits can be lost if the machine (not just the daemon) dies.
+    Never,
+    /// Flush in the background on this interval. SurrealKV refuses anything
+    /// at or below 100 ms, so [`FromStr`](std::str::FromStr) does too.
+    Interval(std::time::Duration),
+}
+
+impl std::str::FromStr for StoreSync {
+    type Err = String;
+
+    fn from_str(raw: &str) -> std::result::Result<Self, String> {
+        let raw = raw.trim().to_ascii_lowercase();
+        match raw.as_str() {
+            "every" => return Ok(Self::Every),
+            "never" => return Ok(Self::Never),
+            _ => {}
+        }
+        // Longest suffix first: `ms` ends in `s`, so `s` would otherwise
+        // swallow `250ms` and fail to parse `250m` as a number.
+        let (digits, unit_ms) = if let Some(n) = raw.strip_suffix("ms") {
+            (n, 1)
+        } else if let Some(n) = raw.strip_suffix('s') {
+            (n, 1_000)
+        } else if let Some(n) = raw.strip_suffix('m') {
+            (n, 60_000)
+        } else {
+            // A bare number has no unit to scale by: a zero multiplier makes
+            // it fail the `> 100` check below rather than guess seconds.
+            (raw.as_str(), 0)
+        };
+        let invalid =
+            || "expected `every`, `never`, or an interval over 100ms such as `500ms`, `5s` or `1m`";
+        let millis = digits
+            .parse::<u64>()
+            .ok()
+            .and_then(|n| n.checked_mul(unit_ms))
+            .filter(|millis| *millis > 100)
+            .ok_or_else(invalid)?;
+        Ok(Self::Interval(std::time::Duration::from_millis(millis)))
+    }
+}
+
+impl std::fmt::Display for StoreSync {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Every => f.write_str("every"),
+            Self::Never => f.write_str("never"),
+            // Milliseconds always: the one unit that round-trips through
+            // `from_str` (and SurrealDB's own parser) without loss.
+            Self::Interval(interval) => write!(f, "{}ms", interval.as_millis()),
+        }
+    }
+}
+
+impl From<StoreSync> for String {
+    fn from(sync: StoreSync) -> Self {
+        sync.to_string()
+    }
+}
+
+impl TryFrom<String> for StoreSync {
+    type Error = String;
+
+    fn try_from(raw: String) -> std::result::Result<Self, String> {
+        raw.parse()
+    }
+}
+
 /// Where the palace's data actually lives.
 #[derive(Debug, Clone)]
 pub enum Backend {
@@ -163,6 +246,8 @@ pub enum Backend {
     Embedded {
         /// The directory SurrealDB should own. Created if missing.
         path: PathBuf,
+        /// How often writes are forced to disk.
+        sync: StoreSync,
     },
     /// A remotely hosted SurrealDB instance.
     Remote {
@@ -196,7 +281,7 @@ impl Backend {
     #[must_use]
     pub fn describe(&self) -> BackendInfo {
         match self {
-            Self::Embedded { path } => BackendInfo {
+            Self::Embedded { path, .. } => BackendInfo {
                 kind: "embedded",
                 location: path.display().to_string(),
             },
@@ -213,7 +298,17 @@ impl Backend {
             // Single colon, no slashes: `surrealkv:` is the scheme, what
             // follows is the path verbatim (`surrealkv://` would make the
             // first path segment look like a host).
-            Self::Embedded { path } => format!("surrealkv:{}", path.display()),
+            Self::Embedded { path, sync } => {
+                let endpoint = format!("surrealkv:{}", path.display());
+                match sync {
+                    // The default is left implicit so the common endpoint
+                    // stays exactly what it was before this setting existed.
+                    StoreSync::Every => endpoint,
+                    // Query parameters become `datastore_*` options in
+                    // SurrealDB's `any` engine, which strips them from the path.
+                    _ => format!("{endpoint}?sync={sync}"),
+                }
+            }
             Self::Remote { url, .. } => url.clone(),
         }
     }
@@ -268,7 +363,7 @@ impl SurrealStore {
     ///
     /// Returns [`crate::Error::Store`] if the connection or sign-in fails.
     pub async fn connect(backend: &Backend) -> Result<Self> {
-        if let Backend::Embedded { path } = backend {
+        if let Backend::Embedded { path, .. } = backend {
             std::fs::create_dir_all(path)
                 .map_err(|source| crate::Error::io(path.display().to_string(), source))?;
         }
@@ -431,10 +526,84 @@ mod tests {
     fn an_embedded_backend_describes_its_directory() {
         let info = Backend::Embedded {
             path: PathBuf::from("/data/palace/db"),
+            sync: StoreSync::default(),
         }
         .describe();
         assert_eq!(info.kind, "embedded");
         assert_eq!(info.location, "/data/palace/db");
+    }
+
+    fn embedded(sync: StoreSync) -> Backend {
+        Backend::Embedded {
+            path: PathBuf::from("/data/palace/db"),
+            sync,
+        }
+    }
+
+    #[test]
+    fn the_default_sync_leaves_the_endpoint_exactly_as_it_was() {
+        // A palace that never set `sync` must keep opening the way it always did.
+        assert_eq!(
+            embedded(StoreSync::Every).endpoint(),
+            "surrealkv:/data/palace/db"
+        );
+    }
+
+    #[test]
+    fn a_relaxed_sync_reaches_the_endpoint_as_a_query_parameter() {
+        assert_eq!(
+            embedded(StoreSync::Never).endpoint(),
+            "surrealkv:/data/palace/db?sync=never"
+        );
+        assert_eq!(
+            embedded("2s".parse().unwrap()).endpoint(),
+            "surrealkv:/data/palace/db?sync=2000ms"
+        );
+    }
+
+    #[test]
+    fn sync_modes_parse_and_print_the_same_way() {
+        assert_eq!("every".parse(), Ok(StoreSync::Every));
+        assert_eq!(" NEVER ".parse(), Ok(StoreSync::Never));
+        assert_eq!(
+            "250ms".parse(),
+            Ok(StoreSync::Interval(std::time::Duration::from_millis(250)))
+        );
+        assert_eq!(
+            "1m".parse(),
+            Ok(StoreSync::Interval(std::time::Duration::from_secs(60)))
+        );
+        for sync in [StoreSync::Every, StoreSync::Never, "5s".parse().unwrap()] {
+            assert_eq!(sync.to_string().parse(), Ok(sync));
+        }
+    }
+
+    #[test]
+    fn a_sync_value_nothing_can_honour_is_refused() {
+        // 100ms and below is SurrealKV's own floor; a bare number has no unit.
+        for bad in ["", "sometimes", "100ms", "0s", "30", "-5s", "1h"] {
+            assert!(bad.parse::<StoreSync>().is_err(), "{bad:?} must be refused");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_store_opens_with_every_sync_mode_the_endpoint_can_carry() {
+        // The query string is SurrealDB's to interpret; this proves it accepts
+        // what `endpoint()` builds instead of rejecting it as part of the path.
+        for sync in [StoreSync::Never, "1s".parse().unwrap()] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let backend = Backend::Embedded {
+                path: dir.path().join("palace"),
+                sync,
+            };
+            let store = SurrealStore::connect(&backend)
+                .await
+                .unwrap_or_else(|e| panic!("connect with sync={sync}: {e}"));
+            store.sync_schema().await.expect("sync schema");
+            store.ping().await.expect("ping");
+            // Dropping the handle does not release the file lock (see the note
+            // below), but the tempdir is private to this iteration.
+        }
     }
 
     // "Reopen the same SurrealKV path in the same process" is deliberately
@@ -452,8 +621,11 @@ mod tests {
     #[tokio::test]
     async fn a_drawer_can_be_created_and_listed_under_its_room() {
         let dir = tempfile::tempdir().expect("tempdir");
+        // The default sync, deliberately: this is the one test that opens a
+        // real durable palace the way production does.
         let backend = Backend::Embedded {
             path: dir.path().join("palace"),
+            sync: StoreSync::default(),
         };
         let store = SurrealStore::connect(&backend).await.expect("connect");
         // `connect()` no longer syncs schema itself (see this module's doc)

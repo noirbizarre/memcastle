@@ -12,9 +12,10 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use memcastle::config::Config;
+use memcastle::config::{Config, StoreConfig};
 use memcastle::domain::{Job, JobId, JobStatus};
 use memcastle::server::lifecycle::RuntimeInfo;
+use memcastle::store::StoreSync;
 use tempfile::TempDir;
 use tokio::task::JoinHandle;
 
@@ -50,6 +51,13 @@ impl TestDaemon {
         config.jobs.max_concurrency = 1;
         config.server.bind = "127.0.0.1".parse().expect("valid IP address");
         config.server.port = 0;
+        // In-process daemons are never killed mid-write, so what a flush per
+        // commit protects against cannot happen here, while paying for it
+        // cost seconds per boot on a slow disk (Windows CI). A test that is
+        // about durability starts a real process instead (`persistence.rs`).
+        config.store = StoreConfig::Embedded {
+            sync: StoreSync::Never,
+        };
         configure(&mut config);
 
         let handle = tokio::spawn(memcastle::server::run(config));

@@ -32,7 +32,11 @@ fn isolated(root: &Path) -> Command {
     }
     cmd.env("XDG_CONFIG_HOME", root.join("config"))
         .env("XDG_DATA_HOME", root.join("data"))
-        .env("XDG_STATE_HOME", root.join("state"));
+        .env("XDG_STATE_HOME", root.join("state"))
+        // These tests assert where the daemon listens, not that its data
+        // survives a crash. A flush per commit makes every boot cost seconds
+        // on a slow disk (Windows CI), which was most of this file's run time.
+        .env("MEMCASTLE_STORE_SYNC", "never");
     cmd
 }
 

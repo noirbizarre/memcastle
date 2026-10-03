@@ -110,6 +110,15 @@ A second `serve` on the same address never gets that far: the listener is bound 
 so it fails with `memcastle::server::bind_failed`.
 Stop the daemon first, or point at a different palace.
 
+By default an embedded palace flushes to disk on every commit, so nothing it acknowledged is lost if the daemon is killed
+or the machine loses power.
+`store.sync` (or `MEMCASTLE_STORE_SYNC`) relaxes that:
+`never` leaves flushing to the operating system, and an interval such as `5s` flushes in the background.
+Either is faster, most visibly on a disk with a slow flush, but the most recent commits can be lost if the machine
+(not just the daemon) stops abruptly.
+Keep the default for a palace you care about; the relaxed modes are meant for tests and throwaway palaces.
+A remote store sets its own durability, so the setting does not apply to it.
+
 **Remote** connects to a SurrealDB server over `ws://` or `wss://`:
 
 ```toml
