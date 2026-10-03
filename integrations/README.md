@@ -62,6 +62,11 @@ which is also installable on its own (see [Agent skills](../docs/skills.md)).
 What stays here is the lifecycle: when to load a skill, when to call MemCastle, and refusing to load one into a session
 whose memory mode is off.
 
+## Per-ecosystem findings
+
+- [`opencode/docs/research.md`](opencode/docs/research.md) maps OpenCode's plugin hooks, MCP client and skills onto
+  MemCastle operations, and records where OpenCode has no clean equivalent.
+
 ## Non-goals
 
 No plugin marketplace, no dynamic plugin runtime, no package manager across
