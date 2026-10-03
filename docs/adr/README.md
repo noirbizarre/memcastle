@@ -66,3 +66,5 @@ The history is the value.
 - [ADR-021](021-richer-retrieval.md) — retrieval is SurrealDB-native and derived: one HNSW index, one shared scope,
   `search::rrf` fusion, point-in-time validity, drawer supersession and graph expansion, with embeddings from a provider
   or the caller
+- [ADR-022](022-integrations-are-bun-packages-tested-against-a-real-daemon.md) — integrations are self-contained bun
+  packages, each with its own small client, tested against a real daemon in their own CI job

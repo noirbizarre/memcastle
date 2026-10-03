@@ -41,14 +41,19 @@ integration's own model and full conversation context, which MemCastle does not
 have. MemCastle persists whatever already-classified payload it's given; it
 does not classify.
 
-## Layout (planned)
+## Layout
 
 ```text
 integrations/
-  pi/            TypeScript/bun — the primary V1 integration (Phase 2)
-  opencode/      TypeScript — native OpenCode extension mechanism (Phase 3)
-  claude-code/   MCP + skills only, pragmatic/best-effort (Phase 4)
+  pi/            TypeScript/bun — the primary V1 integration (Phase 2); not scaffolded yet
+  opencode/      TypeScript/bun — an OpenCode plugin (Phase 3); scaffolded
+  claude-code/   MCP + skills only, pragmatic/best-effort (Phase 4); planned
 ```
+
+Each TypeScript package is self-contained, with its own `package.json`, lockfile and tests, and carries its own copy of
+the small client it needs.
+`mise run integrations:check` typechecks and tests every one of them against a real daemon;
+see [ADR-022](../docs/adr/022-integrations-are-bun-packages-tested-against-a-real-daemon.md).
 
 Each ecosystem uses its own native language/runtime and packaging conventions —
 this is not forced into Rust, and there is no shared plugin runtime or package
@@ -75,6 +80,8 @@ native tooling, nothing more.
 
 ## Status
 
-No integration code exists yet. Tracked as GitHub issues under the
+The OpenCode package is a scaffold: its connection, mode, discovery and failure foundations work and are tested,
+and its lifecycle hooks are empty.
+Tracked as GitHub issues under the
 "Phase 2 — Pi integration", "Phase 3 — OpenCode integration", and
 "Phase 4 — Claude Code integration" milestones.

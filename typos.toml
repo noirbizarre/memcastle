@@ -3,6 +3,8 @@ extend-exclude = [
   # Short SHAs in the changelog and the lockfiles read as typos.
   "Cargo.lock",
   "mise.lock",
+  # The integration packages' lockfiles carry integrity hashes, which read as typos.
+  "**/bun.lock",
   "CHANGELOG.md",
   # Snapshots record output verbatim, including any deliberate typo under test.
   "tests/snapshots/**",

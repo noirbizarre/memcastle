@@ -164,6 +164,28 @@ jobs:
           directory: target/nextest/ci
           report_type: test_results
 
+  # The client half of the integration contract: each package under integrations/ is typechecked and tested against a
+  # real `memcastle serve` (ADR-022). It builds the daemon because that is what the tests talk to, and it is its own
+  # job because it needs bun, which `mise install` deliberately leaves out of [tools].
+  # This job is local to this repository; the template does not have it.
+  integrations:
+    name: 🔌 Integrations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: rui314/setup-mold@v1
+      - uses: mozilla-actions/sccache-action@v0.0.11
+
+      - uses: jdx/mise-action@v5
+        with:
+          cache: true
+
+      # `build` is a dependency of the task, so the debug binary the tests start is built first.
+      - name: Typecheck and test the integrations
+        run: mise run integrations:check
+
   # The .deb and .rpm are otherwise first built by 📦 Publish Release, after the
   # tag exists, which is the worst moment to learn the nfpm config is broken.
   # Stub binaries are enough: nfpm only packages the bytes it is given. They

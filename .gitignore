@@ -42,3 +42,8 @@ node_modules/
 # not be shared. Already covered by the global `mise.*.toml`, but stated here so
 # the intent survives a developer who has no global ignore at all.
 mise.local.toml
+
+# Build output of the integration packages. Their dependencies are covered by `node_modules/` above; a bundle or
+# incremental-build file is regenerated, and committing one makes a diff nobody reviews.
+integrations/**/dist/
+*.tsbuildinfo

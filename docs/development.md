@@ -17,6 +17,7 @@ mise run test       # cargo nextest run (accepts nextest selectors)
 mise run lint       # cargo clippy --all-targets --all-features -- -D warnings
 mise run format     # cargo fmt --all
 mise run guards     # the architecture guard hooks, described below
+mise run integrations:check # typecheck and test each package under integrations/ (needs bun, fetched on demand)
 mise run check      # every lint, the guards and the tests, without modifying the tree
 mise run ci         # check plus the docs build: the local equivalent of CI's lint,
                     # test and docs steps
@@ -93,6 +94,10 @@ Every path, environment variable, flag and the precedence between them is in [Co
     a real MCP session replays the language-neutral fixtures in `tests/fixtures/integration/`
     (modes, checkpoint payloads, failure classes), and fails when the contract page, the capability manifest
     and the test names disagree (in-process).
+  - `integrations/<name>/test/` — the client half of the same contract, one bun suite per integration:
+    each starts a real `memcastle serve`, finds it through its registry file and replays the same fixtures through
+    the integration's own client.
+    Run them with `mise run integrations:check`, see [ADR-022](adr/022-integrations-are-bun-packages-tested-against-a-real-daemon.md).
   - `tests/skills.rs` — the shared [agent skills](skills.md): every skill is discoverable, and every tool, CLI command
     and REST route it names exists in this release (in-process daemon, plus the real binary's help).
 

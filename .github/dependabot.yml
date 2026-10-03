@@ -26,3 +26,14 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+
+  # One entry per integration package: each is self-contained, with its own lockfile (ADR-022).
+  - package-ecosystem: bun
+    directory: /integrations/opencode
+    schedule:
+      interval: weekly
+    rebase-strategy: disabled
+    groups:
+      opencode-dependencies:
+        patterns: ["*"]
+        update-types: [minor, patch]
