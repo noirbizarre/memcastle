@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
-use crate::store::Backend;
+use crate::store::{Backend, StoreSync};
 
 // Defined in `domain` so `store::Backend` can hold it too; re-exported because
 // configuration is where callers have always found it.
@@ -62,12 +62,16 @@ impl Default for PalaceConfig {
 
 /// Backend selection, as read from configuration (before being turned into
 /// `store::Backend`) — see [`StoreConfig::into_backend`].
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum StoreConfig {
     /// Embedded SurrealKV under `palace.path` — the default developer setup.
-    #[default]
-    Embedded,
+    Embedded {
+        /// How often writes are forced to disk. Defaults to every commit;
+        /// `[store] mode = "embedded"` alone must keep parsing, so it is optional.
+        #[serde(default)]
+        sync: StoreSync,
+    },
     /// A remotely hosted SurrealDB instance.
     Remote {
         /// e.g. `ws://localhost:8000`.
@@ -86,13 +90,23 @@ pub enum StoreConfig {
     },
 }
 
+impl Default for StoreConfig {
+    fn default() -> Self {
+        // Spelled out because `#[default]` only works on a unit variant.
+        Self::Embedded {
+            sync: StoreSync::default(),
+        }
+    }
+}
+
 impl StoreConfig {
     /// Resolve into the concrete backend `store::SurrealStore::connect` needs.
     #[must_use]
     pub fn into_backend(self, palace_path: &Path) -> Backend {
         match self {
-            Self::Embedded => Backend::Embedded {
+            Self::Embedded { sync } => Backend::Embedded {
                 path: palace_path.join("db"),
+                sync,
             },
             Self::Remote {
                 url,
@@ -459,6 +473,15 @@ impl Config {
         }
         if let Some(dir) = lookup("MEMCASTLE_ASSETS_DIR") {
             self.assets.dir = Some(PathBuf::from(dir));
+        }
+        if let Some(raw) = lookup("MEMCASTLE_STORE_SYNC") {
+            let parsed: StoreSync = parse_override("MEMCASTLE_STORE_SYNC", &raw)?;
+            // A remote database decides its own durability, so there is
+            // nothing here to apply the value to. Validated above regardless,
+            // so a typo is reported whichever backend is configured.
+            if let StoreConfig::Embedded { sync } = &mut self.store {
+                *sync = parsed;
+            }
         }
         if let Some(level) = lookup("MEMCASTLE_LOG") {
             self.logging.level = level;
@@ -1033,11 +1056,69 @@ mod tests {
 
     #[test]
     fn embedded_store_config_resolves_under_the_palace_path() {
-        let backend = StoreConfig::Embedded.into_backend(Path::new("/tmp/palace"));
+        let backend = StoreConfig::default().into_backend(Path::new("/tmp/palace"));
         match backend {
-            Backend::Embedded { path } => assert_eq!(path, Path::new("/tmp/palace/db")),
+            Backend::Embedded { path, sync } => {
+                assert_eq!(path, Path::new("/tmp/palace/db"));
+                assert_eq!(sync, StoreSync::Every, "durable unless told otherwise");
+            }
             Backend::Remote { .. } => panic!("expected an embedded backend"),
         }
+    }
+
+    #[test]
+    fn the_store_sync_comes_from_the_file_and_the_environment_outranks_it() {
+        let mut config: Config =
+            toml::from_str("[store]\nmode = \"embedded\"\nsync = \"5s\"").unwrap();
+        assert!(matches!(
+            config.store,
+            StoreConfig::Embedded { sync } if sync == "5s".parse().unwrap()
+        ));
+
+        config
+            .apply_overrides_from(env(&[("MEMCASTLE_STORE_SYNC", "never")]))
+            .unwrap();
+        assert!(matches!(
+            config.store,
+            StoreConfig::Embedded {
+                sync: StoreSync::Never
+            }
+        ));
+    }
+
+    #[test]
+    fn an_embedded_store_without_a_sync_setting_stays_durable() {
+        // The shape every existing config file has.
+        let config: Config = toml::from_str("[store]\nmode = \"embedded\"").unwrap();
+        assert!(matches!(
+            config.store,
+            StoreConfig::Embedded {
+                sync: StoreSync::Every
+            }
+        ));
+    }
+
+    #[test]
+    fn a_bad_store_sync_is_refused_by_name_from_the_file_and_the_environment() {
+        assert!(toml::from_str::<Config>("[store]\nmode = \"embedded\"\nsync = \"soon\"").is_err());
+
+        let err = Config::default()
+            .apply_overrides_from(env(&[("MEMCASTLE_STORE_SYNC", "soon")]))
+            .unwrap_err();
+        assert!(err.to_string().contains("MEMCASTLE_STORE_SYNC"), "{err}");
+    }
+
+    #[test]
+    fn the_store_sync_environment_variable_does_not_touch_a_remote_store() {
+        let mut config: Config = toml::from_str(
+            "[store]\nmode = \"remote\"\nurl = \"ws://x:8000\"\nnamespace = \"n\"\ndatabase = \"d\"\n\
+             username = \"root\"\npassword = \"p\"",
+        )
+        .unwrap();
+        config
+            .apply_overrides_from(env(&[("MEMCASTLE_STORE_SYNC", "never")]))
+            .unwrap();
+        assert!(matches!(config.store, StoreConfig::Remote { .. }));
     }
 
     #[test]
