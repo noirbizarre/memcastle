@@ -130,9 +130,9 @@ run = "cargo insta review"
 
 [tasks.check]
 description = "Run every check that does not modify the working tree"
-# `guards` is project-specific: without it `check`/`ci` pass locally while the
-# architecture hooks (which otherwise run only on commit and in CI) fail later.
-depends = ["format:check", "lint", "lint:actions", "lint:md", "spell", "guards", "test"]
+# `guards` and `integrations:check` are project-specific: without them `check`/`ci` pass locally while the
+# architecture hooks (which otherwise run only on commit and in CI) and the integration suites fail later.
+depends = ["format:check", "lint", "lint:actions", "lint:md", "spell", "guards", "test", "integrations:check"]
 
 [tasks.ci]
 description = "The local equivalent of CI's lint, test and documentation steps"
@@ -249,4 +249,23 @@ prek run --all-files single-writer
 prek run --all-files job-status-only-via-apply
 prek run --all-files no-hand-rolled-ddl
 prek run --all-files integrations-http-only
+"""
+
+[tasks."integrations:check"]
+description = "Typecheck and test every package under integrations/ against a real daemon"
+# bun is declared here and not in `[tools]`, for the same reason as cargo-insta: only this task needs it, and
+# `mise install` in every CI job would otherwise fetch it too.
+tools = { bun = "1" }
+# The packages replay their tests against a real `memcastle serve`, so the debug binary must exist and be current.
+depends = ["build"]
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+export MEMCASTLE_BIN="$PWD/target/debug/memcastle"
+for manifest in integrations/*/package.json; do
+  package="$(dirname "$manifest")"
+  echo "==> $package"
+  # --frozen-lockfile: a lockfile that disagrees with package.json is a failure here, not a silent rewrite.
+  (cd "$package" && bun install --frozen-lockfile && bun run typecheck && bun run test)
+done
 """

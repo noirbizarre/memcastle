@@ -41,14 +41,19 @@ integration's own model and full conversation context, which MemCastle does not
 have. MemCastle persists whatever already-classified payload it's given; it
 does not classify.
 
-## Layout (planned)
+## Layout
 
 ```text
 integrations/
-  pi/            TypeScript/bun — the primary V1 integration (Phase 2)
-  opencode/      TypeScript — native OpenCode extension mechanism (Phase 3)
-  claude-code/   MCP + skills only, pragmatic/best-effort (Phase 4)
+  pi/            TypeScript/bun — the primary V1 integration (Phase 2); scaffolded
+  opencode/      TypeScript/bun — an OpenCode plugin (Phase 3); scaffolded
+  claude-code/   MCP + skills only, pragmatic/best-effort (Phase 4); planned
 ```
+
+Each TypeScript package is self-contained, with its own `package.json`, lockfile and tests, and carries its own copy of
+the small client it needs.
+`mise run integrations:check` typechecks and tests every one of them against a real daemon;
+see [ADR-022](../docs/adr/022-integrations-are-bun-packages-tested-against-a-real-daemon.md).
 
 Each ecosystem uses its own native language/runtime and packaging conventions —
 this is not forced into Rust, and there is no shared plugin runtime or package
@@ -62,6 +67,11 @@ which is also installable on its own (see [Agent skills](../docs/skills.md)).
 What stays here is the lifecycle: when to load a skill, when to call MemCastle, and refusing to load one into a session
 whose memory mode is off.
 
+## Per-ecosystem findings
+
+- [`opencode/docs/research.md`](opencode/docs/research.md) maps OpenCode's plugin hooks, MCP client and skills onto
+  MemCastle operations, and records where OpenCode has no clean equivalent.
+
 ## Non-goals
 
 No plugin marketplace, no dynamic plugin runtime, no package manager across
@@ -70,6 +80,8 @@ native tooling, nothing more.
 
 ## Status
 
-No integration code exists yet. Tracked as GitHub issues under the
+The Pi and OpenCode packages are scaffolds: their connection, mode, discovery and failure foundations work and are
+tested, and their lifecycle hooks are empty.
+Tracked as GitHub issues under the
 "Phase 2 — Pi integration", "Phase 3 — OpenCode integration", and
 "Phase 4 — Claude Code integration" milestones.
