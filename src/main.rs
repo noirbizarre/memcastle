@@ -11,6 +11,7 @@
 #![allow(clippy::result_large_err)]
 
 use std::process::ExitCode;
+use std::time::Duration;
 
 use clap::{CommandFactory, Parser};
 use miette::MietteHandlerOpts;
@@ -90,16 +91,55 @@ async fn async_main() -> ExitCode {
             .unwrap_or_default(),
     );
 
+    // Read before `run` consumes `args`. Only these two commands open the embedded
+    // datastore; every other one is an HTTP client with nothing to wait for.
+    let opens_storage = matches!(args.command, Command::Serve(_) | Command::Migrate(_));
     let outcome = match config {
         Ok(config) => run(args, config).await,
         Err(error) => Err(error),
     };
+    if opens_storage {
+        wait_for_datastore_shutdown().await;
+    }
     match outcome {
         Ok(code) => code,
         Err(error) => {
             eprintln!("{:?}", miette::Report::new(error));
             ExitCode::FAILURE
         }
+    }
+}
+
+/// Keep the runtime alive until the embedded datastore has finished stopping.
+///
+/// SurrealDB has no explicit close: dropping the last `Surreal` handle makes a
+/// detached task cancel the datastore's maintenance tasks, wait for them and
+/// flush the storage engine. If the runtime is dropped first it cancels that
+/// task and the maintenance tasks mid-way, which logs one `Background task did
+/// not shut down cleanly` error per task and can skip the flush.
+///
+/// By now every handle is gone, so the only tasks left are the datastore's own
+/// and they all end once its shutdown completes: waiting for the runtime to
+/// hold no task is waiting for exactly that. `block_on`'s own future is not a
+/// spawned task and is not counted.
+async fn wait_for_datastore_shutdown() {
+    /// Upstream bounds its own wait at 30s for tasks plus 60s for the node
+    /// archive; this is shorter on purpose, so a stuck pass delays a stop by
+    /// seconds, not past a service manager's stop timeout.
+    const TIMEOUT: Duration = Duration::from_secs(10);
+    const POLL: Duration = Duration::from_millis(5);
+
+    let metrics = tokio::runtime::Handle::current().metrics();
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    while metrics.num_alive_tasks() > 0 {
+        if tokio::time::Instant::now() >= deadline {
+            tracing::warn!(
+                remaining = metrics.num_alive_tasks(),
+                "the database did not finish shutting down within {TIMEOUT:?}; exiting anyway"
+            );
+            return;
+        }
+        tokio::time::sleep(POLL).await;
     }
 }
 

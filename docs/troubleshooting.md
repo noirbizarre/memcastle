@@ -118,12 +118,16 @@ Read the message and the log (`memcastle serve -v`), fix the cause and start aga
 the palace resumes from the last step that succeeded.
 A lock left by a crashed run expires on its own.
 
-### Logs are noisy, or a few `ERROR ... did not shut down cleanly` lines appear
+### Logs are noisy
 
-The embedded database logs its own startup at the default `info` level, and can print such lines when a process exits,
-notably after `memcastle migrate`.
-Judge a command by its exit code and output.
+The embedded database logs its own startup at the default `info` level.
 Set `MEMCASTLE_LOG=warn` to quieten the daemon.
+
+### `ERROR ... did not shut down cleanly` lines appear when the daemon stops
+
+`serve` and `migrate` wait for the embedded database to finish stopping before they exit, so these lines are not expected.
+If you see them, or a warning that the database did not finish shutting down within ten seconds, please report it
+with the log.
 
 ## Wings, rooms and drawers
 

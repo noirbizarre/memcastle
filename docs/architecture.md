@@ -417,6 +417,9 @@ The design points worth knowing:
   The wait is bounded by `jobs.drain_timeout_secs`;
   a job that does not stop in time is left `Running` and re-queued by `Scheduler::recover` on the next start.
   See [ADR-009](adr/009-shutdown-drains-jobs.md).
+- The embedded database has no explicit close: it stops itself in a background task once the last handle is dropped.
+  `serve` and `migrate` therefore keep the process alive, for at most ten seconds, until that task has finished,
+  so the storage engine is flushed before exit instead of being cancelled by the runtime's teardown.
 - `memcastle status` resolves the daemon the way every client does (a live registry file, then the configured address),
   asks `GET /api/status`, and still reports from configuration and the registry file when no daemon answers.
   The datastore section of `/api/status` comes from a ping and the migration watermark;
