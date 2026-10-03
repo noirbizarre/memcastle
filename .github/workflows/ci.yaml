@@ -134,6 +134,16 @@ jobs:
           # Logging this turns a silent regression into a visible one.
           Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled, IsTamperProtected, AntivirusEnabled | Format-List
 
+      - name: Put temporary files on the workspace drive (Windows)
+        if: matrix.os.flag == 'windows'
+        # The workspace and target/ are on D:, but every test palace is a
+        # tempdir, and TEMP defaults to C:. Each one is an on-disk database that
+        # is written and flushed many times, so keep them on the same drive.
+        run: |
+          mkdir -p "$RUNNER_TEMP/tmp"
+          echo "TMP=$(cygpath -w "$RUNNER_TEMP/tmp")" >> "$GITHUB_ENV"
+          echo "TEMP=$(cygpath -w "$RUNNER_TEMP/tmp")" >> "$GITHUB_ENV"
+
       - name: Run tests (with coverage)
         run: |
           cargo llvm-cov nextest --profile ci
