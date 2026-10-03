@@ -79,7 +79,8 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `tests/config_paths.rs` — the XDG config, data and state locations, resolved through the real binary
     (subprocess).
   - `tests/migrate.rs` — `memcastle migrate` and its `--check`/`--status` modes (subprocess).
-  - `tests/cli.rs` — the binary's argument parsing and its behaviour with no daemon reachable (subprocess).
+  - `tests/cli.rs` — the binary's argument parsing and its behaviour with no daemon reachable (subprocess),
+    including colour, `completions` and the absence of a `help` subcommand.
   - `tests/cli_daemon.rs` — CLI flags that change what the daemon is asked: `--mode`, and relative `mine` paths
     against an in-process daemon (subprocess client).
 

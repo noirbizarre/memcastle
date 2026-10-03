@@ -187,6 +187,18 @@ memcastle 0.1.0
 
 `memcastle --help` lists every command; the [CLI reference](cli.md) describes them.
 
+## Shell completion
+
+`memcastle completions <shell>` prints a completion script for `bash`, `zsh`, `fish`, `powershell` or `elvish`.
+Package installs already include the bash, zsh and fish scripts.
+For a binary download or a source build, generate one yourself, for example:
+
+```sh
+memcastle completions bash > ~/.local/share/bash-completion/completions/memcastle
+```
+
+The [CLI reference](cli.md#shell-completion) has the install location for each shell.
+
 ## Platform notes
 
 - **Linux and macOS** follow the same Unix XDG layout for configuration, data and runtime state.

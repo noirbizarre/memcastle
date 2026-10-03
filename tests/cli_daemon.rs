@@ -371,3 +371,136 @@ async fn db_start_beyond_loopback_is_refused_with_a_diagnostic_that_says_what_to
     assert!(stderr.contains("--allow-remote"), "{stderr}");
     daemon.shutdown().await;
 }
+
+/// Submit a demo job through the CLI and return it.
+async fn submit_demo(daemon: &TestDaemon, steps: &str) -> Job {
+    let output = memcastle(daemon)
+        .args(["jobs", "demo", "--steps", steps])
+        .output()
+        .await
+        .expect("run memcastle");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("the job as JSON")
+}
+
+#[tokio::test]
+async fn jobs_list_prints_json_when_stdout_is_a_pipe_with_no_flag_needed() {
+    let daemon = TestDaemon::start().await;
+    let submitted = submit_demo(&daemon, "1").await;
+
+    let output = memcastle(&daemon)
+        .args(["jobs", "list"])
+        .output()
+        .await
+        .expect("run memcastle");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains('\u{1b}'),
+        "no escape codes in a pipe: {stdout:?}"
+    );
+    let jobs: Vec<Job> = serde_json::from_slice(&output.stdout).expect("a JSON array of jobs");
+    assert!(jobs.iter().any(|job| job.id == submitted.id), "{stdout}");
+
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn jobs_list_filtered_by_status_stays_valid_json_when_nothing_matches() {
+    let daemon = TestDaemon::start().await;
+
+    let output = memcastle(&daemon)
+        .args(["jobs", "list", "--status", "failed"])
+        .output()
+        .await
+        .expect("run memcastle");
+
+    assert!(output.status.success());
+    let jobs: Vec<Job> = serde_json::from_slice(&output.stdout).expect("a JSON array of jobs");
+    assert!(jobs.is_empty());
+
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn confirming_commands_never_prompt_without_a_terminal() {
+    // A script that already decided must not block on a question nobody can
+    // answer: stdin is /dev/null here, as it is in CI.
+    let daemon = TestDaemon::start().await;
+    let job = submit_demo(&daemon, "500").await;
+
+    for args in [
+        vec!["repair".to_string(), "--apply".to_string()],
+        vec!["jobs".to_string(), "cancel".to_string(), job.id.to_string()],
+        vec!["auth".to_string(), "revoke".to_string()],
+    ] {
+        let output = memcastle(&daemon)
+            .args(&args)
+            .output()
+            .await
+            .expect("run memcastle");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{args:?}: {stderr}");
+        assert!(!stderr.contains("(y/n)"), "{args:?} prompted: {stderr}");
+    }
+
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn yes_is_accepted_everywhere_a_confirmation_would_be_asked() {
+    let daemon = TestDaemon::start().await;
+    let job = submit_demo(&daemon, "500").await;
+
+    for args in [
+        vec![
+            "repair".to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ],
+        vec![
+            "jobs".to_string(),
+            "cancel".to_string(),
+            job.id.to_string(),
+            "-y".to_string(),
+        ],
+        vec![
+            "auth".to_string(),
+            "revoke".to_string(),
+            "--yes".to_string(),
+        ],
+    ] {
+        let output = memcastle(&daemon)
+            .args(&args)
+            .output()
+            .await
+            .expect("run memcastle");
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_piped_status_report_has_no_escape_codes() {
+    let daemon = TestDaemon::start().await;
+
+    let output = memcastle(&daemon)
+        .arg("status")
+        .output()
+        .await
+        .expect("run memcastle");
+
+    assert!(!String::from_utf8_lossy(&output.stdout).contains('\u{1b}'));
+
+    daemon.shutdown().await;
+}

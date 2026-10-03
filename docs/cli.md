@@ -9,10 +9,40 @@ Three things differ:
 and the reserved commands (see [Not implemented yet](#not-implemented-yet)) fail with `memcastle::cli::not_implemented`
 without contacting a daemon.
 Run `memcastle <command> --help` for the authoritative text of any flag.
+There is no `help` subcommand: `--help` is the one way to ask.
 
 Client commands print the daemon's JSON answer, so the output pipes into `jq`.
 `status`, `db start` and `db status` are the exceptions: they print a readable report,
 and `--json` gives the same report as JSON.
+`jobs list` is the other: it prints a table when standard output is a terminal, and JSON when it is not.
+See [Output, colour and prompts](#output-colour-and-prompts).
+
+## Output, colour and prompts
+
+What the CLI shows depends on where its output goes, never on a flag, so a script needs no change:
+a terminal gets decoration, and a pipe or a file gets plain data.
+
+| Setting | Effect |
+|---|---|
+| `NO_COLOR` set to anything | No colour anywhere, even on a terminal. |
+| `CLICOLOR=0` | The same. |
+| `CLICOLOR_FORCE=1` | Colour even when output is piped, for tools that render escape codes. |
+| `TERM=dumb` | No colour. |
+
+Colour is added around words and never replaces them.
+It colours `--help`, `status` and `db status` reports (healthy in green, degraded or unavailable in red,
+things that need attention in yellow), the table of `jobs list`, and the diagnostics printed on failure.
+A job status has the same colour wherever it is shown:
+queued yellow, running cyan, paused magenta, completed green, failed red and cancelled dim.
+Standard output and standard error are decided separately:
+with `memcastle status 2> errors.log` the report stays coloured and the log stays plain.
+
+`repair --apply`, `auth generate`, `auth revoke` and `jobs cancel` ask for confirmation, with a prompt on standard error
+that defaults to "no".
+`--yes` (or `-y`) skips the question.
+When standard input or standard error is not a terminal, a script or CI job for instance,
+they never ask and proceed, because the caller has already decided.
+Declining the prompt exits with `memcastle::cli::aborted` and changes nothing.
 
 ## Global flags
 
@@ -38,12 +68,41 @@ See [Configuration](configuration.md) for how these flags combine with the confi
 | `memcastle stop` | Ask the running daemon to shut down gracefully. |
 | `memcastle status [--json]` | Report whether the daemon is running, where, which palace, and whether the datastore is healthy. |
 | `memcastle migrate [--check \| --status]` | Apply, or just inspect, the palace's migrations without a daemon. |
+| `memcastle completions <SHELL>` | Print a shell completion script, see [Shell completion](#shell-completion). |
 
 `--bind`, `--port` and `--assets-dir` only exist on `serve` and `restart`;
 client commands find the daemon through its registry file instead.
 `--assets-dir` names a directory of runtime assets that outranks the installed and built-in ones,
 see [Runtime assets](configuration.md#runtime-assets).
 See [Running the daemon](daemon.md) for the details of each, and [Migrations and upgrades](migrations.md) for `migrate`.
+
+### Shell completion
+
+```sh
+memcastle completions <SHELL>
+```
+
+`<SHELL>` is `bash`, `zsh`, `fish`, `powershell` or `elvish`.
+The script goes to standard output, and the command needs neither a daemon nor a working configuration file.
+Completion offers subcommands, flags and the values of `--mode` and `jobs list --status`.
+It does not complete job ids, which would need a running daemon.
+Install it once, for your shell:
+
+```sh
+# bash (needs the bash-completion package)
+memcastle completions bash > ~/.local/share/bash-completion/completions/memcastle
+
+# zsh: any directory on your $fpath, before compinit runs
+memcastle completions zsh > ~/.zfunc/_memcastle
+
+# fish
+memcastle completions fish > ~/.config/fish/completions/memcastle.fish
+
+# PowerShell: add this line to your profile
+memcastle completions powershell | Out-String | Invoke-Expression
+```
+
+The Homebrew formula, the `.deb` and `.rpm` packages and the AUR package install the bash, zsh and fish scripts for you.
 
 ### Database access
 
@@ -161,12 +220,13 @@ Read the report with `memcastle jobs show <id>`.
 ### `repair`
 
 ```sh
-memcastle repair [--apply] [--based-on-job <JOB_ID>]
+memcastle repair [--apply [--yes]] [--based-on-job <JOB_ID>]
 ```
 
 Submits a repair job.
 Without `--apply` it is a dry run that only reports what it would remove.
 With `--apply` it deletes orphan drawers, which is a write and is refused in `read_only` and `disabled` modes.
+In a terminal `--apply` asks for confirmation first, unless `--yes` is given.
 `--based-on-job` narrows the repair to what a previous audit found; a live scan still decides what is removed.
 
 ## Jobs
@@ -176,12 +236,19 @@ memcastle jobs list [--status <STATUS>]
 memcastle jobs show <ID>
 memcastle jobs pause <ID>
 memcastle jobs resume <ID>
-memcastle jobs cancel <ID>
+memcastle jobs cancel <ID> [--yes]
 memcastle jobs retry <ID>
 memcastle jobs demo [--steps <N>]
 ```
 
 `--status` is one of `queued`, `running`, `paused`, `completed`, `failed` or `cancelled`.
+`jobs list` prints a table in a terminal, with the full id (copy it into `jobs show`), the kind, the coloured status,
+the progress, when it was created and the detail: the error of a failed job, otherwise the latest progress message.
+The detail column is only as wide as its text needs, and wraps onto further lines, never cut, when the terminal is narrower.
+The other columns are never wrapped, so on a very narrow terminal the table overflows instead.
+When standard output is a pipe or a file it prints the same jobs as a JSON array, so `memcastle jobs list | jq` works
+without a flag.
+`jobs cancel` asks for confirmation in a terminal, see [Output, colour and prompts](#output-colour-and-prompts).
 Pausing and cancelling are requests: a running job stops at its next unit of work, not instantly.
 `retry` only applies to a failed job, and `resume` only to a paused one.
 `demo` submits a synthetic job (5 steps by default) that touches no palace content,
@@ -191,8 +258,8 @@ The states a job moves through are in [Architecture](architecture.md#job-lifecyc
 ## Authentication
 
 ```sh
-memcastle auth generate
-memcastle auth revoke
+memcastle auth generate [--yes]
+memcastle auth revoke [--yes]
 ```
 
 `auth generate` asks the daemon to make a high-entropy token, and prints it on standard output, once, and nothing else,
@@ -200,6 +267,8 @@ so it pipes straight into a secret manager.
 The daemon keeps only a digest, so the token cannot be shown again.
 The instructions for enabling authentication go to standard error.
 Running it again replaces the previous token, which is how you rotate.
+In a terminal both commands ask for confirmation first, on standard error so the token on standard output is unaffected,
+and `--yes` skips it.
 `auth revoke` removes the stored token, which stops working at once, and prints `{"revoked": true}`.
 
 Both are administrative REST and CLI operations, and neither is available to MCP clients.

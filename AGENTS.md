@@ -73,6 +73,7 @@ src/
 ├── cli.rs      argument types only
 ├── lib.rs      module wiring
 ├── error.rs    the crate's error type
+├── term.rs     terminal presentation for the CLI: colour, TTY detection and confirmation prompts
 ├── config/     typed configuration (defaults -> file -> env -> CLI -> validate) and Unix XDG paths
 ├── domain/     Palace/Wing/Room/Drawer/Job, checkpoint payloads, entities, memory modes — pure types, no I/O
 ├── store/      SurrealDB connection and repository methods (schema is applied from `database/schema/`)
@@ -89,7 +90,7 @@ src/
 ├── server/     the daemon composition root + lifecycle (registry file)
 ├── mcp/        MCP tool surface, over HTTP
 ├── api/        the REST API (health/status/jobs/search/recall/wake-up/diary/auth-token/db/shutdown)
-└── client/     the CLI's HTTP client for a running daemon
+└── client/     the CLI's HTTP client for a running daemon, and the human renderings of its answers (status, tables)
 ```
 
 Dependencies point inward: `cli / mcp / api -> app -> domain + store/jobs/search -> store`,

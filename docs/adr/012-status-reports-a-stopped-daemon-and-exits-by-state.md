@@ -3,6 +3,7 @@
 ## Status
 
 Accepted, amended by [ADR-015](015-database-admin-endpoint.md) (`--json` on `db start` and `db status`)
+and by [ADR-016](016-cli-presentation-follows-the-output-stream.md) (a command may choose its form by stream)
 
 ## Context
 
@@ -81,3 +82,9 @@ readable report and accept `--json`.
 `status` is therefore no longer the only command with a human rendering.
 The decision stands: the flag is still per command rather than global, because most commands print JSON and have no
 human form to switch to.
+
+## Amendment (2026-10-03)
+
+[ADR-016](016-cli-presentation-follows-the-output-stream.md) gave `jobs list` a table for a terminal.
+It has no `--json` flag: JSON is what it prints whenever standard output is not a terminal.
+The decision stands for the commands that already had the flag, and for rejecting a global one.

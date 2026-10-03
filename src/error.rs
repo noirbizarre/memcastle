@@ -90,6 +90,33 @@ pub enum Error {
         feature: String,
     },
 
+    /// The user declined a confirmation prompt, so nothing was changed.
+    /// An error rather than a quiet success: a script that chains commands
+    /// must stop, and the exit code must say the action did not happen.
+    #[error("{action} was not confirmed, nothing was changed")]
+    #[diagnostic(
+        code(memcastle::cli::aborted),
+        help("run the command again and answer `y`, or pass `--yes` to skip the confirmation")
+    )]
+    Aborted {
+        /// What would have been done, e.g. "applying repairs".
+        action: String,
+    },
+
+    /// A confirmation prompt could not be shown or read (the terminal went
+    /// away, or the user pressed Ctrl-C).
+    #[error("could not ask for confirmation: {message}")]
+    #[diagnostic(
+        code(memcastle::cli::prompt_failed),
+        help(
+            "pass `--yes` to skip the confirmation, or run the command from an interactive terminal"
+        )
+    )]
+    PromptFailed {
+        /// What the terminal reported.
+        message: String,
+    },
+
     /// `memcastle migrate --check` found migrations that have not been
     /// applied.
     #[error("{count} migration(s) pending: {pending}")]
@@ -594,6 +621,20 @@ impl Error {
         }
     }
 
+    /// Build an [`Error::Aborted`].
+    pub fn aborted(action: impl Into<String>) -> Self {
+        Self::Aborted {
+            action: action.into(),
+        }
+    }
+
+    /// Build an [`Error::PromptFailed`].
+    pub fn prompt_failed(message: impl Into<String>) -> Self {
+        Self::PromptFailed {
+            message: message.into(),
+        }
+    }
+
     /// Build an [`Error::Remote`] from a daemon's error response.
     pub fn remote(
         status: u16,
@@ -743,6 +784,8 @@ mod tests {
             Error::invalid_input("status", "unknown"),
             Error::invalid_job_id("nope"),
             Error::not_implemented("memcastle wings"),
+            Error::aborted("cancelling a job"),
+            Error::prompt_failed("not a terminal"),
             Error::MigrationsPending {
                 count: 1,
                 pending: "canonical-timestamps".to_string(),
@@ -821,6 +864,8 @@ mod tests {
             | Error::InvalidInput { .. }
             | Error::InvalidJobId { .. }
             | Error::NotImplemented { .. }
+            | Error::Aborted { .. }
+            | Error::PromptFailed { .. }
             | Error::MigrationsPending { .. }
             | Error::Store { .. }
             | Error::StoreMalformed { .. }

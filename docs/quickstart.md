@@ -56,7 +56,8 @@ Watch it finish:
 memcastle jobs list
 ```
 
-A completed job has `"status": "completed"` and a `result` such as
+In a terminal this is a table whose `STATUS` column reads `completed` once the job is done.
+Piped (`memcastle jobs list | jq`), it is JSON, where a completed job has `"status": "completed"` and a `result` such as
 `{"files_considered": 2, "limit": 2000, "truncated": false}`.
 Without `--wing`, memories are filed under a wing named after the directory.
 [What mining reads](storage.md#what-mining-reads) says which files are skipped.

@@ -15,6 +15,7 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 
 pub mod status;
+pub mod table;
 
 pub use status::StatusView;
 
