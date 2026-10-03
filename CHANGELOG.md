@@ -4,6 +4,67 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0](https://github.com/noirbizarre/memcastle/compare/0.1.0..0.2.0) - 2026-10-03
+
+### 💫 Features
+
+- **cli** Manage wings, rooms and drawers ([#135](https://github.com/noirbizarre/memcastle/issues/135)) - ([7b20ffe](https://github.com/noirbizarre/memcastle/commit/7b20ffeb9a2fdf8e2d1933306b189779ca70fd1f))
+- **cli**  🚨 **breaking** Group daemon start, stop and restart under `memcastle daemon` ([#132](https://github.com/noirbizarre/memcastle/issues/132)) - ([190b3d7](https://github.com/noirbizarre/memcastle/commit/190b3d7cd94e18a55973d09ec21534a364cc7db4))
+- **cli** Colored help, shell completion, tables, prompts and styled status ([#131](https://github.com/noirbizarre/memcastle/issues/131)) - ([730a419](https://github.com/noirbizarre/memcastle/commit/730a4191eaa11f7ad5f24cb6bac52364e1daa5a3))
+- **store** Add a store.sync setting for how often an embedded palace flushes - ([21da143](https://github.com/noirbizarre/memcastle/commit/21da1437d78b316bc7c535a9baa577d13ab7a39e))
+
+### 🐛 Bug Fixes
+
+- **api** Treat a database endpoint bind failure as a conflict and correct stale comments - ([ce5d5f8](https://github.com/noirbizarre/memcastle/commit/ce5d5f8fdbce2bebef0e40c099b8267812c216e4))
+- **app** Refuse a fact confidence outside 0 to 1 at checkpoint submission - ([b081862](https://github.com/noirbizarre/memcastle/commit/b08186295f29ec5f360c9cec77e21e8ca3c413a6))
+- **app** Refuse a blank diary entry like every other drawer writer - ([df1f643](https://github.com/noirbizarre/memcastle/commit/df1f643c0ad79181b5720974db2af936551409c7))
+- **app** Validate new wing names on mine, checkpoint and diary writes - ([2547edb](https://github.com/noirbizarre/memcastle/commit/2547edb664191d07adf98ca9b1226903e3a0d266))
+- **config** Refuse an auth token with edge whitespace in the config file - ([c7ec275](https://github.com/noirbizarre/memcastle/commit/c7ec2752d76ce6df48419f9728e17020919f06c5))
+- **dbadmin** Accept the Studio desktop app's origin and sign in as a fixed user ([#129](https://github.com/noirbizarre/memcastle/issues/129)) - ([5ccfb5e](https://github.com/noirbizarre/memcastle/commit/5ccfb5e3f93628134d19cc669b72dbd924904ab9))
+- **error** Give job contention and missing entropy their own diagnostics - ([682bf34](https://github.com/noirbizarre/memcastle/commit/682bf34516c0be375c5fa7ec7810e8fecee274d3))
+- **hooks** Make store-isolation fail when either of its checks matches - ([c476ba2](https://github.com/noirbizarre/memcastle/commit/c476ba2682d2b69f3a1eac7275cb3d85d444ea95))
+- **mcp** Advertise an object schema for the checkpoint payload and accept it as a JSON string ([#134](https://github.com/noirbizarre/memcastle/issues/134)) - ([6023297](https://github.com/noirbizarre/memcastle/commit/60232976175d52923317e18dd3c69b533a1120e7))
+- **packaging** Expand the binary path in the nfpm config ([#121](https://github.com/noirbizarre/memcastle/issues/121)) - ([d0d8912](https://github.com/noirbizarre/memcastle/commit/d0d89120fb17ef6a51f90ddd7f468409274529f6))
+- **search** Fall back to any-word matching and reject empty checkpoints ([#137](https://github.com/noirbizarre/memcastle/issues/137)) - ([ec7f425](https://github.com/noirbizarre/memcastle/commit/ec7f4251e7d19513ec0f48585d81d1f57f267d7a))
+- **server** Wait for the embedded database to stop before exiting ([#133](https://github.com/noirbizarre/memcastle/issues/133)) - ([2ebc989](https://github.com/noirbizarre/memcastle/commit/2ebc989ff3033f1dcecd9d74aa73d21472305634))
+
+### ⚡ Performance
+
+- **migrate** Skip the second schema sync when no data migration ran - ([b1a434a](https://github.com/noirbizarre/memcastle/commit/b1a434ad56f8bf4cbe94264c844a95f89f602f40))
+
+### 🔨 Refactor
+
+- **cli** Rename the jobs subcommand to job ([#136](https://github.com/noirbizarre/memcastle/issues/136)) - ([20897e3](https://github.com/noirbizarre/memcastle/commit/20897e3175e6372b352d04a620a49d0641a75b03))
+- **db**  🚨 **breaking** Rename db serve to db start and make it idempotent ([#130](https://github.com/noirbizarre/memcastle/issues/130)) - ([6262c40](https://github.com/noirbizarre/memcastle/commit/6262c40991aad988c02878cd7aa67bc746116847))
+
+### 📚 Documentation
+
+- **architecture** Say the MCP surface mirrors memory operations only - ([6305c91](https://github.com/noirbizarre/memcastle/commit/6305c913db07706b999b81a450f4bbee6fcc4dc8))
+- **development** Use daemon stop in the run-locally example - ([86c17b8](https://github.com/noirbizarre/memcastle/commit/86c17b83a6a71da080e7445b1fbfbef75aed269e))
+- **installation** List the completion scripts the packages install - ([79948a0](https://github.com/noirbizarre/memcastle/commit/79948a0ab7518f6494932ae09b20608aded7a2d2))
+- **mcp-and-api** Say what a checkpoint source kind other than file or manual becomes - ([6f9ee61](https://github.com/noirbizarre/memcastle/commit/6f9ee61820c00bbfeee56e7a2b35fee97c3aab16))
+- **troubleshooting** Document the remaining diagnostics and start the daemon with daemon start - ([d63d2ac](https://github.com/noirbizarre/memcastle/commit/d63d2acfe0cf9be7c11995f1dba86cf3704fefd6))
+- Keep the reflowed lines within the 120-column limit - ([1a953c1](https://github.com/noirbizarre/memcastle/commit/1a953c1c8c0dd52e48f8c5bc3cb8b3427b53410a))
+- One sentence per line in AGENTS.md, CONTRIBUTING.md and ADR-001, 002 and 004 - ([342d433](https://github.com/noirbizarre/memcastle/commit/342d433c1a96c4092b98dfeb1e2758806aca3867))
+- Align layout, defaults, ADR pointers, test list and guide order with the code - ([b73e161](https://github.com/noirbizarre/memcastle/commit/b73e1614db215bbe63ddd6f12ce501f01d3a3e52))
+
+### 🧪 Tests
+
+- **palace** Cancel the queued mine before the blocker so it cannot slip into running - ([5d007d0](https://github.com/noirbizarre/memcastle/commit/5d007d062fa9d539bd160bef9b64f3fb6e924101))
+- Skip the per-commit flush where a test is not about durability - ([85e4dbe](https://github.com/noirbizarre/memcastle/commit/85e4dbe3e35ac2500e748271588e806747a7f9b1))
+
+### 🏗️ Build
+
+- **deps** Bump comfy-table from 7.2.2 to 8.0.1 ([#142](https://github.com/noirbizarre/memcastle/issues/142)) - ([3a7973d](https://github.com/noirbizarre/memcastle/commit/3a7973d28c8e24b6d0d45cd6a7e5f2e42933075a))
+- **deps** Bump rmcp ([#139](https://github.com/noirbizarre/memcastle/issues/139)) - ([fb6a3f3](https://github.com/noirbizarre/memcastle/commit/fb6a3f3591949f86172a7abd7743e54224a30eb8))
+- **deps** Bump tokio-tungstenite from 0.29.0 to 0.30.0 ([#141](https://github.com/noirbizarre/memcastle/issues/141)) - ([6fb8b4f](https://github.com/noirbizarre/memcastle/commit/6fb8b4f6914c376bde58f2161a2a48de00420bde))
+- **deps** Bump tower-http from 0.6.11 to 0.7.1 ([#140](https://github.com/noirbizarre/memcastle/issues/140)) - ([06af749](https://github.com/noirbizarre/memcastle/commit/06af7491b9dc5f66fa40e6930e0909fe7deaab7f))
+
+### 🔧 CI
+
+- **deps** Bump the actions group with 2 updates ([#138](https://github.com/noirbizarre/memcastle/issues/138)) - ([2b04579](https://github.com/noirbizarre/memcastle/commit/2b04579368ca2fdcdb484959bd4e39516160b551))
+- Keep Windows test temp files on the workspace drive - ([549c9c0](https://github.com/noirbizarre/memcastle/commit/549c9c0df5556dc8d25628ccb5199b96653e6838))
+
 ## 0.1.0 - 2026-10-02
 
 ### 💫 Features
