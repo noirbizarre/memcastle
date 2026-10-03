@@ -81,6 +81,16 @@ memcastle --mode read_only mine ./project     # rejected
 
 This is mostly useful to check what a restricted session can and cannot do.
 
+### In an integration
+
+An agent integration usually offers the labels `full`, `read-only` and `off`.
+`off` is the integration's label for `disabled`, which is the only value MemCastle accepts,
+so the integration translates it.
+The daemon refuses every read and write in that mode, but it only protects its own answers.
+An integration must also stop injecting anything it fetched earlier, or loaded from a skill, so that a session in `off`
+behaves as if MemCastle does not exist.
+See [Integration contract](integration-contract.md#session-identity-and-memory-mode).
+
 Modes are advisory boundaries between cooperating clients on one machine, not security:
 any client can choose `full`, and [authentication](authentication.md), when enabled, gives every client that holds the
 token the same access.

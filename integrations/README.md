@@ -10,6 +10,14 @@ knowledge-graph mutation, mining — live in the MemCastle daemon (`src/`), behi
 See [`docs/architecture.md`](../docs/architecture.md) and `PLAN.md` for the full
 rationale.
 
+Every integration satisfies the same conformance matrix, defined in
+[`docs/integration-contract.md`](../docs/integration-contract.md): what MemCastle
+operation each capability uses, what the client is responsible for, and what to
+test. The daemon half is replayed from the language-neutral fixtures in
+`tests/fixtures/integration/`; the client half is each integration's own tests.
+Where a client has no lifecycle point for a capability, say so in that
+integration's README (missing, fallback, effect) instead of faking one.
+
 ## Hard rule
 
 An integration talks to MemCastle **exclusively** over its HTTP API and MCP
@@ -20,6 +28,10 @@ tools. It must never:
 - touch `store`/`jobs` directly, or embed a second copy of the persistence
   layer,
 - fork the memory model per ecosystem.
+
+The `integrations-http-only` hook enforces this: it fails on `surrealdb`,
+`surrealkv`, `SurrealStore`, a `store`/`jobs` path or `/api/db` anywhere under
+this directory (Markdown and `node_modules` excepted).
 
 The one deliberate exception: **deciding what's worth remembering** (which
 words in a conversation become a checkpoint item, and which destination —

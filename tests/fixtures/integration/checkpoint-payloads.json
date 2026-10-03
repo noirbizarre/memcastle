@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "description": "Checkpoint payloads an integration may send. Classification into a destination is the client's job; MemCastle only persists it. Every `valid` payload must be accepted, complete, and be recallable by its `recall_token`. Every `invalid` payload must be refused at submission, before any job exists, with `expected_code`.",
+  "valid": [
+    {
+      "name": "a_preference",
+      "recall_token": "fixturepreferencetoken",
+      "payload": {
+        "items": [
+          {
+            "destination": "preference",
+            "content": "fixturepreferencetoken the user prefers short answers",
+            "tags": ["style"],
+            "source": { "kind": "manual", "uri": null, "agent": "conformance-agent" },
+            "fact": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "a_project_decision_in_its_own_wing_with_a_name",
+      "recall_token": "fixtureprojecttoken",
+      "payload": {
+        "items": [
+          {
+            "destination": "project",
+            "wing": "conformance-project",
+            "name": "decisions/storage",
+            "content": "fixtureprojecttoken the project stores everything in one database",
+            "tags": [],
+            "source": { "kind": "manual", "uri": null, "agent": "conformance-agent" },
+            "fact": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "a_diary_entry_carrying_the_agent_identity",
+      "recall_token": "fixturediarytoken",
+      "payload": {
+        "items": [
+          {
+            "destination": "diary",
+            "wing": "conformance",
+            "content": "fixturediarytoken finished the migration work today",
+            "tags": [],
+            "source": { "kind": "manual", "uri": null, "agent": "conformance-agent" },
+            "fact": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "several_items_in_one_payload",
+      "recall_token": "fixturegeneraltoken",
+      "payload": {
+        "items": [
+          {
+            "destination": "general",
+            "content": "fixturegeneraltoken first of two items",
+            "tags": [],
+            "source": { "kind": "manual", "uri": null, "agent": "conformance-agent" },
+            "fact": null
+          },
+          {
+            "destination": "general",
+            "content": "the second of two items",
+            "tags": ["second"],
+            "source": { "kind": "manual", "uri": null, "agent": "conformance-agent" },
+            "fact": null
+          }
+        ]
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "an_empty_item_list",
+      "payload": { "items": [] },
+      "expected_code": "memcastle::input::invalid"
+    },
+    {
+      "name": "a_blank_content",
+      "payload": {
+        "items": [
+          {
+            "destination": "general",
+            "content": "   ",
+            "tags": [],
+            "source": { "kind": "manual", "uri": null, "agent": "conformance-agent" },
+            "fact": null
+          }
+        ]
+      },
+      "expected_code": "memcastle::input::invalid"
+    },
+    {
+      "name": "a_fact_confidence_above_one",
+      "payload": {
+        "items": [
+          {
+            "destination": "general",
+            "content": "a fact with an impossible confidence",
+            "tags": [],
+            "source": { "kind": "manual", "uri": null, "agent": "conformance-agent" },
+            "fact": {
+              "op": "add",
+              "subject": "00000000-0000-4000-8000-000000000001",
+              "predicate": "knows",
+              "object": "00000000-0000-4000-8000-000000000002",
+              "confidence": 1.5
+            }
+          }
+        ]
+      },
+      "expected_code": "memcastle::input::invalid"
+    },
+    {
+      "name": "an_unknown_destination",
+      "payload": {
+        "items": [
+          {
+            "destination": "somewhere-else",
+            "content": "content for a bucket that does not exist",
+            "tags": [],
+            "source": { "kind": "manual", "uri": null, "agent": "conformance-agent" },
+            "fact": null
+          }
+        ]
+      },
+      "expected_code": "memcastle::input::invalid"
+    },
+    {
+      "name": "a_drawer_name_with_an_empty_path_segment",
+      "payload": {
+        "items": [
+          {
+            "destination": "general",
+            "name": "a//b",
+            "content": "content under a malformed drawer name",
+            "tags": [],
+            "source": { "kind": "manual", "uri": null, "agent": "conformance-agent" },
+            "fact": null
+          }
+        ]
+      },
+      "expected_code": "memcastle::palace::invalid_path"
+    }
+  ]
+}

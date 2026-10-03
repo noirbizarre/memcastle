@@ -253,7 +253,8 @@ flowchart LR
 - **Mining and checkpoint** are durable jobs, resumable after a pause or a crash.
 - `AppServices::recall` is `search` under a recall-oriented name, never paraphrasing or truncating a `Drawer.content`.
   It exists as a name to hang future recall-specific ranking off, not to duplicate logic today.
-  MemCastle does not enforce a search-before-answer protocol; that discipline belongs to an integration or skill.
+  MemCastle does not enforce a search-before-answer protocol; that discipline belongs to an integration or skill
+  (see the [Integration contract](integration-contract.md)).
 - `AppServices::wake_up` builds a deterministic session-start context:
   the agent's most recent diary entry (when a `wing` is given)
   plus up to `WakeUpBudget::max_items` recent checkpoint-originated drawers, trimmed to `max_bytes` by whole drawers only.
@@ -496,6 +497,13 @@ It calls `AppServices::authenticate`, which checks a configured secret and the s
 Generating and revoking a token are REST and CLI operations over `AppServices`, and MCP has no tool for either.
 The trace layer logs no headers, so the `Authorization` header never reaches the log.
 See [Authentication](authentication.md) and [ADR-014](adr/014-optional-token-authentication.md).
+
+**Integrations are lifecycle glue over this surface.**
+An agent integration decides when to call these tools and never reaches storage, the job code or the database console,
+and every integration is held to the same conformance matrix with the same fixtures.
+The core stays a memory runtime:
+it has no scheduler for an integration's timers and no session of its own beyond the MCP session.
+See the [Integration contract](integration-contract.md) and [ADR-019](adr/019-shared-integration-contract.md).
 
 **The database console is opt-in.**
 `memcastle serve` opens one listener and nothing else.

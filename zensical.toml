@@ -39,6 +39,7 @@ nav = [
     { "Configuration" = "configuration.md" },
     { "CLI" = "cli.md" },
     { "MCP tools and REST API" = "mcp-and-api.md" },
+    { "Integration contract" = "integration-contract.md" },
   ] },
   { "Project" = [
     { "Architecture" = "architecture.md" },

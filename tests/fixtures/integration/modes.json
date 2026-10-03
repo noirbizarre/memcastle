@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "description": "Memory modes as an integration sees them. `labels` maps what a user or client configuration calls a mode to the wire value MemCastle accepts. `rejected_wire_values` must never be sent, and the daemon must refuse them. `operations` are replayed once per mode; `rules` say what each class of operation must do in each mode. The placeholder {{mine_dir}} is replaced with an existing absolute directory before the arguments are sent.",
+  "labels": {
+    "full": "full",
+    "read-only": "read_only",
+    "off": "disabled"
+  },
+  "rejected_wire_values": ["off", "read-only", "readonly", "FULL", ""],
+  "rules": {
+    "full": { "read": "ok", "write": "ok", "ungated": "ok" },
+    "read_only": { "read": "ok", "write": "mode_forbidden", "ungated": "ok" },
+    "disabled": { "read": "mode_forbidden", "write": "mode_forbidden", "ungated": "ok" }
+  },
+  "forbidden_code": "memcastle::app::mode_forbidden",
+  "operations": [
+    {
+      "id": "search",
+      "class": "read",
+      "tool": "memcastle_search",
+      "arguments": { "query": "anything" }
+    },
+    {
+      "id": "recall",
+      "class": "read",
+      "tool": "memcastle_recall",
+      "arguments": { "query": "anything" }
+    },
+    {
+      "id": "wake_up",
+      "class": "read",
+      "tool": "memcastle_wake_up",
+      "arguments": { "agent_identity": "conformance-agent", "wing": "conformance" }
+    },
+    {
+      "id": "diary_read",
+      "class": "read",
+      "tool": "memcastle_diary_read",
+      "arguments": { "agent_identity": "conformance-agent", "wing": "conformance" }
+    },
+    {
+      "id": "job_list",
+      "class": "read",
+      "tool": "memcastle_job_list",
+      "arguments": {}
+    },
+    {
+      "id": "checkpoint",
+      "class": "write",
+      "tool": "memcastle_checkpoint",
+      "arguments": {
+        "payload": {
+          "items": [
+            {
+              "destination": "general",
+              "content": "a conformance checkpoint",
+              "tags": [],
+              "source": { "kind": "manual", "uri": null, "agent": "conformance-agent" },
+              "fact": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "emergency_checkpoint",
+      "class": "write",
+      "tool": "memcastle_checkpoint",
+      "arguments": {
+        "emergency": true,
+        "payload": {
+          "items": [
+            {
+              "destination": "general",
+              "content": "a conformance emergency checkpoint",
+              "tags": [],
+              "source": { "kind": "manual", "uri": null, "agent": "conformance-agent" },
+              "fact": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "diary_write",
+      "class": "write",
+      "tool": "memcastle_diary_write",
+      "arguments": {
+        "agent_identity": "conformance-agent",
+        "wing": "conformance",
+        "content": "a conformance diary entry"
+      }
+    },
+    {
+      "id": "mine",
+      "class": "write",
+      "tool": "memcastle_mine",
+      "arguments": { "path": "{{mine_dir}}" }
+    },
+    {
+      "id": "applied_repair",
+      "class": "write",
+      "tool": "memcastle_repair",
+      "arguments": { "dry_run": false }
+    },
+    {
+      "id": "status",
+      "class": "ungated",
+      "tool": "memcastle_status",
+      "arguments": {}
+    },
+    {
+      "id": "audit",
+      "class": "ungated",
+      "tool": "memcastle_audit",
+      "arguments": {}
+    },
+    {
+      "id": "dry_run_repair",
+      "class": "ungated",
+      "tool": "memcastle_repair",
+      "arguments": { "dry_run": true }
+    }
+  ]
+}

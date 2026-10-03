@@ -89,6 +89,10 @@ Every path, environment variable, flag and the precedence between them is in [Co
     and sharing the daemon's data (in-process).
   - `tests/cli_daemon.rs` — CLI flags that change what the daemon is asked: `--mode`, and relative `mine` paths
     against an in-process daemon (subprocess client).
+  - `tests/integration_contract.rs` — the daemon half of the [integration contract](integration-contract.md):
+    a real MCP session replays the language-neutral fixtures in `tests/fixtures/integration/`
+    (modes, checkpoint payloads, failure classes), and fails when the contract page, the capability manifest
+    and the test names disagree (in-process).
 
 Run a subset with nextest's filter syntax, e.g.:
 
@@ -113,6 +117,11 @@ so the same capability becomes available to every interface at once.
 
 The `single-writer` hook enforces the companion invariant, one daemon and one writer per embedded palace:
 `SurrealStore::connect` may only be called from `src/server/`, `src/store/` and `src/main.rs` (for `migrate`).
+
+The `integrations-http-only` hook keeps an integration to MCP and HTTP:
+it fails on `surrealdb`, `surrealkv`, `SurrealStore`, a `store` or `jobs` path, or `/api/db` anywhere under `integrations/`
+(Markdown and `node_modules` are skipped), see [ADR-019](adr/019-shared-integration-contract.md).
+Like the others it is a text match, so a comment that names one of them trips it too.
 
 The authentication invariant has no hook, because a route or an MCP tool is not something a grep can recognise.
 It is enforced by tests instead: `tests/auth.rs` walks a list of the REST routes

@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "description": "The conformance matrix as data: one entry per capability an integration must satisfy. docs/integration-contract.md carries the same ids, and tests/integration_contract.rs fails when the two disagree.",
+  "capabilities": [
+    {
+      "id": "session-mode",
+      "operations": ["memcastle_set_mode", "memcastle_status"],
+      "daemon_test": "three_sessions_in_three_modes_share_one_daemon_and_read_back_their_own_mode",
+      "gap_allowed": false
+    },
+    {
+      "id": "wake-up",
+      "operations": ["memcastle_wake_up"],
+      "daemon_test": "wake_up_returns_the_diary_and_checkpointed_highlights_within_its_limits",
+      "gap_allowed": false
+    },
+    {
+      "id": "recall",
+      "operations": ["memcastle_recall", "memcastle_search"],
+      "daemon_test": "recall_returns_checkpointed_content_verbatim",
+      "gap_allowed": false
+    },
+    {
+      "id": "checkpoint",
+      "operations": ["memcastle_checkpoint", "memcastle_job_get"],
+      "daemon_test": "every_valid_checkpoint_fixture_is_accepted_and_every_invalid_one_is_refused_with_its_code",
+      "gap_allowed": false
+    },
+    {
+      "id": "emergency-checkpoint",
+      "operations": ["memcastle_checkpoint"],
+      "daemon_test": "an_emergency_checkpoint_is_critical_and_a_normal_one_is_high_priority",
+      "gap_allowed": true
+    },
+    {
+      "id": "persistent-session",
+      "operations": ["memcastle_set_mode", "memcastle_wake_up", "memcastle_recall", "memcastle_checkpoint"],
+      "daemon_test": "one_persistent_session_serves_wake_up_recall_and_checkpoint_without_reconnecting",
+      "gap_allowed": false
+    },
+    {
+      "id": "skills",
+      "operations": [],
+      "daemon_test": null,
+      "gap_allowed": false
+    },
+    {
+      "id": "background-mining",
+      "operations": ["memcastle_mine"],
+      "daemon_test": "mining_is_background_priority_requires_an_absolute_path_and_is_not_deduplicated_by_the_daemon",
+      "gap_allowed": true
+    },
+    {
+      "id": "failure-reporting",
+      "operations": ["memcastle_job_get"],
+      "daemon_test": "each_failure_class_is_distinguishable_with_its_code_and_help",
+      "gap_allowed": false
+    },
+    {
+      "id": "audit-repair",
+      "operations": ["memcastle_audit", "memcastle_repair", "memcastle_job_get"],
+      "daemon_test": "audit_is_read_only_and_a_dry_run_repair_is_allowed_in_read_only_but_applying_is_not",
+      "gap_allowed": true
+    }
+  ]
+}

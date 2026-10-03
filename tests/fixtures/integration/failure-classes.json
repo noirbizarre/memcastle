@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "description": "The failure classes an integration must tell apart, and what the daemon gives it to do so. `detected_by` says where the signal comes from: `transport` means no daemon answered, `http_status` and `tool_error` mean the daemon answered with an error body of the shape {error, code, help}, `job` means a job reached `failed` and carries `error`. An integration shows the user `help` when it has one.",
+  "classes": [
+    {
+      "id": "daemon_unavailable",
+      "detected_by": "transport",
+      "http_status": null,
+      "code": null,
+      "client_must": "say that the daemon cannot be reached and how to start it; never invent memory content"
+    },
+    {
+      "id": "unauthorized",
+      "detected_by": "http_status",
+      "http_status": 401,
+      "code": "memcastle::auth::unauthorized",
+      "client_must": "say that a token is needed and relay `help`"
+    },
+    {
+      "id": "mode_rejected",
+      "detected_by": "tool_error",
+      "http_status": 403,
+      "code": "memcastle::app::mode_forbidden",
+      "client_must": "treat it as the session's own choice, not as a fault, and say which operation was refused"
+    },
+    {
+      "id": "invalid_input",
+      "detected_by": "tool_error",
+      "http_status": 400,
+      "code": "memcastle::input::invalid",
+      "client_must": "report it as a bug in the integration or the model's payload, with `help`"
+    },
+    {
+      "id": "job_failed",
+      "detected_by": "job",
+      "http_status": null,
+      "code": null,
+      "client_must": "report `Job.error`, and offer a retry through memcastle_job_retry"
+    }
+  ]
+}
