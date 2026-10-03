@@ -17,6 +17,12 @@ updates:
     schedule:
       interval: weekly
     rebase-strategy: disabled
+    # The ref of `dtolnay/rust-toolchain` is the Rust version it installs, not
+    # an action version: Dependabot reads its tags as releases and proposed a
+    # toolchain that does not exist (1.120.0), which broke a release. The pin
+    # is bumped by hand, together with `RUSTUP_TOOLCHAIN` in publish-release.yaml.
+    ignore:
+      - dependency-name: dtolnay/rust-toolchain
     groups:
       actions:
         patterns: ["*"]
