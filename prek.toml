@@ -55,7 +55,7 @@ rev = "v0.23.2"
 
 [[repos.hooks]]
 id = "markdownlint-cli2"
-files = "^(AGENTS\\.md|CONTRIBUTING\\.md|README\\.md|docs/.*\\.md)$"
+files = "^(AGENTS\\.md|CONTRIBUTING\\.md|README\\.md|docs/.*\\.md|skills/[^/]+/SKILL\\.md)$"
 # For the pretty output formatter .markdownlint-cli2.yaml configures — it
 # needs to resolve alongside markdownlint-cli2 itself, and this installs it
 # into the same node environment as the hook.

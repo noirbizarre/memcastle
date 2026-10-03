@@ -95,7 +95,8 @@ The [tool reference](mcp-and-api.md#mcp-tools) lists each one.
 Typical use is to ask the agent to search the palace before answering, and to save decisions with `memcastle_checkpoint`
 or `memcastle_diary_write`.
 MemCastle stores what it is given: deciding what is worth remembering is the agent's job.
-It does not enforce a search-before-answer habit, so put that in your agent's instructions.
+It does not enforce a search-before-answer habit: the shared [agent skills](skills.md) carry that behaviour,
+along with setup, checkpoint, wake-up and diary guidance, and you install them in your client.
 Writing an integration that does this for an agent, such as when to wake up, checkpoint or mine,
 is covered by the [Integration contract](integration-contract.md).
 

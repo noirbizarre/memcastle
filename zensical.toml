@@ -25,6 +25,7 @@ nav = [
     { "Installation" = "installation.md" },
     { "Quickstart" = "quickstart.md" },
     { "Connect an MCP client" = "mcp-clients.md" },
+    { "Agent skills" = "skills.md" },
   ] },
   { "Guides" = [
     { "Running the daemon" = "daemon.md" },

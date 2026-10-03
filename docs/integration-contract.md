@@ -173,10 +173,16 @@ Client-side (to test): no reconnect between wake-up, recall and checkpoint, and 
 
 There is no MemCastle operation here, because a skill is plain agent text.
 `skills/` is the one source of those instructions, and an integration loads them rather than keeping its own copy.
+The five [agent skills](skills.md) are `memcastle-setup`, `search-before-answer`, `checkpoint-instructions`, `wake-up`
+and `diary`.
 A skill never overrides a mode: in `off` it must not be loaded if it would carry MemCastle-derived content.
+The shipped skills carry instructions only and no palace content, and each one that calls a gated tool says to stop when
+the mode refuses it.
 
 Client-side (to test): the integration reads its instructions from `skills/` and does not duplicate them.
 Nothing is tested against a daemon, and the matrix records that with a `null` daemon test.
+What is tested is the skills themselves: `tests/skills.rs` checks every tool, command and route a skill names against
+this release (see [ADR-020](adr/020-skills-are-versioned-with-the-repository.md)).
 
 ### Background mining
 
