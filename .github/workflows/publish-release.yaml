@@ -78,7 +78,7 @@ jobs:
           persist-credentials: false
 
       # An exact version: see `RUSTUP_TOOLCHAIN` above, which this must equal.
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
@@ -256,7 +256,7 @@ jobs:
       # links, taken from `Cargo.lock` and the manifest. `--target all` because
       # one SBOM describes five builds. Named with a hyphen so the `memcastle_*`
       # glob that selects the attested subjects below does not match it.
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.120.0
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-cyclonedx@0.5.9
