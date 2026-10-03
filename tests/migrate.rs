@@ -15,7 +15,11 @@ use serde_json::Value;
 /// since `migrate` never binds an HTTP listener.
 fn migrate_cmd(palace: &std::path::Path) -> Command {
     let mut cmd = Command::cargo_bin("memcastle").expect("find the memcastle binary");
-    cmd.env("MEMCASTLE_PALACE_PATH", palace);
+    // The process exits normally after each run, which flushes the database,
+    // so relaxed syncing cannot lose what these tests read back; it only
+    // spares each run a flush per commit (seconds on a slow disk).
+    cmd.env("MEMCASTLE_PALACE_PATH", palace)
+        .env("MEMCASTLE_STORE_SYNC", "never");
     cmd
 }
 

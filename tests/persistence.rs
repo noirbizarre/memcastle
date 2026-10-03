@@ -5,6 +5,11 @@
 //! `memcastle serve` processes against the same palace directory, which is
 //! also the more representative test of the actual claim ("stop and restart
 //! the daemon; your data is still there").
+//!
+//! These deliberately keep the default `store.sync` (a flush per commit): they
+//! SIGKILL a daemon and expect everything it acknowledged to be there, which a
+//! relaxed sync does not promise. Do not set `MEMCASTLE_STORE_SYNC` here to
+//! speed them up.
 
 use std::path::Path;
 use std::process::Stdio;

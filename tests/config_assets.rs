@@ -31,6 +31,9 @@ fn isolated(root: &Path) -> Command {
     cmd.env("XDG_CONFIG_HOME", root.join("config"))
         .env("XDG_DATA_HOME", root.join("data"))
         .env("XDG_STATE_HOME", root.join("state"))
+        // These tests assert how assets resolve, not that data survives a
+        // crash; a flush per commit only slows every boot on a slow disk.
+        .env("MEMCASTLE_STORE_SYNC", "never")
         // Port 0 so parallel tests never fight over 8420.
         .env("MEMCASTLE_PORT", "0")
         .arg("--palace")
