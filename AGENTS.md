@@ -97,7 +97,8 @@ src/
 ├── checkpoint/ the checkpoint job handler (durable, resumable memory writes)
 ├── audit/      the audit job handler (read-only consistency report)
 ├── repair/     the repair job handler (narrow, dry-run-first fixes)
-├── search/     the search abstraction (lexical today; semantic later)
+├── search/     the retrieval contract and ranking policy (lexical, semantic, hybrid, temporal, graph expansion)
+├── embed/      embedding providers (command, OpenAI-compatible HTTP) behind one trait, and the `Embed` job handler
 ├── app/        application services — the one layer mcp/api call into (the CLI reaches it over HTTP, via `client/`)
 ├── server/     the daemon composition root + lifecycle (registry file)
 ├── mcp/        MCP tool surface, over HTTP

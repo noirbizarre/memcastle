@@ -13,6 +13,7 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::{Job, JobId, JobProgress};
+use crate::embed::Embeddings;
 use crate::error::Result;
 use crate::store::SurrealStore;
 
@@ -74,6 +75,9 @@ pub struct JobContext {
     /// With it, every write the handler makes is fenced: refused if the
     /// stored job has been leased to someone else since.
     lease_owner: Option<String>,
+    /// The embedding provider, for the handlers that derive vectors. Disabled
+    /// unless the scheduler was given one.
+    embeddings: Embeddings,
 }
 
 impl JobContext {
@@ -85,7 +89,21 @@ impl JobContext {
             control,
             store,
             lease_owner: None,
+            embeddings: Embeddings::disabled(),
         }
+    }
+
+    /// Give this context the daemon's embedding provider.
+    #[must_use]
+    pub fn with_embeddings(mut self, embeddings: Embeddings) -> Self {
+        self.embeddings = embeddings;
+        self
+    }
+
+    /// The embedding provider (possibly none), for handlers that derive vectors.
+    #[must_use]
+    pub fn embeddings(&self) -> &Embeddings {
+        &self.embeddings
     }
 
     /// Fence this context's writes to `worker`'s lease: a checkpoint is

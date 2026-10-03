@@ -22,6 +22,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::app::{AppServices, WakeUpBudget};
 use crate::domain::{JobId, JobKind, JobStatus, MiningSource};
+use crate::search::{SearchOptions, SearchQuery};
 
 use extract::{ApiJson, ApiQuery};
 
@@ -45,8 +46,8 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/status", get(status))
-        .route("/api/search", get(search))
-        .route("/api/recall", get(recall))
+        .route("/api/search", get(search).post(search_json))
+        .route("/api/recall", get(recall).post(recall_json))
         .route("/api/wake-up", get(wake_up))
         .route("/api/diary", get(diary_read).post(diary_write))
         .route("/api/jobs", get(list_jobs).post(submit_job))
@@ -83,6 +84,21 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
             "/api/wings/{wing}/rooms/{room}/drawers/{*drawer}",
             get(palace::show_drawer).delete(palace::delete_drawer),
         )
+        // Derived and corrective writes on one drawer, by id (a search hit
+        // already carries it). Not nested under the room path: a drawer name
+        // may contain `/`, so that route's wildcard would swallow a suffix.
+        .route(
+            "/api/drawers/{id}/supersede",
+            post(palace::supersede_drawer),
+        )
+        .route(
+            "/api/drawers/{id}/embedding",
+            axum::routing::put(palace::set_drawer_embedding),
+        )
+        .route(
+            "/api/drawers/{id}/mentions",
+            post(palace::link_drawer_entity),
+        )
         // Administrative, and deliberately REST-only: there is no MCP tool for
         // these, so an agent integration cannot mint or revoke credentials.
         .route(
@@ -106,6 +122,10 @@ async fn status(
     Ok(Json(state.app.status(mode).await?))
 }
 
+/// The query-string form of a search, shared by `search` and `recall`.
+///
+/// Every option beyond `q` is optional, so a plain `?q=word` still means what
+/// it always did. Query strings carry no lists, so `tags` is comma-separated.
 #[derive(Debug, Deserialize)]
 struct SearchParams {
     /// `query` is accepted as an alias: MCP and the CLI call this `query`, and
@@ -117,12 +137,51 @@ struct SearchParams {
     limit: u32,
     /// Restrict results to one wing by name (see `AppServices::search`).
     wing: Option<String>,
-    /// Restrict results to one room by name.
+    /// Restrict results to one room by name. Ignored by `recall`.
     room: Option<String>,
+    /// `auto` (default), `lexical`, `semantic` or `hybrid`.
+    ranking: Option<String>,
+    /// Comma-separated tags a drawer must all carry.
+    #[serde(alias = "tag")]
+    tags: Option<String>,
+    /// Restrict to drawers from one source kind: `file`, `manual` or `other`.
+    source_kind: Option<String>,
+    /// An RFC 3339 instant: search the memory valid then.
+    as_of: Option<String>,
+    /// Include superseded memory as well as current.
+    #[serde(default)]
+    include_historical: bool,
+    /// Enrich the hits through the knowledge graph.
+    #[serde(default)]
+    expand: bool,
 }
 
 fn default_search_limit() -> u32 {
     crate::app::DEFAULT_SEARCH_LIMIT
+}
+
+impl SearchParams {
+    fn into_query(self) -> Result<SearchQuery, crate::Error> {
+        SearchOptions {
+            limit: Some(self.limit),
+            wing: self.wing,
+            room: self.room,
+            ranking: self.ranking,
+            tags: self
+                .tags
+                .iter()
+                .flat_map(|tags| tags.split(','))
+                .map(str::trim)
+                .filter(|tag| !tag.is_empty())
+                .map(str::to_string)
+                .collect(),
+            source_kind: self.source_kind,
+            as_of: self.as_of,
+            include_historical: self.include_historical,
+            expand: self.expand,
+        }
+        .into_query(self.q)
+    }
 }
 
 async fn search(
@@ -130,42 +189,34 @@ async fn search(
     ApiQuery(params): ApiQuery<SearchParams>,
     ModeHeader(mode): ModeHeader,
 ) -> Result<impl IntoResponse, ApiError> {
-    Ok(Json(
-        state
-            .app
-            .search(
-                &params.q,
-                params.wing.as_deref(),
-                params.room.as_deref(),
-                params.limit,
-                mode,
-            )
-            .await?,
-    ))
+    Ok(Json(state.app.search(params.into_query()?, mode).await?))
 }
 
-#[derive(Debug, Deserialize)]
-struct RecallParams {
-    /// `query` is accepted as an alias, as for search.
-    #[serde(alias = "query")]
-    q: String,
-    #[serde(default = "default_search_limit")]
-    limit: u32,
-    /// Restrict results to one wing by name (see `AppServices::recall`).
-    wing: Option<String>,
+/// `POST /api/search`: the same search as a JSON [`SearchQuery`], which is the
+/// only way to send a `query_embedding` (a vector does not fit a query string).
+async fn search_json(
+    State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
+    ApiJson(query): ApiJson<SearchQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(state.app.search(query, mode).await?))
 }
 
 async fn recall(
     State(state): State<ApiState>,
-    ApiQuery(params): ApiQuery<RecallParams>,
+    ApiQuery(params): ApiQuery<SearchParams>,
     ModeHeader(mode): ModeHeader,
 ) -> Result<impl IntoResponse, ApiError> {
-    Ok(Json(
-        state
-            .app
-            .recall(&params.q, params.wing.as_deref(), params.limit, mode)
-            .await?,
-    ))
+    Ok(Json(state.app.recall(params.into_query()?, mode).await?))
+}
+
+/// `POST /api/recall`: [`search_json`]'s counterpart for recall.
+async fn recall_json(
+    State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
+    ApiJson(query): ApiJson<SearchQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(state.app.recall(query, mode).await?))
 }
 
 #[derive(Debug, Deserialize)]
@@ -337,6 +388,13 @@ async fn submit_job(
             // Not gated by `mode` — same reasoning as `Mine` above (see
             // `AppServices::submit_audit`'s doc comment).
             state.app.submit_audit(scope, &body.requested_by).await?
+        }
+        JobKind::Embed { wing } => {
+            // Gated as a write inside `submit_embed`: it fills every drawer's embedding.
+            state
+                .app
+                .submit_embed(wing, &body.requested_by, mode)
+                .await?
         }
         JobKind::Repair {
             dry_run,

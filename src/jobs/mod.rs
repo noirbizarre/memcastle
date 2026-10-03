@@ -24,6 +24,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::domain::{Job, JobEvent, JobId, JobKind, JobStatus, Priority};
+use crate::embed::Embeddings;
 use crate::error::Result;
 use crate::store::SurrealStore;
 
@@ -109,6 +110,9 @@ pub struct Scheduler {
     /// keep failing for a whole lease, this daemon must assume its jobs have
     /// been reaped and stop them.
     last_renewed: std::sync::Mutex<tokio::time::Instant>,
+    /// The embedding provider handed to every job's context, and consulted to
+    /// decide whether finishing a drawer-writing job should queue a sweep.
+    embeddings: Embeddings,
 }
 
 impl Scheduler {
@@ -128,6 +132,54 @@ impl Scheduler {
             lease_ttl: DEFAULT_LEASE_TTL,
             exclusive_store: true,
             last_renewed: std::sync::Mutex::new(tokio::time::Instant::now()),
+            embeddings: Embeddings::disabled(),
+        }
+    }
+
+    /// Give the scheduler an embedding provider (see `[embeddings]`).
+    #[must_use]
+    pub fn with_embeddings(mut self, embeddings: Embeddings) -> Self {
+        self.embeddings = embeddings;
+        self
+    }
+
+    /// Queue an embedding sweep unless there is nothing to do it with or one
+    /// is already waiting.
+    ///
+    /// Called after anything that writes drawers, so new memory becomes
+    /// semantically searchable without anyone asking. Coalesced on *queued*
+    /// jobs only: a sweep that is already running may have passed the new
+    /// drawer, so one more is queued behind it, but a pile of writes yields a
+    /// single waiting sweep. Never an error to the caller: embedding is
+    /// derived data, so failing to schedule it must not fail the write that
+    /// triggered it.
+    pub async fn ensure_embedding_sweep(&self) {
+        if !self.embeddings.is_configured() {
+            return;
+        }
+        let queued = match self.store.list_jobs(Some(JobStatus::Queued)).await {
+            Ok(jobs) => jobs,
+            Err(error) => {
+                warn!(%error, "could not check for a queued embedding sweep");
+                return;
+            }
+        };
+        if queued
+            .iter()
+            .any(|job| matches!(job.kind, JobKind::Embed { .. }))
+        {
+            return;
+        }
+        if let Err(error) = self
+            .submit(
+                JobKind::Embed { wing: None },
+                Priority::Background,
+                // Not a channel: nobody asked, the daemon did.
+                "system",
+            )
+            .await
+        {
+            warn!(%error, "could not queue an embedding sweep");
         }
     }
 
@@ -588,8 +640,11 @@ impl Scheduler {
         // Fenced to this worker's lease: if a partition let another daemon
         // reap this job, this run's checkpoints are refused, not merged.
         let ctx = JobContext::new(job.id, control.clone(), self.store.clone())
-            .with_lease(self.worker.clone());
+            .with_lease(self.worker.clone())
+            .with_embeddings(self.embeddings.clone());
 
+        let kind_wrote_drawers =
+            matches!(job.kind, JobKind::Mine { .. } | JobKind::Checkpoint { .. });
         let outcome = match job.kind.clone() {
             JobKind::Demo { steps } => demo::run(&ctx, &mut job, demo::DemoParams { steps }).await,
             JobKind::Mine { source, wing } => {
@@ -606,6 +661,10 @@ impl Scheduler {
             }
             JobKind::Audit { scope } => {
                 crate::audit::run(&ctx, &mut job, crate::audit::AuditParams { scope }).await
+            }
+            JobKind::Embed { wing } => {
+                crate::embed::job::run(&ctx, &mut job, crate::embed::job::EmbedParams { wing })
+                    .await
             }
             JobKind::Repair {
                 dry_run,
@@ -677,6 +736,11 @@ impl Scheduler {
             ),
             Err(error) => warn!(job_id = %job.id, %error, "failed to persist final job state"),
         }
+        // After the final state is saved, so the sweep sees the finished
+        // job's drawers and never races its last write.
+        if event == JobEvent::Complete && kind_wrote_drawers {
+            self.ensure_embedding_sweep().await;
+        }
     }
 }
 
@@ -689,6 +753,7 @@ fn kind_name(kind: &JobKind) -> &'static str {
         JobKind::Checkpoint { .. } => "checkpoint",
         JobKind::Audit { .. } => "audit",
         JobKind::Repair { .. } => "repair",
+        JobKind::Embed { .. } => "embed",
     }
 }
 
@@ -696,6 +761,38 @@ fn kind_name(kind: &JobKind) -> &'static str {
 mod tests {
     use super::*;
     use crate::domain::JobStatus;
+
+    #[tokio::test]
+    async fn no_embedding_sweep_is_queued_without_a_provider() {
+        let scheduler = scheduler().await;
+        scheduler.ensure_embedding_sweep().await;
+        assert_eq!(scheduler.store.count_jobs(None).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn repeated_writes_queue_a_single_waiting_embedding_sweep() {
+        let scheduler = scheduler()
+            .await
+            .with_embeddings(crate::embed::Embeddings::new(
+                crate::embed::fake::WordHashEmbedder,
+                4,
+            ));
+        for _ in 0..5 {
+            scheduler.ensure_embedding_sweep().await;
+        }
+        let queued = scheduler
+            .store
+            .list_jobs(Some(JobStatus::Queued))
+            .await
+            .unwrap();
+        assert_eq!(
+            queued.len(),
+            1,
+            "writes must coalesce into one waiting sweep"
+        );
+        assert!(matches!(queued[0].kind, JobKind::Embed { wing: None }));
+        assert_eq!(queued[0].priority, Priority::Background);
+    }
 
     async fn scheduler() -> Scheduler {
         Scheduler::new(SurrealStore::connect_memory_for_tests().await, 1)

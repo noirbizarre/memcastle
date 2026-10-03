@@ -95,6 +95,15 @@ port = 8000
 allow_remote = false
 allowed_origins = []
 
+# Where embeddings come from. Without a provider search stays lexical; see "Embeddings".
+[embeddings]
+provider = "none"          # "none", "command" or "http"
+# command = ["/usr/local/bin/embed"]
+# url = "http://localhost:11434/v1"
+# model = "nomic-embed-text"
+timeout_secs = 30
+batch_size = 16
+
 # Only to serve assets from somewhere other than the installed or embedded ones.
 [assets]
 dir = "/home/alice/src/memcastle-web/dist"
@@ -146,6 +155,13 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `db.port` (0 to 65535) | `MEMCASTLE_DB_PORT` | `8000` |
 | `db.allow_remote` (`true` or `false`) | `MEMCASTLE_DB_ALLOW_REMOTE` | `false` |
 | `db.allowed_origins` (a list) | `MEMCASTLE_DB_ALLOWED_ORIGINS` (comma-separated) | none |
+| `embeddings.provider` (`none`, `command` or `http`) | `MEMCASTLE_EMBEDDINGS_PROVIDER` | `none` |
+| `embeddings.url` (an `http://` or `https://` URL) | `MEMCASTLE_EMBEDDINGS_URL` | none |
+| `embeddings.model` | `MEMCASTLE_EMBEDDINGS_MODEL` | none |
+| `embeddings.api_key` | `MEMCASTLE_EMBEDDINGS_API_KEY` | none |
+| `embeddings.timeout_secs` (1 to 3600) | `MEMCASTLE_EMBEDDINGS_TIMEOUT_SECS` | `30` |
+| `embeddings.batch_size` (1 to 1024) | none | `16` |
+| `embeddings.command` (a list) | none | none |
 | `store.sync` (`every`, `never` or an interval over 100ms) | `MEMCASTLE_STORE_SYNC` | `every` |
 | `store.mode` and remote settings | none | `embedded` |
 
@@ -155,6 +171,8 @@ Whitespace around `MEMCASTLE_AUTH_TOKEN` is ignored,
 but a token in the config file with leading or trailing whitespace is refused at start,
 because a client's token is trimmed too and the two could never match.
 See [Authentication](authentication.md).
+
+`embeddings.api_key` is a secret too: it is never logged, printed or serialised, and an invalid value is never echoed.
 
 Some variables are read by the command line rather than the config file:
 
@@ -218,6 +236,69 @@ The listener is bound before anything that changes state: the runtime assets are
 If the address is taken, needs privileges, or does not exist on this machine,
 the start fails with `memcastle::server::bind_failed`, naming the address and what to change,
 and has not created the palace, migrated it or touched its jobs.
+
+## Embeddings
+
+Semantic and hybrid search rank by vectors, and a vector has to come from a model.
+MemCastle links no model and does not want your API keys, so the `[embeddings]` section only says how to reach one.
+Without it the palace works exactly as before and `search` is lexical.
+A vector is *derived* data: it is stored beside the drawer, never replaces its content, and can be recomputed at any time.
+
+Every stored vector has **768** numbers, because the vector index's dimension is part of the palace's schema.
+Pick a model that produces 768, or one that can be asked for 768 (OpenAI's `text-embedding-3-*` models accept a
+`dimensions` setting, which MemCastle sends).
+Anything else is refused with `memcastle::embed::dimension_mismatch`.
+
+### The `command` provider
+
+```toml
+[embeddings]
+provider = "command"
+command = ["/usr/local/bin/embed", "--quiet"]
+model = "my-model"      # passed to the program, optional
+```
+
+MemCastle runs the program, without a shell, once per batch, writes one JSON object to its standard input
+and reads one from its standard output:
+
+```json
+{"model": "my-model", "dimension": 768, "texts": ["first text", "second text"]}
+{"embeddings": [[0.01, 0.02, "… 768 numbers"], [0.03, 0.04, "…"]]}
+```
+
+The program returns one vector per text, in order, and exits `0`.
+A non-zero exit, output that is not that JSON, or no answer within `timeout_secs` fails the call, and the program is killed.
+This is the provider to use when the model needs a credential or a client library: the program owns them, MemCastle never
+sees them, and the daemon's own `MEMCASTLE_*` variables (its auth token included) are removed from the program's environment.
+Everything else is inherited, so `PATH` and the program's own variables work.
+
+### The `http` provider
+
+```toml
+[embeddings]
+provider = "http"
+url = "http://localhost:11434/v1"
+model = "nomic-embed-text"
+```
+
+MemCastle posts to `{url}/embeddings` in the OpenAI format, so OpenAI, Ollama, llama.cpp's server and vLLM all work.
+A local server needs no key.
+A hosted one takes `MEMCASTLE_EMBEDDINGS_API_KEY`, sent as a bearer token; prefer that to `api_key` in the file.
+
+### How embedding happens
+
+- The daemon embeds in the background.
+  After anything that writes drawers (mining, a checkpoint, a diary entry, a created drawer) and once at startup,
+  it queues a low-priority `embed` job that embeds every drawer without a vector.
+  Queued sweeps are coalesced, so a burst of writes leaves one waiting job.
+  `memcastle embed` queues one by hand, for example after you first configure a provider.
+- A drawer is embedded from its first 8,000 characters, because providers cap their input.
+  Its content is stored whole and verbatim whatever the provider sees.
+- A query is embedded on the fly.
+  If the provider fails, a default `auto` search falls back to lexical and logs a warning,
+  while an explicit `semantic` or `hybrid` search fails with `memcastle::embed::failed`.
+- You can skip the provider altogether and send vectors yourself, see
+  [Searching](mcp-and-api.md#searching).
 
 ## The database admin endpoint
 

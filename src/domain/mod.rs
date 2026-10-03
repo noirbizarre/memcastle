@@ -16,6 +16,7 @@ mod job;
 mod memory_mode;
 mod palace;
 mod path;
+mod search;
 mod secret;
 
 pub use checkpoint::{CheckpointDestination, CheckpointItem, CheckpointPayload, FactMutation};
@@ -28,6 +29,9 @@ pub use job::{
     TransitionError,
 };
 pub use memory_mode::MemoryMode;
+pub use search::{
+    EMBEDDING_DIMENSION, RankingMode, SearchFilter, SearchHit, SearchQuery, Signals, Temporal,
+};
 pub use secret::Secret;
 
 /// The channels a write can come through, recorded as `Job::requested_by` and

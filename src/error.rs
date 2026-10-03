@@ -664,6 +664,70 @@ pub enum Error {
         /// How many mining, checkpoint or repair jobs are queued, running or paused.
         count: usize,
     },
+
+    /// A drawer was asked to be superseded but its validity already ended.
+    #[error("drawer `{drawer}` was already superseded")]
+    #[diagnostic(
+        code(memcastle::palace::drawer_superseded),
+        help(
+            "supersede the drawer that replaced it instead, or search with `include_historical` to find the current one"
+        )
+    )]
+    DrawerSuperseded {
+        /// The drawer id.
+        drawer: String,
+    },
+
+    /// A vector's length is not the one the palace's vector index accepts.
+    #[error("an embedding has {actual} dimension(s) but the palace stores {expected}")]
+    #[diagnostic(
+        code(memcastle::embed::dimension_mismatch),
+        help(
+            "use a model that produces the stored dimension, or ask the provider for it (the `dimensions` option of OpenAI-compatible APIs); see docs/configuration.md"
+        )
+    )]
+    EmbeddingDimension {
+        /// The dimension the vector index declares.
+        expected: usize,
+        /// The length of the vector that was offered.
+        actual: usize,
+    },
+
+    /// Something asked for embeddings while no provider is configured.
+    #[error("no embedding provider is configured")]
+    #[diagnostic(
+        code(memcastle::embed::not_configured),
+        help(
+            "set `provider = \"command\"` or `\"http\"` in the `[embeddings]` section of the config file (see docs/configuration.md), or send vectors yourself with `PUT /api/drawers/{{id}}/embedding`"
+        )
+    )]
+    EmbeddingsNotConfigured,
+
+    /// The embedding provider was configured but did not return usable vectors.
+    #[error("the embedding provider failed: {message}")]
+    #[diagnostic(
+        code(memcastle::embed::failed),
+        help(
+            "check the `[embeddings]` section of the config and that the provider is reachable; semantic search falls back to lexical until it works"
+        )
+    )]
+    EmbeddingFailed {
+        /// What the provider reported.
+        message: String,
+    },
+
+    /// A search asked for vector ranking, but no vector could be produced.
+    #[error("{ranking} ranking needs a query embedding, and none is available")]
+    #[diagnostic(
+        code(memcastle::search::semantic_unavailable),
+        help(
+            "configure an `[embeddings]` provider, send a `query_embedding` with the request, or search with `ranking: lexical` (the default `auto` falls back on its own)"
+        )
+    )]
+    SemanticUnavailable {
+        /// The requested ranking (`semantic` or `hybrid`).
+        ranking: String,
+    },
 }
 
 /// What every interface reports about a failure: the message, and the two
@@ -1030,6 +1094,20 @@ mod tests {
                 target: "wing `work`".to_string(),
                 count: 1,
             },
+            Error::DrawerSuperseded {
+                drawer: "y".to_string(),
+            },
+            Error::EmbeddingDimension {
+                expected: 768,
+                actual: 2,
+            },
+            Error::EmbeddingsNotConfigured,
+            Error::EmbeddingFailed {
+                message: "timeout".to_string(),
+            },
+            Error::SemanticUnavailable {
+                ranking: "hybrid".to_string(),
+            },
         ]
     }
 
@@ -1079,7 +1157,12 @@ mod tests {
             | Error::DrawerNotFound { .. }
             | Error::InvalidPalacePath { .. }
             | Error::DrawerNameTaken { .. }
-            | Error::PalaceBusy { .. } => {}
+            | Error::PalaceBusy { .. }
+            | Error::DrawerSuperseded { .. }
+            | Error::EmbeddingDimension { .. }
+            | Error::EmbeddingsNotConfigured
+            | Error::EmbeddingFailed { .. }
+            | Error::SemanticUnavailable { .. } => {}
         }
     }
 

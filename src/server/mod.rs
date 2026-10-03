@@ -18,6 +18,7 @@ use tracing::{info, warn};
 
 use crate::app::{AppServices, AuthPolicy, DbEndpoint, RuntimeContext};
 use crate::config::{Config, Secret};
+use crate::embed::Embeddings;
 use crate::error::{Error, Result};
 use crate::jobs::Scheduler;
 use crate::store::SurrealStore;
@@ -85,7 +86,12 @@ pub async fn run(config: Config) -> Result<()> {
     // it has changed or served anything.
     auth_policy.ensure_satisfiable(&store).await?;
 
+    // One provider handle for the scheduler's embed jobs and the services'
+    // query vectors. Built before anything serves so a bad `[embeddings]`
+    // section fails startup, not the first search.
+    let embeddings = Embeddings::from_config(&config.embeddings)?;
     let mut scheduler = Scheduler::new(store.clone(), config.jobs.max_concurrency)
+        .with_embeddings(embeddings.clone())
         .with_drain_timeout(Duration::from_secs(config.jobs.drain_timeout_secs))
         .with_lease_ttl(Duration::from_secs(config.jobs.lease_ttl_secs));
     if backend.is_shared() {
@@ -101,6 +107,9 @@ pub async fn run(config: Config) -> Result<()> {
         "job scheduler configured; recovering interrupted jobs"
     );
     scheduler.recover().await?;
+    // Drawers written before a provider was configured (or while it was down)
+    // are covered by one sweep at startup; a no-op without a provider.
+    scheduler.ensure_embedding_sweep().await;
 
     let shutdown = CancellationToken::new();
     let dispatch_handle = {
@@ -112,6 +121,7 @@ pub async fn run(config: Config) -> Result<()> {
     let backend_info = backend.describe();
     let backend_info_kind = backend_info.kind.to_string();
     let app = AppServices::new(store, Arc::clone(&scheduler))
+        .with_embeddings(embeddings)
         .with_runtime(RuntimeContext {
             // The real bound address, not the requested one: `status` must agree
             // with the registry file when port 0 was asked for.

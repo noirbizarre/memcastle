@@ -13,6 +13,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
 use serde::Deserialize;
 
+use crate::domain::DrawerId;
+
 use super::extract::{ApiJson, ApiQuery};
 use super::{ApiError, ApiState, ModeHeader, default_requested_by};
 
@@ -177,4 +179,90 @@ pub(super) async fn delete_drawer(
     Ok(Json(
         state.app.delete_drawer(&wing, &room, &drawer, mode).await?,
     ))
+}
+
+/// The optional replacement a drawer is superseded by. Without `content` the
+/// drawer is only invalidated.
+#[derive(Debug, Deserialize)]
+pub(super) struct SupersedeBody {
+    /// The corrected content.
+    content: Option<String>,
+    /// Tags for the replacement; the old drawer's when absent.
+    tags: Option<Vec<String>>,
+    /// The channel this write came through.
+    #[serde(default = "default_requested_by")]
+    requested_by: String,
+}
+
+/// `POST /api/drawers/{id}/supersede`, by id: a search hit already carries one.
+pub(super) async fn supersede_drawer(
+    State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
+    Path(id): Path<String>,
+    ApiJson(body): ApiJson<SupersedeBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    let id = parse_drawer_id(&id)?;
+    let replacement = body.content.map(|content| crate::app::DrawerReplacement {
+        content,
+        tags: body.tags,
+    });
+    Ok(Json(
+        state
+            .app
+            .supersede_drawer(id, replacement, &body.requested_by, mode)
+            .await?,
+    ))
+}
+
+/// The body of `PUT /api/drawers/{id}/embedding`.
+#[derive(Debug, Deserialize)]
+pub(super) struct EmbeddingBody {
+    /// The vector, of the palace's fixed dimension.
+    embedding: Vec<f32>,
+}
+
+/// `PUT /api/drawers/{id}/embedding`: attach a caller-computed vector.
+pub(super) async fn set_drawer_embedding(
+    State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
+    Path(id): Path<String>,
+    ApiJson(body): ApiJson<EmbeddingBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    let id = parse_drawer_id(&id)?;
+    state
+        .app
+        .set_drawer_embedding(id, body.embedding, mode)
+        .await?;
+    Ok(Json(serde_json::json!({ "embedded": true })))
+}
+
+/// A drawer id from a path, with the shared invalid-input diagnostic.
+fn parse_drawer_id(raw: &str) -> Result<DrawerId, crate::Error> {
+    raw.parse().map_err(|_| {
+        crate::Error::invalid_input("id", format!("`{raw}` is not a drawer id (a UUID)"))
+    })
+}
+
+/// The body of `POST /api/drawers/{id}/mentions`.
+#[derive(Debug, Deserialize)]
+pub(super) struct MentionBody {
+    /// The entity's name.
+    name: String,
+    /// The entity's kind (`person`, `project`, ...), free-form.
+    kind: String,
+}
+
+/// `POST /api/drawers/{id}/mentions`: record that a drawer mentions an entity.
+pub(super) async fn link_drawer_entity(
+    State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
+    Path(id): Path<String>,
+    ApiJson(body): ApiJson<MentionBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    let id = parse_drawer_id(&id)?;
+    let link = state
+        .app
+        .link_drawer_entity(id, &body.name, &body.kind, mode)
+        .await?;
+    Ok((created_status(link.created), Json(link)))
 }

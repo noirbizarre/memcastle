@@ -600,3 +600,173 @@ async fn stop_daemon(bin: &Path, palace: &Path, child: &mut Child) {
         .expect("daemon process exits within 15s of being asked to stop")
         .expect("daemon process can be waited on");
 }
+
+/// A unit vector along `axis` of the stored dimension (768): two on different
+/// axes are orthogonal, so which drawer a vector search returns is exact.
+fn axis_vector(axis: usize) -> Vec<f32> {
+    let mut v = vec![0.0f32; 768];
+    v[axis] = 1.0;
+    v
+}
+
+#[tokio::test]
+async fn vector_index_validity_and_graph_links_survive_a_daemon_restart() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let palace = dir.path().join("palace");
+    let bin = cargo_bin("memcastle");
+    let client = reqwest::Client::new();
+
+    let write = |base: String, content: &'static str| {
+        let client = client.clone();
+        async move {
+            let drawer: serde_json::Value = client
+                .post(format!("{base}/api/wings/w/rooms/r/drawers"))
+                .json(&serde_json::json!({ "content": content }))
+                .send()
+                .await
+                .expect("create drawer")
+                .error_for_status()
+                .expect("drawer accepted")
+                .json()
+                .await
+                .expect("drawer json");
+            drawer["id"].as_str().expect("drawer id").to_string()
+        }
+    };
+
+    // Round 1: derived data is written, then the daemon is stopped.
+    let moment;
+    {
+        let (mut child, info) = spawn_daemon_and_wait(&bin, &palace).await;
+        let base = format!("http://{}", info.bind_addr);
+
+        let kept = write(base.clone(), "persisted vector memory about harbours").await;
+        let old = write(base.clone(), "persisted belief that the ferry runs daily").await;
+        let sibling = write(base.clone(), "persisted note about the ferry timetable").await;
+        for (id, axis) in [(&kept, 0), (&old, 1)] {
+            client
+                .put(format!("{base}/api/drawers/{id}/embedding"))
+                .json(&serde_json::json!({ "embedding": axis_vector(axis) }))
+                .send()
+                .await
+                .expect("put embedding")
+                .error_for_status()
+                .expect("embedding accepted");
+        }
+        for id in [&old, &sibling] {
+            client
+                .post(format!("{base}/api/drawers/{id}/mentions"))
+                .json(&serde_json::json!({ "name": "ferry", "kind": "service" }))
+                .send()
+                .await
+                .expect("mention")
+                .error_for_status()
+                .expect("mention accepted");
+        }
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        moment = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        client
+            .post(format!("{base}/api/drawers/{old}/supersede"))
+            .json(&serde_json::json!({ "content": "persisted belief that the ferry runs weekly" }))
+            .send()
+            .await
+            .expect("supersede")
+            .error_for_status()
+            .expect("supersede accepted");
+
+        stop_daemon(&bin, &palace, &mut child).await;
+    }
+
+    // Round 2: a new process over the same files finds everything again.
+    {
+        let (mut child, info) = spawn_daemon_and_wait(&bin, &palace).await;
+        let base = format!("http://{}", info.bind_addr);
+        let contents = |hits: &serde_json::Value| -> Vec<String> {
+            hits.as_array()
+                .expect("hits")
+                .iter()
+                .map(|hit| hit["content"].as_str().expect("content").to_string())
+                .collect()
+        };
+
+        // The HNSW index serves a vector search without any re-embedding.
+        let semantic: serde_json::Value = client
+            .post(format!("{base}/api/search"))
+            .json(&serde_json::json!({
+                "text": "",
+                "ranking": "semantic",
+                "limit": 1,
+                "query_embedding": axis_vector(0),
+            }))
+            .send()
+            .await
+            .expect("semantic search")
+            .json()
+            .await
+            .expect("json");
+        assert_eq!(
+            contents(&semantic),
+            ["persisted vector memory about harbours"],
+            "the vector index must survive the restart"
+        );
+
+        // Validity survived: current search sees the correction only, and a
+        // search as of before the correction sees the old belief.
+        let current: serde_json::Value = client
+            .get(format!("{base}/api/search"))
+            .query(&[("q", "persisted belief ferry"), ("ranking", "lexical")])
+            .send()
+            .await
+            .expect("current search")
+            .json()
+            .await
+            .expect("json");
+        assert_eq!(
+            contents(&current),
+            ["persisted belief that the ferry runs weekly"]
+        );
+        let then: serde_json::Value = client
+            .get(format!("{base}/api/search"))
+            .query(&[
+                ("q", "persisted belief ferry"),
+                ("ranking", "lexical"),
+                ("as_of", moment.as_str()),
+            ])
+            .send()
+            .await
+            .expect("as-of search")
+            .json()
+            .await
+            .expect("json");
+        assert_eq!(
+            contents(&then),
+            ["persisted belief that the ferry runs daily"]
+        );
+
+        // The graph links survived: expanding from the sibling reaches the
+        // drawer that shares the `ferry` entity with it.
+        let expanded: serde_json::Value = client
+            .get(format!("{base}/api/search"))
+            .query(&[
+                ("q", "timetable"),
+                ("ranking", "lexical"),
+                ("include_historical", "true"),
+                ("expand", "true"),
+            ])
+            .send()
+            .await
+            .expect("expanded search")
+            .json()
+            .await
+            .expect("json");
+        let found = contents(&expanded);
+        assert_eq!(found[0], "persisted note about the ferry timetable");
+        assert!(
+            found.contains(&"persisted belief that the ferry runs daily".to_string()),
+            "graph expansion must reach the linked drawer after a restart: {found:?}"
+        );
+
+        stop_daemon(&bin, &palace, &mut child).await;
+    }
+}

@@ -43,7 +43,171 @@ pub struct WingDetail {
     pub rooms: Vec<RoomSummary>,
 }
 
+/// The corrected content a superseded drawer is replaced by.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrawerReplacement {
+    /// The new content. Required and non-blank: a replacement is a new memory.
+    pub content: String,
+    /// Tags for the replacement; the superseded drawer's own when absent.
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+}
+
+/// What linking a drawer to an entity did.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityLink {
+    /// The drawer that mentions the entity.
+    pub drawer: DrawerId,
+    /// The entity, created if it did not exist.
+    pub entity: crate::domain::Entity,
+    /// Whether this call made the link (`false`: it was already there).
+    pub created: bool,
+}
+
+/// What superseding a drawer did.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Superseded {
+    /// The drawer whose validity now ends, content untouched.
+    pub superseded: Drawer,
+    /// The drawer that took its place, absent for a plain invalidation.
+    pub replacement: Option<Drawer>,
+}
+
 impl AppServices {
+    /// End a drawer's validity now and, when `replacement` is given, open a
+    /// corrected drawer from the same instant.
+    ///
+    /// Drawer content is immutable, so a correction is a new drawer plus a
+    /// closed old one: nothing is rewritten, a point-in-time search still sees
+    /// what was believed then, and the default (current) search sees only the
+    /// replacement. The replacement is filed in the same room, inherits the
+    /// old drawer's name (the old one gives it up; it stays addressable by id)
+    /// and, unless `replacement.tags` says otherwise, its tags. Without a
+    /// replacement the drawer is simply no longer current.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ModeForbidden`] unless `mode` permits writes,
+    /// [`Error::DrawerNotFound`], [`Error::DrawerSuperseded`] if it already
+    /// ended, [`Error::InvalidInput`] for blank replacement content, or a
+    /// store error.
+    pub async fn supersede_drawer(
+        &self,
+        id: DrawerId,
+        replacement: Option<DrawerReplacement>,
+        requested_by: &str,
+        mode: MemoryMode,
+    ) -> Result<Superseded> {
+        Self::require_write(mode, "drawer_supersede")?;
+        if let Some(replacement) = &replacement
+            && replacement.content.trim().is_empty()
+        {
+            return Err(Error::invalid_input(
+                "content",
+                "must not be empty; omit it to invalidate the drawer without a replacement",
+            ));
+        }
+        let old = self
+            .store
+            .get_drawer(id)
+            .await?
+            .ok_or_else(|| Error::DrawerNotFound {
+                room: "-".to_string(),
+                drawer: id.to_string(),
+            })?;
+        let superseded = || Error::DrawerSuperseded {
+            drawer: id.to_string(),
+        };
+        if old.valid_to.is_some() {
+            return Err(superseded());
+        }
+
+        let at = chrono::Utc::now();
+        let new = replacement.map(|replacement| {
+            let mut drawer = Drawer::new(
+                DrawerId::new(),
+                old.room,
+                replacement.content,
+                Source {
+                    kind: SourceKind::Manual,
+                    uri: None,
+                    agent: old.source.agent.clone(),
+                },
+                replacement.tags.unwrap_or_else(|| old.tags.clone()),
+                Provenance {
+                    requested_by: requested_by.to_string(),
+                    job_id: None,
+                },
+            )
+            .with_name(old.name.clone());
+            // The instant the old drawer closes: its end is exclusive, so the
+            // two are never both valid and never both absent.
+            drawer.valid_from = at;
+            drawer
+        });
+        if !self.store.supersede_drawer(id, new.as_ref(), at).await? {
+            return Err(superseded());
+        }
+        if new.is_some() {
+            self.scheduler.ensure_embedding_sweep().await;
+        }
+        let closed = self
+            .store
+            .get_drawer(id)
+            .await?
+            .ok_or_else(|| Error::DrawerNotFound {
+                room: "-".to_string(),
+                drawer: id.to_string(),
+            })?;
+        Ok(Superseded {
+            superseded: closed,
+            replacement: new,
+        })
+    }
+
+    /// Record that a drawer mentions an entity (`kind` and `name`), creating
+    /// the entity if needed, so graph-aware search can reach this drawer from
+    /// others that share it.
+    ///
+    /// The hook a future extractor (#40) calls and a person or integration can
+    /// use today. Idempotent. The drawer is never changed: the link is
+    /// derived data beside it. A write, so refused unless `mode` permits.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ModeForbidden`], [`Error::DrawerNotFound`],
+    /// [`Error::InvalidInput`] for a blank name, [`Error::EmptyLabel`] for a
+    /// blank kind, or a store error.
+    pub async fn link_drawer_entity(
+        &self,
+        drawer: DrawerId,
+        name: &str,
+        kind: &str,
+        mode: MemoryMode,
+    ) -> Result<EntityLink> {
+        Self::require_write(mode, "drawer_link")?;
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(Error::invalid_input("name", "must not be empty"));
+        }
+        if !self.store.drawer_exists(drawer).await? {
+            return Err(Error::DrawerNotFound {
+                room: "-".to_string(),
+                drawer: drawer.to_string(),
+            });
+        }
+        let entity = self
+            .store
+            .get_or_create_entity(name, kind, serde_json::json!({}))
+            .await?;
+        let created = self.store.link_drawer_entity(drawer, entity.id).await?;
+        Ok(EntityLink {
+            drawer,
+            entity,
+            created,
+        })
+    }
+
     /// Every wing with its room and drawer counts.
     ///
     /// # Errors
@@ -279,6 +443,7 @@ impl AppServices {
 
         let Some(name) = name else {
             self.store.create_drawer(&drawer).await?;
+            self.scheduler.ensure_embedding_sweep().await;
             return Ok(Created {
                 created: true,
                 item: drawer,
@@ -313,6 +478,7 @@ impl AppServices {
                 Err(error)
             };
         }
+        self.scheduler.ensure_embedding_sweep().await;
         Ok(Created {
             created: true,
             item: drawer,
@@ -447,7 +613,9 @@ fn writes_to_palace(kind: &JobKind) -> bool {
     match kind {
         JobKind::Mine { .. } | JobKind::Checkpoint { .. } => true,
         JobKind::Repair { dry_run, .. } => !dry_run,
-        JobKind::Demo { .. } | JobKind::Audit { .. } => false,
+        // An embedding sweep only fills a field of drawers that exist; it never
+        // creates or removes one, so a wing deleted under it is not resurrected.
+        JobKind::Demo { .. } | JobKind::Audit { .. } | JobKind::Embed { .. } => false,
     }
 }
 

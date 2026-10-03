@@ -258,12 +258,28 @@ Over MCP and REST it must be absolute; the CLI makes it absolute for you.
 
 ### Search returns nothing for a query that should match
 
-Search is lexical, not semantic: it matches words in the stored text, not their meaning.
+Without an [embedding provider](configuration.md#embeddings) search is lexical: it matches words in the stored text, not
+their meaning.
 Words are stemmed and case is ignored, so `languages` matches `language`, but a synonym such as `tongue` does not.
 A query returns the drawers containing every word first.
 Only when there are none does it fall back to drawers containing any of the words, best match first.
 Short keyword queries therefore work best, and a drawer matching one word of a long question ranks low.
-Check the scope too: `--wing` and `--room` take names, and a wrong one gives an empty result.
+Check the scope too: `--wing`, `--room`, `--tag` and `--source-kind` narrow the result, and a wrong one gives an empty result.
+A drawer that was corrected with `drawer supersede` is only found by `--as-of` or `--include-historical`.
+
+### Semantic search finds nothing, or fails
+
+- `memcastle::search::semantic_unavailable`: you asked for `--ranking semantic` or `hybrid` but the query could not be
+  embedded.
+  Configure an `[embeddings]` provider, or search with `--ranking lexical` (the default `auto` falls back by itself).
+- `memcastle::embed::not_configured`: `memcastle embed` or an embedding request needs a provider, and none is set.
+- `memcastle::embed::failed`: the provider answered with an error or not at all.
+  The message carries what it said; for a `command` provider that is its exit status and the start of its standard error.
+  Searches with `auto` ranking keep working lexically meanwhile.
+- `memcastle::embed::dimension_mismatch`: the model returns another vector length than the 768 the palace stores.
+  Ask it for 768 (`dimensions`), or choose a model that produces it.
+- Semantic search only finds drawers that already have a vector.
+  `memcastle job list` shows the `embed` job that fills them; `memcastle audit` reports how many drawers still have none.
 
 ## Other diagnostics
 

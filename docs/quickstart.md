@@ -88,7 +88,8 @@ memcastle diary read --agent-identity me --wing my-project
 memcastle wake-up --agent-identity me --wing my-project
 ```
 
-`search` is full-text: it matches the words you stored, and returns JSON with each drawer's content verbatim.
+`search` matches the words you stored (and, once you configure an [embedding provider](configuration.md#embeddings),
+their meaning), and returns JSON with each drawer's content verbatim.
 `wake-up` builds the context an agent would load at the start of a session.
 Pipe any of them through `jq` to pick out what you need, for example `memcastle search formatter | jq '.[].content'`.
 

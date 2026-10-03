@@ -21,13 +21,17 @@ use crate::domain::{
     JobStatus, MemoryMode, MiningSource, NameKind, Priority, Provenance, Source, SourceKind,
     validate_name,
 };
+use crate::embed::Embeddings;
 use crate::error::{Error, Result};
 use crate::jobs::Scheduler;
-use crate::store::{SearchHit, SurrealStore};
+use crate::search::{RankingMode, SearchHit, SearchQuery};
+use crate::store::SurrealStore;
 
 pub use auth::{AuthPolicy, GeneratedToken, RevokeResult};
 pub use db_endpoint::{DbEndpoint, DbEndpointRequest, DbEndpointStatus};
-pub use palace::{Created, DEFAULT_LIST_LIMIT, WingDetail};
+pub use palace::{
+    Created, DEFAULT_LIST_LIMIT, DrawerReplacement, EntityLink, Superseded, WingDetail,
+};
 
 /// A point-in-time summary of daemon health, for `GET /api/status`,
 /// `memcastle status`, and the `memcastle_status` MCP tool alike.
@@ -238,6 +242,9 @@ pub struct AppServices {
     runtime: Arc<RuntimeContext>,
     auth: Arc<AuthPolicy>,
     db_endpoint: Arc<DbEndpoint>,
+    /// Produces query vectors for semantic search; disabled unless an
+    /// `[embeddings]` provider is configured.
+    embeddings: Embeddings,
 }
 
 impl AppServices {
@@ -251,7 +258,15 @@ impl AppServices {
             runtime: Arc::new(RuntimeContext::default()),
             auth: Arc::new(AuthPolicy::default()),
             db_endpoint: Arc::new(DbEndpoint::default()),
+            embeddings: Embeddings::disabled(),
         }
+    }
+
+    /// Give the services an embedding provider for query vectors.
+    #[must_use]
+    pub fn with_embeddings(mut self, embeddings: Embeddings) -> Self {
+        self.embeddings = embeddings;
+        self
     }
 
     /// Record how the daemon was started, for `status` to report.
@@ -363,23 +378,19 @@ impl AppServices {
         }
     }
 
-    /// Lexical search over drawer content, optionally scoped to one wing
-    /// and/or room by name.
+    /// Search drawer content: lexical, semantic or hybrid, per
+    /// [`SearchQuery::ranking`], within the query's scope (wing, room, tags,
+    /// source kind, point in time) and optionally enriched through the
+    /// knowledge graph.
     ///
     /// # Errors
     ///
-    /// Returns an error if the store query fails, or [`Error::ModeForbidden`]
-    /// if `mode` doesn't permit reads (`Disabled`).
-    pub async fn search(
-        &self,
-        query: &str,
-        wing: Option<&str>,
-        room: Option<&str>,
-        limit: u32,
-        mode: MemoryMode,
-    ) -> Result<Vec<SearchHit>> {
-        self.gated_search("search", query, wing, room, limit, mode)
-            .await
+    /// Returns an error if the store query fails, [`Error::ModeForbidden`]
+    /// if `mode` doesn't permit reads (`Disabled`),
+    /// [`Error::SemanticUnavailable`] if a semantic or hybrid search has no
+    /// vector, or [`Error::InvalidInput`] for a malformed `query_embedding`.
+    pub async fn search(&self, query: SearchQuery, mode: MemoryMode) -> Result<Vec<SearchHit>> {
+        self.gated_search("search", query, mode).await
     }
 
     /// The gated search both `search` and `recall` run, taking the caller's
@@ -388,15 +399,97 @@ impl AppServices {
     async fn gated_search(
         &self,
         operation: &'static str,
-        query: &str,
-        wing: Option<&str>,
-        room: Option<&str>,
-        limit: u32,
+        query: SearchQuery,
         mode: MemoryMode,
     ) -> Result<Vec<SearchHit>> {
         Self::require_read(mode, operation)?;
-        let limit = limit.min(MAX_READ_LIMIT);
-        crate::search::lexical_search(&self.store, query, limit, wing, room).await
+        let limit = if query.limit == 0 {
+            DEFAULT_SEARCH_LIMIT
+        } else {
+            query.limit.min(MAX_READ_LIMIT)
+        };
+        let vector = self.query_vector(&query).await?;
+        crate::search::search(&self.store, &query, limit, vector.as_deref()).await
+    }
+
+    /// The vector to rank `query` with, if its mode wants one and one can be had.
+    ///
+    /// A caller-supplied `query_embedding` wins (it may come from a model the
+    /// daemon does not run). Otherwise the configured provider embeds the text.
+    /// A provider that fails degrades an `auto` search to lexical, with a
+    /// warning, because the caller asked for no particular ranking and an
+    /// answer beats an error; for an explicit `semantic` or `hybrid` the
+    /// failure is surfaced, because a lexical answer would pass for the
+    /// semantic one the caller is relying on.
+    async fn query_vector(&self, query: &SearchQuery) -> Result<Option<Vec<f32>>> {
+        if query.ranking == RankingMode::Lexical {
+            return Ok(None);
+        }
+        if let Some(embedding) = &query.query_embedding {
+            // A caller's mistake, so `invalid_input` (400) rather than the
+            // provider-fault error `check_dimension` raises on the store side.
+            if embedding.len() != crate::domain::EMBEDDING_DIMENSION {
+                return Err(Error::invalid_input(
+                    "query_embedding",
+                    format!(
+                        "has {} dimension(s) but the palace stores {}",
+                        embedding.len(),
+                        crate::domain::EMBEDDING_DIMENSION
+                    ),
+                ));
+            }
+            return Ok(Some(embedding.clone()));
+        }
+        if !self.embeddings.is_configured() || query.text.trim().is_empty() {
+            return Ok(None);
+        }
+        match self.embeddings.embed_one(&query.text).await {
+            Ok(vector) => Ok(Some(vector)),
+            Err(error) if query.ranking == RankingMode::Auto => {
+                tracing::warn!(%error, "query embedding failed; searching lexically instead");
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Attach a caller-computed embedding to an existing drawer.
+    ///
+    /// For a client with its own model against a daemon that has no provider,
+    /// or one that wants a different model's vectors. Only the derived
+    /// `embedding` field changes. A write, so refused in `ReadOnly` and
+    /// `Disabled` modes.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ModeForbidden`], [`Error::InvalidInput`] for a vector of the
+    /// wrong length, [`Error::DrawerNotFound`] for an unknown drawer, or a
+    /// store error.
+    pub async fn set_drawer_embedding(
+        &self,
+        drawer: DrawerId,
+        embedding: Vec<f32>,
+        mode: MemoryMode,
+    ) -> Result<()> {
+        Self::require_write(mode, "drawer_embed")?;
+        if embedding.len() != crate::domain::EMBEDDING_DIMENSION {
+            return Err(Error::invalid_input(
+                "embedding",
+                format!(
+                    "has {} dimension(s) but the palace stores {}",
+                    embedding.len(),
+                    crate::domain::EMBEDDING_DIMENSION
+                ),
+            ));
+        }
+        if self.store.set_drawer_embedding(drawer, &embedding).await? {
+            Ok(())
+        } else {
+            Err(Error::DrawerNotFound {
+                room: "-".to_string(),
+                drawer: drawer.to_string(),
+            })
+        }
     }
 
     /// Submit a mining job for `path`, returning immediately with the
@@ -679,6 +772,32 @@ impl AppServices {
             .await
     }
 
+    /// Submit an embedding sweep: give every drawer without a vector one (see
+    /// `crate::embed::job`). Gated as a **write**, since it fills a field of
+    /// every drawer it touches, and refused up front when no provider is
+    /// configured: a job that could only fail would be accepted with a 200 and
+    /// surface minutes later in `job list`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ModeForbidden`] unless `mode` permits writes,
+    /// [`Error::EmbeddingsNotConfigured`] when no provider is configured, or a
+    /// store error.
+    pub async fn submit_embed(
+        &self,
+        wing: Option<String>,
+        requested_by: &str,
+        mode: MemoryMode,
+    ) -> Result<Job> {
+        Self::require_write(mode, "embed")?;
+        if !self.embeddings.is_configured() {
+            return Err(Error::EmbeddingsNotConfigured);
+        }
+        self.scheduler
+            .submit(JobKind::Embed { wing }, Priority::Background, requested_by)
+            .await
+    }
+
     /// List jobs, optionally filtered to one status.
     ///
     /// Gated as a **read**: a job record carries its whole input, and for a
@@ -833,6 +952,9 @@ impl AppServices {
             },
         );
         self.store.create_drawer(&drawer).await?;
+        // Derived data, queued after the canonical write succeeded and never
+        // able to fail it.
+        self.scheduler.ensure_embedding_sweep().await;
         Ok(drawer)
     }
 
@@ -878,7 +1000,7 @@ impl AppServices {
     /// recall-oriented primitive the task brief's vocabulary calls for
     /// (issue #14 / §14 — "MemCastle should expose excellent primitives for
     /// `recall(...)`/`search(...)`"), wired to exactly the same scoped
-    /// `list_drawers_matching` underneath — a future divergence (e.g.
+    /// search underneath — a future divergence (e.g.
     /// recall-specific reranking) has a name to hang off, not a reason to
     /// duplicate logic today. MemCastle does not itself force a
     /// search-before-answer protocol; enforcing that discipline is an
@@ -897,15 +1019,11 @@ impl AppServices {
     ///
     /// Returns an error if the store query fails, or [`Error::ModeForbidden`]
     /// if `mode` doesn't permit reads (`Disabled`).
-    pub async fn recall(
-        &self,
-        query: &str,
-        wing: Option<&str>,
-        limit: u32,
-        mode: MemoryMode,
-    ) -> Result<Vec<SearchHit>> {
-        self.gated_search("recall", query, wing, None, limit, mode)
-            .await
+    pub async fn recall(&self, mut query: SearchQuery, mode: MemoryMode) -> Result<Vec<SearchHit>> {
+        // Recall is wing-scoped by design (see its doc comment); a room is a
+        // `search` refinement, so one smuggled in is dropped, not honoured.
+        query.filter.room = None;
+        self.gated_search("recall", query, mode).await
     }
 
     /// Build an agent's session-start context: its most recent diary entry
@@ -992,6 +1110,13 @@ impl AppServices {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A search for `text` scoped to one wing.
+    fn wing_query(text: &str, wing: &str) -> SearchQuery {
+        let mut query = SearchQuery::new(text);
+        query.filter.wing = Some(wing.to_string());
+        query
+    }
 
     async fn test_app() -> AppServices {
         test_app_with_store().await.0
@@ -1136,7 +1261,7 @@ mod tests {
         .expect("write");
 
         let hits = app
-            .recall("verbatim", Some("project-x"), 10, MemoryMode::Full)
+            .recall(wing_query("verbatim", "project-x"), MemoryMode::Full)
             .await
             .expect("recall");
         assert_eq!(hits.len(), 1);
@@ -1254,12 +1379,15 @@ mod tests {
     async fn a_rejected_recall_names_recall_not_the_search_it_delegates_to() {
         let app = test_app().await;
 
-        match app.recall("anything", None, 5, MemoryMode::Disabled).await {
+        match app
+            .recall(SearchQuery::new("anything"), MemoryMode::Disabled)
+            .await
+        {
             Err(crate::Error::ModeForbidden { operation, .. }) => assert_eq!(operation, "recall"),
             other => panic!("expected Error::ModeForbidden, got {other:?}"),
         }
         match app
-            .search("anything", None, None, 5, MemoryMode::Disabled)
+            .search(SearchQuery::new("anything"), MemoryMode::Disabled)
             .await
         {
             Err(crate::Error::ModeForbidden { operation, .. }) => assert_eq!(operation, "search"),
@@ -1515,7 +1643,7 @@ mod tests {
     async fn a_disabled_search_is_rejected_without_a_store_query() {
         let app = test_app().await;
         let result = app
-            .search("anything", None, None, 10, MemoryMode::Disabled)
+            .search(SearchQuery::new("anything"), MemoryMode::Disabled)
             .await;
         assert_mode_forbidden(&result, MemoryMode::Disabled);
     }
@@ -1523,7 +1651,9 @@ mod tests {
     #[tokio::test]
     async fn recall_in_disabled_mode_is_rejected_the_same_as_search() {
         let app = test_app().await;
-        let result = app.recall("anything", None, 10, MemoryMode::Disabled).await;
+        let result = app
+            .recall(SearchQuery::new("anything"), MemoryMode::Disabled)
+            .await;
         assert_mode_forbidden(&result, MemoryMode::Disabled);
     }
 
@@ -1775,9 +1905,7 @@ mod tests {
 
         let hits = app
             .recall(
-                "programming languages I use preferences",
-                None,
-                10,
+                SearchQuery::new("programming languages I use preferences"),
                 MemoryMode::Full,
             )
             .await
@@ -1808,7 +1936,7 @@ mod tests {
         }
 
         let hits = app
-            .recall("programming languages", None, 10, MemoryMode::Full)
+            .recall(SearchQuery::new("programming languages"), MemoryMode::Full)
             .await
             .expect("recall");
         assert_eq!(
@@ -2131,5 +2259,327 @@ mod tests {
             .expect("wake up");
 
         assert_eq!(context.recent_highlights.len(), 1);
+    }
+
+    /// An app whose provider is `embeddings`, and its store.
+    async fn app_with_embeddings(embeddings: Embeddings) -> (AppServices, SurrealStore) {
+        let (app, store) = test_app_with_store().await;
+        (app.with_embeddings(embeddings), store)
+    }
+
+    /// Write `content` through the app and give it the fake provider's vector,
+    /// as the embedding sweep would.
+    async fn remember(app: &AppServices, store: &SurrealStore, content: &str) -> Drawer {
+        let drawer = app
+            .diary_write("agent", "w", content.to_string(), "test", MemoryMode::Full)
+            .await
+            .expect("write");
+        store
+            .set_drawer_embedding(drawer.id, &crate::embed::fake::vector_for(content))
+            .await
+            .expect("embed");
+        drawer
+    }
+
+    fn ranked(text: &str, ranking: RankingMode) -> SearchQuery {
+        SearchQuery {
+            ranking,
+            ..SearchQuery::new(text)
+        }
+    }
+
+    #[tokio::test]
+    async fn auto_search_uses_both_legs_when_a_provider_can_embed_the_query() {
+        let (app, store) =
+            app_with_embeddings(Embeddings::new(crate::embed::fake::WordHashEmbedder, 8)).await;
+        remember(&app, &store, "the harbour master keeps the tide tables").await;
+        for i in 0..5 {
+            remember(&app, &store, &format!("unrelated filler {i}")).await;
+        }
+
+        let hits = app
+            .search(
+                ranked("harbour tide tables", RankingMode::Auto),
+                MemoryMode::Full,
+            )
+            .await
+            .expect("search");
+
+        assert_eq!(
+            hits[0].drawer.content,
+            "the harbour master keeps the tide tables"
+        );
+        assert!(hits[0].signals.lexical.is_some() && hits[0].signals.semantic.is_some());
+    }
+
+    #[tokio::test]
+    async fn an_explicit_semantic_search_without_a_vector_is_an_error() {
+        let app = test_app().await;
+        for ranking in [RankingMode::Semantic, RankingMode::Hybrid] {
+            let result = app
+                .search(ranked("anything", ranking), MemoryMode::Full)
+                .await;
+            assert!(
+                matches!(result, Err(Error::SemanticUnavailable { .. })),
+                "{ranking:?}: {result:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failing_provider_degrades_auto_to_lexical_but_not_an_explicit_ranking() {
+        struct Down;
+        impl crate::embed::Embedder for Down {
+            fn embed<'a>(&'a self, _texts: &'a [String]) -> crate::embed::EmbedFuture<'a> {
+                Box::pin(async {
+                    Err(Error::EmbeddingFailed {
+                        message: "down".into(),
+                    })
+                })
+            }
+        }
+        let (app, _store) = app_with_embeddings(Embeddings::new(Down, 8)).await;
+        app.diary_write(
+            "agent",
+            "w",
+            "lexical survivor".into(),
+            "test",
+            MemoryMode::Full,
+        )
+        .await
+        .expect("write");
+
+        let hits = app
+            .search(ranked("survivor", RankingMode::Auto), MemoryMode::Full)
+            .await
+            .expect("auto still answers");
+        assert_eq!(hits.len(), 1);
+
+        let result = app
+            .search(ranked("survivor", RankingMode::Semantic), MemoryMode::Full)
+            .await;
+        assert!(
+            matches!(result, Err(Error::EmbeddingFailed { .. })),
+            "{result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_caller_vector_of_the_wrong_length_is_the_callers_invalid_input() {
+        let app = test_app().await;
+        let query = SearchQuery {
+            ranking: RankingMode::Semantic,
+            query_embedding: Some(vec![1.0, 2.0]),
+            ..SearchQuery::new("x")
+        };
+        let error = app
+            .search(query, MemoryMode::Full)
+            .await
+            .expect_err("wrong length");
+        assert!(matches!(error, Error::InvalidInput { .. }), "{error}");
+        assert!(error.to_string().contains("768"));
+    }
+
+    #[tokio::test]
+    async fn recall_ignores_a_room_smuggled_into_its_filter() {
+        let app = test_app().await;
+        app.diary_write("agent", "w", "recall me".into(), "test", MemoryMode::Full)
+            .await
+            .expect("write");
+        let mut query = SearchQuery::new("recall");
+        query.filter.room = Some("no-such-room".into());
+
+        let hits = app.recall(query, MemoryMode::Full).await.expect("recall");
+
+        assert_eq!(
+            hits.len(),
+            1,
+            "recall is wing-scoped; a room does not narrow it"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_zero_limit_means_the_default_and_an_oversized_one_is_clamped() {
+        let app = test_app().await;
+        for i in 0..(DEFAULT_SEARCH_LIMIT + 3) {
+            app.diary_write(
+                "agent",
+                "w",
+                format!("limit probe {i}"),
+                "test",
+                MemoryMode::Full,
+            )
+            .await
+            .expect("write");
+        }
+        let hits = app
+            .search(SearchQuery::new("limit probe"), MemoryMode::Full)
+            .await
+            .expect("search");
+        assert_eq!(hits.len(), DEFAULT_SEARCH_LIMIT as usize);
+    }
+
+    #[tokio::test]
+    async fn supersession_needs_a_write_mode_and_never_touches_the_old_content() {
+        let app = test_app().await;
+        let drawer = app
+            .diary_write(
+                "agent",
+                "w",
+                "first belief".into(),
+                "test",
+                MemoryMode::Full,
+            )
+            .await
+            .expect("write");
+
+        let refused = app
+            .supersede_drawer(drawer.id, None, "test", MemoryMode::ReadOnly)
+            .await;
+        assert!(
+            matches!(refused, Err(Error::ModeForbidden { .. })),
+            "{refused:?}"
+        );
+
+        let outcome = app
+            .supersede_drawer(
+                drawer.id,
+                Some(DrawerReplacement {
+                    content: "second belief".into(),
+                    tags: None,
+                }),
+                "test",
+                MemoryMode::Full,
+            )
+            .await
+            .expect("supersede");
+        assert_eq!(outcome.superseded.content, "first belief");
+        assert!(outcome.superseded.valid_to.is_some());
+        let replacement = outcome.replacement.expect("replacement");
+        assert_eq!(replacement.content, "second belief");
+        assert_eq!(replacement.valid_from, outcome.superseded.valid_to.unwrap());
+
+        let again = app
+            .supersede_drawer(drawer.id, None, "test", MemoryMode::Full)
+            .await;
+        assert!(
+            matches!(again, Err(Error::DrawerSuperseded { .. })),
+            "{again:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_blank_replacement_is_refused_before_anything_is_closed() {
+        let app = test_app().await;
+        let drawer = app
+            .diary_write(
+                "agent",
+                "w",
+                "keep me open".into(),
+                "test",
+                MemoryMode::Full,
+            )
+            .await
+            .expect("write");
+
+        let result = app
+            .supersede_drawer(
+                drawer.id,
+                Some(DrawerReplacement {
+                    content: "  ".into(),
+                    tags: None,
+                }),
+                "test",
+                MemoryMode::Full,
+            )
+            .await;
+
+        assert!(
+            matches!(result, Err(Error::InvalidInput { .. })),
+            "{result:?}"
+        );
+        let hits = app
+            .search(SearchQuery::new("keep open"), MemoryMode::Full)
+            .await
+            .expect("search");
+        assert_eq!(hits.len(), 1, "the drawer is still current");
+    }
+
+    #[tokio::test]
+    async fn the_diary_and_wake_up_skip_a_superseded_entry() {
+        let app = test_app().await;
+        let old = app
+            .diary_write("agent", "w", "stale entry".into(), "test", MemoryMode::Full)
+            .await
+            .expect("write");
+        app.supersede_drawer(old.id, None, "test", MemoryMode::Full)
+            .await
+            .expect("supersede");
+
+        let entries = app
+            .diary_read("agent", "w", 10, MemoryMode::Full)
+            .await
+            .expect("read");
+        assert!(entries.is_empty(), "{entries:?}");
+    }
+
+    #[tokio::test]
+    async fn linking_a_drawer_to_an_entity_is_idempotent_and_a_write() {
+        let app = test_app().await;
+        let drawer = app
+            .diary_write(
+                "agent",
+                "w",
+                "mentions the castle".into(),
+                "test",
+                MemoryMode::Full,
+            )
+            .await
+            .expect("write");
+
+        let refused = app
+            .link_drawer_entity(drawer.id, "castle", "place", MemoryMode::ReadOnly)
+            .await;
+        assert!(matches!(refused, Err(Error::ModeForbidden { .. })));
+
+        let first = app
+            .link_drawer_entity(drawer.id, "castle", "place", MemoryMode::Full)
+            .await
+            .expect("link");
+        let second = app
+            .link_drawer_entity(drawer.id, "castle", "Place", MemoryMode::Full)
+            .await
+            .expect("link again");
+        assert!(first.created && !second.created);
+        assert_eq!(first.entity.id, second.entity.id, "kind is normalised");
+
+        let blank = app
+            .link_drawer_entity(drawer.id, " ", "place", MemoryMode::Full)
+            .await;
+        assert!(matches!(blank, Err(Error::InvalidInput { .. })));
+        let missing = app
+            .link_drawer_entity(DrawerId::new(), "castle", "place", MemoryMode::Full)
+            .await;
+        assert!(matches!(missing, Err(Error::DrawerNotFound { .. })));
+    }
+
+    #[tokio::test]
+    async fn an_embedding_sweep_is_refused_without_a_provider_and_accepted_with_one() {
+        let app = test_app().await;
+        let refused = app.submit_embed(None, "test", MemoryMode::Full).await;
+        assert!(
+            matches!(refused, Err(Error::EmbeddingsNotConfigured)),
+            "{refused:?}"
+        );
+
+        let (app, _) =
+            app_with_embeddings(Embeddings::new(crate::embed::fake::WordHashEmbedder, 8)).await;
+        let job = app
+            .submit_embed(None, "test", MemoryMode::Full)
+            .await
+            .expect("accepted");
+        assert!(matches!(job.kind, JobKind::Embed { .. }));
+        let gated = app.submit_embed(None, "test", MemoryMode::ReadOnly).await;
+        assert!(matches!(gated, Err(Error::ModeForbidden { .. })));
     }
 }

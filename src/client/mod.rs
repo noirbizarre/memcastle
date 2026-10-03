@@ -29,7 +29,7 @@ use crate::config::Secret;
 use crate::domain::channel::CLI as CHANNEL;
 use crate::domain::{CheckpointPayload, Drawer, Job, JobId, JobStatus, MemoryMode};
 use crate::error::{Error, Result};
-use crate::search::SearchHit;
+use crate::search::{SearchHit, SearchQuery};
 use crate::server::lifecycle;
 
 /// How long a connection attempt may take. A daemon on this machine answers
@@ -282,33 +282,21 @@ impl DaemonClient {
             .await
     }
 
-    /// Lexical search over drawer content, optionally scoped to one wing
-    /// and/or room by name.
+    /// Search drawer content with `query`: ranking mode, scope, point in time
+    /// and graph expansion are all part of the [`SearchQuery`]. Sent as a JSON
+    /// body (`POST /api/search`) so the request is not limited to what fits in
+    /// a query string.
     ///
     /// # Errors
     ///
     /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
-    pub async fn search(
-        &self,
-        query: &str,
-        wing: Option<&str>,
-        room: Option<&str>,
-        limit: u32,
-    ) -> Result<Vec<SearchHit>> {
-        let mut request = self
-            .http
-            .get(format!("{}/api/search", self.base_url))
-            .query(&[("q", query), ("limit", &limit.to_string())]);
-        // Only append when set, same reasoning as `list_jobs` below: an
-        // absent query param, not an empty-string one, is what the server
-        // side treats as "no filter".
-        if let Some(wing) = wing {
-            request = request.query(&[("wing", wing)]);
-        }
-        if let Some(room) = room {
-            request = request.query(&[("room", room)]);
-        }
-        self.send(request).await
+    pub async fn search(&self, query: &SearchQuery) -> Result<Vec<SearchHit>> {
+        self.send(
+            self.http
+                .post(format!("{}/api/search", self.base_url))
+                .json(query),
+        )
+        .await
     }
 
     /// Retrieve palace content matching `query`, returned verbatim — the
@@ -317,23 +305,13 @@ impl DaemonClient {
     /// # Errors
     ///
     /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
-    pub async fn recall(
-        &self,
-        query: &str,
-        wing: Option<&str>,
-        limit: u32,
-    ) -> Result<Vec<SearchHit>> {
-        let mut request = self
-            .http
-            .get(format!("{}/api/recall", self.base_url))
-            .query(&[("q", query), ("limit", &limit.to_string())]);
-        // Only append when set — same reasoning as `search`'s identical
-        // pattern: an absent query param, not an empty-string one, is what
-        // the server side treats as "no filter".
-        if let Some(wing) = wing {
-            request = request.query(&[("wing", wing)]);
-        }
-        self.send(request).await
+    pub async fn recall(&self, query: &SearchQuery) -> Result<Vec<SearchHit>> {
+        self.send(
+            self.http
+                .post(format!("{}/api/recall", self.base_url))
+                .json(query),
+        )
+        .await
     }
 
     /// Build `agent_identity`'s session-start context — see
@@ -436,6 +414,20 @@ impl DaemonClient {
             self.http
                 .post(format!("{}/api/jobs", self.base_url))
                 .json(&json!({ "type": "audit", "scope": scope, "requested_by": CHANNEL })),
+        )
+        .await
+    }
+
+    /// Submit an embedding sweep — see `AppServices::submit_embed`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
+    pub async fn submit_embed(&self, wing: Option<String>) -> Result<Job> {
+        self.send(
+            self.http
+                .post(format!("{}/api/jobs", self.base_url))
+                .json(&json!({ "type": "embed", "wing": wing, "requested_by": CHANNEL })),
         )
         .await
     }

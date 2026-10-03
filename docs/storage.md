@@ -72,10 +72,16 @@ as orphans.
 Counts shown for wings and rooms are computed when asked, never stored.
 
 Entities and relationships form a knowledge-graph layer that a checkpoint item's `fact` can write to.
-Nothing extracts them from mined content yet.
+A `mentions` edge links a drawer to an entity it talks about.
+Nothing extracts entities from mined content yet, so those links are made explicitly.
 
-Search today is lexical (BM25 full-text) over drawer content; there are no embeddings.
-That is why `embedding` is empty in every drawer you see.
+Everything retrieval uses lives in the same database as the drawers: a BM25 full-text index, an HNSW vector index over
+`embedding`, and the graph edges.
+There is no separate vector file or index to back up, and none can fall out of step with the drawers.
+The `embedding` field is derived data and is empty until an [embedding provider](configuration.md#embeddings)
+(or a vector you send) fills it, so a palace without one searches lexically.
+A drawer's content never changes: correcting it sets the old drawer's `valid_to` and files a replacement, so older memory
+stays in the database and is found by an `--as-of` search.
 
 ### Limits
 

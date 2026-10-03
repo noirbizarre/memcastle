@@ -7,15 +7,14 @@
 //! creating/closing/traversing it goes through `RELATE`/`UPDATE`/a graph
 //! traversal expression instead of `CREATE`/plain `SELECT ... WHERE`.
 //!
-//! **Querying "is this fact still current":** `drawer.valid_to` (the only
-//! prior art for an optional temporal field) is write-only — nothing ever
-//! filters on it, so there's no established pattern here to follow. Rather
-//! than lean on the NULL-vs-NONE distinction `store::mod`'s own regression
-//! test warns is a 3.x driver gotcha for *bound query parameters*, current
-//! vs. expired is decided with SurrealQL truthiness (`!valid_to`), which
-//! reads as "still valid" whether an unset `valid_to` ends up stored as
-//! `NONE` (absent) or `NULL` — the ambiguity this codebase's other comments
-//! flag doesn't matter for a truthiness check the way it does for `= NULL`.
+//! **Querying "is this fact still current":** current vs. expired is decided
+//! with SurrealQL truthiness (`!valid_to`), not `= NULL`: it reads as "still
+//! valid" whether an unset `valid_to` ends up stored as `NONE` (absent) or
+//! `NULL` — the ambiguity this codebase's other comments flag (see
+//! `store::mod`'s regression test on bound parameters) doesn't matter for a
+//! truthiness check the way it does for `= NULL`. Drawers use the same rule:
+//! `store::retrieval`'s scope predicate and `store::graph` both read validity
+//! this way, so a drawer and a relationship are "current" by one definition.
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;

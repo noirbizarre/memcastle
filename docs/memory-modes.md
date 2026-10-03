@@ -23,8 +23,11 @@ The rule follows what an operation touches, not what it is called.
   Jobs count because a job record carries its whole input, such as the memory a checkpoint is writing,
   and the hierarchy counts because the names and counts of a palace are themselves palace content.
 - **Writes:** `checkpoint`, `diary_write`, `mine`, `repair` when it is not a dry run,
+  `embed`, superseding a drawer, linking a drawer to an entity, attaching an embedding,
   and creating or deleting a wing, room or drawer.
-  Mining and applied repairs count because their purpose is to file or delete drawers.
+  Mining and applied repairs count because their purpose is to file or delete drawers,
+  and the derived-data writes count because they change the palace even though they never touch a drawer's content.
+  Every search option (`ranking`, `as_of`, `expand` and the rest) is still a read.
 - **Never gated:** `status`, job control (pause, resume, cancel, retry), demo jobs, `audit` and a dry-run `repair`.
   They report on the palace or steer work that was already allowed, and never expose drawer content.
 
