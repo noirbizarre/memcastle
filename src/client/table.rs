@@ -39,7 +39,7 @@ fn render_table(
 ) -> String {
     let mut table = Table::new();
     table
-        .load_preset(UTF8_FULL_CONDENSED)
+        .load_style(UTF8_FULL_CONDENSED)
         .set_content_arrangement(ContentArrangement::Dynamic)
         // The width is ours to decide (below), not comfy-table's: it would
         // ask crossterm, which reports 0 columns for a terminal that was never
