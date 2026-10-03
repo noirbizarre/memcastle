@@ -45,7 +45,7 @@ does not classify.
 
 ```text
 integrations/
-  pi/            TypeScript/bun — the primary V1 integration (Phase 2); not scaffolded yet
+  pi/            TypeScript/bun — the primary V1 integration (Phase 2); scaffolded
   opencode/      TypeScript/bun — an OpenCode plugin (Phase 3); scaffolded
   claude-code/   MCP + skills only, pragmatic/best-effort (Phase 4); planned
 ```
@@ -80,8 +80,8 @@ native tooling, nothing more.
 
 ## Status
 
-The OpenCode package is a scaffold: its connection, mode, discovery and failure foundations work and are tested,
-and its lifecycle hooks are empty.
+The Pi and OpenCode packages are scaffolds: their connection, mode, discovery and failure foundations work and are
+tested, and their lifecycle hooks are empty.
 Tracked as GitHub issues under the
 "Phase 2 — Pi integration", "Phase 3 — OpenCode integration", and
 "Phase 4 — Claude Code integration" milestones.

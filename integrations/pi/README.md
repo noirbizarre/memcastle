@@ -1,0 +1,106 @@
+# MemCastle for Pi
+
+A [Pi extension](https://pi.dev) that decides *when* to call MemCastle.
+Everything it asks of MemCastle is an MCP call to the daemon, and it never touches the database, the job code or the
+admin endpoint (AGENTS.md invariant 8, enforced by the `integrations-http-only` hook).
+
+**Status: scaffold.**
+The connection, memory-mode, discovery and failure foundations are real and tested against a real daemon.
+The capability modules are registered but empty, and each names the issue that fills it in.
+
+It deliberately does **not** port `pi-palace`'s workaround of routing every write through a daemon queue to avoid
+lock contention.
+MemCastle's daemon is the only writer and already decides, per operation, whether something is a job (checkpoint) or a
+direct call (diary), so the extension calls whichever operation fits and has no routing of its own.
+
+## Use it
+
+The extension needs a running daemon (`memcastle daemon start`) but does not need one to load.
+Loading only registers handlers; the connection is opened in the background when a session starts,
+so Pi starts normally when the daemon is down and the user is told once how to start it.
+
+```sh
+pi -e /path/to/memcastle/integrations/pi/src/extension.ts          # try it for one run
+pi install /path/to/memcastle/integrations/pi                       # or install the package
+```
+
+Pi supplies `@earendil-works/pi-coding-agent` to extensions, so it is a peer dependency here and is never bundled.
+
+### Configuration
+
+The environment variables are the ones the MemCastle CLI already reads.
+
+| Environment | Default | Meaning |
+| --- | --- | --- |
+| `MEMCASTLE_MODE` | `full` | `full`, `read-only` or `off`; anything else disables the extension |
+| `MEMCASTLE_AUTH_TOKEN` | none | Bearer token, when the daemon requires one |
+| `MEMCASTLE_PALACE_PATH` | `$XDG_DATA_HOME/memcastle/default` | Locates the daemon's registry file |
+| `MEMCASTLE_BIND`, `MEMCASTLE_PORT` | `127.0.0.1`, `8420` | Used when no registry file names a live daemon |
+
+The daemon is found through its registry file, then the configured address, and each candidate is checked with
+`GET /api/health` because the file is only a hint.
+A mode the extension cannot parse **fails closed**: it tells the user why and does nothing, rather than treating a
+typo as `full`.
+An `off` session opens no connection at all.
+
+## Layout
+
+The file names follow `pi-palace`'s map of the pieces, wired to MemCastle instead of MemPalace.
+
+```text
+src/extension.ts              the entry point: handlers only; opens nothing until `session_start`
+src/settings.ts               environment to typed settings; the token never reaches a log
+src/daemon-client.ts          discovery: registry file, then configured address, verified by /api/health
+src/persistent-mcp-client.ts  one MCP session; selects the mode on every (re)connect before anything else
+src/mcp-manager.ts            owns that session for the Pi session; reports failures with the daemon's `help`
+src/modes.ts                  client labels (full, read-only, off) to wire values (full, read_only, disabled)
+src/failures.ts               the five failure classes, each with the daemon's `help`
+src/wake-up.ts                wake-up on session start (#22), empty
+src/wake-up-cli.ts            a command to run the wake-up on demand (#22), empty
+src/checkpoint-agent.ts       interval review by the extension's own model (#23), empty
+src/checkpoint-tool.ts        the manual checkpoint (#23) and the pre-compaction one (#24), empty
+src/daily-mine.ts             background mining on the extension's own schedule (#26), empty
+test/                         bun tests against a real `memcastle serve`; they read tests/fixtures/integration/
+```
+
+`modes`, `failures`, `settings`, `daemon-client` and `persistent-mcp-client` are a deliberate copy of the small client
+the OpenCode integration carries, not a shared package: the two ecosystems differ in how many sessions share a process.
+Both suites replay the same fixtures, which is what keeps the copies honest
+(see [ADR-022](../../docs/adr/022-integrations-are-bun-packages-tested-against-a-real-daemon.md)).
+
+## Develop
+
+```sh
+cargo build                  # the tests start a real daemon from target/debug/memcastle (or $MEMCASTLE_BIN)
+bun install --frozen-lockfile
+bun run typecheck
+bun run test
+```
+
+`mise run integrations:check` does all of it for every package under `integrations/`.
+The tests never skip when the binary is missing, because a suite that passes without a daemon proves nothing.
+
+## Conformance matrix
+
+The contract is [`docs/integration-contract.md`](../../docs/integration-contract.md).
+**Foundation** means the building block exists and is tested, but the lifecycle behaviour is not wired yet.
+
+| Capability | Status | Where it lands |
+| --- | --- | --- |
+| `session-mode` | Foundation: label translation, mode selected on connect, `off` opens nothing | #27 |
+| `wake-up` | Not yet | #22 |
+| `recall` | Not yet | #25 |
+| `checkpoint` | Not yet | #23 |
+| `emergency-checkpoint` | Not yet | #24 |
+| `persistent-session` | Implemented: one connection per Pi session, mode re-selected on reconnect | #29 for the rest |
+| `skills` | Not yet | #25 |
+| `background-mining` | Not yet | #26 |
+| `failure-reporting` | Foundation: the five classes with `help`, shown as Pi notifications | #30 for the rest |
+| `audit-repair` | Not yet | #28 |
+
+### Gaps
+
+None are declared yet.
+Only `emergency-checkpoint`, `background-mining` and `audit-repair` may be gaps, each recorded as three lines:
+**Missing**, **Fallback** and **Effect**.
+Pi has a `session_before_compact` event, so a gap is not expected for `emergency-checkpoint`.

@@ -37,3 +37,13 @@ updates:
       opencode-dependencies:
         patterns: ["*"]
         update-types: [minor, patch]
+
+  - package-ecosystem: bun
+    directory: /integrations/pi
+    schedule:
+      interval: weekly
+    rebase-strategy: disabled
+    groups:
+      pi-dependencies:
+        patterns: ["*"]
+        update-types: [minor, patch]
