@@ -59,3 +59,5 @@ The history is the value.
   `memcastle daemon` (`start`, `stop`, `restart`), and `serve` stays the foreground server
 - [ADR-018](018-palace-hierarchy-management.md) — wings, rooms and drawers are managed through REST and the CLI,
   with cascading transactional deletes, optional drawer names and no MCP tool
+- [ADR-019](019-shared-integration-contract.md) — integrations share one documented contract and language-neutral
+  fixtures, not a framework, and reach MemCastle only over MCP and HTTP

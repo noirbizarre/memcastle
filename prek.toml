@@ -158,3 +158,18 @@ language = "system"
 entry = '''bash -c '! grep -rniP --include=*.rs "(DEFINE|REMOVE|ALTER)\s+(OVERWRITE\s+|IF\s+NOT\s+EXISTS\s+)?[A-Z]{4,}\s+[A-Za-z_@$]|INFO\s+FOR\b" src | grep -vP "^\S+:\d+:\s*//"' '''
 files = '^src/.*\.rs$'
 pass_filenames = false
+
+# AGENTS.md invariant #8: an integration is lifecycle glue over MCP and HTTP and
+# nothing else. It must not open the database (the `surrealdb` client, a
+# `surrealkv:` path or `SurrealStore`), reach MemCastle's `store`/`jobs` code, or
+# use the database admin endpoint (`/api/db`, ADR-015), each of which would be a
+# second path to the palace that skips the memory-mode gate and the single
+# writer. Documentation may mention them, and so may vendored dependencies,
+# so Markdown and `node_modules` are left out.
+[[repos.hooks]]
+id = "integrations-http-only"
+name = "integrations reach MemCastle only over MCP and HTTP"
+language = "system"
+entry = '''bash -c '! grep -rnP --exclude=*.md --exclude-dir=node_modules "surrealdb|surrealkv|SurrealStore|(?<![A-Za-z0-9_])(crate|memcastle)::(\{[^}]*)?(store|jobs)\b|/api/db\b" integrations' '''
+files = '^integrations/'
+pass_filenames = false

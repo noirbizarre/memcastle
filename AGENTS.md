@@ -67,6 +67,15 @@ An invariant nothing checks is a comment, and it will be violated.
    foreign origins are refused, the endpoint sees and shares the daemon's data),
    by `tests/auth.rs` (`/api/db` is guarded, no MCP tool mentions the database)
    and by `tests/auth_lifecycle.rs` (no token in the log or any file).
+8. **An integration is lifecycle glue over MCP and HTTP, and nothing else** —
+   everything under `integrations/` decides *when* to call MemCastle and never reaches storage, the job code or the
+   database admin endpoint, and every integration satisfies the same conformance matrix
+   (`docs/integration-contract.md`, `docs/adr/019-shared-integration-contract.md`).
+   Client lifecycle logic does not move into MemCastle to make two clients look alike.
+   Enforced by the prek `integrations-http-only` hook: it fails on `surrealdb`, `surrealkv`, `SurrealStore`, a
+   `store`/`jobs` path or `/api/db` anywhere under `integrations/` (Markdown and `node_modules` excepted),
+   and by `tests/integration_contract.rs`, which replays `tests/fixtures/integration/` against a real daemon and fails
+   when the contract page, the capability manifest and the test names disagree.
 
 ## Layout
 
@@ -94,6 +103,10 @@ src/
 ├── mcp/        MCP tool surface, over HTTP
 ├── api/        the REST API (health/status/jobs/search/recall/wake-up/diary/wings/rooms/drawers/auth-token/db/shutdown)
 └── client/     the CLI's HTTP client for a running daemon, and the human renderings of its answers (status, tables)
+
+integrations/   per-agent lifecycle adapters (Pi, OpenCode, ...), in each agent's own language, over MCP and HTTP only
+skills/         reusable agent instructions shared by every integration
+tests/fixtures/integration/   the language-neutral conformance fixtures every integration is held to
 ```
 
 Dependencies point inward: `cli / mcp / api -> app -> domain + store/jobs/search -> store`,

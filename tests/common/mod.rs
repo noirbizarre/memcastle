@@ -12,6 +12,10 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+// The MCP client helpers and fixture loader for the integration conformance suite. Declared here so any test binary
+// can use them, but only `integration_contract.rs` does today.
+pub mod mcp;
+
 use memcastle::config::{Config, StoreConfig};
 use memcastle::domain::{Job, JobId, JobStatus};
 use memcastle::server::lifecycle::RuntimeInfo;

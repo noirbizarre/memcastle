@@ -84,6 +84,7 @@ phase makes it a thin MemCastle adapter instead of a fork. Depends on Phase 1.
 | [#28](https://github.com/noirbizarre/memcastle/issues/28) | Port palace-audit-equivalent manual command (scoped down) |
 | [#29](https://github.com/noirbizarre/memcastle/issues/29) | Persistent MCP connection for the session |
 | [#30](https://github.com/noirbizarre/memcastle/issues/30) | Actionable, classified failure handling UX |
+| [#123](https://github.com/noirbizarre/memcastle/issues/123) | Shared Pi/OpenCode integration contract and conformance fixtures (`docs/integration-contract.md`) |
 
 ## Phase 3 — OpenCode integration
 

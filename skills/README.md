@@ -43,6 +43,11 @@ skills/
 No skill registry, package manager, or build step — a skill is plain text (or
 a small bundle of text + examples), nothing more.
 
+The `skills` row of the [integration contract](../docs/integration-contract.md)
+requires each integration to load its instructions from here instead of keeping
+its own copy, and never to load one that carries MemCastle-derived content into a
+session whose memory mode is off.
+
 ## Status
 
 No skill content exists yet. Authoring `search-before-answer` and

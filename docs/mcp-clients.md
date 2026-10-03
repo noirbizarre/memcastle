@@ -96,6 +96,8 @@ Typical use is to ask the agent to search the palace before answering, and to sa
 or `memcastle_diary_write`.
 MemCastle stores what it is given: deciding what is worth remembering is the agent's job.
 It does not enforce a search-before-answer habit, so put that in your agent's instructions.
+Writing an integration that does this for an agent, such as when to wake up, checkpoint or mine,
+is covered by the [Integration contract](integration-contract.md).
 
 To try it, ask your agent to run `memcastle_status`, then to search for something you stored in the
 [Quickstart](quickstart.md).
