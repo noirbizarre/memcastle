@@ -218,7 +218,7 @@ features = ["client", "transport-streamable-http-client-reqwest"]
 # (it only speaks `flatbuffers`), and a custom `Origin` header cannot be set
 # through the SDK at all.
 [dev-dependencies.tokio-tungstenite]
-version = "0.29"
+version = "0.30"
 default-features = false
 features = ["connect"]
 
