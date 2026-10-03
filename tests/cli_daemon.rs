@@ -504,3 +504,152 @@ async fn a_piped_status_report_has_no_escape_codes() {
 
     daemon.shutdown().await;
 }
+
+/// Run `memcastle` with `args` against `daemon` and return its stdout, failing
+/// the test with stderr if it did not succeed.
+async fn run_ok(daemon: &TestDaemon, args: &[&str]) -> String {
+    let output = memcastle(daemon)
+        .args(args)
+        .output()
+        .await
+        .expect("run memcastle");
+    assert!(
+        output.status.success(),
+        "{args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("utf-8 stdout")
+}
+
+#[tokio::test]
+async fn the_wing_room_and_drawer_commands_run_a_whole_lifecycle_and_print_json_when_piped() {
+    let daemon = TestDaemon::start().await;
+
+    let wing: serde_json::Value =
+        serde_json::from_str(&run_ok(&daemon, &["wing", "create", "work"]).await).unwrap();
+    assert_eq!(wing["created"], true);
+    run_ok(&daemon, &["room", "create", "work/project-x"]).await;
+    run_ok(
+        &daemon,
+        &[
+            "drawer",
+            "create",
+            "work/project-x/context",
+            "--content",
+            "the plan",
+        ],
+    )
+    .await;
+
+    let wings: serde_json::Value =
+        serde_json::from_str(&run_ok(&daemon, &["wing", "list"]).await).unwrap();
+    assert_eq!(wings[0]["name"], "work");
+    assert_eq!(wings[0]["drawers"], 1);
+
+    // `wings`/`rooms`/`drawers` are the same commands.
+    let rooms: serde_json::Value =
+        serde_json::from_str(&run_ok(&daemon, &["rooms", "list", "--wing", "work"]).await).unwrap();
+    assert_eq!(rooms[0]["name"], "project-x");
+    let everywhere: serde_json::Value =
+        serde_json::from_str(&run_ok(&daemon, &["room", "list"]).await).unwrap();
+    assert_eq!(everywhere.as_array().unwrap().len(), 1);
+
+    let drawers: serde_json::Value = serde_json::from_str(
+        &run_ok(&daemon, &["drawer", "list", "--room", "work/project-x"]).await,
+    )
+    .unwrap();
+    assert_eq!(drawers[0]["name"], "context");
+
+    let shown: serde_json::Value =
+        serde_json::from_str(&run_ok(&daemon, &["drawer", "show", "work/project-x/context"]).await)
+            .unwrap();
+    assert_eq!(shown["content"], "the plan");
+
+    run_ok(
+        &daemon,
+        &["drawer", "delete", "work/project-x/context", "--yes"],
+    )
+    .await;
+    run_ok(&daemon, &["room", "delete", "work/project-x", "--yes"]).await;
+    let deleted: serde_json::Value =
+        serde_json::from_str(&run_ok(&daemon, &["wing", "delete", "work", "--yes"]).await).unwrap();
+    assert_eq!(deleted["wings"], 1);
+
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_drawer_can_be_written_from_standard_input() {
+    use tokio::io::AsyncWriteExt;
+    let daemon = TestDaemon::start().await;
+
+    let mut child = memcastle(&daemon)
+        .args(["drawer", "create", "w/r/piped", "--file", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn memcastle");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"from a pipe")
+        .await
+        .unwrap();
+    let output = child.wait_with_output().await.unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let shown: serde_json::Value =
+        serde_json::from_str(&run_ok(&daemon, &["drawer", "show", "w/r/piped"]).await).unwrap();
+    assert_eq!(shown["content"], "from a pipe");
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_missing_wing_fails_with_the_daemons_own_diagnostic_and_a_bad_path_fails_locally() {
+    let daemon = TestDaemon::start().await;
+
+    let output = memcastle(&daemon)
+        .args(["wing", "show", "nope"])
+        .output()
+        .await
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("memcastle::palace::wing_not_found"));
+
+    // Rejected before any request: `wing show` takes a bare name, not a path.
+    let output = memcastle(&daemon)
+        .args(["wing", "show", "a/b"])
+        .output()
+        .await
+        .unwrap();
+    assert!(String::from_utf8_lossy(&output.stderr).contains("memcastle::palace::invalid_path"));
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_delete_commands_never_prompt_without_a_terminal_and_accept_yes() {
+    let daemon = TestDaemon::start().await;
+    for name in ["a", "b"] {
+        run_ok(
+            &daemon,
+            &["drawer", "create", &format!("{name}/r/d"), "--content", "x"],
+        )
+        .await;
+    }
+
+    // No terminal: deleting proceeds without asking (as `jobs cancel` does).
+    for args in [["drawer", "delete", "a/r/d"], ["room", "delete", "a/r"]] {
+        let output = memcastle(&daemon).args(args).output().await.unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{args:?}: {stderr}");
+        assert!(!stderr.contains("(y/n)"), "{args:?} prompted: {stderr}");
+    }
+    run_ok(&daemon, &["wing", "delete", "b", "-y"]).await;
+    daemon.shutdown().await;
+}

@@ -10,6 +10,7 @@ mod db;
 mod error;
 mod extract;
 mod mode;
+mod palace;
 
 use axum::Router;
 use axum::extract::{Path, State};
@@ -54,6 +55,33 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
         .route("/api/jobs/{id}/cancel", post(cancel_job))
         .route("/api/jobs/{id}/retry", post(retry_job))
         .route("/api/shutdown", post(shutdown_now))
+        // The hierarchy. Reads and creates are open to the same callers as any
+        // other palace content; deletes have no MCP tool (docs/adr/018).
+        .route(
+            "/api/wings",
+            get(palace::list_wings).post(palace::create_wing),
+        )
+        .route(
+            "/api/wings/{wing}",
+            get(palace::show_wing).delete(palace::delete_wing),
+        )
+        .route(
+            "/api/wings/{wing}/rooms",
+            get(palace::list_rooms).post(palace::create_room),
+        )
+        .route(
+            "/api/wings/{wing}/rooms/{room}",
+            get(palace::show_room).delete(palace::delete_room),
+        )
+        .route(
+            "/api/wings/{wing}/rooms/{room}/drawers",
+            get(palace::list_drawers).post(palace::create_drawer),
+        )
+        // A wildcard: a drawer's name may itself contain `/`.
+        .route(
+            "/api/wings/{wing}/rooms/{room}/drawers/{*drawer}",
+            get(palace::show_drawer).delete(palace::delete_drawer),
+        )
         // Administrative, and deliberately REST-only: there is no MCP tool for
         // these, so an agent integration cannot mint or revoke credentials.
         .route(

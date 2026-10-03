@@ -63,6 +63,11 @@ pub struct Drawer {
     pub id: DrawerId,
     /// The room this drawer is filed under.
     pub room: RoomId,
+    /// An optional name, unique within the room, so the drawer can be
+    /// addressed as `wing/room/name` instead of by UUID. Most drawers have
+    /// none. Absent in drawers written before names existed.
+    #[serde(default)]
+    pub name: Option<String>,
     /// The verbatim, original content.
     pub content: String,
     /// SHA-256 of `content`, for cheap exact-duplicate detection.
@@ -106,6 +111,7 @@ impl Drawer {
         Self {
             id,
             room,
+            name: None,
             content_hash: content_hash(&content),
             content,
             source,
@@ -117,6 +123,15 @@ impl Drawer {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    /// This drawer, named `name` (or left unnamed with `None`). The caller
+    /// validates the name with [`super::validate_name`]; a builder rather than
+    /// a seventh constructor argument because nearly every writer has none.
+    #[must_use]
+    pub fn with_name(mut self, name: Option<String>) -> Self {
+        self.name = name;
+        self
     }
 }
 

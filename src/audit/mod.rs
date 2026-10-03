@@ -353,6 +353,7 @@ mod tests {
         let drawer = Drawer {
             id: DrawerId::new(),
             room: orphan_room,
+            name: None,
             content: "filed under a room that doesn't exist".to_string(),
             content_hash: "irrelevant".to_string(),
             source: Source {
@@ -403,6 +404,7 @@ mod tests {
         let drawer = Drawer {
             id: DrawerId::new(),
             room: room.id,
+            name: None,
             content: "claims to come from a job that was never persisted".to_string(),
             content_hash: "irrelevant".to_string(),
             source: Source {
@@ -503,6 +505,7 @@ mod tests {
                 items: vec![CheckpointItem {
                     destination: CheckpointDestination::General,
                     wing: Some(wing_name.to_string()),
+                    name: None,
                     content: content.to_string(),
                     tags: vec![],
                     source: Source {
@@ -541,6 +544,7 @@ mod tests {
         store
             .create_drawer(&Drawer {
                 id: DrawerId::new(),
+                name: None,
                 room: orphan_room,
                 content: "orphan".to_string(),
                 content_hash: "irrelevant".to_string(),

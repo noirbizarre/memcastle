@@ -3,7 +3,7 @@
 //! One connection type (`Surreal<Any>`, via `engine::any`) for both embedded
 //! and remote deployments — the rest of the codebase never branches on which
 //! backend is active. Repository methods live in the sibling modules
-//! (`wings`, `drawers`, `jobs`, `entities`, `migration_state`) as `impl SurrealStore`
+//! (`wings`, `drawers`, `palace`, `jobs`, `entities`, `migration_state`) as `impl SurrealStore`
 //! blocks; this file only owns connecting and schema sync.
 //!
 //! Method names say what they do: `get_*` reads one record, `list_*` reads
@@ -51,6 +51,7 @@ mod drawers;
 mod entities;
 mod jobs;
 mod migration_state;
+mod palace;
 mod timestamps;
 mod wings;
 
@@ -467,6 +468,7 @@ mod tests {
         let drawer = crate::domain::Drawer {
             id: crate::domain::DrawerId::new(),
             room: room.id,
+            name: None,
             content: "hello palace".into(),
             content_hash: "abc".into(),
             source: crate::domain::Source {
@@ -602,6 +604,7 @@ mod tests {
         crate::domain::Drawer {
             id: crate::domain::DrawerId::new(),
             room,
+            name: None,
             content: content.to_string(),
             content_hash: "hash".into(),
             source: crate::domain::Source {

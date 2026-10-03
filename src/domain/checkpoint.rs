@@ -128,6 +128,13 @@ pub struct CheckpointItem {
     /// omitted from JSON entirely) keeps the fixed-bucket routing.
     #[serde(default)]
     pub wing: Option<String>,
+    /// An optional name for the resulting drawer, unique within its room, so
+    /// it can be addressed as `wing/room/name`. A name already held by a
+    /// drawer with other content fails the item (the caller asked for that
+    /// name); replaying the same item is a no-op. See
+    /// [`super::validate_name`] for what a name may be.
+    #[serde(default)]
+    pub name: Option<String>,
     /// The drawer's content.
     pub content: String,
     /// Free-form labels, stored on the resulting drawer verbatim.

@@ -19,13 +19,13 @@ mod cli;
 
 use cli::{
     AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, CompletionsArgs, DaemonCommand,
-    DbCommand, DiaryCommand, JobsCommand, MigrateArgs, MineArgs, RecallArgs, RepairArgs,
-    SearchArgs, ServeArgs, StatusArgs, WakeUpArgs,
+    DbCommand, DiaryCommand, DrawerCommand, JobsCommand, MigrateArgs, MineArgs, RecallArgs,
+    RepairArgs, RoomCommand, SearchArgs, ServeArgs, StatusArgs, WakeUpArgs, WingCommand,
 };
 use memcastle::app::{DbEndpointRequest, DbEndpointStatus, WakeUpBudget};
 use memcastle::client::{DaemonClient, StatusView};
 use memcastle::config::{Config, Overrides};
-use memcastle::domain::MemoryMode;
+use memcastle::domain::{MemoryMode, NameKind, PalacePath, validate_name};
 use memcastle::store::SurrealStore;
 use memcastle::term::{self, Painter};
 use memcastle::{Error, Result};
@@ -164,14 +164,14 @@ async fn run_command(
         Command::Repair(args) => cmd_repair(&config, mode, args).await,
         Command::Diary(cmd) => cmd_diary(&config, mode, cmd).await,
         Command::Jobs(jobs) => cmd_jobs(&config, mode, jobs).await,
+        Command::Wing(cmd) => cmd_wing(&config, mode, cmd).await,
+        Command::Room(cmd) => cmd_room(&config, mode, cmd).await,
+        Command::Drawer(cmd) => cmd_drawer(&config, mode, cmd).await,
         Command::Auth(auth) => cmd_auth(&config, auth).await,
         Command::Db(db) => cmd_db(&config, db).await,
         // Handled before the configuration is loaded (see `async_main`); the
         // arm exists only so this match stays exhaustive.
         Command::Completions(_) => Ok(()),
-        Command::Wings => Err(Error::not_implemented("memcastle wings")),
-        Command::Rooms => Err(Error::not_implemented("memcastle rooms")),
-        Command::Drawers => Err(Error::not_implemented("memcastle drawers")),
         Command::Maintenance => Err(Error::not_implemented("memcastle maintenance")),
     }
 }
@@ -624,6 +624,248 @@ async fn cmd_jobs(config: &Config, mode: Option<MemoryMode>, command: JobsComman
         }
     }
     Ok(())
+}
+
+/// Print `human` when stdout is a terminal, `json` otherwise: the same rule
+/// `jobs list` follows, so a pipe always gets data it can parse.
+fn print_for_terminal_or_json(
+    human: impl FnOnce(Painter, Option<u16>) -> String,
+    json: &impl serde::Serialize,
+) -> Result<()> {
+    if term::stdout_is_terminal() {
+        println!("{}", human(Painter::for_stdout(), term::terminal_width()));
+        Ok(())
+    } else {
+        print_json(json)
+    }
+}
+
+/// Ask before a delete, showing what it would remove.
+///
+/// `stakes` fetches and formats that summary, and only runs when someone can
+/// be asked: in a script the summary would go nowhere, and the read would
+/// only be wasted work. It goes to stderr with the prompt, so stdout stays
+/// what a pipe expects.
+async fn confirm_delete<F>(question: &str, action: &str, yes: bool, stakes: F) -> Result<()>
+where
+    F: std::future::Future<Output = Result<String>>,
+{
+    if !yes && term::is_interactive() {
+        eprintln!("{}\n", stakes.await?);
+    }
+    term::confirm(question, action, yes)
+}
+
+async fn cmd_wing(config: &Config, mode: Option<MemoryMode>, command: WingCommand) -> Result<()> {
+    use memcastle::client::palace_view as view;
+    let daemon = client(config, mode);
+    match command {
+        WingCommand::List => {
+            let wings = daemon.list_wings().await?;
+            print_for_terminal_or_json(
+                |painter, width| memcastle::client::table::render_wings(&wings, painter, width),
+                &wings,
+            )?;
+        }
+        WingCommand::Show { wing } => {
+            let wing = PalacePath::parse_wing(&wing)?;
+            let detail = daemon.show_wing(&wing).await?;
+            print_for_terminal_or_json(
+                |painter, width| view::render_wing(&detail, painter, width),
+                &detail,
+            )?;
+        }
+        WingCommand::Create { wing, description } => {
+            let name = PalacePath::parse_wing(&wing)?;
+            validate_name(NameKind::Wing, &name)?;
+            let created = daemon.create_wing(&name, description.as_deref()).await?;
+            print_for_terminal_or_json(
+                |painter, _| view::render_created("wing", &name, created.created, painter),
+                &created,
+            )?;
+        }
+        WingCommand::Delete { wing, yes } => {
+            let wing = PalacePath::parse_wing(&wing)?;
+            confirm_delete(
+                "Delete this wing and all contained data?",
+                &format!("deleting wing {wing}"),
+                yes,
+                async {
+                    let detail = daemon.show_wing(&wing).await?;
+                    Ok(view::wing_stakes(&detail.wing, Painter::for_stderr()))
+                },
+            )
+            .await?;
+            let deleted = daemon.delete_wing(&wing).await?;
+            print_for_terminal_or_json(
+                |painter, _| view::render_deleted(&format!("wing {wing}"), &deleted, painter),
+                &deleted,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_room(config: &Config, mode: Option<MemoryMode>, command: RoomCommand) -> Result<()> {
+    use memcastle::client::palace_view as view;
+    let daemon = client(config, mode);
+    match command {
+        RoomCommand::List { wing } => {
+            let rooms = match wing {
+                Some(wing) => daemon.list_rooms(&wing).await?,
+                None => {
+                    // The daemon lists rooms per wing; across wings is the
+                    // union, which keeps the API one resource per route.
+                    let mut all = Vec::new();
+                    for wing in daemon.list_wings().await? {
+                        all.extend(daemon.list_rooms(&wing.wing.name).await?);
+                    }
+                    all
+                }
+            };
+            print_for_terminal_or_json(
+                |painter, width| memcastle::client::table::render_rooms(&rooms, painter, width),
+                &rooms,
+            )?;
+        }
+        RoomCommand::Show { room } => {
+            let (wing, room) = PalacePath::parse_room(&room)?;
+            let summary = daemon.show_room(&wing, &room).await?;
+            print_for_terminal_or_json(
+                |painter, _| view::render_room(&summary, painter),
+                &summary,
+            )?;
+        }
+        RoomCommand::Create { room, description } => {
+            let (wing, room) = PalacePath::parse_room(&room)?;
+            validate_name(NameKind::Room, &room)?;
+            let created = daemon
+                .create_room(&wing, &room, description.as_deref())
+                .await?;
+            print_for_terminal_or_json(
+                |painter, _| {
+                    view::render_created(
+                        "room",
+                        &format!("{wing}/{room}"),
+                        created.created,
+                        painter,
+                    )
+                },
+                &created,
+            )?;
+        }
+        RoomCommand::Delete { room, yes } => {
+            let (wing, room) = PalacePath::parse_room(&room)?;
+            confirm_delete(
+                "Delete this room and all contained data?",
+                &format!("deleting room {wing}/{room}"),
+                yes,
+                async {
+                    let summary = daemon.show_room(&wing, &room).await?;
+                    Ok(view::room_stakes(&summary, Painter::for_stderr()))
+                },
+            )
+            .await?;
+            let deleted = daemon.delete_room(&wing, &room).await?;
+            print_for_terminal_or_json(
+                |painter, _| {
+                    view::render_deleted(&format!("room {wing}/{room}"), &deleted, painter)
+                },
+                &deleted,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_drawer(
+    config: &Config,
+    mode: Option<MemoryMode>,
+    command: DrawerCommand,
+) -> Result<()> {
+    use memcastle::client::palace_view as view;
+    let daemon = client(config, mode);
+    match command {
+        DrawerCommand::List { room, limit } => {
+            let (wing, room) = PalacePath::parse_room(&room)?;
+            let drawers = daemon.list_drawers(&wing, &room, limit).await?;
+            print_for_terminal_or_json(
+                |painter, width| memcastle::client::table::render_drawers(&drawers, painter, width),
+                &drawers,
+            )?;
+        }
+        DrawerCommand::Show { drawer } => {
+            let (wing, room, drawer) = PalacePath::parse_drawer(&drawer)?;
+            let found = daemon.show_drawer(&wing, &room, &drawer).await?;
+            print_for_terminal_or_json(|painter, _| view::render_drawer(&found, painter), &found)?;
+        }
+        DrawerCommand::Create {
+            drawer,
+            content,
+            file,
+        } => {
+            let (wing, room, name) = PalacePath::parse_drawer(&drawer)?;
+            validate_name(NameKind::Drawer, &name)?;
+            // Read before contacting the daemon: an unreadable file should
+            // fail as a local I/O error, not after a round trip.
+            let content = read_drawer_content(content, file.as_deref())?;
+            let created = daemon
+                .create_drawer(&wing, &room, Some(&name), content)
+                .await?;
+            print_for_terminal_or_json(
+                |painter, _| view::render_created("drawer", &drawer, created.created, painter),
+                &created,
+            )?;
+        }
+        DrawerCommand::Delete { drawer, yes } => {
+            let (wing, room, name) = PalacePath::parse_drawer(&drawer)?;
+            confirm_delete(
+                "Delete this drawer?",
+                &format!("deleting drawer {drawer}"),
+                yes,
+                async {
+                    let found = daemon.show_drawer(&wing, &room, &name).await?;
+                    Ok(view::drawer_stakes(&drawer, &found, Painter::for_stderr()))
+                },
+            )
+            .await?;
+            let deleted = daemon.delete_drawer(&wing, &room, &name).await?;
+            print_for_terminal_or_json(
+                |painter, _| view::render_deleted(&format!("drawer {drawer}"), &deleted, painter),
+                &deleted,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// The content for `drawer create`: `--content`, else `--file` (`-` for
+/// standard input), else standard input.
+///
+/// A terminal on standard input is refused rather than waited on: a user who
+/// forgot the flag would otherwise see the command hang with no prompt.
+fn read_drawer_content(content: Option<String>, file: Option<&std::path::Path>) -> Result<String> {
+    use std::io::{IsTerminal, Read};
+    let from_stdin = || {
+        if std::io::stdin().is_terminal() {
+            return Err(Error::invalid_input(
+                "content",
+                "give `--content <text>` or `--file <path>`, or pipe the content on standard input",
+            ));
+        }
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .map_err(|source| Error::io("<stdin>", source))?;
+        Ok(buf)
+    };
+    match (content, file) {
+        (Some(content), _) => Ok(content),
+        (None, Some(path)) if path.as_os_str() == "-" => from_stdin(),
+        (None, Some(path)) => std::fs::read_to_string(path)
+            .map_err(|source| Error::io(path.display().to_string(), source)),
+        (None, None) => from_stdin(),
+    }
 }
 
 /// Manage the daemon's bearer token. No `--mode`: a memory mode is a session's

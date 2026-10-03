@@ -125,12 +125,44 @@ notably after `memcastle migrate`.
 Judge a command by its exit code and output.
 Set `MEMCASTLE_LOG=warn` to quieten the daemon.
 
+## Wings, rooms and drawers
+
+### `memcastle::palace::wing_not_found`, `room_not_found` and `drawer_not_found`
+
+Nothing answers to that name or UUID.
+`memcastle wing list`, `memcastle room list --wing <wing>` and `memcastle drawer list --room <wing>/<room>` show what
+exists.
+A room is looked up inside the wing you named, so a room's UUID from another wing is not found there.
+
+### `memcastle::palace::invalid_path`
+
+The path or a name in it cannot be used: a part is empty, a wing or room name contains `/`,
+or a name is blank or looks like a UUID (UUIDs are how records are addressed by id, so they cannot also be names).
+The command line checks this before contacting the daemon.
+A wing from before these rules may have a `/` in its name: address it by its UUID.
+
+### `memcastle::palace::drawer_name_taken`
+
+A drawer with that name already exists in the room, and holds other content.
+Drawer content is immutable, so the name cannot be pointed at new content.
+Pick another name, or delete the old drawer first.
+Writing the same name with the *same* content succeeds and changes nothing.
+In a mined room, only the first copy of a file keeps its name, see [Storage and data](storage.md#what-mining-reads).
+
+### `memcastle::palace::busy`
+
+A wing or room delete was refused because a mining job, a checkpoint job, or a repair that applies is queued, running
+or paused: it files into wings and rooms by name, so it could quietly bring back what you removed.
+`memcastle jobs list` shows which, and `memcastle jobs cancel <id>` stops one.
+Nothing was deleted.
+
 ## The command line
 
 ### `memcastle::cli::aborted`
 
 You answered "no" (or just pressed Enter, which means no) to a confirmation, and nothing was changed.
-`repair --apply`, `auth generate`, `auth revoke` and `jobs cancel` ask before they act when run in a terminal.
+`repair --apply`, `auth generate`, `auth revoke`, `jobs cancel` and the `delete` commands of `wing`, `room` and `drawer`
+ask before they act when run in a terminal.
 Run the command again and answer `y`, or pass `--yes` to skip the question.
 In a script, CI job or pipe they never ask, so this error only appears at a keyboard.
 

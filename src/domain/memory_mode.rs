@@ -13,7 +13,7 @@
 //!
 //! ## The allow/deny matrix
 //!
-//! | mode        | read (`search`/`recall`/`wake_up`/`diary_read`, job `list`/`show`) | write (`checkpoint`/`emergency_checkpoint`/`diary_write`, `mine`, applied `repair`) |
+//! | mode        | read (`search`/`recall`/`wake_up`/`diary_read`, job `list`/`show`, wing/room/drawer `list`/`show`) | write (`checkpoint`/`emergency_checkpoint`/`diary_write`, `mine`, applied `repair`, wing/room/drawer `create`/`delete`) |
 //! |-------------|--------------------------------------------------|-------------------------------------------------------------|
 //! | `Full`      | ok                                               | ok                                                            |
 //! | `ReadOnly`  | ok                                               | rejected (`Error::ModeForbidden`)                             |
@@ -33,7 +33,9 @@
 //! the memory being written — so reading jobs is a memory read
 //! (`list_jobs`/`get_job`), and a job whose purpose is to file or delete
 //! drawers is a memory write (`submit_mine`, and `submit_repair` when it is
-//! not a dry run). Gating only the obvious methods would let a `Disabled`
+//! not a dry run). The hierarchy follows the same rule: the names and counts
+//! of wings, rooms and drawers are palace content, so listing and showing them
+//! is a read, and creating or deleting one is a write. Gating only the obvious methods would let a `Disabled`
 //! session read palace content through the job list, or a `ReadOnly` one
 //! mutate the palace by submitting a mine.
 //!

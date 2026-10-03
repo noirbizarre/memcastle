@@ -53,6 +53,11 @@ DEFINE FIELD IF NOT EXISTS valid_to ON TABLE drawer TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS created_at ON TABLE drawer TYPE datetime;
 DEFINE FIELD IF NOT EXISTS updated_at ON TABLE drawer TYPE datetime;
 DEFINE INDEX IF NOT EXISTS drawer_room_idx ON TABLE drawer FIELDS room;
+-- An optional human-chosen name (`work/project-x/context`), so a drawer can be
+-- addressed without its UUID. Most drawers have none (`NONE`): the unique
+-- index below must therefore let any number of unnamed drawers share a room.
+DEFINE FIELD IF NOT EXISTS name ON TABLE drawer TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS drawer_room_name ON TABLE drawer FIELDS room, name UNIQUE;
 
 -- The "basic working search path": lexical/full-text search over drawer
 -- content. Semantic/vector search is a later phase, added on top of this

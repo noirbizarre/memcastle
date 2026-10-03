@@ -19,7 +19,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::domain::Job;
-use crate::domain::{Drawer, DrawerId, MiningSource, Provenance, Source, SourceKind};
+use crate::domain::{
+    Drawer, DrawerId, MiningSource, NameKind, Provenance, Source, SourceKind, validate_name,
+};
 use crate::error::Result;
 use crate::jobs::{JobContext, JobOutcome};
 use crate::store::SurrealStore;
@@ -145,6 +147,17 @@ async fn mine_directory(
         }
 
         if let Some(content) = read_mineable(file) {
+            // Named by its path under the mined root, so `wing/files/src/lib.rs`
+            // addresses it. A re-mine finds the name already taken by the
+            // first copy: the new drawer is then left unnamed rather than
+            // failing the whole job, since re-mining already duplicates.
+            let drawer_name = relative_name(&canonical, file);
+            let drawer_name = match drawer_name {
+                Some(name) if store.get_drawer_by_name(room.id, &name).await?.is_none() => {
+                    Some(name)
+                }
+                _ => None,
+            };
             let drawer = Drawer::new(
                 // Derived, not random: a crash between the write below and
                 // the checkpoint at the loop's end makes the resumed attempt
@@ -162,7 +175,8 @@ async fn mine_directory(
                     requested_by: job.requested_by.clone(),
                     job_id: Some(job.id),
                 },
-            );
+            )
+            .with_name(drawer_name);
             store.create_drawer_once(&drawer).await?;
         }
 
@@ -178,6 +192,20 @@ async fn mine_directory(
         "truncated": truncated,
     }));
     Ok(JobOutcome::Completed)
+}
+
+/// `file`'s path relative to `root`, with `/` separators, if it is a valid
+/// drawer name (a path with a non-UTF-8 part or a name that looks like a UUID
+/// is simply left unnamed).
+fn relative_name(root: &Path, file: &Path) -> Option<String> {
+    let relative = file.strip_prefix(root).ok()?;
+    let name = relative
+        .components()
+        .map(|part| part.as_os_str().to_str())
+        .collect::<Option<Vec<_>>>()?
+        .join("/");
+    validate_name(NameKind::Drawer, &name).ok()?;
+    Some(name)
 }
 
 /// Recursively collect file paths under `dir`, skipping noisy subtrees and
@@ -290,6 +318,72 @@ mod tests {
             store.list_drawers(None).await.unwrap().len(),
             3,
             "each file must be mined exactly once across the replay"
+        );
+    }
+
+    async fn mine_once(store: &SurrealStore, dir: &Path) {
+        let source = MiningSource::Directory {
+            path: dir.to_path_buf(),
+        };
+        let mut job = Job::new(
+            JobKind::Mine {
+                source: source.clone(),
+                wing: Some("docs".to_string()),
+            },
+            Priority::Background,
+            "test",
+        );
+        job.apply(crate::domain::JobEvent::Claim).unwrap();
+        let ctx = JobContext::new(job.id, JobControl::default(), store.clone());
+        run(
+            &ctx,
+            &mut job,
+            MiningParams {
+                source,
+                wing: Some("docs".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_mined_file_is_named_by_its_path_under_the_mined_root() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src").join("lib.rs"), "fn main() {}").unwrap();
+
+        mine_once(&store, dir.path()).await;
+
+        let wing = store.get_wing("docs").await.unwrap().unwrap();
+        let room = store.get_room(wing.id, "files").await.unwrap().unwrap();
+        assert!(
+            store
+                .get_drawer_by_name(room.id, "src/lib.rs")
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn re_mining_leaves_the_first_copy_named_and_the_second_unnamed_instead_of_failing() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "contents").unwrap();
+
+        mine_once(&store, dir.path()).await;
+        mine_once(&store, dir.path()).await;
+
+        let drawers = store.list_drawers(None).await.unwrap();
+        assert_eq!(drawers.len(), 2, "re-mining still duplicates, as before");
+        assert_eq!(
+            drawers
+                .iter()
+                .filter(|d| d.name.as_deref() == Some("a.txt"))
+                .count(),
+            1
         );
     }
 
