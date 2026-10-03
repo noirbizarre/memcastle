@@ -64,7 +64,7 @@ use surrealdb::opt::auth::Root;
 use crate::domain::Secret;
 use crate::error::{Error, Result};
 
-pub use drawers::SearchHit;
+pub use drawers::{MatchMode, SearchHit};
 
 /// Convert a struct or data-carrying enum to a bindable value.
 ///
@@ -625,6 +625,60 @@ mod tests {
         }
     }
 
+    /// A store holding one drawer, for the match-mode tests below.
+    async fn store_with_one_drawer(content: &str) -> SurrealStore {
+        let store = memory_store().await;
+        let wing = store.get_or_create_wing("alpha", None).await.expect("wing");
+        let room = store
+            .get_or_create_room(wing.id, "notes", None)
+            .await
+            .expect("room");
+        store
+            .create_drawer(&test_drawer(room.id, content))
+            .await
+            .expect("create drawer");
+        store
+    }
+
+    #[tokio::test]
+    async fn all_mode_requires_every_query_term() {
+        let store =
+            store_with_one_drawer("my main programming languages are Rust and Python").await;
+
+        let hits = store
+            .list_drawers_matching(
+                "programming languages I use preferences",
+                10,
+                None,
+                None,
+                MatchMode::All,
+            )
+            .await
+            .expect("search");
+        assert!(
+            hits.is_empty(),
+            "terms absent from the drawer must defeat a strict match, got {hits:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn any_mode_matches_on_a_single_shared_term() {
+        let store =
+            store_with_one_drawer("my main programming languages are Rust and Python").await;
+
+        let hits = store
+            .list_drawers_matching(
+                "programming languages I use preferences",
+                10,
+                None,
+                None,
+                MatchMode::Any,
+            )
+            .await
+            .expect("search");
+        assert_eq!(hits.len(), 1, "a shared term should be enough: {hits:?}");
+    }
+
     #[tokio::test]
     async fn an_unscoped_lexical_search_still_matches_every_wing() {
         let store = memory_store().await;
@@ -661,7 +715,7 @@ mod tests {
             .expect("create beta drawer");
 
         let hits = store
-            .list_drawers_matching("castle", 10, None, None)
+            .list_drawers_matching("castle", 10, None, None, MatchMode::All)
             .await
             .expect("search");
         assert_eq!(
@@ -705,7 +759,7 @@ mod tests {
             .expect("create beta drawer");
 
         let hits = store
-            .list_drawers_matching("castle", 10, Some("alpha"), None)
+            .list_drawers_matching("castle", 10, Some("alpha"), None, MatchMode::All)
             .await
             .expect("wing-scoped search");
         assert_eq!(
@@ -740,7 +794,7 @@ mod tests {
             .expect("create notes drawer");
 
         let hits = store
-            .list_drawers_matching("castle", 10, None, Some("notes"))
+            .list_drawers_matching("castle", 10, None, Some("notes"), MatchMode::All)
             .await
             .expect("room-scoped search");
         assert_eq!(
@@ -801,7 +855,7 @@ mod tests {
         // match count, the top hits are "loud"'s -- proving the score gap
         // is real, not an artifact of insertion order.
         let unscoped = store
-            .list_drawers_matching("castle", 2, None, None)
+            .list_drawers_matching("castle", 2, None, None, MatchMode::All)
             .await
             .expect("unscoped search");
         assert_eq!(unscoped.len(), 2);
@@ -816,7 +870,7 @@ mod tests {
         // already-fetched unscoped page, this would come back empty -- the
         // top 2 rows fetched would already be "loud"'s.
         let scoped = store
-            .list_drawers_matching("castle", 2, Some("quiet"), None)
+            .list_drawers_matching("castle", 2, Some("quiet"), None, MatchMode::All)
             .await
             .expect("wing-scoped search");
         assert_eq!(

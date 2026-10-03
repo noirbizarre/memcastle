@@ -447,7 +447,12 @@ impl McpTools {
         tool_result("memcastle_status", self.app.status(mode).await)
     }
 
-    #[tool(description = "Lexically search palace drawer content")]
+    #[tool(
+        description = "Lexically search palace drawer content. Matching is by words (stemmed, \
+                        no synonyms): drawers containing every query word are returned, and \
+                        only if there are none, drawers containing any of them. Short keyword \
+                        queries work best."
+    )]
     async fn memcastle_search(
         &self,
         Parameters(args): Parameters<SearchArgs>,
@@ -470,7 +475,9 @@ impl McpTools {
     #[tool(
         description = "Retrieve palace content matching a query, returned verbatim — the \
                         recall-oriented counterpart to memcastle_search (see \
-                        AppServices::recall's doc comment for why both exist)"
+                        AppServices::recall's doc comment for why both exist). Matching is by \
+                        words (stemmed, no synonyms): every query word first, then any of them \
+                        if nothing matched. Short keyword queries work best."
     )]
     async fn memcastle_recall(
         &self,

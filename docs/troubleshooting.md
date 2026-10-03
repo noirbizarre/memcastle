@@ -245,6 +245,10 @@ Over MCP and REST it must be absolute; the CLI makes it absolute for you.
 ### Search returns nothing for a query that should match
 
 Search is lexical, not semantic: it matches words in the stored text, not their meaning.
+Words are stemmed and case is ignored, so `languages` matches `language`, but a synonym such as `tongue` does not.
+A query returns the drawers containing every word first.
+Only when there are none does it fall back to drawers containing any of the words, best match first.
+Short keyword queries therefore work best, and a drawer matching one word of a long question ranks low.
 Check the scope too: `--wing` and `--room` take names, and a wrong one gives an empty result.
 
 ## MCP clients

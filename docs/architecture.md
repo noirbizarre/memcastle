@@ -210,6 +210,9 @@ What is missing is a populator: nothing extracts entities or relationships from 
 ## Search
 
 Lexical (BM25 full-text) search over `drawer.content` is the working search path (`search::lexical_search`).
+A query first requires every word to match.
+Only if that finds nothing does it retry with any single word sufficing, ranked by BM25,
+because SurrealDB has no stop-word filter and a natural-language question carries words the stored text never contains.
 It can be scoped to one wing and/or room by name.
 The scope is expressed as SurrealQL predicates, with nested subqueries resolving the name to room ids,
 so SurrealDB applies the filter as part of query execution rather than MemCastle fetching candidates and filtering them.

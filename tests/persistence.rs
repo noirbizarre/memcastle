@@ -139,6 +139,25 @@ async fn checkpoint_drawers_survive_a_daemon_restart_against_the_same_palace() {
             "expected the drawer checkpointed before the restart to still be searchable"
         );
 
+        // The way an agent actually asks: a query with a word the stored
+        // text lacks ("preferences"), which a strict match alone would fail.
+        let hits: Vec<serde_json::Value> = client
+            .get(format!("{base}/api/recall"))
+            .query(&[
+                ("q", "checkpoint before the restart preferences"),
+                ("limit", "10"),
+            ])
+            .send()
+            .await
+            .expect("recall request")
+            .json()
+            .await
+            .expect("recall response is json");
+        assert!(
+            !hits.is_empty(),
+            "expected recall to find the pre-restart drawer despite an unmatched word"
+        );
+
         stop_daemon(&bin, &palace, &mut child).await;
     }
 }

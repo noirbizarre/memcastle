@@ -403,6 +403,18 @@ async fn the_mcp_surface_serves_a_migrated_palace_and_survives_a_daemon_restart(
     )
     .await;
     assert_eq!(contents(&hits), [checkpoint_marker]);
+    // An agent asks in natural language, with words the stored text never
+    // contains; recall must still surface the checkpointed memory.
+    let recalled = call(
+        &session_c,
+        "memcastle_recall",
+        json!({ "query": "smokecheckpointmarker durable facts I use preferences" }),
+    )
+    .await;
+    assert!(
+        contents(&recalled).contains(&checkpoint_marker),
+        "recall must find the checkpoint after a restart despite extra words, got {recalled}"
+    );
 
     // The reopened palace still accepts writes, not just reads.
     let second_entry = "smokesecondentry written after the restart";
