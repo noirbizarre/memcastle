@@ -762,7 +762,8 @@ impl AppServices {
     ///
     /// # Errors
     ///
-    /// Returns an error if the store write fails, [`Error::InvalidPalacePath`]
+    /// Returns an error if the store write fails, [`Error::InvalidInput`] if
+    /// `content` is blank, [`Error::InvalidPalacePath`]
     /// if `wing` would be a new wing with an unusable name, or
     /// [`Error::ModeForbidden`] if `mode` doesn't permit writes
     /// (`ReadOnly`/`Disabled`).
@@ -775,6 +776,12 @@ impl AppServices {
         mode: MemoryMode,
     ) -> Result<Drawer> {
         Self::require_write(mode, "diary_write")?;
+        // The rule `create_drawer` and checkpoint already apply: a blank
+        // drawer is never recallable, so storing one silently loses the entry
+        // the agent believes it wrote.
+        if content.trim().is_empty() {
+            return Err(Error::invalid_input("content", "must not be empty"));
+        }
         self.check_new_wing_name(wing).await?;
         let wing_record = self.store.get_or_create_wing(wing, None).await?;
         let room = self
@@ -1313,6 +1320,32 @@ mod tests {
                 .expect("wings")
                 .is_empty(),
             "a refused name must not create a wing"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_blank_diary_entry_is_refused_and_writes_nothing() {
+        let app = test_app().await;
+
+        let result = app
+            .diary_write(
+                "agent",
+                "project-x",
+                "  \n".into(),
+                "test",
+                MemoryMode::Full,
+            )
+            .await;
+
+        match result {
+            Err(crate::Error::InvalidInput { field, .. }) => assert_eq!(field, "content"),
+            other => panic!("expected Error::InvalidInput for `content`, got {other:?}"),
+        }
+        assert!(
+            app.diary_read("agent", "project-x", 10, MemoryMode::Full)
+                .await
+                .expect("read")
+                .is_empty()
         );
     }
 
