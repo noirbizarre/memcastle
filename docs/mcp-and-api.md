@@ -100,9 +100,10 @@ A request without a valid token, on a daemon with [authentication](authenticatio
 is a `401` with the code `memcastle::auth::unauthorized` and a `WWW-Authenticate: Bearer` header.
 Other statuses are `400` for invalid input, a transition the job's state does not allow, or a database admin endpoint
 that would be unsafe (`memcastle::db::unsafe_bind`), `404` for an unknown job, wing, room or drawer,
-`409` for a job recorded as running that has no worker (restart the daemon), a database admin endpoint that is already
-open or cannot bind its address (`memcastle::db::bind_failed`), a drawer name already held by other content, or a wing or room delete while a job that writes to the palace is
-pending, and `500` for a server failure.
+`409` for a job recorded as running that has no worker (restart the daemon), a job that kept changing state
+under the request (run it again), a database admin endpoint that is already
+open or cannot bind its address (`memcastle::db::bind_failed`), a drawer name already held by other content,
+or a wing or room delete while a job that writes to the palace is pending, and `500` for a server failure.
 
 | Route | Purpose | Parameters |
 |---|---|---|
