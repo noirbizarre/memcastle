@@ -54,9 +54,10 @@ paru -S memcastle-bin   # or your AUR helper of choice
 ```
 
 The `memcastle-bin` package installs the release binary for x86_64 and aarch64,
-and a systemd user unit, `/usr/lib/systemd/user/memcastle.service`.
+a systemd user unit, `/usr/lib/systemd/user/memcastle.service`,
+and the bash, zsh and fish completion scripts.
 
-The package owns only those two files and its licence under `/usr`.
+The package owns only those files and its licence under `/usr`.
 Your configuration (`~/.config/memcastle`), palace (`~/.local/share/memcastle`) and state (`~/.local/state/memcastle`)
 stay yours, and so does any secret: the package never writes to them.
 
@@ -88,8 +89,8 @@ sudo apt install ./memcastle_<version>_linux-amd64.deb
 sudo dnf install ./memcastle_<version>_linux-amd64.rpm
 ```
 
-They install `/usr/bin/memcastle`, the systemd user unit `/usr/lib/systemd/user/memcastle.service`
-and `/usr/share/doc/memcastle/`, and nothing under your XDG directories,
+They install `/usr/bin/memcastle`, the systemd user unit `/usr/lib/systemd/user/memcastle.service`,
+the bash, zsh and fish completion scripts and `/usr/share/doc/memcastle/`, and nothing under your XDG directories,
 so removing the package leaves your configuration and palace alone.
 The unit is used as on Arch: `systemctl --user start memcastle`, as described in [Arch Linux](#arch-linux-aur).
 The package does not enable or start it.

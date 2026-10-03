@@ -87,7 +87,7 @@ Nothing to release is the normal case for step 1, and costs one workflow run rep
 - a tarball for each Unix platform, `memcastle_<tag>_<platform>.tar.gz`, in the native-package layout
   (`bin/`, `share/doc/memcastle/`);
 - `.deb` and `.rpm` packages for linux-amd64 and linux-arm64, `memcastle_<tag>_<platform>.{deb,rpm}`, built by nfpm
-  from `packaging/nfpm/nfpm.yaml` (binary, systemd user unit and documentation) and smoke-tested before upload;
+  from `packaging/nfpm/nfpm.yaml` (binary, systemd user unit, shell completions and documentation) and smoke-tested before upload;
   CI builds them from stub binaries on every pull request, through the same `packaging/nfpm/build.sh`,
   so a broken packaging config fails on the pull request and not mid-release;
 - `memcastle-<tag>.cdx.json`, a CycloneDX bill of materials;
