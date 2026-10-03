@@ -623,14 +623,28 @@ mod tests {
         from: chrono::DateTime<Utc>,
         to: Option<chrono::DateTime<Utc>>,
     ) {
-        let mut drawer = add(store, room, spec(content, None)).await;
-        // `create_drawer` writes whatever validity the struct carries, so the
-        // fixture is built by deleting and re-creating with it set.
-        store.delete_drawer(drawer.id).await.expect("delete");
+        // Built with its validity from the start and written once: creating,
+        // deleting and re-creating one id loses a write conflict against index
+        // maintenance on some platforms (seen on Windows CI).
+        let mut drawer = Drawer::new(
+            DrawerId::new(),
+            room,
+            content.to_string(),
+            Source {
+                kind: SourceKind::Manual,
+                uri: None,
+                agent: None,
+            },
+            vec![],
+            Provenance {
+                requested_by: "test".into(),
+                job_id: None,
+            },
+        );
         drawer.valid_from = from;
         drawer.valid_to = to;
         drawer.embedding = embedding;
-        store.create_drawer(&drawer).await.expect("recreate");
+        store.create_drawer(&drawer).await.expect("create drawer");
     }
 
     #[tokio::test]
