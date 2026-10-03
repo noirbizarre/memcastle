@@ -15,6 +15,7 @@ memcastle serve
 The first start creates the palace and prepares its database, then logs a line such as
 `memcastle daemon listening bind=127.0.0.1:8420`.
 Leave it running.
+To get your terminal back instead, run `memcastle daemon start`, which starts the same daemon in the background.
 
 ## 2. Check it
 
@@ -35,7 +36,7 @@ MemCastle is running
   jobs       0 queued, 0 running, 0 paused
   mode       full
   auth       disabled
-Restart with `memcastle restart`, stop with `memcastle stop`.
+Restart with `memcastle daemon restart`, stop with `memcastle daemon stop`.
 ```
 
 The `mcp` line is the URL to give your agent, see [Connect an MCP client](mcp-clients.md).
@@ -94,7 +95,7 @@ Pipe any of them through `jq` to pick out what you need, for example `memcastle 
 ## 5. Stop, restart, and find everything still there
 
 ```sh
-memcastle stop
+memcastle daemon stop
 memcastle serve
 ```
 

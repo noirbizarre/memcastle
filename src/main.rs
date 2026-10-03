@@ -1,11 +1,12 @@
 //! The memcastle binary.
 //!
-//! Every subcommand is either `serve`/`daemon` (which runs the actual
-//! engine, via `memcastle::server::run`) or a thin `DaemonClient` call — see
+//! Every subcommand is either `serve` (which runs the actual engine, via
+//! `memcastle::server::run`) or a thin `DaemonClient` call — see
 //! `memcastle::app`'s doc comment for why that split is the whole point of
 //! this architecture. The exceptions: `migrate` opens storage itself (it must
-//! work before a daemon exists), and `restart` additionally manages the daemon
-//! process (registry file plus respawn) without touching `store` or `jobs`.
+//! work before a daemon exists), and `daemon start`/`daemon restart`
+//! additionally manage the daemon process (registry file plus spawning
+//! `serve`) without touching `store` or `jobs`.
 
 #![allow(clippy::result_large_err)]
 
@@ -18,9 +19,9 @@ use miette::MietteHandlerOpts;
 mod cli;
 
 use cli::{
-    AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, CompletionsArgs, DbCommand, DiaryCommand,
-    JobsCommand, MigrateArgs, MineArgs, RecallArgs, RepairArgs, SearchArgs, ServeArgs, StatusArgs,
-    WakeUpArgs,
+    AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, CompletionsArgs, DaemonCommand,
+    DbCommand, DiaryCommand, JobsCommand, MigrateArgs, MineArgs, RecallArgs, RepairArgs,
+    SearchArgs, ServeArgs, StatusArgs, WakeUpArgs,
 };
 use memcastle::app::{DbEndpointRequest, DbEndpointStatus, WakeUpBudget};
 use memcastle::client::{DaemonClient, StatusView};
@@ -147,7 +148,10 @@ async fn wait_for_datastore_shutdown() {
 /// (`--bind` used to be applied to `serve` alone, after loading).
 fn overrides_from(args: &Cli) -> Overrides {
     let (bind, port, assets_dir) = match &args.command {
-        Command::Serve(serve) | Command::Restart(serve) => {
+        // `daemon start`/`restart` resolve the address like `serve` does: they
+        // wait on, and report, the very address the new daemon will listen on.
+        Command::Serve(serve)
+        | Command::Daemon(DaemonCommand::Start(serve) | DaemonCommand::Restart(serve)) => {
             (serve.bind, serve.port, serve.assets_dir.clone())
         }
         _ => (None, None, None),
@@ -184,9 +188,12 @@ async fn run_command(
         // Handled by `run`, which needs the exit code; the arm exists only so
         // this match stays exhaustive and a new command cannot be forgotten.
         Command::Status(_) => Ok(()),
-        Command::Stop => cmd_stop(&config, mode).await,
-        Command::Restart(restart_args) => {
-            cmd_restart(&config, config_file, mode, restart_args).await
+        Command::Daemon(DaemonCommand::Start(start_args)) => {
+            cmd_daemon_start(&config, config_file, mode, start_args).await
+        }
+        Command::Daemon(DaemonCommand::Stop) => cmd_stop(&config, mode).await,
+        Command::Daemon(DaemonCommand::Restart(restart_args)) => {
+            cmd_daemon_restart(&config, config_file, mode, restart_args).await
         }
         Command::Search(args) => cmd_search(&config, mode, args).await,
         Command::Recall(args) => cmd_recall(&config, mode, args).await,
@@ -303,17 +310,37 @@ async fn cmd_stop(config: &Config, mode: Option<MemoryMode>) -> Result<()> {
     Ok(())
 }
 
+/// Start a background daemon with the flags this command was given, and wait
+/// until it is actually serving.
+///
+/// Refused when a daemon already answers for this palace: a second one would
+/// only die on the palace's file lock after the delay of a failed startup, and
+/// `daemon restart` is the command that means "replace it".
+async fn cmd_daemon_start(
+    config: &Config,
+    config_path: Option<&std::path::Path>,
+    mode: Option<MemoryMode>,
+    args: ServeArgs,
+) -> Result<()> {
+    if client(config, mode).health().await {
+        // The registry holds the address the live daemon really bound (which
+        // `--port 0` makes differ from the configured one); the configured
+        // address is only the fallback for a daemon that left no registry.
+        let addr = memcastle::server::lifecycle::read_if_live(&config.palace.path).map_or_else(
+            || config.server.socket_addr().to_string(),
+            |info| info.bind_addr,
+        );
+        return Err(Error::DaemonAlreadyRunning { addr });
+    }
+    spawn_and_wait(config, config_path, &args, "started:").await
+}
+
 /// Stop the running daemon (if any), start a fresh one with the flags this
 /// command was given, and wait until it is actually serving.
 ///
-/// "Actually serving" is the registry file appearing with a live daemon
-/// behind it — the same signal every other command discovers the daemon by —
-/// not the process merely having been spawned: reporting success before that
-/// told users a daemon that had crashed on startup was up. The new daemon
-/// gets the original `--config`, `--bind`, `--port` and `--assets-dir` and the resolved `--palace`,
-/// because a bare `memcastle serve` would silently come back on the default
-/// address with the default config.
-async fn cmd_restart(
+/// With no daemon running it simply starts one, so it is also a start that
+/// does not mind what was there before.
+async fn cmd_daemon_restart(
     config: &Config,
     config_path: Option<&std::path::Path>,
     mode: Option<MemoryMode>,
@@ -337,9 +364,55 @@ async fn cmd_restart(
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     }
+    spawn_and_wait(config, config_path, &args, "restarted:").await
+}
 
+/// Make `command`'s process independent of this one and of its terminal, so
+/// the daemon it becomes outlives the command that started it.
+fn detach(command: &mut std::process::Command) {
+    // Detached from this terminal: the new daemon outlives this command,
+    // and an inherited stderr would interleave its log with the prompt.
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Its own process group: a Ctrl-C in the launching terminal signals
+        // the foreground group, and would otherwise kill the daemon this
+        // command just started along with the shell job.
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        // No console to share (closing the launching one would end the
+        // daemon) and its own group, for the same Ctrl-C reason as on Unix.
+        command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    }
+}
+
+/// Spawn a detached `memcastle serve` and wait until it is serving, printing
+/// `verb` (`started:`/`restarted:`) and its address when it is.
+///
+/// "Actually serving" is the registry file appearing with a live daemon
+/// behind it — the same signal every other command discovers the daemon by —
+/// not the process merely having been spawned: reporting success before that
+/// told users a daemon that had crashed on startup was up. The new daemon
+/// gets the original `--config`, `--bind`, `--port` and `--assets-dir` and the resolved `--palace`,
+/// because a bare `memcastle serve` would silently come back on the default
+/// address with the default config.
+async fn spawn_and_wait(
+    config: &Config,
+    config_path: Option<&std::path::Path>,
+    args: &ServeArgs,
+    verb: &str,
+) -> Result<()> {
     let exe = std::env::current_exe().map_err(|source| Error::io("current executable", source))?;
-    // The old process removes its registry file just before it exits, so
+    // A previous process removes its registry file just before it exits, so
     // its lock can outlive that by a moment: a new daemon that dies at once
     // is retried a couple of times before it is reported as failed.
     const ATTEMPTS: u32 = 3;
@@ -353,7 +426,7 @@ async fn cmd_restart(
         if let Some(bind) = args.bind {
             command.arg("--bind").arg(bind.to_string());
         }
-        // Forwarded like `--bind`: without it the respawned daemon would
+        // Forwarded like `--bind`: without it the spawned daemon would
         // fall back to the configured port while this command waits on the
         // one that was asked for.
         if let Some(port) = args.port {
@@ -365,16 +438,12 @@ async fn cmd_restart(
             command.arg("--assets-dir").arg(dir);
         }
         // Always the resolved palace, not just an explicit `--palace`: the
-        // respawned daemon must serve exactly the palace this command
+        // spawned daemon must serve exactly the palace this command
         // found and waits on, whichever layer (file, environment, flag)
         // named it.
         command.arg("--palace").arg(&config.palace.path);
-        // Detached from this terminal: the new daemon outlives this command,
-        // and an inherited stderr would interleave its log with the prompt.
+        detach(&mut command);
         let mut child = command
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
             .spawn()
             .map_err(|source| Error::io("memcastle serve", source))?;
 
@@ -386,7 +455,7 @@ async fn cmd_restart(
                 let paint = Painter::for_stdout();
                 println!(
                     "{} memcastle is serving on {}",
-                    paint.ok("restarted:"),
+                    paint.ok(verb),
                     paint.accent(&format!("http://{}", info.bind_addr))
                 );
                 return Ok(());
@@ -622,7 +691,7 @@ async fn cmd_auth(config: &Config, command: AuthCommand) -> Result<()> {
                  and MemCastle keeps only a digest.\n\
                  To require it, set `auth.enabled = true` (or MEMCASTLE_AUTH_ENABLED=true), \
                  provide the token to clients as MEMCASTLE_AUTH_TOKEN, and restart the daemon \
-                 (`memcastle restart`).",
+                  (`memcastle daemon restart`).",
                 paint.warn("Store this token now")
             );
         }

@@ -131,7 +131,7 @@ impl Sandbox {
     /// Ask the daemon to stop through the CLI and wait for the process to exit,
     /// so the palace lock is released before the next daemon opens it.
     async fn stop(&self, child: &mut Child, token: Option<&str>) {
-        let output = self.run(token, &["stop"]).await;
+        let output = self.run(token, &["daemon", "stop"]).await;
         assert!(
             output.status.success(),
             "`stop` failed: {}",

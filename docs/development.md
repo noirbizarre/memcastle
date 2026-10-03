@@ -61,7 +61,8 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `tests/memory_mode.rs`, `tests/mcp_memory_mode.rs` — per-request and per-MCP-session memory modes (in-process).
   - `tests/audit.rs`, `tests/repair.rs` — the audit and repair job kinds end to end (in-process).
   - `tests/persistence.rs` — data and job state survive a daemon restart, including a SIGKILL mid-job
-    and a pause or cancel requested just before it, and `memcastle restart --bind --port` (subprocess).
+    and a pause or cancel requested just before it, `memcastle daemon start`
+    and `memcastle daemon restart --bind --port` (subprocess).
   - `tests/mcp_smoke.rs` — the MCP surface end to end: a real MCP client over streamable HTTP against a
     `memcastle serve` subprocess, covering read and write tools, migrations before serving, a second session,
     and persistence across a restart with a reconnecting session (subprocess).

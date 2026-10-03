@@ -154,7 +154,7 @@ The embedded database is a directory of files that only the running daemon shoul
 To make a consistent copy, stop the daemon first:
 
 ```sh
-memcastle stop
+memcastle daemon stop
 cp -a ~/.local/share/memcastle/default /path/to/backup/
 memcastle serve
 ```

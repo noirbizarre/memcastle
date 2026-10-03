@@ -2,8 +2,8 @@
 //!
 //! Every handler is a deserialize -> call one `AppServices` method ->
 //! serialize sandwich — no business logic lives here. This is also where
-//! `/api/shutdown` lives, which is how `memcastle stop` asks a foreground
-//! `memcastle serve` to shut down gracefully (see `server::lifecycle`).
+//! `/api/shutdown` lives, which is how `memcastle daemon stop` asks a
+//! running `memcastle serve` to shut down gracefully (see `server::lifecycle`).
 
 mod auth;
 mod db;

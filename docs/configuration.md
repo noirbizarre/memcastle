@@ -37,9 +37,9 @@ then `$XDG_DATA_HOME/memcastle/default`.
 It must be an absolute path; a relative one is rejected at startup, because a daemon and a client started
 from different directories would disagree about which palace they mean.
 
-Every command resolves the palace the same way, so `serve`, `status`, `migrate`, `stop` and the rest agree on it.
+Every command resolves the palace the same way, so `serve`, `status`, `migrate`, `daemon stop` and the rest agree on it.
 A client finds a running daemon through the registry file, which is keyed by the palace path.
-`restart` passes the palace it resolved on to the new daemon.
+`daemon start` and `daemon restart` pass the palace they resolved on to the new daemon.
 
 The registry is runtime metadata, not palace data, so it lives in the state directory rather than beside the palace.
 Backing up or copying a palace never carries a stale daemon record with it.
@@ -164,9 +164,9 @@ Some variables are read by the command line rather than the config file:
 |---|---|---|
 | `--config <FILE>` | every command | the default config file location |
 | `--palace <PATH>` | every command | `palace.path`, `MEMCASTLE_PALACE_PATH` |
-| `--bind <IP>` | `serve`, `restart` | `server.bind`, `MEMCASTLE_BIND` |
-| `--port <PORT>` | `serve`, `restart` | `server.port`, `MEMCASTLE_PORT` |
-| `--assets-dir <DIR>` | `serve`, `restart` | `assets.dir`, `MEMCASTLE_ASSETS_DIR` |
+| `--bind <IP>` | `serve`, `daemon start`, `daemon restart` | `server.bind`, `MEMCASTLE_BIND` |
+| `--port <PORT>` | `serve`, `daemon start`, `daemon restart` | `server.port`, `MEMCASTLE_PORT` |
+| `--assets-dir <DIR>` | `serve`, `daemon start`, `daemon restart` | `assets.dir`, `MEMCASTLE_ASSETS_DIR` |
 | `--mode <MODE>` | every command (acted on by client commands) | the memory mode of the session |
 | `-v`, `-vv` | every command | the log level of memcastle itself |
 
@@ -180,11 +180,11 @@ memcastle serve --bind 127.0.0.1 --port 8787
 
 The address and the port are separate settings, so either can be changed alone.
 Each is chosen by, highest precedence first: the flag, the environment variable, the config file, the default.
-`serve`, `restart` and a supervisor such as systemd all start the daemon through the same path,
+`serve`, `daemon start`, `daemon restart` and a supervisor such as systemd all start the daemon through the same path,
 so the same three sources work everywhere.
 Client commands (`status`, `search`, `jobs` and the rest) read the config file and the environment,
 but not the flags, so a daemon started on a non-default port with `--port` is found through its registry file.
-`restart` passes its `--bind`, `--port` and `--assets-dir` on to the new daemon.
+`daemon start` and `daemon restart` pass their `--bind`, `--port` and `--assets-dir` on to the new daemon.
 
 `memcastle status` shows which of the two it used (`endpoint_source`: `registry` or `config`).
 It exits 0 for a healthy daemon, 1 for a degraded one and 3 when none is running, and takes `--json` for scripts:

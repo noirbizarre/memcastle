@@ -13,6 +13,7 @@ fn help_lists_the_top_level_commands() {
         .assert()
         .success()
         .stdout(contains("serve"))
+        .stdout(contains("daemon"))
         .stdout(contains("mine"))
         .stdout(contains("audit"))
         .stdout(contains("repair"))
@@ -22,13 +23,36 @@ fn help_lists_the_top_level_commands() {
 }
 
 #[test]
-fn serve_help_documents_the_daemon_alias() {
+fn serve_help_says_it_runs_in_the_foreground() {
     Command::cargo_bin("memcastle")
         .unwrap()
         .args(["serve", "--help"])
         .assert()
         .success()
-        .stdout(contains("daemon"));
+        .stdout(contains("foreground"));
+}
+
+#[test]
+fn daemon_help_lists_start_stop_and_restart() {
+    Command::cargo_bin("memcastle")
+        .unwrap()
+        .args(["daemon", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("start"))
+        .stdout(contains("stop"))
+        .stdout(contains("restart"));
+}
+
+#[test]
+fn the_old_top_level_stop_and_restart_are_unknown_commands() {
+    for word in ["stop", "restart"] {
+        Command::cargo_bin("memcastle")
+            .unwrap()
+            .arg(word)
+            .assert()
+            .failure();
+    }
 }
 
 #[test]
@@ -191,7 +215,23 @@ fn status_without_a_reachable_daemon_reports_not_running_and_exits_3() {
         .code(3)
         .stdout(contains("MemCastle is not running"))
         .stdout(contains("127.0.0.1:1"))
-        .stdout(contains("memcastle serve"));
+        .stdout(contains("memcastle daemon start"));
+}
+
+#[test]
+fn daemon_stop_without_a_daemon_fails_and_points_at_daemon_start() {
+    let (state, palace) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    Command::cargo_bin("memcastle")
+        .unwrap()
+        .env("MEMCASTLE_PALACE_PATH", palace.path())
+        .env("XDG_STATE_HOME", state.path())
+        .env("MEMCASTLE_BIND", "127.0.0.1")
+        .env("MEMCASTLE_PORT", "1")
+        .args(["daemon", "stop"])
+        .assert()
+        .failure()
+        .stderr(contains("memcastle::client::not_running"))
+        .stderr(contains("daemon start"));
 }
 
 #[test]

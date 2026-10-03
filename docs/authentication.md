@@ -11,7 +11,7 @@ The decision and the alternatives that were rejected are in
 
 With authentication enabled, every request needs `Authorization: Bearer <token>`, with one exception:
 `GET /api/health`, the liveness probe, stays open.
-It answers only `{"status": "ok"}`, and `restart`, supervisors and health checks depend on it.
+It answers only `{"status": "ok"}`, and `daemon restart`, supervisors and health checks depend on it.
 
 Everything else is protected, including `/api/status`, `/api/shutdown`, every other REST route, and `/mcp`.
 A path that does not exist is refused with `401` too, rather than `404`.
@@ -73,7 +73,7 @@ Then turn authentication on and restart:
 
 ```sh
 export MEMCASTLE_AUTH_ENABLED=true     # or `enabled = true` under [auth] in the config file
-memcastle restart                      # `serve` refuses to start if nothing could authenticate a client
+memcastle daemon restart               # `serve` refuses to start if nothing could authenticate a client
 ```
 
 From now on the CLI needs the token in its environment:
@@ -96,8 +96,8 @@ op run --env-file=memcastle.env -- memcastle status
 Under systemd, give the unit an `EnvironmentFile=` with mode `0600`, or use `LoadCredential=` with a wrapper that
 exports the credential as `MEMCASTLE_AUTH_TOKEN`; see [Under systemd](#under-systemd).
 
-`restart` starts the new daemon with your environment and your `--config`, so a secret in either carries over
-without being passed on the command line.
+`daemon start` and `daemon restart` start the new daemon with your environment and your `--config`,
+so a secret in either carries over without being passed on the command line.
 
 ### Under systemd
 

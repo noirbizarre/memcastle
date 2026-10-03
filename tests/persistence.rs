@@ -297,7 +297,7 @@ async fn a_pause_requested_before_a_sigkill_comes_back_paused_after_restart() {
     an_acknowledged_stop_request_survives_a_sigkill("pause", "paused").await;
 }
 
-/// `memcastle restart` must bring the daemon back the way it was asked to,
+/// `memcastle daemon restart` must bring the daemon back the way it was asked to,
 /// and only say so once it is serving: a bare `memcastle serve` would drop
 /// `--bind`/`--port` and come back on the default address.
 #[tokio::test]
@@ -325,6 +325,7 @@ async fn restart_brings_the_daemon_back_on_the_requested_address() {
     let stderr_file = dir.path().join("restart.err");
     let status = Command::new(&bin)
         .args([
+            "daemon",
             "restart",
             "--bind",
             "127.0.0.1",
@@ -336,7 +337,7 @@ async fn restart_brings_the_daemon_back_on_the_requested_address() {
         .stderr(std::fs::File::create(&stderr_file).expect("stderr file"))
         .status()
         .await
-        .expect("run `memcastle restart`");
+        .expect("run `memcastle daemon restart`");
     assert!(
         status.success(),
         "restart failed: {}",
@@ -358,11 +359,11 @@ async fn restart_brings_the_daemon_back_on_the_requested_address() {
 
     // Tear down the daemon `restart` spawned (the original one is gone).
     let stopped = Command::new(&bin)
-        .arg("stop")
+        .args(["daemon", "stop"])
         .env("MEMCASTLE_PALACE_PATH", &palace)
         .status()
         .await
-        .expect("run `memcastle stop`");
+        .expect("run `memcastle daemon stop`");
     assert!(stopped.success());
     for _ in 0..150 {
         if read_if_live(&palace).is_none() {
@@ -371,6 +372,111 @@ async fn restart_brings_the_daemon_back_on_the_requested_address() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     let _ = child.wait().await;
+}
+
+/// What a `memcastle` CLI run printed, with the exit status.
+struct CliRun {
+    success: bool,
+    stdout: String,
+    stderr: String,
+}
+
+/// Run `memcastle <args>` against `palace` with output going to files, not
+/// pipes: on Windows a daemon the command leaves running inherits every
+/// inheritable handle of its parent, including the write end of a captured
+/// pipe, so waiting for the pipe to close would wait for the daemon to exit.
+async fn run_cli(bin: &Path, dir: &Path, palace: &Path, args: &[&str]) -> CliRun {
+    let stdout_file = dir.join("cli.out");
+    let stderr_file = dir.join("cli.err");
+    let status = Command::new(bin)
+        .args(args)
+        .env("MEMCASTLE_PALACE_PATH", palace)
+        // Nothing here may talk to a developer's own daemon or token.
+        .env_remove("MEMCASTLE_AUTH_ENABLED")
+        .env_remove("MEMCASTLE_AUTH_TOKEN")
+        .stdout(std::fs::File::create(&stdout_file).expect("stdout file"))
+        .stderr(std::fs::File::create(&stderr_file).expect("stderr file"))
+        .status()
+        .await
+        .expect("run memcastle");
+    CliRun {
+        success: status.success(),
+        stdout: std::fs::read_to_string(&stdout_file).unwrap_or_default(),
+        stderr: std::fs::read_to_string(&stderr_file).unwrap_or_default(),
+    }
+}
+
+/// Stop the daemon of `palace` through the CLI and wait for it to unregister,
+/// for a test whose daemon is not a child of the test process.
+async fn stop_detached_daemon(bin: &Path, dir: &Path, palace: &Path) {
+    let stopped = run_cli(bin, dir, palace, &["daemon", "stop"]).await;
+    assert!(stopped.success, "daemon stop failed: {}", stopped.stderr);
+    for _ in 0..150 {
+        if read_if_live(palace).is_none() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("the daemon still holds the palace 15s after `daemon stop`");
+}
+
+/// `memcastle daemon start` must return only once a daemon is really serving,
+/// and leave it running after the command has exited.
+#[tokio::test]
+async fn daemon_start_brings_up_a_detached_daemon_that_serves() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let palace = dir.path().join("palace");
+    let bin = cargo_bin("memcastle");
+    assert!(read_if_live(&palace).is_none());
+
+    let started = run_cli(
+        &bin,
+        dir.path(),
+        &palace,
+        &["daemon", "start", "--bind", "127.0.0.1", "--port", "0"],
+    )
+    .await;
+    assert!(started.success, "daemon start failed: {}", started.stderr);
+
+    // The command has exited, yet the daemon it started is up and registered.
+    let info = read_if_live(&palace).expect("the started daemon is registered");
+    assert!(
+        started.stdout.contains("started:") && started.stdout.contains(&info.bind_addr),
+        "it must report where it is serving: {}",
+        started.stdout
+    );
+    let health = reqwest::get(format!("http://{}/api/health", info.bind_addr))
+        .await
+        .expect("health request");
+    assert!(health.status().is_success());
+
+    stop_detached_daemon(&bin, dir.path(), &palace).await;
+}
+
+/// A second daemon would only die on the palace lock, so `daemon start` says
+/// so up front and points at the command that replaces the running one.
+#[tokio::test]
+async fn daemon_start_refuses_when_a_daemon_is_already_running() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let palace = dir.path().join("palace");
+    let bin = cargo_bin("memcastle");
+
+    let (mut child, first) = spawn_daemon_and_wait(&bin, &palace).await;
+
+    let again = run_cli(&bin, dir.path(), &palace, &["daemon", "start"]).await;
+    assert!(!again.success, "a second start must fail: {}", again.stdout);
+    assert!(
+        again.stderr.contains("memcastle::client::already_running"),
+        "{}",
+        again.stderr
+    );
+    // The refusal must not have disturbed the daemon that was running.
+    assert_eq!(
+        read_if_live(&palace).expect("still registered").pid,
+        first.pid
+    );
+
+    stop_daemon(&bin, &palace, &mut child).await;
 }
 
 async fn wait_for_job(
@@ -458,12 +564,12 @@ async fn drain_stderr(child: &mut Child) -> String {
 
 async fn stop_daemon(bin: &Path, palace: &Path, child: &mut Child) {
     let status = Command::new(bin)
-        .arg("stop")
+        .args(["daemon", "stop"])
         .env("MEMCASTLE_PALACE_PATH", palace)
         .status()
         .await
-        .expect("run `memcastle stop`");
-    assert!(status.success(), "`memcastle stop` should succeed");
+        .expect("run `memcastle daemon stop`");
+    assert!(status.success(), "`memcastle daemon stop` should succeed");
 
     tokio::time::timeout(Duration::from_secs(15), child.wait())
         .await
