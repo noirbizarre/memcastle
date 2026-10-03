@@ -155,7 +155,7 @@ flowchart LR
     R --> A[sync schema]
     A --> B[take lock]
     B --> C[run pending data steps]
-    C --> D[sync schema again]
+    C -->     D[sync schema again, if a step ran]
     D --> E[release lock]
     C -.->|a step fails| F[fail closed: daemon does not serve]
 ```

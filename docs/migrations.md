@@ -37,9 +37,13 @@ sequenceDiagram
         R->>DB: run the step
         R->>DB: record the new version
     end
-    R->>DB: sync schema again (picks up anything else the release ships)
+    opt at least one step ran
+        R->>DB: sync schema again (picks up anything else the release ships)
+    end
     R->>DB: release the lock
 ```
+
+When no step is pending, the schema is not synced a second time: the first sync has already made it current.
 
 `memcastle serve` runs this before it starts answering requests, so an MCP client never sees a half-migrated palace.
 The listener is already bound by then, and connections wait in its backlog.

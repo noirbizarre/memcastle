@@ -53,7 +53,9 @@ this embedding scenario would be needless duplication and a maintenance burden w
   → sync schema for real once up front (so the watermark/lock table exists at all — see Consequences)
   → acquire an exclusive migration lock (a lease-based compare-and-swap over one row, tolerant of a crashed holder)
   → read the current data version → run all pending data migrations in order, recording the watermark after each
-  success → re-synchronize the declarative schema (picks up anything the release also shipped) → release the lock.
+  success → re-synchronize the declarative schema if any step ran (picks up anything the release also shipped;
+  with nothing pending the up-front sync is already current, and repeating it costs dozens of fsynced commits)
+  → release the lock.
   A failed migration fails the daemon closed — it must never serve a partially migrated database — and the
   watermark stays at the last step that succeeded, so a later, corrected run resumes rather than replays.
 - `--status`/`--check` report MemCastle's own watermark/pending-migrations list only — a plain read, no lock, no
@@ -88,7 +90,7 @@ this embedding scenario would be needless duplication and a maintenance burden w
   is this palace at" — so unlike the abstract "read version, then sync schema" ordering one might expect, the very
   first thing `crate::migrate::run` does is a real (non-dry-run) schema sync, unconditionally. This is idempotent
   and cheap when already applied, and is a one-time bootstrap concern distinct from the schema re-sync that happens
-  again after data migrations run.
+  again after data migrations run (and only when one did).
 - `SurrealStore::connect` no longer syncs schema or migrates as a side effect of connecting (unlike the original
   Phase 1 stand-in) — every caller that needs a fully migrated, ready-to-use store must go through
   `crate::migrate::run` explicitly (as `server::run` and `memcastle migrate` both do), or, for test code that
