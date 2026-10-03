@@ -196,7 +196,10 @@ classDiagram
 A `Drawer`'s `content` is immutable once written, and it may carry a `name` that is unique within its room,
 so it can be addressed as `wing/room/name`
 (wings, rooms and drawers are managed through REST and the CLI, see [ADR-018](adr/018-palace-hierarchy-management.md));
-provenance, tags, an optional `embedding` and a `valid_from`/`valid_to` pair travel alongside it.
+provenance, tags, an optional `embedding` (derived data, see [Search](#search)) and a `valid_from`/`valid_to` pair
+travel alongside it.
+A drawer is corrected by *superseding* it: its `valid_to` is set and a replacement opens from the same instant, so the old
+content is never rewritten.
 Provenance has one meaning for every writer (diary, mining, checkpoint):
 `provenance.requested_by` is the **channel** the write came through (`cli`, `http`, `mcp`),
 and `source.agent` is the **agent identity** behind it, or absent when no agent is involved (mining).
@@ -209,19 +212,54 @@ and are exercised by `checkpoint::run`'s optional `fact` mutation.
 `relates_to` is a SurrealDB-native graph edge table (`TYPE RELATION IN entity OUT entity`),
 unlike every other relationship in the model (wing to palace, room to wing, drawer to room),
 which is a plain foreign-key column on a regular table.
-What is missing is a populator: nothing extracts entities or relationships from mined content yet.
+A `mentions` edge (`TYPE RELATION IN drawer OUT entity`) links a drawer to the entities it talks about, which is how
+graph-aware search gets from canonical memory into the graph.
+What is missing is an extractor: nothing derives entities or relationships from mined content yet,
+so `mentions` links are made explicitly (`POST /api/drawers/{id}/mentions`) until #40 lands.
 
 ## Search
 
-Lexical (BM25 full-text) search over `drawer.content` is the working search path (`search::lexical_search`).
-A query first requires every word to match.
-Only if that finds nothing does it retry with any single word sufficing, ranked by BM25,
-because SurrealDB has no stop-word filter and a natural-language question carries words the stored text never contains.
-It can be scoped to one wing and/or room by name.
-The scope is expressed as SurrealQL predicates, with nested subqueries resolving the name to room ids,
-so SurrealDB applies the filter as part of query execution rather than MemCastle fetching candidates and filtering them.
-Semantic and vector search, temporal filtering, graph-aware retrieval and hybrid ranking are future work
-on the same table.
+Retrieval is SurrealDB's work, and MemCastle owns the contract and the policy
+([ADR-021](adr/021-richer-retrieval.md)).
+The `search` module takes a `SearchQuery` (text, ranking, scope, point in time, expansion) and returns `SearchHit`s: the
+stored drawer verbatim, a score and the signals behind it.
+No second vector store, graph store or index file exists; everything runs against the one `drawer` table.
+
+```mermaid
+flowchart LR
+    Q[SearchQuery] --> R{ranking}
+    R -->|lexical| BM[BM25 full-text index]
+    R -->|semantic| HN[HNSW vector index]
+    R -->|hybrid| BM & HN
+    BM & HN --> FU[search::rrf fusion]
+    FU --> TB[id tie-break]
+    TB --> EX{expand?}
+    EX -->|yes| GR[mentions, entity, relates_to traversal]
+    EX -->|no| OUT[hits]
+    GR --> OUT
+```
+
+- **Lexical** (BM25) first requires every word to match.
+  Only if that finds nothing does it retry with any single word sufficing,
+  because SurrealDB has no stop-word filter and a natural-language question carries words the stored text never contains.
+- **Semantic** is a k-nearest-neighbour query on an HNSW index over `drawer.embedding` (768 dimensions, cosine).
+- **Hybrid** runs both and merges them with SurrealDB's own `search::rrf`, which fuses by rank and so needs no score
+  normalisation.
+  Rust breaks ties by drawer id, so a query always ranks the same way.
+- **One scope for every leg.**
+  Wing, room, tags, source kind and validity form a single `WHERE` fragment that SurrealDB applies *before* ranking
+  and before the limit, including inside the vector index traversal,
+  instead of MemCastle fetching candidates and filtering them.
+- **Time.**
+  A drawer or relationship is valid at an instant when `valid_from <= t` and it has no `valid_to` or `valid_to > t`.
+  Search defaults to now, and `as_of` or `include_historical` reach superseded memory.
+- **Graph expansion** appends drawers that share an entity with a hit, or sit one valid `relates_to` hop away,
+  after the direct hits, and never reorders them.
+- **Where vectors come from.**
+  The `embed` module wraps a provider (an operator's program, an OpenAI-compatible endpoint, or none) behind one trait,
+  and the `Embed` job fills drawers that have none.
+  A caller may instead send vectors itself.
+  With no provider, `auto` ranking is lexical, so a palace keeps working without any model.
 
 ## Memory flows
 
@@ -241,7 +279,7 @@ flowchart LR
     end
     subgraph Reads
         RQ[search, recall, wake_up, diary read] --> G4{mode gate}
-        G4 --> LS[lexical search / recent drawers]
+        G4 --> LS[ranked search / recent drawers]
         LS --> RES[drawers returned verbatim]
     end
     D1 & D2 --> DB[(store)]
@@ -389,11 +427,15 @@ Two fields mean "where do I read progress from" and "where do I read what it fou
   Every item gets a drawer, and *additionally* applies its `fact` mutation when present,
   so a checkpoint item is never only a graph mutation with no drawer to audit it.
   There is deliberately no artificial per-item delay, because an emergency checkpoint exists to save state before a crash.
+- **`Embed`** (`src/embed/job.rs`) computes the embedding of every drawer that has none.
+  The database is its cursor: each pass asks for the next unembedded drawers, so pausing, crashing or running it again
+  loses and repeats nothing, and only the `embedding` field is ever written.
+  It is queued automatically after drawer-writing jobs and writes, and at startup.
 - **`Audit`** (`src/audit`) is a read-only consistency report, scoped to what is structurally possible
   with a single database.
   It checks for orphan drawers (a `room` reference that no longer resolves), dangling `provenance.job_id` references,
   `Failed` jobs that exhausted their attempt budget, a plain count of `Running` jobs,
-  and drawers with no `embedding` (informational: semantic search does not exist yet).
+  and drawers with no `embedding` (informational: a backlog the `Embed` job clears when a provider is configured).
   A full scan is cheap and idempotent, so it keeps no per-unit checkpoint.
 - **`Repair`** (`src/repair`) turns a subset of audit findings into a fix.
   It is dry-run-first (`dry_run = true` is the default at every entry point) and deliberately narrow:
@@ -515,7 +557,8 @@ See [ADR-015](adr/015-database-admin-endpoint.md).
 
 Deliberately out of scope, and each is structurally possible without rework given the module boundaries above:
 
-- Semantic/vector search, embeddings, hybrid ranking.
+- Chunking: a mined file is one drawer and one vector, embedded from its first 8,000 characters.
+- Extracting entities from text to resolve a query's words to the graph (#40): expansion starts from drawers already found.
 - Entity and relationship extraction wired into mining (the schema exists; nothing populates it).
 - A stdio MCP bridge for clients that cannot speak HTTP.
 - The CLI auto-starting a daemon on demand.

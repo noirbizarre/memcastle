@@ -2,7 +2,7 @@
 
 use serde_json::json;
 
-use crate::app::{Created, WingDetail};
+use crate::app::{Created, EntityLink, Superseded, WingDetail};
 use crate::domain::channel::CLI as CHANNEL;
 use crate::domain::{Deleted, Drawer, DrawerSummary, RoomSummary, WingSummary};
 use crate::error::{Error, Result};
@@ -199,6 +199,36 @@ impl DaemonClient {
                     "content": content,
                     "requested_by": CHANNEL,
                 })),
+        )
+        .await
+    }
+
+    /// End a drawer's validity and optionally open a replacement
+    /// (`POST /api/drawers/{id}/supersede`).
+    ///
+    /// # Errors
+    ///
+    /// As for [`Self::show_wing`]; a drawer that already ended is a 409.
+    pub async fn supersede_drawer(&self, id: &str, content: Option<String>) -> Result<Superseded> {
+        self.send(
+            self.http
+                .post(format!("{}/api/drawers/{id}/supersede", self.base_url))
+                .json(&json!({ "content": content, "requested_by": CHANNEL })),
+        )
+        .await
+    }
+
+    /// Record that a drawer mentions an entity
+    /// (`POST /api/drawers/{id}/mentions`).
+    ///
+    /// # Errors
+    ///
+    /// As for [`Self::show_wing`].
+    pub async fn link_drawer_entity(&self, id: &str, name: &str, kind: &str) -> Result<EntityLink> {
+        self.send(
+            self.http
+                .post(format!("{}/api/drawers/{id}/mentions", self.base_url))
+                .json(&json!({ "name": name, "kind": kind })),
         )
         .await
     }

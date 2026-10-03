@@ -170,6 +170,15 @@ pub enum JobKind {
         /// never trusts a stored report on its own.
         based_on_job: Option<JobId>,
     },
+    /// Compute and store the embedding of every drawer that has none, so
+    /// semantic search covers it — see `crate::embed::job`. Derived data
+    /// only: it never changes a drawer's content, and re-running finds
+    /// nothing left to do, which is what makes it safe to repeat or resume.
+    Embed {
+        /// Restrict the sweep to one wing by name; `None` sweeps the palace.
+        #[serde(default)]
+        wing: Option<String>,
+    },
 }
 
 /// A repair that says nothing about `dry_run` must fail safe: destructive

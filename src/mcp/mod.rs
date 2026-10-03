@@ -71,7 +71,7 @@ struct SessionMode {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct SearchArgs {
-    /// The search query.
+    /// The search query, in your own words.
     query: String,
     /// Maximum number of results to return.
     #[serde(default = "default_search_limit")]
@@ -81,15 +81,35 @@ struct SearchArgs {
     wing: Option<String>,
     /// Restrict results to drawers filed directly under this room name.
     room: Option<String>,
+    /// Ranking: `auto` (default: hybrid when the daemon can embed the query,
+    /// else lexical), `lexical`, `semantic` or `hybrid`.
+    ranking: Option<String>,
+    /// Only drawers carrying every one of these tags.
+    #[serde(default)]
+    tags: Vec<String>,
+    /// Only drawers from this kind of source: `file`, `manual` or `other`.
+    source_kind: Option<String>,
+    /// An RFC 3339 instant, e.g. `2026-01-31T12:00:00Z`: search the memory
+    /// that was valid then instead of now.
+    as_of: Option<String>,
+    /// Also return memory that has since been superseded.
+    #[serde(default)]
+    include_historical: bool,
+    /// Also surface drawers related to the hits through the knowledge graph.
+    #[serde(default)]
+    expand: bool,
 }
 
 fn default_search_limit() -> u32 {
     crate::app::DEFAULT_SEARCH_LIMIT
 }
 
+/// `memcastle_recall`'s arguments: [`SearchArgs`] without `room`, spelled out
+/// rather than shared so the tool's schema does not advertise an option recall
+/// ignores.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct RecallArgs {
-    /// The recall query.
+    /// The recall query, in your own words.
     query: String,
     /// Maximum number of results to return.
     #[serde(default = "default_search_limit")]
@@ -97,6 +117,57 @@ struct RecallArgs {
     /// Restrict results to drawers filed (transitively, via their room)
     /// under this wing name.
     wing: Option<String>,
+    /// Ranking: `auto` (default), `lexical`, `semantic` or `hybrid`.
+    ranking: Option<String>,
+    /// Only drawers carrying every one of these tags.
+    #[serde(default)]
+    tags: Vec<String>,
+    /// Only drawers from this kind of source: `file`, `manual` or `other`.
+    source_kind: Option<String>,
+    /// An RFC 3339 instant: recall the memory that was valid then.
+    as_of: Option<String>,
+    /// Also return memory that has since been superseded.
+    #[serde(default)]
+    include_historical: bool,
+    /// Also surface drawers related to the hits through the knowledge graph.
+    #[serde(default)]
+    expand: bool,
+}
+
+impl RecallArgs {
+    fn into_query(self) -> Result<crate::search::SearchQuery, crate::Error> {
+        SearchArgs {
+            query: self.query,
+            limit: self.limit,
+            wing: self.wing,
+            room: None,
+            ranking: self.ranking,
+            tags: self.tags,
+            source_kind: self.source_kind,
+            as_of: self.as_of,
+            include_historical: self.include_historical,
+            expand: self.expand,
+        }
+        .into_query(false)
+    }
+}
+
+impl SearchArgs {
+    /// The validated query, with `room` dropped when `recall` is the caller.
+    fn into_query(self, with_room: bool) -> Result<crate::search::SearchQuery, crate::Error> {
+        crate::search::SearchOptions {
+            limit: Some(self.limit),
+            wing: self.wing,
+            room: if with_room { self.room } else { None },
+            ranking: self.ranking,
+            tags: self.tags,
+            source_kind: self.source_kind,
+            as_of: self.as_of,
+            include_historical: self.include_historical,
+            expand: self.expand,
+        }
+        .into_query(self.query)
+    }
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -448,10 +519,15 @@ impl McpTools {
     }
 
     #[tool(
-        description = "Lexically search palace drawer content. Matching is by words (stemmed, \
-                        no synonyms): drawers containing every query word are returned, and \
-                        only if there are none, drawers containing any of them. Short keyword \
-                        queries work best."
+        description = "Search palace drawer content. By default the ranking is hybrid (word \
+                        match plus meaning) when the daemon can embed the query, and word match \
+                        alone otherwise; `ranking` forces lexical, semantic or hybrid. Word matching \
+                        is stemmed with no synonyms: drawers containing every query word are \
+                        returned, and only if there are none, drawers containing any of them. \
+                        Narrow with wing, room, tags and source_kind; `as_of` or \
+                        `include_historical` reach superseded memory; `expand` adds drawers \
+                        related through the knowledge graph. Each hit is the stored drawer \
+                        verbatim plus a `score` that is comparable only within one response."
     )]
     async fn memcastle_search(
         &self,
@@ -459,25 +535,19 @@ impl McpTools {
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
         let mode = self.mode_for(&parts);
-        let hits = self
-            .app
-            .search(
-                &args.query,
-                args.wing.as_deref(),
-                args.room.as_deref(),
-                args.limit,
-                mode,
-            )
-            .await;
+        let hits = match args.into_query(true) {
+            Ok(query) => self.app.search(query, mode).await,
+            Err(error) => Err(error),
+        };
         tool_result("memcastle_search", hits)
     }
 
     #[tool(
         description = "Retrieve palace content matching a query, returned verbatim — the \
                         recall-oriented counterpart to memcastle_search (see \
-                        AppServices::recall's doc comment for why both exist). Matching is by \
-                        words (stemmed, no synonyms): every query word first, then any of them \
-                        if nothing matched. Short keyword queries work best."
+                        AppServices::recall's doc comment for why both exist). Takes the same \
+                        options as memcastle_search except `room`: ranking mode, tags, \
+                        source_kind, as_of, include_historical and expand."
     )]
     async fn memcastle_recall(
         &self,
@@ -485,10 +555,10 @@ impl McpTools {
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
         let mode = self.mode_for(&parts);
-        let hits = self
-            .app
-            .recall(&args.query, args.wing.as_deref(), args.limit, mode)
-            .await;
+        let hits = match args.into_query() {
+            Ok(query) => self.app.recall(query, mode).await,
+            Err(error) => Err(error),
+        };
         tool_result("memcastle_recall", hits)
     }
 

@@ -59,13 +59,16 @@ DEFINE INDEX IF NOT EXISTS drawer_room_idx ON TABLE drawer FIELDS room;
 DEFINE FIELD IF NOT EXISTS name ON TABLE drawer TYPE option<string>;
 DEFINE INDEX IF NOT EXISTS drawer_room_name ON TABLE drawer FIELDS room, name UNIQUE;
 
--- The "basic working search path": lexical/full-text search over drawer
--- content. Semantic/vector search is a later phase, added on top of this
--- same table (an `embedding`-based index alongside this one), not a
--- replacement for it.
+-- Retrieval over drawer content, all on this one table: a BM25 full-text index
+-- and, beside it, an HNSW index over `embedding`. The vector index's DIMENSION
+-- is the palace's fixed embedding length (`domain::EMBEDDING_DIMENSION`, which
+-- a test keeps equal to this number); drawers without an embedding are simply
+-- not in it.
 DEFINE ANALYZER IF NOT EXISTS drawer_text TOKENIZERS blank, class FILTERS lowercase, snowball(english);
 DEFINE INDEX IF NOT EXISTS drawer_content_search ON TABLE drawer
     FIELDS content FULLTEXT ANALYZER drawer_text BM25 HIGHLIGHTS;
+DEFINE INDEX IF NOT EXISTS drawer_embedding_idx ON TABLE drawer
+    FIELDS embedding HNSW DIMENSION 768 DIST COSINE TYPE F32;
 
 -- Knowledge-graph tables, wired by `store::entities` (create/supersede/
 -- invalidate/list relationships). The only populator is a checkpoint item's
@@ -78,6 +81,15 @@ DEFINE FIELD IF NOT EXISTS properties ON TABLE entity TYPE object FLEXIBLE;
 -- One (name, kind) pair per entity: mirrors `wing_palace_name` above so
 -- `create_entity`'s get-or-create is race-safe, not just "usually fine".
 DEFINE INDEX IF NOT EXISTS entity_name_kind ON TABLE entity FIELDS name, kind UNIQUE;
+
+-- Which drawers mention which entities: the bridge from canonical memory into
+-- the graph. Derived data (a drawer's content never depends on it), written by
+-- `store::graph::link_drawer_entity` — today by REST, and by #40's extractor
+-- once it exists. The unique (in, out) index makes linking idempotent, and
+-- graph-aware retrieval walks `drawer -> mentions -> entity -> relates_to`.
+DEFINE TABLE IF NOT EXISTS mentions TYPE RELATION IN drawer OUT entity SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE mentions TYPE datetime;
+DEFINE INDEX IF NOT EXISTS mentions_edge ON TABLE mentions FIELDS in, out UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS relates_to TYPE RELATION IN entity OUT entity SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS predicate ON TABLE relates_to TYPE string;

@@ -133,6 +133,9 @@ pub enum Command {
     Checkpoint(CheckpointArgs),
     /// Submit an audit job: a read-only palace consistency report.
     Audit(AuditArgs),
+    /// Submit an embedding job: compute the vector of every drawer that has
+    /// none, so semantic search covers it. Needs an `[embeddings]` provider.
+    Embed(EmbedArgs),
     /// Submit a repair job: a narrow, dry-run-first set of destructive
     /// palace-consistency fixes (see `memcastle::repair`'s module doc for
     /// exactly what it does).
@@ -253,6 +256,31 @@ pub struct MigrateArgs {
     pub status: bool,
 }
 
+/// The retrieval options `search` and `recall` share.
+#[derive(Debug, Args)]
+pub struct RetrievalArgs {
+    /// How to rank: `auto` (hybrid when the daemon can embed the query, else
+    /// lexical), `lexical`, `semantic` or `hybrid`.
+    #[arg(long, value_parser = PossibleValuesParser::new(memcastle::search::RankingMode::NAMES))]
+    pub ranking: Option<String>,
+    /// Only drawers carrying this tag; repeat the flag to require several.
+    #[arg(long = "tag")]
+    pub tags: Vec<String>,
+    /// Only drawers from this kind of source.
+    #[arg(long, value_parser = PossibleValuesParser::new(["file", "manual", "other"]))]
+    pub source_kind: Option<String>,
+    /// Search the memory that was valid at this RFC 3339 instant
+    /// (e.g. 2026-01-31T12:00:00Z) instead of now.
+    #[arg(long, value_name = "TIMESTAMP", conflicts_with = "include_historical")]
+    pub as_of: Option<String>,
+    /// Also return memory that has since been superseded.
+    #[arg(long)]
+    pub include_historical: bool,
+    /// Also surface drawers related to the hits through the knowledge graph.
+    #[arg(long)]
+    pub expand: bool,
+}
+
 /// Arguments for `memcastle search`.
 #[derive(Debug, Args)]
 pub struct SearchArgs {
@@ -267,6 +295,8 @@ pub struct SearchArgs {
     /// Restrict results to drawers filed directly under this room.
     #[arg(long)]
     pub room: Option<String>,
+    #[command(flatten)]
+    pub retrieval: RetrievalArgs,
 }
 
 /// Arguments for `memcastle recall`.
@@ -280,6 +310,8 @@ pub struct RecallArgs {
     /// Restrict results to drawers filed (transitively) under this wing.
     #[arg(long)]
     pub wing: Option<String>,
+    #[command(flatten)]
+    pub retrieval: RetrievalArgs,
 }
 
 /// Arguments for `memcastle wake-up`.
@@ -336,6 +368,14 @@ pub struct AuditArgs {
     /// palace-wide regardless of this (see `memcastle::audit`'s module doc).
     #[arg(long)]
     pub scope: Option<String>,
+}
+
+/// Arguments for `memcastle embed`.
+#[derive(Debug, Args)]
+pub struct EmbedArgs {
+    /// Only embed the drawers of this wing, by name.
+    #[arg(long)]
+    pub wing: Option<String>,
 }
 
 /// Arguments for `memcastle repair`.
@@ -487,6 +527,35 @@ pub enum DrawerCommand {
         /// Read the content from this file; `-` reads standard input.
         #[arg(long, value_name = "PATH")]
         file: Option<PathBuf>,
+    },
+    /// Correct a drawer without rewriting history: end its validity now and
+    /// open a replacement with the new content (from `--content`, `--file`
+    /// or standard input), or only end it with `--invalidate`. The old drawer
+    /// stays, content untouched, for point-in-time searches (`--as-of`).
+    Supersede {
+        /// The drawer to supersede, as `<wing>/<room>/<name or UUID>`.
+        drawer: String,
+        /// The replacement content, as an argument.
+        #[arg(long, conflicts_with_all = ["file", "invalidate"])]
+        content: Option<String>,
+        /// Read the replacement content from this file; `-` reads standard input.
+        #[arg(long, value_name = "PATH", conflicts_with = "invalidate")]
+        file: Option<PathBuf>,
+        /// End the drawer's validity without a replacement.
+        #[arg(long)]
+        invalidate: bool,
+    },
+    /// Record that a drawer mentions an entity, creating the entity if
+    /// needed, so `search --expand` can reach related drawers through it.
+    Mention {
+        /// The drawer, as `<wing>/<room>/<name or UUID>`.
+        drawer: String,
+        /// The entity's name.
+        #[arg(long)]
+        name: String,
+        /// The entity's kind (`person`, `project`, ...).
+        #[arg(long)]
+        kind: String,
     },
     /// Delete one drawer, permanently. In a terminal this asks first.
     Delete {

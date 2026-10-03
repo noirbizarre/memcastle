@@ -53,10 +53,10 @@ pub struct Provenance {
 ///
 /// `content` is never mutated after creation — a re-mine creates a new
 /// drawer (or, once dedup lands, is rejected) rather than overwriting one,
-/// so provenance and history stay honest. `embedding` and the temporal
-/// `valid_from`/`valid_to` pair are populated by later phases (semantic
-/// search, supersession) and are `None`/equal-to-`created_at` for every
-/// drawer this bootstrap writes.
+/// so provenance and history stay honest. A correction is a *supersession*:
+/// the old drawer gains a `valid_to` and a replacement opens from that instant.
+/// `embedding` is derived data filled in after the fact by the embedding sweep
+/// (or by a caller), never part of what the drawer says.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Drawer {
     /// Unique identifier.
@@ -76,7 +76,7 @@ pub struct Drawer {
     pub source: Source,
     /// Free-form tags.
     pub tags: Vec<String>,
-    /// A dense embedding vector, once semantic search populates it.
+    /// A dense embedding vector (768 numbers), once the embedding sweep or a caller fills it. Derived data; search results omit it.
     pub embedding: Option<Vec<f32>>,
     /// Why this drawer exists.
     pub provenance: Provenance,

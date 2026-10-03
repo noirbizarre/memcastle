@@ -126,6 +126,9 @@ async fn every_other_route_is_guarded_including_ones_that_do_not_exist() {
         (Method::GET, "/api/status"),
         (Method::GET, "/api/search?q=x"),
         (Method::GET, "/api/recall?q=x"),
+        // The JSON forms of search and recall, which carry query vectors.
+        (Method::POST, "/api/search"),
+        (Method::POST, "/api/recall"),
         (Method::GET, "/api/wake-up?agent_identity=a"),
         (Method::GET, "/api/diary"),
         (Method::POST, "/api/diary"),
@@ -157,6 +160,10 @@ async fn every_other_route_is_guarded_including_ones_that_do_not_exist() {
         (Method::POST, "/api/wings/w/rooms/r/drawers"),
         (Method::GET, "/api/wings/w/rooms/r/drawers/d"),
         (Method::DELETE, "/api/wings/w/rooms/r/drawers/d"),
+        // Corrective and derived writes on one drawer, by id.
+        (Method::POST, "/api/drawers/x/supersede"),
+        (Method::PUT, "/api/drawers/x/embedding"),
+        (Method::POST, "/api/drawers/x/mentions"),
         (Method::POST, "/mcp"),
         // A path no route serves must not answer 404 to an anonymous caller,
         // or the router's shape could be probed without a token.

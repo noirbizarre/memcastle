@@ -49,9 +49,11 @@ use embedded_schema_gen::embedded_schema;
 mod auth;
 mod drawers;
 mod entities;
+mod graph;
 mod jobs;
 mod migration_state;
 mod palace;
+mod retrieval;
 mod timestamps;
 mod wings;
 
@@ -64,7 +66,7 @@ use surrealdb::opt::auth::Root;
 use crate::domain::Secret;
 use crate::error::{Error, Result};
 
-pub use drawers::{MatchMode, SearchHit};
+pub use retrieval::MatchMode;
 
 /// Convert a struct or data-carrying enum to a bindable value.
 ///
@@ -769,6 +771,15 @@ mod tests {
         );
     }
 
+    /// A filter scoping by wing and/or room name, everything else default.
+    fn scope(wing: Option<&str>, room: Option<&str>) -> crate::domain::SearchFilter {
+        crate::domain::SearchFilter {
+            wing: wing.map(str::to_string),
+            room: room.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
     /// A minimal drawer fixture for search tests — only `room` and
     /// `content` vary between callers; everything else is filler a
     /// full-text search test doesn't care about.
@@ -818,11 +829,10 @@ mod tests {
             store_with_one_drawer("my main programming languages are Rust and Python").await;
 
         let hits = store
-            .list_drawers_matching(
+            .search_lexical(
                 "programming languages I use preferences",
                 10,
-                None,
-                None,
+                &scope(None, None),
                 MatchMode::All,
             )
             .await
@@ -839,11 +849,10 @@ mod tests {
             store_with_one_drawer("my main programming languages are Rust and Python").await;
 
         let hits = store
-            .list_drawers_matching(
+            .search_lexical(
                 "programming languages I use preferences",
                 10,
-                None,
-                None,
+                &scope(None, None),
                 MatchMode::Any,
             )
             .await
@@ -887,7 +896,7 @@ mod tests {
             .expect("create beta drawer");
 
         let hits = store
-            .list_drawers_matching("castle", 10, None, None, MatchMode::All)
+            .search_lexical("castle", 10, &scope(None, None), MatchMode::All)
             .await
             .expect("search");
         assert_eq!(
@@ -931,7 +940,7 @@ mod tests {
             .expect("create beta drawer");
 
         let hits = store
-            .list_drawers_matching("castle", 10, Some("alpha"), None, MatchMode::All)
+            .search_lexical("castle", 10, &scope(Some("alpha"), None), MatchMode::All)
             .await
             .expect("wing-scoped search");
         assert_eq!(
@@ -966,7 +975,7 @@ mod tests {
             .expect("create notes drawer");
 
         let hits = store
-            .list_drawers_matching("castle", 10, None, Some("notes"), MatchMode::All)
+            .search_lexical("castle", 10, &scope(None, Some("notes")), MatchMode::All)
             .await
             .expect("room-scoped search");
         assert_eq!(
@@ -1002,6 +1011,16 @@ mod tests {
             .await
             .expect("room quiet");
 
+        // Drawers that never mention the term. BM25's inverse document
+        // frequency is zero when *every* drawer matches, which would make
+        // every score 0 and leave the order to insertion luck; with fillers
+        // the score gap below is real.
+        for i in 0..6 {
+            store
+                .create_drawer(&test_drawer(loud_room.id, &format!("unrelated filler {i}")))
+                .await
+                .expect("create filler drawer");
+        }
         // Repeated term -> a much higher BM25 score than a single mention,
         // so an unscoped, capped query is dominated by "loud"'s drawers.
         for i in 0..3 {
@@ -1027,7 +1046,7 @@ mod tests {
         // match count, the top hits are "loud"'s -- proving the score gap
         // is real, not an artifact of insertion order.
         let unscoped = store
-            .list_drawers_matching("castle", 2, None, None, MatchMode::All)
+            .search_lexical("castle", 2, &scope(None, None), MatchMode::All)
             .await
             .expect("unscoped search");
         assert_eq!(unscoped.len(), 2);
@@ -1042,7 +1061,7 @@ mod tests {
         // already-fetched unscoped page, this would come back empty -- the
         // top 2 rows fetched would already be "loud"'s.
         let scoped = store
-            .list_drawers_matching("castle", 2, Some("quiet"), None, MatchMode::All)
+            .search_lexical("castle", 2, &scope(Some("quiet"), None), MatchMode::All)
             .await
             .expect("wing-scoped search");
         assert_eq!(

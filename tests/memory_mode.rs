@@ -364,3 +364,100 @@ async fn a_read_only_client_cannot_mine_or_apply_a_repair_but_can_dry_run_one() 
 
     daemon.shutdown().await;
 }
+
+#[tokio::test]
+async fn the_new_retrieval_operations_follow_the_memory_mode_matrix() {
+    let daemon = TestDaemon::start().await;
+    let client = reqwest::Client::new();
+    let base = &daemon.base_url;
+    let drawer: serde_json::Value = client
+        .post(format!("{base}/api/wings/w/rooms/r/drawers"))
+        .json(&serde_json::json!({ "content": "gated retrieval memory" }))
+        .send()
+        .await
+        .expect("create")
+        .json()
+        .await
+        .expect("json");
+    let id = drawer["id"].as_str().expect("id");
+
+    // Reads: the JSON search forms and every new option are reads.
+    for mode in ["full", "read_only"] {
+        let response = client
+            .post(format!("{base}/api/search"))
+            .header(HEADER, mode)
+            .json(&serde_json::json!({ "text": "gated", "expand": true }))
+            .send()
+            .await
+            .expect("request");
+        assert_eq!(response.status(), StatusCode::OK, "{mode} may search");
+    }
+    for url in [
+        format!("{base}/api/search?q=gated&ranking=lexical&include_historical=true"),
+        format!("{base}/api/recall?q=gated&expand=true"),
+    ] {
+        let response = client
+            .get(&url)
+            .header(HEADER, "disabled")
+            .send()
+            .await
+            .expect("request");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{url}");
+    }
+    let disabled = client
+        .post(format!("{base}/api/search"))
+        .header(HEADER, "disabled")
+        .json(&serde_json::json!({ "text": "gated" }))
+        .send()
+        .await
+        .expect("request");
+    assert_eq!(disabled.status(), StatusCode::FORBIDDEN);
+
+    // Writes: supersession, linking and embedding refuse read_only and disabled.
+    for mode in ["read_only", "disabled"] {
+        let supersede = client
+            .post(format!("{base}/api/drawers/{id}/supersede"))
+            .header(HEADER, mode)
+            .json(&serde_json::json!({ "content": "rewritten" }))
+            .send()
+            .await
+            .expect("request");
+        assert_eq!(
+            supersede.status(),
+            StatusCode::FORBIDDEN,
+            "supersede in {mode}"
+        );
+
+        let mention = client
+            .post(format!("{base}/api/drawers/{id}/mentions"))
+            .header(HEADER, mode)
+            .json(&serde_json::json!({ "name": "x", "kind": "thing" }))
+            .send()
+            .await
+            .expect("request");
+        assert_eq!(mention.status(), StatusCode::FORBIDDEN, "mention in {mode}");
+
+        let embed = client
+            .put(format!("{base}/api/drawers/{id}/embedding"))
+            .header(HEADER, mode)
+            .json(&serde_json::json!({ "embedding": vec![0.0f32; 768] }))
+            .send()
+            .await
+            .expect("request");
+        assert_eq!(embed.status(), StatusCode::FORBIDDEN, "embedding in {mode}");
+    }
+
+    // The refused supersession changed nothing.
+    let after: serde_json::Value = client
+        .get(format!("{base}/api/search?q=gated"))
+        .send()
+        .await
+        .expect("request")
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(after[0]["content"], "gated retrieval memory");
+    assert!(after[0]["valid_to"].is_null(), "{after}");
+
+    daemon.shutdown().await;
+}

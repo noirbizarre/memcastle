@@ -19,8 +19,8 @@ A failure comes back as an MCP error result carrying the [error body](#errors) b
 |---|---|---|
 | `memcastle_set_mode` | `mode` | Choose this session's [memory mode](memory-modes.md). |
 | `memcastle_status` | none | Daemon health: version, uptime, pid, address, palace, datastore and migration state, counts. |
-| `memcastle_search` | `query`, `limit?`, `wing?`, `room?` | Full-text search over drawer content. |
-| `memcastle_recall` | `query`, `limit?`, `wing?` | Verbatim recall of matching content. |
+| `memcastle_search` | `query`, `limit?`, `wing?`, `room?`, `ranking?`, `tags?`, `source_kind?`, `as_of?`, `include_historical?`, `expand?` | Search drawer content: lexical, semantic or hybrid, see [Searching](#searching). |
+| `memcastle_recall` | the same, without `room` | Verbatim recall of matching content. |
 | `memcastle_wake_up` | `agent_identity`, `wing?`, `max_items?`, `max_bytes?` | Session-start context for an agent. |
 | `memcastle_diary_write` | `agent_identity`, `wing`, `content` | Write a diary entry. |
 | `memcastle_diary_read` | `agent_identity`, `wing`, `limit?` | Read an agent's newest diary entries. |
@@ -103,14 +103,20 @@ that would be unsafe (`memcastle::db::unsafe_bind`), `404` for an unknown job, w
 `409` for a job recorded as running that has no worker (restart the daemon), a job that kept changing state
 under the request (run it again), a database admin endpoint that is already
 open or cannot bind its address (`memcastle::db::bind_failed`), a drawer name already held by other content,
-or a wing or room delete while a job that writes to the palace is pending, and `500` for a server failure.
+a wing or room delete while a job that writes to the palace is pending, or superseding a drawer that was already
+superseded (`memcastle::palace::drawer_superseded`), `502` when the embedding provider fails
+(`memcastle::embed::failed`), and `500` for a server failure.
+A search that needs a vector it cannot get (`memcastle::search::semantic_unavailable`) and a request that needs an embedding
+provider when none is configured (`memcastle::embed::not_configured`) are `400`s.
 
 | Route | Purpose | Parameters |
 |---|---|---|
 | `GET /api/health` | Liveness: `{"status": "ok"}`. Touches nothing else. | none |
 | `GET /api/status` | The full status report, also used by `memcastle status`. | none |
-| `GET /api/search` | Search drawers. | query string: `q` (or `query`), `limit`, `wing`, `room` |
-| `GET /api/recall` | Recall drawers. | `q` (or `query`), `limit`, `wing` |
+| `GET /api/search` | Search drawers. | query string: `q` (or `query`), `limit`, `wing`, `room`, `ranking`, `tags`, `source_kind`, `as_of`, `include_historical`, `expand` |
+| `POST /api/search` | The same search as a JSON [`SearchQuery`](#searching), the only way to send a `query_embedding`. | JSON body |
+| `GET /api/recall` | Recall drawers. | as `GET /api/search`, and `room` is ignored |
+| `POST /api/recall` | The JSON form of recall. | JSON body |
 | `GET /api/wake-up` | Session-start context. | `agent_identity`, `wing`, `max_items`, `max_bytes` |
 | `GET /api/diary` | Read diary entries. | `agent_identity`, `wing`, `limit` |
 | `POST /api/diary` | Write a diary entry. | JSON body: `agent_identity`, `wing`, `content`, `requested_by?` |
@@ -134,6 +140,9 @@ or a wing or room delete while a job that writes to the palace is pending, and `
 | `POST /api/wings/{wing}/rooms/{room}/drawers` | Write a drawer, creating its wing and room if needed. | JSON body: `content`, `name?`, `requested_by?` |
 | `GET /api/wings/{wing}/rooms/{room}/drawers/{drawer}` | One drawer in full. | none |
 | `DELETE /api/wings/{wing}/rooms/{room}/drawers/{drawer}` | Delete one drawer. | none |
+| `POST /api/drawers/{id}/supersede` | End a drawer's validity now, with a replacement when `content` is given: `{superseded, replacement}`. | JSON body: `content?`, `tags?`, `requested_by?` |
+| `PUT /api/drawers/{id}/embedding` | Attach a vector you computed to a drawer. | JSON body: `embedding` (768 numbers) |
+| `POST /api/drawers/{id}/mentions` | Record that a drawer mentions an entity, for graph expansion: `201` when linked, `200` when it already was. | JSON body: `name`, `kind` |
 | `POST /api/auth/token` | Generate a token, replacing any previous one: `{token, algorithm, version, created_at}`. | none |
 | `DELETE /api/auth/token` | Revoke the generated token: `{"revoked": true}`. | none |
 | `GET /api/db` | Whether the [database admin endpoint](database-access.md) is listening, and where. | none |
@@ -149,6 +158,84 @@ curl -s http://127.0.0.1:8420/api/health
 curl -s 'http://127.0.0.1:8420/api/search?q=formatter&limit=5'
 curl -s http://127.0.0.1:8420/api/jobs?status=running
 ```
+
+### Searching
+
+`memcastle_search`, `memcastle_recall`, `GET /api/search` and `GET /api/recall` take the same options.
+Only the query is required, so a plain `?q=word` means what it always did.
+
+| Option | Meaning |
+|---|---|
+| `ranking` | `auto` (the default), `lexical`, `semantic` or `hybrid`. |
+| `wing`, `room` | Restrict to a wing or room by name. `recall` ignores `room`. |
+| `tags` | Drawers carrying every one of these tags: a list over MCP, comma-separated in a query string (`tags=a,b`). |
+| `source_kind` | `file`, `manual` or `other`. |
+| `as_of` | An RFC 3339 instant, such as `2026-01-31T12:00:00Z`: search the memory that was valid then. |
+| `include_historical` | Also return memory that has been superseded. Cannot be combined with `as_of`. |
+| `expand` | Append drawers related to the hits through the knowledge graph. |
+| `limit` | At most this many hits, 10 by default and 200 at most. |
+
+**Ranking.**
+`lexical` is BM25 over the words, stemmed and without synonyms, matching every word first and any of them only when
+nothing matched.
+`semantic` ranks by vector similarity, and `hybrid` fuses the two by reciprocal rank.
+`auto` is hybrid when the query can be embedded and lexical otherwise: a palace with no
+[embedding provider](configuration.md#embeddings) keeps searching exactly as before, and a provider that is down
+degrades `auto` to lexical with a warning in the daemon log.
+An explicit `semantic` or `hybrid` that cannot get a vector fails with `memcastle::search::semantic_unavailable`
+instead of answering lexically.
+
+**Time.**
+By default a search sees only what is valid now.
+A drawer is valid at an instant from its `valid_from` until, but not including, its `valid_to`, so a drawer superseded at
+that instant and its replacement are never both found.
+`as_of` and `include_historical` reach older memory, which is how a corrected belief is still found as it stood.
+
+**Expansion.**
+With `expand`, drawers that share an entity with a hit (or sit one currently valid `relates_to` hop away) follow the direct
+hits, best first, up to `limit` more.
+Each carries a `graph` signal and `via`, the entities that connect it.
+Expansion never reorders or replaces a direct hit.
+Link drawers to entities with `POST /api/drawers/{id}/mentions` or `memcastle drawer mention`.
+
+**Results.**
+Every hit is the stored drawer, verbatim, plus these fields:
+
+```json
+{
+  "id": "…", "content": "…", "tags": [], "valid_from": "…", "valid_to": null,
+  "score": 0.0328,
+  "signals": { "lexical": 1.2, "semantic": 0.91 },
+  "via": ["alice"]
+}
+```
+
+`score` means what the ranking says (BM25, cosine similarity or reciprocal-rank fusion) and is comparable only within one
+response.
+`signals` shows which legs matched and how strongly, and is absent when none did; `via` appears only on expanded hits.
+Equal scores order by drawer id, so a query ranks identically every time.
+A hit never carries the embedding vector.
+
+**Your own vectors.**
+`POST /api/search` takes the request as JSON, so it can carry a `query_embedding`:
+
+```json
+{ "text": "…", "ranking": "semantic", "limit": 5,
+  "filter": { "wing": "work", "tags": ["style"], "temporal": "current" },
+  "query_embedding": [0.01, "… 768 numbers"] }
+```
+
+`temporal` is `"current"`, `"all"` or `{"as_of": "2026-01-31T12:00:00Z"}`.
+Attach a document vector with `PUT /api/drawers/{id}/embedding`, whose body is `{"embedding": [...]}`.
+Both need exactly 768 numbers: the dimension is part of the palace's schema.
+
+**Correcting a drawer.**
+`POST /api/drawers/{id}/supersede` closes the drawer and, when the body has `content`, files a replacement in the same room
+from the same instant.
+The replacement takes over the drawer's name (the old one stays reachable by id) and its tags unless `tags` says otherwise.
+Without `content` the drawer is only invalidated.
+The old content is never rewritten.
+These three routes take a drawer id, which every search hit carries, and have no MCP tool.
 
 ### Wings, rooms and drawers
 

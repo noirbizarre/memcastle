@@ -115,7 +115,10 @@ and the client does not block the session when the daemon is unavailable.
 
 Operations: `memcastle_recall` and `memcastle_search`.
 
-Both are lexical today, matching every query word first and any word if there was none.
+Both rank lexically unless the daemon has an embedding provider, and then by meaning and words together (`ranking: auto`).
+The lexical leg matches every query word first and any word if there was none.
+Both accept optional `ranking`, `tags`, `source_kind`, `as_of`, `include_historical` and `expand` arguments, and a client
+that sends only `query` keeps working.
 Content is returned verbatim, so a client can quote it.
 No match is an empty list.
 Neither tool forces a client to search, and nothing in MemCastle enforces the habit.

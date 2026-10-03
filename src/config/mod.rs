@@ -3,7 +3,7 @@
 //! Load order: hardcoded defaults -> optional TOML file -> `MEMCASTLE_*`
 //! environment overrides -> command-line [`Overrides`] -> [`Config::validate`].
 //! Deliberately hand-rolled rather than pulled in from a config-framework
-//! crate — there are eight sections of settings, and a framework's abstraction
+//! crate — there are nine sections of settings, and a framework's abstraction
 //! cost would outweigh what it saves here.
 //!
 //! Default file locations follow the Unix XDG convention on Linux and macOS
@@ -229,6 +229,88 @@ impl Default for DbConfig {
     }
 }
 
+/// Where document and query embeddings come from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EmbeddingProvider {
+    /// No provider: nothing is embedded by the daemon and search is lexical
+    /// unless a caller supplies vectors itself.
+    #[default]
+    None,
+    /// An external program the daemon runs, speaking JSON over stdin/stdout.
+    /// The program owns any credentials, so MemCastle never sees them.
+    Command,
+    /// An OpenAI-compatible `/embeddings` HTTP endpoint (OpenAI, Ollama,
+    /// llama.cpp, vLLM, ...).
+    Http,
+}
+
+impl std::str::FromStr for EmbeddingProvider {
+    type Err = String;
+
+    fn from_str(raw: &str) -> std::result::Result<Self, String> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "none" => Ok(Self::None),
+            "command" => Ok(Self::Command),
+            "http" => Ok(Self::Http),
+            other => Err(format!(
+                "unknown embedding provider `{other}`; expected one of: none, command, http"
+            )),
+        }
+    }
+}
+
+/// The default time, in seconds, one embedding call may take.
+pub const DEFAULT_EMBEDDING_TIMEOUT_SECS: u64 = 30;
+/// The default number of texts sent to the provider per call.
+pub const DEFAULT_EMBEDDING_BATCH_SIZE: usize = 16;
+
+/// Embedding provider settings (`[embeddings]`).
+///
+/// Embeddings are derived data: the palace works without a provider, and one
+/// that is configured but down degrades search to lexical rather than
+/// failing it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EmbeddingsConfig {
+    /// Which mechanism produces embeddings.
+    pub provider: EmbeddingProvider,
+    /// For `provider = "command"`: the program and its arguments, run without a
+    /// shell. File-only, since an argument list is awkward in an environment
+    /// variable.
+    pub command: Vec<String>,
+    /// For `provider = "http"`: the API base URL, e.g.
+    /// `http://localhost:11434/v1`; `/embeddings` is appended.
+    pub url: Option<String>,
+    /// For `provider = "http"`: the model name sent with each request. Also
+    /// passed to a `command` provider so one script can serve several models.
+    pub model: Option<String>,
+    /// For `provider = "http"`: a bearer API key, when the endpoint needs one
+    /// (local servers usually do not). Prefer `MEMCASTLE_EMBEDDINGS_API_KEY`
+    /// so the secret stays out of the file.
+    #[serde(skip_serializing)]
+    pub api_key: Option<Secret>,
+    /// How long, in seconds, one embedding call may take before it is
+    /// abandoned (and, for a command, killed).
+    pub timeout_secs: u64,
+    /// How many texts one call carries; bounds a provider's request size.
+    pub batch_size: usize,
+}
+
+impl Default for EmbeddingsConfig {
+    fn default() -> Self {
+        Self {
+            provider: EmbeddingProvider::None,
+            command: Vec::new(),
+            url: None,
+            model: None,
+            api_key: None,
+            timeout_secs: DEFAULT_EMBEDDING_TIMEOUT_SECS,
+            batch_size: DEFAULT_EMBEDDING_BATCH_SIZE,
+        }
+    }
+}
+
 /// Parse a bind *interface* (`--bind`, `MEMCASTLE_BIND`).
 ///
 /// # Errors
@@ -389,6 +471,9 @@ pub struct Config {
     /// Database admin endpoint defaults.
     #[serde(default)]
     pub db: DbConfig,
+    /// Embedding provider settings.
+    #[serde(default)]
+    pub embeddings: EmbeddingsConfig,
 }
 
 impl Config {
@@ -521,6 +606,25 @@ impl Config {
                 .filter(|origin| !origin.is_empty())
                 .map(str::to_string)
                 .collect();
+        }
+        if let Some(raw) = lookup("MEMCASTLE_EMBEDDINGS_PROVIDER") {
+            self.embeddings.provider = raw
+                .parse()
+                .map_err(|e| Error::config(format!("MEMCASTLE_EMBEDDINGS_PROVIDER: {e}")))?;
+        }
+        if let Some(url) = lookup("MEMCASTLE_EMBEDDINGS_URL") {
+            self.embeddings.url = Some(url.trim().to_string());
+        }
+        if let Some(model) = lookup("MEMCASTLE_EMBEDDINGS_MODEL") {
+            self.embeddings.model = Some(model.trim().to_string());
+        }
+        if let Some(n) = lookup("MEMCASTLE_EMBEDDINGS_TIMEOUT_SECS") {
+            self.embeddings.timeout_secs = parse_override("MEMCASTLE_EMBEDDINGS_TIMEOUT_SECS", &n)?;
+        }
+        // Same reasoning as the auth token below: a secret, so no
+        // `parse_override`, whose error would echo the value.
+        if let Some(key) = lookup("MEMCASTLE_EMBEDDINGS_API_KEY") {
+            self.embeddings.api_key = Some(Secret::new(key.trim()));
         }
         // Deliberately not `parse_override`: its error embeds the raw value,
         // and this one is a secret. An empty variable (a secret manager that
@@ -668,6 +772,60 @@ impl Config {
                 "auth.token (or MEMCASTLE_AUTH_TOKEN) must be at least {MIN_TOKEN_LEN} characters; \
                  generate a strong one with `memcastle auth generate`"
             )));
+        }
+        self.validate_embeddings()?;
+        Ok(())
+    }
+
+    /// The `[embeddings]` invariants: a provider that is selected must be
+    /// fully specified, so a half-written section fails at load, not at the
+    /// first search.
+    fn validate_embeddings(&self) -> Result<()> {
+        let embeddings = &self.embeddings;
+        match embeddings.provider {
+            EmbeddingProvider::None => {}
+            EmbeddingProvider::Command => {
+                if embeddings
+                    .command
+                    .first()
+                    .is_none_or(|program| program.trim().is_empty())
+                {
+                    return Err(Error::config(
+                        "embeddings.command is empty; with `provider = \"command\"` set it to the \
+                         program and arguments to run, e.g. `command = [\"/usr/local/bin/embed\"]`",
+                    ));
+                }
+            }
+            EmbeddingProvider::Http => {
+                let url = embeddings.url.as_deref().unwrap_or_default();
+                if !(url.starts_with("http://") || url.starts_with("https://")) {
+                    return Err(Error::config(
+                        "embeddings.url (or MEMCASTLE_EMBEDDINGS_URL) must be an http:// or https:// \
+                         URL when `provider = \"http\"`, e.g. `http://localhost:11434/v1`",
+                    ));
+                }
+                if embeddings
+                    .model
+                    .as_deref()
+                    .is_none_or(|model| model.trim().is_empty())
+                {
+                    return Err(Error::config(
+                        "embeddings.model (or MEMCASTLE_EMBEDDINGS_MODEL) is required when \
+                         `provider = \"http\"`",
+                    ));
+                }
+            }
+        }
+        // A zero timeout would fail every call at once; a day is a units mistake.
+        if !(1..=3_600).contains(&embeddings.timeout_secs) {
+            return Err(Error::config(
+                "embeddings.timeout_secs must be between 1 and 3600 seconds",
+            ));
+        }
+        if !(1..=1_024).contains(&embeddings.batch_size) {
+            return Err(Error::config(
+                "embeddings.batch_size must be between 1 and 1024",
+            ));
         }
         Ok(())
     }
@@ -1300,5 +1458,116 @@ mod tests {
             Config::resolve_log_filter("memcastle=warn", true, None, 2),
             "memcastle=warn"
         );
+    }
+
+    /// A valid config (absolute palace path) to build `[embeddings]` cases on.
+    fn valid_config() -> Config {
+        let mut config = Config::default();
+        config.palace.path = std::env::temp_dir();
+        config
+    }
+
+    #[test]
+    fn no_embedding_provider_is_configured_by_default_and_validates() {
+        let config = valid_config();
+        assert_eq!(config.embeddings.provider, EmbeddingProvider::None);
+        config.validate().expect("a palace needs no provider");
+    }
+
+    #[test]
+    fn a_partial_embeddings_section_keeps_the_other_defaults() {
+        let config: Config = toml::from_str(
+            "[embeddings]\nprovider = \"http\"\nurl = \"http://localhost:11434/v1\"\nmodel = \"nomic\"",
+        )
+        .unwrap();
+        assert_eq!(config.embeddings.provider, EmbeddingProvider::Http);
+        assert_eq!(
+            config.embeddings.timeout_secs,
+            DEFAULT_EMBEDDING_TIMEOUT_SECS
+        );
+        assert_eq!(config.embeddings.batch_size, DEFAULT_EMBEDDING_BATCH_SIZE);
+    }
+
+    #[test]
+    fn embedding_environment_overrides_replace_the_file_values() {
+        let mut config = valid_config();
+        config
+            .apply_overrides_from(env(&[
+                ("MEMCASTLE_EMBEDDINGS_PROVIDER", "http"),
+                ("MEMCASTLE_EMBEDDINGS_URL", " http://localhost:1234/v1 "),
+                ("MEMCASTLE_EMBEDDINGS_MODEL", "m"),
+                ("MEMCASTLE_EMBEDDINGS_TIMEOUT_SECS", "5"),
+                ("MEMCASTLE_EMBEDDINGS_API_KEY", "sk-secret "),
+            ]))
+            .unwrap();
+        assert_eq!(config.embeddings.provider, EmbeddingProvider::Http);
+        assert_eq!(
+            config.embeddings.url.as_deref(),
+            Some("http://localhost:1234/v1")
+        );
+        assert_eq!(config.embeddings.timeout_secs, 5);
+        assert_eq!(
+            config.embeddings.api_key.as_ref().unwrap().expose(),
+            "sk-secret"
+        );
+        config
+            .validate()
+            .expect("a complete http provider is valid");
+    }
+
+    #[test]
+    fn a_malformed_provider_override_names_the_variable() {
+        let mut config = valid_config();
+        let message = config
+            .apply_overrides_from(env(&[("MEMCASTLE_EMBEDDINGS_PROVIDER", "openai")]))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains("MEMCASTLE_EMBEDDINGS_PROVIDER"),
+            "{message}"
+        );
+        assert!(
+            message.contains("command"),
+            "the valid names are listed: {message}"
+        );
+    }
+
+    #[test]
+    fn a_selected_provider_must_be_fully_specified() {
+        let mut http = valid_config();
+        http.embeddings.provider = EmbeddingProvider::Http;
+        let message = http.validate().unwrap_err().to_string();
+        assert!(message.contains("embeddings.url"), "{message}");
+
+        http.embeddings.url = Some("http://localhost:1/v1".into());
+        let message = http.validate().unwrap_err().to_string();
+        assert!(message.contains("embeddings.model"), "{message}");
+
+        let mut command = valid_config();
+        command.embeddings.provider = EmbeddingProvider::Command;
+        let message = command.validate().unwrap_err().to_string();
+        assert!(message.contains("embeddings.command"), "{message}");
+        command.embeddings.command = vec!["/usr/local/bin/embed".into()];
+        command
+            .validate()
+            .expect("a command provider with a program is valid");
+    }
+
+    #[test]
+    fn embedding_timeout_and_batch_size_are_range_checked() {
+        let mut config = valid_config();
+        config.embeddings.timeout_secs = 0;
+        assert!(config.validate().is_err());
+        config.embeddings.timeout_secs = DEFAULT_EMBEDDING_TIMEOUT_SECS;
+        config.embeddings.batch_size = 0;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn an_embedding_api_key_is_neither_printed_nor_serialised() {
+        let mut config = valid_config();
+        config.embeddings.api_key = Some(Secret::new("sk-very-secret"));
+        assert!(!format!("{config:?}").contains("sk-very-secret"));
+        assert!(!toml::to_string(&config).unwrap().contains("sk-very-secret"));
     }
 }

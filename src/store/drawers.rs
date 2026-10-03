@@ -1,8 +1,7 @@
-//! Drawer repository methods: writes, listing, and lexical search.
+//! Drawer repository methods: writes and listing.
 //!
-//! Semantic/vector search is a deliberate gap here (see `search` module docs
-//! and the architecture doc's non-goals list) — `embedding` is written when
-//! present but nothing yet reads it back for ranking.
+//! Ranked retrieval (lexical, vector, hybrid) lives in `retrieval`; this
+//! module is the plain create/read/delete surface.
 
 use serde::Deserialize;
 
@@ -10,40 +9,6 @@ use crate::domain::{Drawer, DrawerId, RoomId};
 use crate::error::Result;
 
 use super::SurrealStore;
-
-/// One lexical search result: the drawer plus its BM25 relevance score.
-#[derive(Debug, Clone, Deserialize, serde::Serialize)]
-pub struct SearchHit {
-    /// The matching drawer.
-    #[serde(flatten)]
-    pub drawer: Drawer,
-    /// The BM25 score `search::score(1)` assigned this match — higher is
-    /// more relevant. Not comparable across different queries.
-    pub score: f32,
-}
-
-/// How a multi-word query's terms combine in the full-text match.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MatchMode {
-    /// Every query term must appear in the drawer (SurrealDB's default `@1@`).
-    All,
-    /// A single matching term is enough; BM25 still ranks drawers with more
-    /// matching terms higher.
-    Any,
-}
-
-impl MatchMode {
-    /// The full-text operator for this mode. A closed set of literals,
-    /// because SurrealDB cannot bind an operator as a parameter and
-    /// interpolating anything caller-supplied into the query would be an
-    /// injection hole.
-    const fn operator(self) -> &'static str {
-        match self {
-            Self::All => "@1@",
-            Self::Any => "@1,OR@",
-        }
-    }
-}
 
 /// The column list every drawer read projects, so a native `id`/`room`
 /// `RecordId` never has to be handled on the Rust side (see `store::mod`'s
@@ -53,34 +18,50 @@ pub(super) const DRAWER_COLUMNS: &str = "record::id(id) AS id, room, name, conte
      embedding, provenance, <string>valid_from AS valid_from, valid_to, \
      <string>created_at AS created_at, <string>updated_at AS updated_at";
 
+/// [`DRAWER_COLUMNS`] without the embedding, for ranked retrieval: a vector is
+/// hundreds of floats the caller never asked for, and search results are
+/// serialised straight onto the wire.
+pub(super) const DRAWER_SEARCH_COLUMNS: &str = "record::id(id) AS id, room, name, content, content_hash, source, tags, \
+     provenance, <string>valid_from AS valid_from, valid_to, \
+     <string>created_at AS created_at, <string>updated_at AS updated_at";
+
+/// The statement that writes one drawer, binding the names [`bind_drawer`] sets.
+const CREATE_DRAWER: &str = "CREATE type::record('drawer', $id) SET \
+     room = $room, name = $name, content = $content, content_hash = $content_hash, \
+     source = $source, tags = $tags, embedding = $embedding, provenance = $provenance, \
+     valid_from = <datetime>$valid_from, valid_to = $valid_to, \
+     created_at = <datetime>$created_at, updated_at = <datetime>$updated_at";
+
+/// Bind every parameter [`CREATE_DRAWER`] mentions, so the plain write and the
+/// supersession transaction cannot drift apart on how a drawer is stored.
+fn bind_drawer<'r>(
+    query: surrealdb::method::Query<'r, surrealdb::engine::any::Any>,
+    drawer: &Drawer,
+) -> Result<surrealdb::method::Query<'r, surrealdb::engine::any::Any>> {
+    Ok(query
+        .bind(("id", drawer.id.to_string()))
+        .bind(("room", drawer.room.to_string()))
+        // `None` binds as `NONE`, which is what an `option<string>` field
+        // wants: unnamed drawers must not collide on the unique index.
+        .bind(("name", drawer.name.clone()))
+        .bind(("content", drawer.content.clone()))
+        .bind(("content_hash", drawer.content_hash.clone()))
+        .bind(("source", super::bindable(&drawer.source)?))
+        .bind(("tags", drawer.tags.clone()))
+        .bind(("embedding", drawer.embedding.clone()))
+        .bind(("provenance", super::bindable(&drawer.provenance)?))
+        .bind(("valid_from", super::stored(drawer.valid_from)))
+        .bind(("valid_to", drawer.valid_to.map(super::stored)))
+        .bind(("created_at", super::stored(drawer.created_at)))
+        .bind(("updated_at", super::stored(drawer.updated_at))))
+}
+
 impl SurrealStore {
     /// Persist a new drawer. Drawers are never updated in place (`content`
     /// is immutable — see [`Drawer`]'s doc comment), so this is always a
     /// fresh `CREATE`, never an upsert.
     pub async fn create_drawer(&self, drawer: &Drawer) -> Result<()> {
-        self.db
-            .query(
-                "CREATE type::record('drawer', $id) SET \
-                 room = $room, name = $name, content = $content, content_hash = $content_hash, \
-                 source = $source, tags = $tags, embedding = $embedding, provenance = $provenance, \
-                 valid_from = <datetime>$valid_from, valid_to = $valid_to, \
-                 created_at = <datetime>$created_at, updated_at = <datetime>$updated_at",
-            )
-            .bind(("id", drawer.id.to_string()))
-            .bind(("room", drawer.room.to_string()))
-            // `None` binds as `NONE`, which is what an `option<string>` field
-            // wants: unnamed drawers must not collide on the unique index.
-            .bind(("name", drawer.name.clone()))
-            .bind(("content", drawer.content.clone()))
-            .bind(("content_hash", drawer.content_hash.clone()))
-            .bind(("source", super::bindable(&drawer.source)?))
-            .bind(("tags", drawer.tags.clone()))
-            .bind(("embedding", drawer.embedding.clone()))
-            .bind(("provenance", super::bindable(&drawer.provenance)?))
-            .bind(("valid_from", super::stored(drawer.valid_from)))
-            .bind(("valid_to", drawer.valid_to.map(super::stored)))
-            .bind(("created_at", super::stored(drawer.created_at)))
-            .bind(("updated_at", super::stored(drawer.updated_at)))
+        bind_drawer(self.db.query(CREATE_DRAWER), drawer)?
             .await?
             // `.await` alone only reports transport-level failures; a
             // rejected `SET` (e.g. a schema mismatch) would otherwise fail
@@ -88,6 +69,67 @@ impl SurrealStore {
             // drawer that was never written. See `store::mod`'s doc comment.
             .check()?;
         Ok(())
+    }
+
+    /// Close the validity of drawer `old` at `at` and, in the same
+    /// transaction, open `replacement` from that instant.
+    ///
+    /// Supersession is how a drawer is corrected without rewriting history:
+    /// the old drawer keeps its content, hash and id, and only gains a
+    /// `valid_to`, so a point-in-time search still finds what was believed
+    /// then. With no replacement it is an invalidation ("this was never
+    /// true" or "no longer true"). Returns whether `old` was open and is now
+    /// closed; `false` means it does not exist or was already closed, and
+    /// nothing was written.
+    ///
+    /// `(room, name)` is unique, so the superseded drawer gives up its name
+    /// (it stays addressable by id) for the replacement to take over.
+    pub async fn supersede_drawer(
+        &self,
+        old: DrawerId,
+        replacement: Option<&Drawer>,
+        at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<bool> {
+        // `!valid_to` is the "still open" test (see `entities`'s module doc).
+        let mut sql = String::from(
+            "BEGIN TRANSACTION; \
+             LET $closed = (UPDATE drawer SET valid_to = $at, updated_at = <datetime>$at, name = NONE \
+                WHERE id = type::record('drawer', $old) AND !valid_to RETURN record::id(id) AS id); \
+             IF array::len($closed) = 0 { THROW 'drawer not open'; }; ",
+        );
+        if replacement.is_some() {
+            sql.push_str(CREATE_DRAWER);
+            sql.push_str("; ");
+        }
+        sql.push_str("COMMIT TRANSACTION;");
+
+        let query = self
+            .db
+            .query(sql)
+            .bind(("old", old.to_string()))
+            .bind(("at", super::stored(at)));
+        let query = match replacement {
+            Some(drawer) => bind_drawer(query, drawer)?,
+            None => query,
+        };
+        let mut response = query.await?;
+        // Every statement of a failed transaction reports an error, and only
+        // the `THROW`'s names the cause, so all of them are inspected rather
+        // than `.check()`'s first.
+        let mut errors: Vec<_> = response.take_errors().into_iter().collect();
+        if errors.is_empty() {
+            return Ok(true);
+        }
+        // The `THROW` above: nothing matched, nothing was written.
+        if errors
+            .iter()
+            .any(|(_, error)| error.to_string().contains("drawer not open"))
+        {
+            return Ok(false);
+        }
+        errors.sort_by_key(|(index, _)| *index);
+        let (_, error) = errors.remove(0);
+        Err(error.into())
     }
 
     /// Persist `drawer` unless a drawer with that id already exists,
@@ -213,60 +255,6 @@ impl SurrealStore {
         Ok(counts.into_iter().next().map_or(0, |c| c.count))
     }
 
-    /// List drawers whose content matches `query`, best first: lexical (BM25
-    /// full-text) search over drawer content — the "basic
-    /// working search path" this bootstrap establishes. Semantic and hybrid
-    /// ranking are later phases layered on top of the same `drawer` table.
-    ///
-    /// `wing`/`room` optionally scope results by name. `drawer` has no
-    /// `wing` column (only `room`; `room.wing` is one hop up — see
-    /// `store::wings`'s module doc on why every FK here is a plain string,
-    /// not a record link), so the wing scope resolves matching room ids via
-    /// a nested subquery rather than a direct column comparison. Both
-    /// scopes are expressed as `($param = NULL OR ...)` predicates — the
-    /// same "optional filter" idiom as `list_jobs` (see its comment) — so
-    /// SurrealDB applies them before `ORDER BY`/`LIMIT`, instead of this
-    /// method fetching an unscoped page and filtering it in Rust, which
-    /// would let an out-of-scope but higher-scoring hit crowd a requested
-    /// scope's matches out of a capped result set.
-    ///
-    /// `mode` picks whether every query term must match or any one will
-    /// (see [`MatchMode`]); the `search` module decides which to try.
-    pub async fn list_drawers_matching(
-        &self,
-        query: &str,
-        limit: u32,
-        wing: Option<&str>,
-        room: Option<&str>,
-        mode: MatchMode,
-    ) -> Result<Vec<SearchHit>> {
-        let operator = mode.operator();
-        let sql = format!(
-            "SELECT {DRAWER_COLUMNS}, search::score(1) AS score FROM drawer \
-             WHERE content {operator} $query \
-               AND ($wing = NULL OR room IN ( \
-                     SELECT VALUE record::id(id) FROM room WHERE wing IN ( \
-                       SELECT VALUE record::id(id) FROM wing WHERE name = $wing))) \
-               AND ($room = NULL OR room IN ( \
-                     SELECT VALUE record::id(id) FROM room WHERE name = $room)) \
-             ORDER BY score DESC LIMIT $limit"
-        );
-        let mut response = self
-            .db
-            .query(sql)
-            .bind(("query", query.to_string()))
-            // Bound through `bindable` (`serde_json::Value`), not `.bind()`
-            // directly: binding `Option::None` the native way produces
-            // SurrealDB's `NONE` (absence), which `$wing = NULL` never
-            // matches — see `store::mod`'s regression test on `list_jobs`
-            // for the exact failure mode this sidesteps.
-            .bind(("wing", super::bindable(&wing)?))
-            .bind(("room", super::bindable(&room)?))
-            .bind(("limit", limit))
-            .await?;
-        super::take_rows(&mut response, 0)
-    }
-
     /// List `agent`'s diary entries filed under `room`, newest first,
     /// capped at `limit`. Unlike `list_drawers` (unfiltered), diary reads
     /// are always scoped to one identity — the whole point of issue #13's
@@ -283,7 +271,7 @@ impl SurrealStore {
     ) -> Result<Vec<Drawer>> {
         let sql = format!(
             "SELECT {DRAWER_COLUMNS} FROM drawer \
-             WHERE room = $room AND source.agent = $agent \
+             WHERE room = $room AND source.agent = $agent AND !valid_to \
              ORDER BY created_at DESC LIMIT $limit"
         );
         let mut response = self
@@ -315,7 +303,7 @@ impl SurrealStore {
     ) -> Result<Vec<Drawer>> {
         let sql = format!(
             "SELECT {DRAWER_COLUMNS} FROM drawer \
-             WHERE provenance.job_id != NULL \
+             WHERE provenance.job_id != NULL AND !valid_to \
                AND provenance.job_id IN ( \
                      SELECT VALUE record::id(id) FROM job WHERE kind.type = 'checkpoint') \
                AND ($wing = NULL OR room IN ( \

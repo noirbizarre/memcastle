@@ -7,7 +7,7 @@
 //!        |
 //!       app                <- application services (the only layer the above may call)
 //!        |
-//!   domain + jobs + search  <- pure model + scheduling + retrieval logic
+//!   domain + jobs + search + embed  <- pure model + scheduling + retrieval logic + vector providers
 //!        |
 //!      store                <- SurrealDB, embedded or remote
 //! ```
@@ -34,6 +34,7 @@ pub mod client;
 pub mod config;
 pub mod dbadmin;
 pub mod domain;
+pub mod embed;
 pub mod error;
 pub mod jobs;
 pub mod mcp;

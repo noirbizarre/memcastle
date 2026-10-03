@@ -63,3 +63,6 @@ The history is the value.
   fixtures, not a framework, and reach MemCastle only over MCP and HTTP
 - [ADR-020](020-skills-are-versioned-with-the-repository.md) — agent skills are plain files versioned with the
   repository and installed by copying, and a test holds them to the tools, commands and routes they name
+- [ADR-021](021-richer-retrieval.md) — retrieval is SurrealDB-native and derived: one HNSW index, one shared scope,
+  `search::rrf` fusion, point-in-time validity, drawer supersession and graph expansion, with embeddings from a provider
+  or the caller

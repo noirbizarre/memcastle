@@ -150,21 +150,32 @@ Failures print a diagnostic with a `memcastle::<module>::<kind>` code and what t
 
 ```sh
 memcastle search <QUERY> [--limit <N>] [--wing <WING>] [--room <ROOM>]
+                 [--ranking <auto|lexical|semantic|hybrid>] [--tag <TAG>]... [--source-kind <KIND>]
+                 [--as-of <TIMESTAMP> | --include-historical] [--expand]
 ```
 
-Full-text (BM25) search over drawer content.
-Drawers containing every word of the query are returned; if there are none, drawers containing any of them are.
+Search drawer content, lexically, by meaning or both.
+`--ranking auto` (the default) is hybrid when the daemon has an [embedding provider](configuration.md#embeddings) and
+lexical otherwise.
+Lexical matching returns drawers containing every word of the query and, if there are none, drawers containing any of them.
 `--limit` defaults to 10 and is capped at 200.
-`--wing` restricts results to a wing, `--room` to a room directly.
+`--wing` restricts results to a wing, `--room` to a room directly, `--tag` (repeatable) to drawers carrying every tag,
+and `--source-kind` to `file`, `manual` or `other`.
+Only memory valid now is searched unless `--as-of` names an instant (RFC 3339, such as `2026-01-31T12:00:00Z`) or
+`--include-historical` adds superseded memory.
+`--expand` appends drawers related to the hits through the knowledge graph.
+The option is `--ranking` because `--mode` is the [memory mode](memory-modes.md).
+The output is JSON, and the fields of each hit are described in [Searching](mcp-and-api.md#searching).
 
 ### `recall`
 
 ```sh
-memcastle recall <QUERY> [--limit <N>] [--wing <WING>]
+memcastle recall <QUERY> [--limit <N>] [--wing <WING>] [--ranking <…>] [--tag <TAG>]... [--source-kind <KIND>]
+                 [--as-of <TIMESTAMP> | --include-historical] [--expand]
 ```
 
 The recall-oriented counterpart to `search`.
-It returns matching drawers verbatim, with the same limit rules.
+It returns matching drawers verbatim, with the same options and limit rules, except that it has no `--room`.
 
 ### `wake-up`
 
@@ -226,6 +237,8 @@ memcastle room delete <WING>/<ROOM> [--yes]
 memcastle drawer list --room <WING>/<ROOM> [--limit <N>]
 memcastle drawer show <WING>/<ROOM>/<DRAWER>
 memcastle drawer create <WING>/<ROOM>/<NAME> [--content <TEXT> | --file <PATH>]
+memcastle drawer supersede <WING>/<ROOM>/<DRAWER> (--content <TEXT> | --file <PATH> | --invalidate)
+memcastle drawer mention <WING>/<ROOM>/<DRAWER> --name <NAME> --kind <KIND>
 memcastle drawer delete <WING>/<ROOM>/<DRAWER> [--yes]
 ```
 
@@ -282,10 +295,33 @@ Cancel the job or wait for it, then try again.
 The check is coarse on purpose and is not atomic with the delete:
 a job submitted in the instant between the two is not caught.
 
+`drawer supersede` is how a drawer is corrected without rewriting history.
+It ends the drawer's validity now and files a replacement with the new content (from `--content`, `--file` or standard
+input) in the same room, taking over the old drawer's name; with `--invalidate` it only ends it.
+The old drawer keeps its content and stays reachable by id and by `--as-of` searches, but no longer appears in a current
+search, diary read or wake-up.
+`drawer mention` records that a drawer mentions an entity, creating the entity if needed, so `search --expand` can reach
+related drawers through it.
+Both are writes.
+
 There is no MCP tool for any of this, see [MCP tools and REST API](mcp-and-api.md#wings-rooms-and-drawers).
 Looking is gated as a read and changing as a write, see [Memory modes](memory-modes.md).
 
 ## Maintenance
+
+### `embed`
+
+```sh
+memcastle embed [--wing <WING>]
+```
+
+Submits a job that computes the embedding of every drawer that has none, so semantic search covers it.
+It needs an [`[embeddings]` provider](configuration.md#embeddings) and is refused with `memcastle::embed::not_configured`
+without one.
+You rarely run it: the daemon queues the same job after anything that writes drawers, and once at startup, so this is for
+backfilling after you configure a provider and for forcing a sweep.
+It only fills each drawer's embedding and never changes its content, and running it again does nothing.
+It is a write, so it is refused in `read_only` and `disabled` modes.
 
 ### `audit`
 

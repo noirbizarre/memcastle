@@ -20,9 +20,9 @@
 //!   (`domain::Job::lease_expires_at`) says whether it is live, but this is a
 //!   cross-check number, not a defect signal, and a stale one is the
 //!   scheduler's reaper's business, not the audit's.
-//! - Drawers without an embedding: informational only, never a defect —
-//!   semantic search doesn't exist yet, so an absent embedding is expected,
-//!   not broken.
+//! - Drawers without an embedding: informational only, never a defect — a
+//!   palace with no embedding provider is a supported configuration, and with
+//!   one the backlog is exactly what the `Embed` job clears.
 //!
 //! Unlike `mining::run`/`checkpoint::run`, this handler does **not** chunk
 //! its work with a per-unit checkpoint: a full palace scan here is cheap

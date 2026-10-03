@@ -20,8 +20,9 @@ mod cli;
 
 use cli::{
     AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, CompletionsArgs, DaemonCommand,
-    DbCommand, DiaryCommand, DrawerCommand, JobCommand, MigrateArgs, MineArgs, RecallArgs,
-    RepairArgs, RoomCommand, SearchArgs, ServeArgs, StatusArgs, WakeUpArgs, WingCommand,
+    DbCommand, DiaryCommand, DrawerCommand, EmbedArgs, JobCommand, MigrateArgs, MineArgs,
+    RecallArgs, RepairArgs, RoomCommand, SearchArgs, ServeArgs, StatusArgs, WakeUpArgs,
+    WingCommand,
 };
 use memcastle::app::{DbEndpointRequest, DbEndpointStatus, WakeUpBudget};
 use memcastle::client::{DaemonClient, StatusView};
@@ -201,6 +202,7 @@ async fn run_command(
         Command::Mine(args) => cmd_mine(&config, mode, args).await,
         Command::Checkpoint(args) => cmd_checkpoint(&config, mode, args).await,
         Command::Audit(args) => cmd_audit(&config, mode, args).await,
+        Command::Embed(args) => cmd_embed(&config, mode, args).await,
         Command::Repair(args) => cmd_repair(&config, mode, args).await,
         Command::Diary(cmd) => cmd_diary(&config, mode, cmd).await,
         Command::Job(cmd) => cmd_job(&config, mode, cmd).await,
@@ -486,23 +488,39 @@ async fn spawn_and_wait(
     )))
 }
 
+/// The validated query for `search` or `recall`, built by the one conversion
+/// every interface shares so a bad `--ranking` or `--as-of` reads the same everywhere.
+fn retrieval_query(
+    query: String,
+    limit: u32,
+    wing: Option<String>,
+    room: Option<String>,
+    retrieval: cli::RetrievalArgs,
+) -> Result<memcastle::search::SearchQuery> {
+    memcastle::search::SearchOptions {
+        limit: Some(limit),
+        wing,
+        room,
+        ranking: retrieval.ranking,
+        tags: retrieval.tags,
+        source_kind: retrieval.source_kind,
+        as_of: retrieval.as_of,
+        include_historical: retrieval.include_historical,
+        expand: retrieval.expand,
+    }
+    .into_query(query)
+}
+
 async fn cmd_search(config: &Config, mode: Option<MemoryMode>, args: SearchArgs) -> Result<()> {
-    let hits = client(config, mode)
-        .search(
-            &args.query,
-            args.wing.as_deref(),
-            args.room.as_deref(),
-            args.limit,
-        )
-        .await?;
+    let query = retrieval_query(args.query, args.limit, args.wing, args.room, args.retrieval)?;
+    let hits = client(config, mode).search(&query).await?;
     print_json(&hits)?;
     Ok(())
 }
 
 async fn cmd_recall(config: &Config, mode: Option<MemoryMode>, args: RecallArgs) -> Result<()> {
-    let hits = client(config, mode)
-        .recall(&args.query, args.wing.as_deref(), args.limit)
-        .await?;
+    let query = retrieval_query(args.query, args.limit, args.wing, None, args.retrieval)?;
+    let hits = client(config, mode).recall(&query).await?;
     print_json(&hits)?;
     Ok(())
 }
@@ -562,6 +580,12 @@ async fn cmd_checkpoint(
 
 async fn cmd_audit(config: &Config, mode: Option<MemoryMode>, args: AuditArgs) -> Result<()> {
     let job = client(config, mode).submit_audit(args.scope).await?;
+    print_json(&job)?;
+    Ok(())
+}
+
+async fn cmd_embed(config: &Config, mode: Option<MemoryMode>, args: EmbedArgs) -> Result<()> {
+    let job = client(config, mode).submit_embed(args.wing).await?;
     print_json(&job)?;
     Ok(())
 }
@@ -856,6 +880,42 @@ async fn cmd_drawer(
                 |painter, _| view::render_created("drawer", &drawer, created.created, painter),
                 &created,
             )?;
+        }
+        DrawerCommand::Supersede {
+            drawer,
+            content,
+            file,
+            invalidate,
+        } => {
+            let (wing, room, name) = PalacePath::parse_drawer(&drawer)?;
+            if !invalidate && content.is_none() && file.is_none() {
+                return Err(Error::invalid_input(
+                    "content",
+                    "give `--content <text>` or `--file <path>` for the replacement, \
+                     or `--invalidate` to end the drawer without one",
+                ));
+            }
+            // Read before contacting the daemon, like `drawer create`.
+            let replacement = if invalidate {
+                None
+            } else {
+                Some(read_drawer_content(content, file.as_deref())?)
+            };
+            // The REST route takes an id (a search hit already carries one), so
+            // the path is resolved to it first.
+            let found = daemon.show_drawer(&wing, &room, &name).await?;
+            let outcome = daemon
+                .supersede_drawer(&found.id.to_string(), replacement)
+                .await?;
+            print_json(&outcome)?;
+        }
+        DrawerCommand::Mention { drawer, name, kind } => {
+            let (wing, room, drawer_name) = PalacePath::parse_drawer(&drawer)?;
+            let found = daemon.show_drawer(&wing, &room, &drawer_name).await?;
+            let link = daemon
+                .link_drawer_entity(&found.id.to_string(), &name, &kind)
+                .await?;
+            print_json(&link)?;
         }
         DrawerCommand::Delete { drawer, yes } => {
             let (wing, room, name) = PalacePath::parse_drawer(&drawer)?;
