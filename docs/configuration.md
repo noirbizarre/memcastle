@@ -151,6 +151,9 @@ Keep secrets out of version control: put this file outside any repository, and r
 
 `auth.token` is a secret, and is handled as one: MemCastle never logs it, prints it, serialises it, or writes it anywhere,
 and the client commands read it from the environment or the config file, never from a flag.
+Whitespace around `MEMCASTLE_AUTH_TOKEN` is ignored,
+but a token in the config file with leading or trailing whitespace is refused at start,
+because a client's token is trimmed too and the two could never match.
 See [Authentication](authentication.md).
 
 Some variables are read by the command line rather than the config file:
