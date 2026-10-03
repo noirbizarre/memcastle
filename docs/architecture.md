@@ -78,7 +78,8 @@ Nothing in `domain` knows SurrealDB exists, and nothing in `cli`, `mcp` or `api`
 The dotted line is the important one: the CLI is an HTTP client of the daemon, exactly as a script or dashboard would be.
 
 **The CLI has no business logic MCP/HTTP can't reuse.**
-Every subcommand except `serve`/`daemon start`/`daemon restart`/`migrate` is a thin `client::DaemonClient` call —
+Every subcommand except `serve`/`daemon start`/`daemon restart`/`migrate` and the local `completions`
+is a thin `client::DaemonClient` call —
 `memcastle mine ./project` submits a job over HTTP the way an MCP tool call would, rather than mining anything itself.
 `daemon stop` is one of them: it only asks the daemon to shut down.
 `daemon start` and `daemon restart` add only process management:
@@ -175,6 +176,7 @@ classDiagram
     class Wing
     class Room
     class Drawer {
+        +name?
         +content
         +source
         +tags
@@ -191,7 +193,9 @@ classDiagram
     Entity "1" --> "*" Relationship : relates_to
 ```
 
-A `Drawer`'s `content` is immutable once written;
+A `Drawer`'s `content` is immutable once written, and it may carry a `name` that is unique within its room,
+so it can be addressed as `wing/room/name`
+(wings, rooms and drawers are managed through REST and the CLI, see [ADR-018](adr/018-palace-hierarchy-management.md));
 provenance, tags, an optional `embedding` and a `valid_from`/`valid_to` pair travel alongside it.
 Provenance has one meaning for every writer (diary, mining, checkpoint):
 `provenance.requested_by` is the **channel** the write came through (`cli`, `http`, `mcp`),
@@ -468,7 +472,10 @@ and most MCP clients already support a URL-based transport, so no bridging proce
 A stdio bridge for clients that can only spawn a subprocess is deferred;
 tool logic never touches a transport type, so adding one is additive.
 
-The tool surface mirrors what the CLI and REST offer, so an integration never has to leave MCP.
+The tool surface mirrors the CLI and REST *memory* operations,
+so an integration never has to leave MCP to remember or recall.
+Management stays off it on purpose:
+there are no tools for wings, rooms and drawers, authentication tokens, the database endpoint or daemon lifecycle.
 It is listed in [MCP tools and REST API](mcp-and-api.md).
 The instruction text sent at `initialize` is generated from the registered tools, and a test compares the two,
 so it cannot drift from the surface.

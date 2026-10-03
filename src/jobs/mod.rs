@@ -37,7 +37,8 @@ pub enum JobOutcome {
     /// The handler finished all its work.
     Completed,
     /// The handler cooperatively paused; `job.checkpoint` holds where to
-    /// resume from.
+    /// resume from, for a handler that records one (audit and repair rescan
+    /// instead).
     Paused,
     /// The handler cooperatively stopped in response to a cancellation
     /// request.
@@ -425,9 +426,7 @@ impl Scheduler {
     /// The job kept changing status faster than a request could be applied.
     /// Practically unreachable; reported rather than looping forever.
     fn contended(id: JobId) -> crate::Error {
-        crate::Error::server(format!(
-            "job {id} kept changing state while the request was being applied; try again"
-        ))
+        crate::Error::job_contended(id.to_string())
     }
 
     /// Run the dispatch loop until `shutdown` fires. Claims at most one job

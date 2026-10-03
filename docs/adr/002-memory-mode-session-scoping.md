@@ -22,7 +22,8 @@ that is indistinguishable from a genuinely empty result.
 ## Decision
 
 `domain::MemoryMode` is a closed three-value enum (`Full`/`ReadOnly`/`Disabled`),
-not a per-capability flag set (task brief §21 explicitly deferred). Enforcement lives in exactly one place —
+not a per-capability flag set (task brief §21 explicitly deferred).
+Enforcement lives in exactly one place —
 `app::AppServices::require_read`/`require_write`, checked before any store contact
 by the seven memory-content operations (`search`/`recall`/`wake_up`/`diary_read` for reads;
 `checkpoint`/`emergency_checkpoint`/`diary_write` for writes).
@@ -66,7 +67,8 @@ reads are rejected with the same typed `Error::ModeForbidden` as writes, never a
 ## Consequences
 
 - The MCP session-mode cache is purely in-process (never written to `SurrealStore`)
-  and does not survive a daemon restart — unlike the durable job queue. In practice this is likely moot:
+  and does not survive a daemon restart — unlike the durable job queue.
+  In practice this is likely moot:
   rmcp's `LocalSessionManager` session ids are themselves in-memory and process-local,
   so a reconnecting client gets a new session id and the same Full-by-default cold start a first-time caller gets,
   rather than a stale-mode bug —

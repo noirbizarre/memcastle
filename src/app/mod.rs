@@ -17,8 +17,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    CheckpointDestination, CheckpointPayload, Drawer, DrawerId, Job, JobId, JobKind, JobStatus,
-    MemoryMode, MiningSource, NameKind, Priority, Provenance, Source, SourceKind, validate_name,
+    CheckpointDestination, CheckpointPayload, Drawer, DrawerId, FactMutation, Job, JobId, JobKind,
+    JobStatus, MemoryMode, MiningSource, NameKind, Priority, Provenance, Source, SourceKind,
+    validate_name,
 };
 use crate::error::{Error, Result};
 use crate::jobs::Scheduler;
@@ -333,9 +334,9 @@ impl AppServices {
         Ok(())
     }
 
-    /// Reject a read (`search`/`recall`/`wake_up`/`diary_read`) that
-    /// `mode` doesn't permit, before any store contact — the single place
-    /// all read-gated methods check `MemoryMode` (see that type's doc
+    /// Reject a read (search, recall, wake-up, diary read, job and palace
+    /// listings) that `mode` doesn't permit, before any store contact — the
+    /// single place all read-gated methods check `MemoryMode` (see that type's doc
     /// comment for the matrix).
     fn require_read(mode: MemoryMode, operation: &'static str) -> Result<()> {
         if mode.allows_read() {
@@ -348,8 +349,8 @@ impl AppServices {
         }
     }
 
-    /// Reject a write (`checkpoint`/`emergency_checkpoint`/`diary_write`)
-    /// that `mode` doesn't permit, before any store contact — the write
+    /// Reject a write (checkpoint, diary write, mining, repair, and palace
+    /// create and delete) that `mode` doesn't permit, before any store contact — the write
     /// counterpart of [`Self::require_read`].
     fn require_write(mode: MemoryMode, operation: &'static str) -> Result<()> {
         if mode.allows_write() {
@@ -436,6 +437,12 @@ impl AppServices {
                 ),
             ));
         }
+        // Up front, like the path: a bad wing name is a 400 at submission,
+        // not a job that fails once it starts. A wing derived from the
+        // directory name is left alone, since the caller did not choose it.
+        if let Some(wing) = wing.as_deref() {
+            self.check_new_wing_name(wing).await?;
+        }
         self.scheduler
             .submit(
                 JobKind::Mine {
@@ -458,6 +465,20 @@ impl AppServices {
         self.scheduler
             .submit(JobKind::Demo { steps }, Priority::Normal, requested_by)
             .await
+    }
+
+    /// Refuse a wing name that could not be created through `wing create`.
+    ///
+    /// An existing wing is always accepted, whatever its name: it can only
+    /// have an odd one from before names were checked, and refusing it here
+    /// would lock its owner out of writing to it. Only a name that would
+    /// *create* a wing is validated, so a UUID-shaped or `/`-bearing name can
+    /// never become a wing no path can address.
+    async fn check_new_wing_name(&self, wing: &str) -> Result<()> {
+        if self.store.get_wing(wing).await?.is_some() {
+            return Ok(());
+        }
+        validate_name(NameKind::Wing, wing)
     }
 
     /// Shared submission path for both checkpoint priorities — `checkpoint`
@@ -496,10 +517,32 @@ impl AppServices {
                 format!("`items[{index}].content` must not be empty"),
             ));
         }
+        // The range the domain types document and nothing else enforced: an
+        // out-of-range (or NaN) confidence would be stored as given and
+        // skew whatever later ranks facts by it. `contains` is false for NaN.
+        for (index, item) in payload.items.iter().enumerate() {
+            let confidence = match &item.fact {
+                Some(
+                    FactMutation::Add { confidence, .. }
+                    | FactMutation::Supersede { confidence, .. },
+                ) => Some(*confidence),
+                Some(FactMutation::Invalidate { .. }) | None => None,
+            };
+            if confidence.is_some_and(|value| !(0.0..=1.0).contains(&value)) {
+                return Err(Error::invalid_input(
+                    "payload",
+                    format!("`items[{index}].fact.confidence` must be between 0 and 1"),
+                ));
+            }
+        }
         // Up front, so a bad name is a 400 at submission and not a job that
         // fails halfway through after writing the items before it.
         for name in payload.items.iter().filter_map(|item| item.name.as_deref()) {
             validate_name(NameKind::Drawer, name)?;
+        }
+        // The same reason for item wings, which create a wing on first use.
+        for wing in payload.items.iter().filter_map(|item| item.wing.as_deref()) {
+            self.check_new_wing_name(wing).await?;
         }
         self.scheduler
             .submit(JobKind::Checkpoint { payload }, priority, requested_by)
@@ -738,8 +781,11 @@ impl AppServices {
     ///
     /// # Errors
     ///
-    /// Returns an error if the store write fails, or [`Error::ModeForbidden`]
-    /// if `mode` doesn't permit writes (`ReadOnly`/`Disabled`).
+    /// Returns an error if the store write fails, [`Error::InvalidInput`] if
+    /// `content` is blank, [`Error::InvalidPalacePath`]
+    /// if `wing` would be a new wing with an unusable name, or
+    /// [`Error::ModeForbidden`] if `mode` doesn't permit writes
+    /// (`ReadOnly`/`Disabled`).
     pub async fn diary_write(
         &self,
         agent_identity: &str,
@@ -749,6 +795,13 @@ impl AppServices {
         mode: MemoryMode,
     ) -> Result<Drawer> {
         Self::require_write(mode, "diary_write")?;
+        // The rule `create_drawer` and checkpoint already apply: a blank
+        // drawer is never recallable, so storing one silently loses the entry
+        // the agent believes it wrote.
+        if content.trim().is_empty() {
+            return Err(Error::invalid_input("content", "must not be empty"));
+        }
+        self.check_new_wing_name(wing).await?;
         let wing_record = self.store.get_or_create_wing(wing, None).await?;
         let room = self
             .store
@@ -1233,6 +1286,121 @@ mod tests {
                 .is_empty(),
             "a rejected submission must not leave a job behind"
         );
+    }
+
+    #[tokio::test]
+    async fn a_new_wing_with_an_unusable_name_is_refused_by_every_writer() {
+        let app = test_app().await;
+        let uuid_like = uuid::Uuid::new_v4().to_string();
+
+        for bad in [uuid_like.as_str(), "has/slash"] {
+            assert!(
+                matches!(
+                    app.diary_write("agent", bad, "entry".into(), "test", MemoryMode::Full)
+                        .await,
+                    Err(crate::Error::InvalidPalacePath { .. })
+                ),
+                "diary_write must refuse the wing {bad:?}"
+            );
+            assert!(
+                matches!(
+                    app.submit_mine(
+                        "/tmp/anything".into(),
+                        Some(bad.into()),
+                        "test",
+                        MemoryMode::Full
+                    )
+                    .await,
+                    Err(crate::Error::InvalidPalacePath { .. })
+                ),
+                "submit_mine must refuse the wing {bad:?}"
+            );
+            let mut payload = one_item_payload("content");
+            payload.items[0].wing = Some(bad.to_string());
+            assert!(
+                matches!(
+                    app.submit_checkpoint(payload, "test", MemoryMode::Full)
+                        .await,
+                    Err(crate::Error::InvalidPalacePath { .. })
+                ),
+                "submit_checkpoint must refuse the wing {bad:?}"
+            );
+        }
+        assert!(
+            app.list_jobs(None, MemoryMode::Full)
+                .await
+                .expect("list")
+                .is_empty(),
+            "a refused submission must not leave a job behind"
+        );
+        assert!(
+            app.list_wings(MemoryMode::Full)
+                .await
+                .expect("wings")
+                .is_empty(),
+            "a refused name must not create a wing"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_fact_confidence_outside_zero_to_one_is_refused_at_submission() {
+        let app = test_app().await;
+
+        for confidence in [1.5_f32, -0.1, f32::NAN] {
+            let mut payload = one_item_payload("content");
+            payload.items[0].fact = Some(crate::domain::FactMutation::Add {
+                subject: crate::domain::EntityId::new(),
+                predicate: "likes".to_string(),
+                object: crate::domain::EntityId::new(),
+                confidence,
+            });
+
+            match app
+                .submit_checkpoint(payload, "test", MemoryMode::Full)
+                .await
+            {
+                Err(crate::Error::InvalidInput { field, .. }) => assert_eq!(field, "payload"),
+                other => panic!("expected InvalidInput for confidence {confidence}, got {other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_blank_diary_entry_is_refused_and_writes_nothing() {
+        let app = test_app().await;
+
+        let result = app
+            .diary_write(
+                "agent",
+                "project-x",
+                "  \n".into(),
+                "test",
+                MemoryMode::Full,
+            )
+            .await;
+
+        match result {
+            Err(crate::Error::InvalidInput { field, .. }) => assert_eq!(field, "content"),
+            other => panic!("expected Error::InvalidInput for `content`, got {other:?}"),
+        }
+        assert!(
+            app.diary_read("agent", "project-x", 10, MemoryMode::Full)
+                .await
+                .expect("read")
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn an_existing_wing_stays_writable_whatever_its_name() {
+        let app = test_app().await;
+        let odd = uuid::Uuid::new_v4().to_string();
+        // Created straight through the store, as a pre-validation palace would have it.
+        app.store.get_or_create_wing(&odd, None).await.unwrap();
+
+        app.diary_write("agent", &odd, "entry".into(), "test", MemoryMode::Full)
+            .await
+            .expect("an existing wing is accepted");
     }
 
     #[test]

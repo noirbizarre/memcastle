@@ -1,4 +1,5 @@
-//! The HTTP API: health, status, search/recall/wake-up/diary, job inspection/control and shutdown.
+//! The HTTP API: health, status, search/recall/wake-up/diary, job inspection/control, wing/room/drawer
+//! management, authentication tokens, the database endpoint and shutdown.
 //!
 //! Every handler is a deserialize -> call one `AppServices` method ->
 //! serialize sandwich — no business logic lives here. This is also where
@@ -287,7 +288,7 @@ fn default_requested_by() -> String {
 ///
 /// Letting serde reject the whole body would report both as
 /// `memcastle::input::invalid` on `body`, while the other two channels say
-/// `memcastle::jobs::invalid_id` and `payload`: the same mistake with a
+/// the shared job-id diagnostic and `payload`: the same mistake with a
 /// different diagnostic per channel. The two checks run on the raw JSON first,
 /// so those cases get the shared diagnostic and everything else still falls
 /// through to the single serde pass below.

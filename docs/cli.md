@@ -5,8 +5,9 @@ The `memcastle` binary is one daemon plus a set of thin clients.
 and `migrate` talks to storage directly.
 Every other subcommand is an HTTP call to a running daemon, so it fails with `memcastle::client::not_running`
 (and points you at `memcastle daemon start`) when none is running.
-Three things differ:
+Four things differ:
 `status` reports a stopped daemon instead of failing, `daemon restart` starts a daemon when none is running,
+`completions` prints a script locally and needs neither a daemon nor a configuration file,
 and the reserved command (see [Not implemented yet](#not-implemented-yet)) fails with `memcastle::cli::not_implemented`
 without contacting a daemon.
 Run `memcastle <command> --help` for the authoritative text of any flag.
@@ -15,7 +16,7 @@ There is no `help` subcommand: `--help` is the one way to ask.
 Client commands print the daemon's JSON answer, so the output pipes into `jq`.
 `status`, `db start` and `db status` are the exceptions: they print a readable report,
 and `--json` gives the same report as JSON.
-`job list`, and the `list` and `show` commands of `wing`, `room` and `drawer`, are the others:
+`job list`, and every `wing`, `room` and `drawer` command (`list`, `show`, `create` and `delete`), are the others:
 they print a table or a readable view when standard output is a terminal, and JSON when it is not.
 See [Output, colour and prompts](#output-colour-and-prompts).
 
@@ -236,18 +237,23 @@ A drawer is addressed by its name or its UUID within its room, so `work/project-
 `work/project-x/<uuid>` are the same drawer when it is named `context`.
 A drawer's name may itself contain `/` (a mined file is named after its path, as in `files/src/main.rs`),
 which is why everything after the second `/` is the drawer.
-A name cannot be empty, cannot have leading or trailing whitespace, and cannot look like a UUID.
-A wing or room name cannot contain `/`.
+A name cannot be empty, cannot have leading or trailing whitespace, cannot contain control characters
+and cannot look like a UUID.
+A wing or room name cannot contain `/`, and no `/`-separated segment of a drawer name can be empty, `.` or `..`.
 A path that breaks these rules is refused locally, before the daemon is contacted, with `memcastle::palace::invalid_path`.
+The same rules apply to a new wing named by `mine --wing`, a checkpoint item or a diary write,
+which the daemon refuses at submission with the same code.
+A wing that already exists is always accepted, whatever its name.
 
-`list` and `show` print a table or a readable view in a terminal, and JSON when standard output is a pipe or a file.
+Every `wing`, `room` and `drawer` command prints a table or a readable view in a terminal,
+and JSON when standard output is a pipe or a file.
 `wing show` prints the wing's totals and its rooms.
 `drawer list` shows the newest drawers first with a preview of each, never the whole content,
 and `drawer show` prints the content verbatim after a few lines of metadata.
 `room list` without `--wing` lists the rooms of every wing.
 
 `create` is idempotent for wings and rooms: creating one that exists succeeds and changes nothing,
-and the JSON answer says `"created": false`.
+and the JSON answer (what a pipe gets) says `"created": false`.
 `room create` and `drawer create` also create the wing, and the room, when they do not exist yet,
 as mining, checkpoint and diary writes do.
 Content is immutable, so `drawer create` can only conflict on the name:

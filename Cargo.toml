@@ -114,7 +114,7 @@ chrono = { version = "0.4.45", features = ["serde"] }
 uuid = { version = "1.26.1", features = ["v4", "serde"] }
 
 # Async runtime. `signal` backs the daemon's graceful shutdown, `net` the listeners; the rest is the
-# baseline every module needs. (`restart` respawns through `std::process`, so
+# baseline every module needs. (`daemon start` and `daemon restart` respawn through `std::process`, so
 # tokio's `process` feature is a dev-dependency only, for the subprocess tests.)
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net"] }
 tokio-util = "0.7.19"

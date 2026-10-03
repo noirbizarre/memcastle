@@ -13,13 +13,15 @@ which dispatches on a connection string's scheme at runtime —
 the choice of embedded backend is already isolated to one function (`Backend::endpoint`)
 and one Cargo feature flag, never a domain concept.
 
-Until now, that feature flag was `kv-rocksdb`. RocksDB is mature and battle-tested, but it is a native C++ dependency
+Until now, that feature flag was `kv-rocksdb`.
+RocksDB is mature and battle-tested, but it is a native C++ dependency
 (`surrealdb-librocksdb-sys`, vendoring `rocksdb`/`snappy` and compiling them from source):
 every fresh build environment pays a multi-minute native compile,
 `cargo tree` pulls in a `cc`/`cmake` build-dependency chain,
 cross-compiling release binaries for musl/ARM targets has to carry a C toolchain along for the ride,
 and any C++-toolchain mismatch on the developer's machine (vendored vs. system library, missing symbols)
-becomes a linker error rather than a Cargo error. None of that cost buys anything Phase 1 needs:
+becomes a linker error rather than a Cargo error.
+None of that cost buys anything Phase 1 needs:
 there is no bundled server-side engine to make RocksDB's production track record relevant,
 and the project is a single-writer, single-palace, local-first tool.
 
@@ -31,7 +33,8 @@ The alternatives are argued here rather than in a separate section: RocksDB, the
 
 ## Decision
 
-Use SurrealKV (`kv-surrealkv`) as the only embedded storage backend for Phase 1. Concretely:
+Use SurrealKV (`kv-surrealkv`) as the only embedded storage backend for Phase 1.
+Concretely:
 
 - `Cargo.toml` compiles `kv-surrealkv`, not `kv-rocksdb`.
   Phase 1 does not compile, package, test, or document RocksDB at all — no feature flag kept around "just in case."

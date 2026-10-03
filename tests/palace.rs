@@ -264,7 +264,11 @@ async fn a_delete_is_refused_with_a_409_while_a_mining_job_is_pending() {
     assert_eq!(status, StatusCode::OK, "nothing was deleted");
 
     // Cancel both; once nothing is pending the same delete goes through.
-    for job in [&blocker, &mine] {
+    // The queued mine goes first: with a concurrency of one, cancelling the
+    // blocker frees the worker, and a slow runner (macOS CI) can then start and
+    // complete the one-file mine before its own cancel arrives, so it would end
+    // `Completed` and never reach `Cancelled`.
+    for job in [&mine, &blocker] {
         let id = job["id"].as_str().unwrap();
         post(&daemon, &format!("/api/jobs/{id}/cancel"), json!({})).await;
     }

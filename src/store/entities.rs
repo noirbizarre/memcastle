@@ -211,8 +211,8 @@ impl SurrealStore {
     ///
     /// A soft delete, unlike [`Self::delete_drawer`]'s hard one, on purpose:
     /// a retracted fact is still history someone may ask about ("what did we
-    /// believe in March?"), whereas a drawer is only deleted when it is an
-    /// orphan with no history worth keeping.
+    /// believe in March?"), whereas a drawer is deleted only when a person
+    /// asks (`drawer delete`, or deleting its room or wing).
     pub async fn invalidate_relationship(
         &self,
         id: RelationshipId,

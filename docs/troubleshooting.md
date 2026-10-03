@@ -15,7 +15,7 @@ Start with `memcastle status`: it says whether a daemon is running, where, and w
 ### `memcastle::client::not_running`
 
 No daemon answered.
-Start one with `memcastle serve`.
+Start one with `memcastle daemon start`, or `memcastle serve` to run it in the foreground.
 If you believe one is running, it may serve a different palace or port:
 client commands look it up by palace, so pass the same `--palace` (or set the same `XDG_DATA_HOME`) you started it with,
 and check `memcastle status`, which prints the endpoint it tried and the registry file's state.
@@ -53,6 +53,12 @@ and none generated.
 The palace was opened and migrated, but no job ran and nothing was served.
 Either set a secret, or start once with authentication disabled, run `memcastle auth generate`, store the token,
 and enable authentication.
+
+### `memcastle::auth::entropy_unavailable`
+
+`memcastle auth generate` could not read the operating system's random source.
+MemCastle never falls back to a weaker one, so no token was generated and nothing was stored.
+Check that the process can use `getrandom` (a restricted container or sandbox is the usual cause), and run it again.
 
 ### Everything is refused after `memcastle auth revoke`
 
@@ -141,7 +147,9 @@ A room is looked up inside the wing you named, so a room's UUID from another win
 ### `memcastle::palace::invalid_path`
 
 The path or a name in it cannot be used: a part is empty, a wing or room name contains `/`,
-or a name is blank or looks like a UUID (UUIDs are how records are addressed by id, so they cannot also be names).
+a drawer name has an empty, `.` or `..` segment,
+or a name is blank, has leading or trailing whitespace, contains a control character
+or looks like a UUID (UUIDs are how records are addressed by id, so they cannot also be names).
 The command line checks this before contacting the daemon.
 A wing from before these rules may have a `/` in its name: address it by its UUID.
 
@@ -159,6 +167,12 @@ A wing or room delete was refused because a mining job, a checkpoint job, or a r
 or paused: it files into wings and rooms by name, so it could quietly bring back what you removed.
 `memcastle job list` shows which, and `memcastle job cancel <id>` stops one.
 Nothing was deleted.
+
+### `memcastle::jobs::contended`
+
+A job pause, resume, cancel or retry could not be applied because the job kept changing state underneath it.
+Nothing was changed: run the command again.
+The REST API answers `409`.
 
 ## The command line
 
@@ -250,6 +264,53 @@ A query returns the drawers containing every word first.
 Only when there are none does it fall back to drawers containing any of the words, best match first.
 Short keyword queries therefore work best, and a drawer matching one word of a long question ranks low.
 Check the scope too: `--wing` and `--room` take names, and a wrong one gives an empty result.
+
+## Other diagnostics
+
+These are rarer, and each one's `help:` line names the fix.
+
+### `memcastle::jobs::orphaned` and `memcastle::jobs::lease_lost`
+
+`orphaned` (REST `409`): a job is recorded as running, but nothing in this daemon is running it.
+`memcastle daemon restart` re-queues it, because startup recovery picks up jobs left running.
+`lease_lost`: another daemon took a job over after this one's lease expired, which can only happen on a remote palace
+shared by several daemons.
+If the first daemon was merely slow, raise `jobs.lease_ttl_secs`.
+
+### `memcastle::repair::invalid_based_on_job`
+
+`repair` needs the id of a completed `audit` job to plan from.
+Give it one that exists, is an audit, and has finished.
+
+### `memcastle::graph::relationship_not_found` and `memcastle::domain::empty_label`
+
+A checkpoint item's `fact` named a relationship the palace does not hold (`relationship_not_found`),
+or gave a blank entity kind or predicate (`empty_label`).
+Correct the item and submit it again.
+
+### `memcastle::client::request_failed`
+
+A request reached the daemon, or tried to, and failed in transport:
+a timeout, a dropped connection or an unreadable reply.
+The daemon may be busy or restarting; retry, and check `memcastle status` and the daemon's log.
+A refused connection is `memcastle::client::not_running` instead.
+
+### `memcastle::server::failed`
+
+The HTTP server failed while starting or serving, other than a failed bind.
+Run `memcastle serve -v` in the foreground to see what it was doing.
+
+### `memcastle::store::malformed` and `memcastle::store::schema_sync`
+
+`malformed`: a stored row did not have the expected shape,
+usually because a different MemCastle version wrote the palace.
+Run `memcastle migrate --status`, and `memcastle audit` to look for damage.
+`schema_sync`: applying the bundled schema failed, which points at a defect in a build rather than in your palace.
+
+### `memcastle::serialization::failed`
+
+A value could not be turned into JSON, or read back from it.
+This is a bug in MemCastle: please report it with the command that triggered it.
 
 ## MCP clients
 

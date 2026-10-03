@@ -649,6 +649,19 @@ impl Config {
         }
         // The message never includes the token itself, only what to do about it.
         if let Some(token) = &self.auth.token
+            && token.expose().trim() != token.expose()
+        {
+            // The environment variable is trimmed on the way in, so only a
+            // file value can get here. The authentication layer trims the
+            // token a client presents, so a stored one with edge whitespace
+            // could never match and every request would be refused with no
+            // hint why.
+            return Err(Error::config(
+                "auth.token must not start or end with whitespace; remove the stray space or newline \
+                 from the value in the configuration file",
+            ));
+        }
+        if let Some(token) = &self.auth.token
             && token.expose().len() < MIN_TOKEN_LEN
         {
             return Err(Error::config(format!(
@@ -751,6 +764,21 @@ mod tests {
         assert_eq!(
             config.auth.token.as_ref().map(Secret::expose),
             Some("mc_from_the_environment_0000")
+        );
+    }
+
+    #[test]
+    fn a_file_token_with_edge_whitespace_is_refused_without_echoing_it() {
+        let padded = format!(" {TOKEN}\n");
+        let config: Config = toml::from_str(&format!("[auth]\ntoken = {padded:?}")).unwrap();
+
+        let message = config.validate().unwrap_err().to_string();
+
+        assert!(message.contains("auth.token"), "{message}");
+        assert!(message.contains("whitespace"), "{message}");
+        assert!(
+            !message.contains(TOKEN),
+            "the token must not be echoed: {message}"
         );
     }
 

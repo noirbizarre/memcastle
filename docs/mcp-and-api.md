@@ -73,9 +73,9 @@ MemCastle does not decide what is worth remembering; the calling integration doe
 | `wing` | Optional wing override. Without it, the item is filed under `preferences`, `projects`, `diary` or `general`. |
 | `content` | The text to store, verbatim. |
 | `tags` | Free-form labels stored with the drawer. Required, may be empty. |
-| `source` | Where the memory came from: `kind` is `file` or `manual`, `uri` and `agent` are optional. |
+| `source` | Where the memory came from: `kind` is `file` or `manual` (the MCP schema allows only these; REST and the CLI store any other value as `other`), `uri` and `agent` are optional. |
 | `name` | Optional name for the drawer, unique within its room, so it can be addressed as `wing/room/name`. A name held by another drawer fails the item with `memcastle::palace::drawer_name_taken`; an unusable one is refused at submission. |
-| `fact` | Optional knowledge-graph change made alongside the drawer: `{"op": "add" \| "supersede" \| "invalidate", ...}`. |
+| `fact` | Optional knowledge-graph change made alongside the drawer: `{"op": "add" \| "supersede" \| "invalidate", ...}`; a `confidence` outside 0 to 1 is refused at submission. |
 
 Over MCP, `payload` is a JSON object, and the tool's input schema describes its shape.
 A JSON-encoded string of that object is accepted too, because some clients serialise it before sending.
@@ -100,9 +100,10 @@ A request without a valid token, on a daemon with [authentication](authenticatio
 is a `401` with the code `memcastle::auth::unauthorized` and a `WWW-Authenticate: Bearer` header.
 Other statuses are `400` for invalid input, a transition the job's state does not allow, or a database admin endpoint
 that would be unsafe (`memcastle::db::unsafe_bind`), `404` for an unknown job, wing, room or drawer,
-`409` for a job recorded as running that has no worker (restart the daemon), a database admin endpoint that is already
-open, a drawer name already held by other content, or a wing or room delete while a job that writes to the palace is
-pending, and `500` for a server failure.
+`409` for a job recorded as running that has no worker (restart the daemon), a job that kept changing state
+under the request (run it again), a database admin endpoint that is already
+open or cannot bind its address (`memcastle::db::bind_failed`), a drawer name already held by other content,
+or a wing or room delete while a job that writes to the palace is pending, and `500` for a server failure.
 
 | Route | Purpose | Parameters |
 |---|---|---|
@@ -160,7 +161,7 @@ Reads are gated as reads and creates and deletes as writes, see [Memory modes](m
 There is deliberately no MCP tool for these routes, as for token generation and the database endpoint:
 deleting a wing is a human decision, and an agent that can file memories can already do so through
 `memcastle_checkpoint` and `memcastle_diary_write`.
-The decision is recorded in [ADR 018](adr/018-palace-hierarchy-management.md).
+The decision is recorded in [ADR-018](adr/018-palace-hierarchy-management.md).
 
 ### Authentication
 

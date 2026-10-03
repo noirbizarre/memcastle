@@ -56,7 +56,7 @@ pub struct Relationship {
 
 /// Everything needed to describe a new fact, for
 /// [`SurrealStore::supersede_relationship`](crate::store::SurrealStore::supersede_relationship) —
-/// no `id` (the store assigns one) and no temporal fields (the store always
+/// no `id` (it is passed alongside, chosen by the caller so a replay reuses it) and no temporal fields (the store always
 /// opens a fresh, currently-valid edge).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewRelationship {

@@ -49,7 +49,8 @@ pub fn registry_path(palace_path: &Path) -> PathBuf {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Io`] if the directory or file cannot be written.
+/// Returns [`Error::Io`] if the directory or file cannot be written, or
+/// [`Error::Serialization`] if the info cannot be encoded.
 pub fn write(palace_path: &Path, info: &RuntimeInfo) -> Result<()> {
     let path = registry_path(palace_path);
     if let Some(parent) = path.parent() {

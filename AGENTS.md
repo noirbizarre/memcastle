@@ -17,11 +17,13 @@ See `docs/architecture.md` for the full rationale, including what this deliberat
 
 ## Non-negotiable invariants
 
-Each of these should be enforced by a hook or a test. An invariant nothing checks is a comment, and it will be violated.
+Each of these should be enforced by a hook or a test.
+An invariant nothing checks is a comment, and it will be violated.
 
 1. **The CLI has no business logic MCP/HTTP can't reuse** —
    every subcommand except `serve`/`migrate` only calls `client::DaemonClient`, never `store` or `jobs`
-   directly. (`daemon start` and `daemon restart` also manage the daemon *process* — they read the registry file
+   directly (`completions` calls neither: it prints a script locally).
+   (`daemon start` and `daemon restart` also manage the daemon *process* — they read the registry file
    via `server::lifecycle` and spawn `serve` detached — but touch neither `store` nor `jobs`.)
    `migrate` is a second, narrow exception alongside `serve`: it connects to storage directly (via
    `crate::migrate::run`/`status`, the same runner `serve` calls on every startup) because migration must work
@@ -90,7 +92,7 @@ src/
 ├── app/        application services — the one layer mcp/api call into (the CLI reaches it over HTTP, via `client/`)
 ├── server/     the daemon composition root + lifecycle (registry file)
 ├── mcp/        MCP tool surface, over HTTP
-├── api/        the REST API (health/status/jobs/search/recall/wake-up/diary/auth-token/db/shutdown)
+├── api/        the REST API (health/status/jobs/search/recall/wake-up/diary/wings/rooms/drawers/auth-token/db/shutdown)
 └── client/     the CLI's HTTP client for a running daemon, and the human renderings of its answers (status, tables)
 ```
 
@@ -101,11 +103,13 @@ Nothing in `domain` knows SurrealDB exists; nothing in `cli`/`mcp`/`api` knows `
 ## Style
 
 **Every non-obvious line carries a comment saying why.** Not what — the code says what.
-Ideally naming the failure it prevents. A comment that restates the code is worse than none.
+Ideally naming the failure it prevents.
+A comment that restates the code is worse than none.
 
 **Errors are typed and actionable.** `thiserror` for the library, `miette` at the binary edge.
 A diagnostic must carry the two things the user does not already know:
-what specifically failed, and what to do about it. Diagnostic codes are `memcastle::<module>::<kind>`,
+what specifically failed, and what to do about it.
+Diagnostic codes are `memcastle::<module>::<kind>`,
 and a code is a public identifier users grep for — renaming one is a breaking change.
 
 **Test names are sentences.** `an_unchanged_input_produces_no_output`, not `test_run_2`.
@@ -130,7 +134,8 @@ The type becomes a changelog heading, so choose it as if someone will read it in
 
 ## Releases
 
-Driven by gh-ship. Never bump a version or push a tag by hand:
+Driven by gh-ship.
+Never bump a version or push a tag by hand:
 `cliff.toml` derives the version from the commit history, `prepare-release` applies it,
 and `.github/ship.yml` is the contract between them.
 See CONTRIBUTING.md.
@@ -153,5 +158,6 @@ and are updated with `git tpl update`.
 Files carrying template-owned content end with a `# --- project-specific ...` marker
 (`mise.toml`, `prek.toml`, `Cargo.toml` and a few more): add below it, never above.
 
-Changing template-owned content here fixes it in one repository. Changing it in the template fixes it in all of them —
+Changing template-owned content here fixes it in one repository.
+Changing it in the template fixes it in all of them —
 prefer that.

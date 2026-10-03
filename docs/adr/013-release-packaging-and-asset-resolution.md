@@ -99,6 +99,8 @@ A release that cannot be rebuilt to the same bytes cannot be checked by anyone b
   with the same contents as the tarball plus the systemd user unit.
   They are unsigned, have no apt or dnf repository, and declare no dependencies.
   The Arch package installs the same unit.*
+  *Amended 2026-10-03: the `.deb`, `.rpm` and Arch packages also install the bash, zsh and fish completion scripts,
+  generated from the binary.*
 - **Generate the systemd unit from the binary, such as `memcastle install-service`.**
   It couples the core binary to one init system and to paths it cannot know, and it is a packager's responsibility.
 - **Only pin the toolchain.**
