@@ -37,7 +37,8 @@ pub enum JobOutcome {
     /// The handler finished all its work.
     Completed,
     /// The handler cooperatively paused; `job.checkpoint` holds where to
-    /// resume from.
+    /// resume from, for a handler that records one (audit and repair rescan
+    /// instead).
     Paused,
     /// The handler cooperatively stopped in response to a cancellation
     /// request.

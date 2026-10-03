@@ -334,9 +334,9 @@ impl AppServices {
         Ok(())
     }
 
-    /// Reject a read (`search`/`recall`/`wake_up`/`diary_read`) that
-    /// `mode` doesn't permit, before any store contact — the single place
-    /// all read-gated methods check `MemoryMode` (see that type's doc
+    /// Reject a read (search, recall, wake-up, diary read, job and palace
+    /// listings) that `mode` doesn't permit, before any store contact — the
+    /// single place all read-gated methods check `MemoryMode` (see that type's doc
     /// comment for the matrix).
     fn require_read(mode: MemoryMode, operation: &'static str) -> Result<()> {
         if mode.allows_read() {
@@ -349,8 +349,8 @@ impl AppServices {
         }
     }
 
-    /// Reject a write (`checkpoint`/`emergency_checkpoint`/`diary_write`)
-    /// that `mode` doesn't permit, before any store contact — the write
+    /// Reject a write (checkpoint, diary write, mining, repair, and palace
+    /// create and delete) that `mode` doesn't permit, before any store contact — the write
     /// counterpart of [`Self::require_read`].
     fn require_write(mode: MemoryMode, operation: &'static str) -> Result<()> {
         if mode.allows_write() {

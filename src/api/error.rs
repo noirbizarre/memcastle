@@ -43,6 +43,9 @@ impl IntoResponse for ApiError {
             Error::JobOrphaned { .. }
             | Error::JobContended { .. }
             | Error::DbEndpointRunning { .. }
+            // The address the caller asked for is taken, or not theirs to
+            // bind: a different port fixes it, so it is not the daemon's fault.
+            | Error::DbEndpointBind { .. }
             | Error::DrawerNameTaken { .. }
             | Error::PalaceBusy { .. } => StatusCode::CONFLICT,
             // The caller asked for something the daemon will not do (an unsafe
@@ -145,6 +148,19 @@ mod tests {
     fn a_contended_job_is_a_retryable_conflict_not_a_server_fault() {
         let response = ApiError::from(Error::job_contended("x")).into_response();
         assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+
+    #[test]
+    fn a_database_endpoint_bind_failure_is_a_conflict_the_caller_can_resolve() {
+        let error = Error::DbEndpointBind {
+            addr: std::net::SocketAddr::from(([127, 0, 0, 1], 8000)),
+            source: std::io::Error::from(std::io::ErrorKind::AddrInUse),
+        };
+
+        assert_eq!(
+            ApiError::from(error).into_response().status(),
+            StatusCode::CONFLICT
+        );
     }
 
     #[test]
