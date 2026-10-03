@@ -75,7 +75,7 @@ MemCastle does not decide what is worth remembering; the calling integration doe
 | `tags` | Free-form labels stored with the drawer. Required, may be empty. |
 | `source` | Where the memory came from: `kind` is `file` or `manual`, `uri` and `agent` are optional. |
 | `name` | Optional name for the drawer, unique within its room, so it can be addressed as `wing/room/name`. A name held by another drawer fails the item with `memcastle::palace::drawer_name_taken`; an unusable one is refused at submission. |
-| `fact` | Optional knowledge-graph change made alongside the drawer: `{"op": "add" \| "supersede" \| "invalidate", ...}`. |
+| `fact` | Optional knowledge-graph change made alongside the drawer: `{"op": "add" \| "supersede" \| "invalidate", ...}`; a `confidence` outside 0 to 1 is refused at submission. |
 
 Over MCP, `payload` is a JSON object, and the tool's input schema describes its shape.
 A JSON-encoded string of that object is accepted too, because some clients serialise it before sending.

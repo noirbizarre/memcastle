@@ -17,8 +17,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    CheckpointDestination, CheckpointPayload, Drawer, DrawerId, Job, JobId, JobKind, JobStatus,
-    MemoryMode, MiningSource, NameKind, Priority, Provenance, Source, SourceKind, validate_name,
+    CheckpointDestination, CheckpointPayload, Drawer, DrawerId, FactMutation, Job, JobId, JobKind,
+    JobStatus, MemoryMode, MiningSource, NameKind, Priority, Provenance, Source, SourceKind,
+    validate_name,
 };
 use crate::error::{Error, Result};
 use crate::jobs::Scheduler;
@@ -515,6 +516,24 @@ impl AppServices {
                 "payload",
                 format!("`items[{index}].content` must not be empty"),
             ));
+        }
+        // The range the domain types document and nothing else enforced: an
+        // out-of-range (or NaN) confidence would be stored as given and
+        // skew whatever later ranks facts by it. `contains` is false for NaN.
+        for (index, item) in payload.items.iter().enumerate() {
+            let confidence = match &item.fact {
+                Some(
+                    FactMutation::Add { confidence, .. }
+                    | FactMutation::Supersede { confidence, .. },
+                ) => Some(*confidence),
+                Some(FactMutation::Invalidate { .. }) | None => None,
+            };
+            if confidence.is_some_and(|value| !(0.0..=1.0).contains(&value)) {
+                return Err(Error::invalid_input(
+                    "payload",
+                    format!("`items[{index}].fact.confidence` must be between 0 and 1"),
+                ));
+            }
         }
         // Up front, so a bad name is a 400 at submission and not a job that
         // fails halfway through after writing the items before it.
@@ -1321,6 +1340,29 @@ mod tests {
                 .is_empty(),
             "a refused name must not create a wing"
         );
+    }
+
+    #[tokio::test]
+    async fn a_fact_confidence_outside_zero_to_one_is_refused_at_submission() {
+        let app = test_app().await;
+
+        for confidence in [1.5_f32, -0.1, f32::NAN] {
+            let mut payload = one_item_payload("content");
+            payload.items[0].fact = Some(crate::domain::FactMutation::Add {
+                subject: crate::domain::EntityId::new(),
+                predicate: "likes".to_string(),
+                object: crate::domain::EntityId::new(),
+                confidence,
+            });
+
+            match app
+                .submit_checkpoint(payload, "test", MemoryMode::Full)
+                .await
+            {
+                Err(crate::Error::InvalidInput { field, .. }) => assert_eq!(field, "payload"),
+                other => panic!("expected InvalidInput for confidence {confidence}, got {other:?}"),
+            }
+        }
     }
 
     #[tokio::test]
