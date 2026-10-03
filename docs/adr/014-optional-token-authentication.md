@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted, amended by [ADR-017](017-daemon-lifecycle-commands-live-under-daemon.md)
+(the `restart` this record names is now `memcastle daemon restart`)
 
 ## Context
 

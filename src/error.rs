@@ -301,9 +301,22 @@ pub enum Error {
     #[error("no running memcastle daemon found for this palace")]
     #[diagnostic(
         code(memcastle::client::not_running),
-        help("start one with `memcastle serve`")
+        help("start one with `memcastle daemon start` (or `memcastle serve` in the foreground)")
     )]
     DaemonNotRunning,
+
+    /// `daemon start` found a daemon already serving this palace. Starting a
+    /// second one would only die on the palace's file lock, so it is refused
+    /// up front with the command that does mean "replace it".
+    #[error("a memcastle daemon is already running for this palace on {addr}")]
+    #[diagnostic(
+        code(memcastle::client::already_running),
+        help("use `memcastle daemon restart` to replace it, or `memcastle status` to inspect it")
+    )]
+    DaemonAlreadyRunning {
+        /// Where the running daemon listens.
+        addr: String,
+    },
 
     /// A job is recorded as `Running` but nothing in this daemon is running
     /// it. Distinct from [`Error::Server`], whose help is about the bind
@@ -312,7 +325,7 @@ pub enum Error {
     #[diagnostic(
         code(memcastle::jobs::orphaned),
         help(
-            "restart the daemon (`memcastle restart`): startup recovery re-queues jobs left running"
+            "restart the daemon (`memcastle daemon restart`): startup recovery re-queues jobs left running"
         )
     )]
     JobOrphaned {
@@ -819,6 +832,9 @@ mod tests {
             },
             Error::remote(400, Some("memcastle::x::y"), "nope", None),
             Error::DaemonNotRunning,
+            Error::DaemonAlreadyRunning {
+                addr: "127.0.0.1:8420".to_string(),
+            },
             Error::JobOrphaned {
                 id: "x".to_string(),
             },
@@ -879,6 +895,7 @@ mod tests {
             | Error::Client { .. }
             | Error::Remote { .. }
             | Error::DaemonNotRunning
+            | Error::DaemonAlreadyRunning { .. }
             | Error::JobOrphaned { .. }
             | Error::LeaseLost { .. }
             | Error::Server { .. }

@@ -87,7 +87,7 @@ While a daemon is running, `memcastle status` shows the same information under i
 
 ## Upgrading MemCastle
 
-1. Stop the daemon: `memcastle stop`.
+1. Stop the daemon: `memcastle daemon stop`.
 2. Back up the palace directory if the data matters, see [Storage and data](storage.md#back-up-and-move-a-palace).
 3. Install the new version, see [Installation](installation.md).
 4. Start it: `memcastle serve`.

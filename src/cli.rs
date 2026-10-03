@@ -99,10 +99,12 @@ pub struct Cli {
 /// The subcommands.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Run the daemon in the foreground. `daemon` is an alias — both start
-    /// the same long-running server.
-    #[command(alias = "daemon")]
+    /// Run the daemon in the foreground, logging to standard error. This is
+    /// what a process manager runs; `daemon start` runs it in the background.
     Serve(ServeArgs),
+    /// Start, stop or restart the daemon as a background process.
+    #[command(subcommand)]
+    Daemon(DaemonCommand),
     /// Bring this palace's data up to date, or just report on it — the
     /// exact same runner `serve` uses on every startup, never a second
     /// migration system. Connects to storage directly, like `serve`; does
@@ -113,13 +115,6 @@ pub enum Command {
     /// Exit codes: 0 running and healthy, 1 running but degraded (or an
     /// error), 3 not running.
     Status(StatusArgs),
-    /// Ask a running daemon to shut down gracefully.
-    Stop,
-    /// Stop the daemon, then start a fresh one and wait until it is serving
-    /// (best-effort; for supervised deployments, prefer restarting through
-    /// your process manager). `--config`, `--bind`, `--port`, `--assets-dir`
-    /// and the resolved `--palace` are passed on to the new daemon.
-    Restart(ServeArgs),
     /// Search palace drawer content.
     Search(SearchArgs),
     /// Retrieve palace content matching a query, returned verbatim — the
@@ -172,6 +167,25 @@ pub enum Command {
     Maintenance,
 }
 
+/// `memcastle daemon` subcommands: the daemon as a background process.
+#[derive(Debug, Subcommand)]
+pub enum DaemonCommand {
+    /// Start a daemon in the background and wait until it is serving. Fails
+    /// if one is already running for this palace (see `daemon restart`). Its
+    /// log output is discarded: run `serve` in the foreground, or under a
+    /// process manager, when you need it. `--config`, `--bind`, `--port`,
+    /// `--assets-dir` and the resolved `--palace` are passed on to the new
+    /// daemon.
+    Start(ServeArgs),
+    /// Ask a running daemon to shut down gracefully.
+    Stop,
+    /// Stop the daemon, then start a fresh one and wait until it is serving
+    /// (best-effort; for supervised deployments, prefer restarting through
+    /// your process manager). Starts one when none is running. The flags are
+    /// the same as `daemon start`.
+    Restart(ServeArgs),
+}
+
 /// Arguments for `memcastle completions`.
 #[derive(Debug, Args)]
 pub struct CompletionsArgs {
@@ -196,7 +210,8 @@ pub struct StatusArgs {
     pub json: bool,
 }
 
-/// Arguments for `memcastle serve`.
+/// Arguments for `memcastle serve`, `memcastle daemon start` and
+/// `memcastle daemon restart`: the last two only forward them to `serve`.
 #[derive(Debug, Args)]
 pub struct ServeArgs {
     /// Interface address to listen on, overriding `server.bind` and
@@ -504,11 +519,82 @@ mod tests {
         assert_eq!(serve.port, Some(8787));
     }
 
+    fn daemon_command(args: &[&str]) -> Result<DaemonCommand, clap::Error> {
+        let cli = Cli::try_parse_from(
+            ["memcastle", "daemon"]
+                .into_iter()
+                .chain(args.iter().copied()),
+        )?;
+        match cli.command {
+            Command::Daemon(daemon) => Ok(daemon),
+            other => panic!("expected daemon, got {other:?}"),
+        }
+    }
+
     #[test]
-    fn the_daemon_alias_takes_the_same_listener_flags() {
-        let serve = serve_args(&["daemon", "--bind", "::1", "--port", "9000"]).unwrap();
-        assert_eq!(serve.bind, Some("::1".parse().unwrap()));
-        assert_eq!(serve.port, Some(9000));
+    fn the_daemon_group_has_start_stop_and_restart() {
+        assert!(matches!(
+            daemon_command(&["start"]).unwrap(),
+            DaemonCommand::Start(_)
+        ));
+        assert!(matches!(
+            daemon_command(&["stop"]).unwrap(),
+            DaemonCommand::Stop
+        ));
+        assert!(matches!(
+            daemon_command(&["restart"]).unwrap(),
+            DaemonCommand::Restart(_)
+        ));
+        // A bare `daemon` names no action, so it must not silently start one.
+        assert!(Cli::try_parse_from(["memcastle", "daemon"]).is_err());
+    }
+
+    #[test]
+    fn daemon_start_and_restart_take_the_listener_flags() {
+        for word in ["start", "restart"] {
+            let command = daemon_command(&[
+                word,
+                "--bind",
+                "::1",
+                "--port",
+                "9000",
+                "--assets-dir",
+                "/srv/assets",
+            ])
+            .unwrap();
+            let (DaemonCommand::Start(args) | DaemonCommand::Restart(args)) = command else {
+                panic!("`daemon {word}` must carry the listener flags");
+            };
+            assert_eq!(args.bind, Some("::1".parse().unwrap()), "{word}");
+            assert_eq!(args.port, Some(9000), "{word}");
+            assert_eq!(
+                args.assets_dir,
+                Some(PathBuf::from("/srv/assets")),
+                "{word}"
+            );
+        }
+    }
+
+    #[test]
+    fn daemon_stop_takes_no_listener_flags() {
+        assert!(daemon_command(&["stop", "--port", "9000"]).is_err());
+    }
+
+    #[test]
+    fn the_old_top_level_stop_and_restart_are_gone() {
+        for word in ["stop", "restart"] {
+            assert!(
+                Cli::try_parse_from(["memcastle", word]).is_err(),
+                "`{word}` moved under `daemon`"
+            );
+        }
+    }
+
+    #[test]
+    fn daemon_is_no_longer_an_alias_of_serve() {
+        // `daemon --port` used to run the server in the foreground; it must
+        // now be refused rather than mean something else.
+        assert!(Cli::try_parse_from(["memcastle", "daemon", "--port", "9000"]).is_err());
     }
 
     #[test]
@@ -601,7 +687,7 @@ mod tests {
     fn there_is_no_help_subcommand_at_the_top_or_in_any_group() {
         // `--help` is the one way to ask: `help` only duplicated it.
         assert!(Cli::try_parse_from(["memcastle", "help"]).is_err());
-        for group in ["jobs", "diary", "auth", "db"] {
+        for group in ["jobs", "diary", "auth", "db", "daemon"] {
             assert!(
                 Cli::try_parse_from(["memcastle", group, "help"]).is_err(),
                 "`{group} help` must not exist"
