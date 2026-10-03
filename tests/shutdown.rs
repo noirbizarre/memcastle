@@ -83,12 +83,12 @@ fn a_stopped_daemon_logs_no_datastore_shutdown_errors() {
         }
 
         let stop = memcastle(dir.path())
-            .arg("stop")
+            .args(["daemon", "stop"])
             .output()
-            .expect("run `stop`");
+            .expect("run `daemon stop`");
         assert!(
             stop.status.success(),
-            "`stop` failed: {}",
+            "`daemon stop` failed: {}",
             String::from_utf8_lossy(&stop.stderr)
         );
         let status = daemon.wait().expect("wait for the daemon");
