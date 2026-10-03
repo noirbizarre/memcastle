@@ -54,6 +54,12 @@ The palace was opened and migrated, but no job ran and nothing was served.
 Either set a secret, or start once with authentication disabled, run `memcastle auth generate`, store the token,
 and enable authentication.
 
+### `memcastle::auth::entropy_unavailable`
+
+`memcastle auth generate` could not read the operating system's random source.
+MemCastle never falls back to a weaker one, so no token was generated and nothing was stored.
+Check that the process can use `getrandom` (a restricted container or sandbox is the usual cause), and run it again.
+
 ### Everything is refused after `memcastle auth revoke`
 
 Revoking the only credential leaves nothing that can authenticate, so even `memcastle daemon stop` is refused.
@@ -159,6 +165,12 @@ A wing or room delete was refused because a mining job, a checkpoint job, or a r
 or paused: it files into wings and rooms by name, so it could quietly bring back what you removed.
 `memcastle job list` shows which, and `memcastle job cancel <id>` stops one.
 Nothing was deleted.
+
+### `memcastle::jobs::contended`
+
+A job pause, resume, cancel or retry could not be applied because the job kept changing state underneath it.
+Nothing was changed: run the command again.
+The REST API answers `409`.
 
 ## The command line
 

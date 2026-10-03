@@ -167,14 +167,13 @@ impl AppServices {
     ///
     /// # Errors
     ///
-    /// [`Error::Server`] if the operating system cannot provide randomness, or
+    /// [`Error::EntropyUnavailable`] if the operating system cannot provide randomness, or
     /// a store error.
     pub async fn generate_token(&self) -> Result<GeneratedToken> {
         let mut entropy = [0_u8; auth::TOKEN_ENTROPY_BYTES];
         // Never fall back to a weaker source: a predictable token is worse
         // than no token, so a failure here fails the request.
-        getrandom::fill(&mut entropy)
-            .map_err(|e| Error::server(format!("no operating-system randomness: {e}")))?;
+        getrandom::fill(&mut entropy).map_err(Error::entropy_unavailable)?;
         let token = auth::format_token(&entropy);
         let verifier = TokenVerifier::for_token(&token, Utc::now());
         self.store.save_token_verifier(&verifier).await?;

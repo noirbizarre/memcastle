@@ -425,9 +425,7 @@ impl Scheduler {
     /// The job kept changing status faster than a request could be applied.
     /// Practically unreachable; reported rather than looping forever.
     fn contended(id: JobId) -> crate::Error {
-        crate::Error::server(format!(
-            "job {id} kept changing state while the request was being applied; try again"
-        ))
+        crate::Error::job_contended(id.to_string())
     }
 
     /// Run the dispatch loop until `shutdown` fires. Claims at most one job

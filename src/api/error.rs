@@ -38,7 +38,10 @@ impl IntoResponse for ApiError {
             // A 500 would blame the daemon for something the caller can fix.
             // A name already taken, or a delete that a running job would undo:
             // the request is well-formed but conflicts with the palace's state.
+            // The same for a job that kept changing under the request: the
+            // caller only has to retry.
             Error::JobOrphaned { .. }
+            | Error::JobContended { .. }
             | Error::DbEndpointRunning { .. }
             | Error::DrawerNameTaken { .. }
             | Error::PalaceBusy { .. } => StatusCode::CONFLICT,
@@ -135,6 +138,12 @@ mod tests {
     #[test]
     fn an_orphaned_job_is_a_conflict_the_caller_can_resolve_not_a_server_fault() {
         let response = ApiError::from(Error::JobOrphaned { id: "x".into() }).into_response();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+
+    #[test]
+    fn a_contended_job_is_a_retryable_conflict_not_a_server_fault() {
+        let response = ApiError::from(Error::job_contended("x")).into_response();
         assert_eq!(response.status(), StatusCode::CONFLICT);
     }
 

@@ -333,6 +333,19 @@ pub enum Error {
         id: String,
     },
 
+    /// A job kept changing status faster than a control request could be
+    /// applied. Its own variant, not [`Error::Server`], whose help would send
+    /// the user to the daemon's foreground log when the fix is to retry.
+    #[error("job {id} kept changing state while the request was being applied")]
+    #[diagnostic(
+        code(memcastle::jobs::contended),
+        help("nothing was changed; run the command again")
+    )]
+    JobContended {
+        /// The job that would not hold still.
+        id: String,
+    },
+
     /// A worker tried to write a job it no longer holds the lease on: the
     /// lease lapsed (a stalled or partitioned daemon) and another daemon
     /// reaped the job, so this worker's copy is stale and its write was
@@ -347,6 +360,20 @@ pub enum Error {
     LeaseLost {
         /// The job whose lease was lost.
         id: String,
+    },
+
+    /// The operating system could not provide the randomness a token needs.
+    /// MemCastle never falls back to a weaker source, so no token was made.
+    #[error("the operating system could not provide randomness: {message}")]
+    #[diagnostic(
+        code(memcastle::auth::entropy_unavailable),
+        help(
+            "no token was generated; check that the system's random source (`getrandom`) is available to this process, then try again"
+        )
+    )]
+    EntropyUnavailable {
+        /// What the operating system reported.
+        message: String,
     },
 
     /// The HTTP server failed while starting or serving (a failed *bind* is
@@ -783,6 +810,18 @@ impl Error {
         }
     }
 
+    /// Build an [`Error::JobContended`].
+    pub fn job_contended(id: impl Into<String>) -> Self {
+        Self::JobContended { id: id.into() }
+    }
+
+    /// Build an [`Error::EntropyUnavailable`].
+    pub fn entropy_unavailable(message: impl ToString) -> Self {
+        Self::EntropyUnavailable {
+            message: message.to_string(),
+        }
+    }
+
     /// Build an [`Error::Server`] from a message.
     pub fn server(message: impl Into<String>) -> Self {
         Self::Server {
@@ -939,6 +978,8 @@ mod tests {
             Error::LeaseLost {
                 id: "x".to_string(),
             },
+            Error::job_contended("x"),
+            Error::entropy_unavailable("no source"),
             Error::server("boom"),
             Error::server_bind(
                 std::net::SocketAddr::from(([127, 0, 0, 1], 8420)),
@@ -1019,6 +1060,8 @@ mod tests {
             | Error::DaemonAlreadyRunning { .. }
             | Error::JobOrphaned { .. }
             | Error::LeaseLost { .. }
+            | Error::JobContended { .. }
+            | Error::EntropyUnavailable { .. }
             | Error::Server { .. }
             | Error::ServerBind { .. }
             | Error::ModeForbidden { .. }
