@@ -311,7 +311,7 @@ fn jobs_show_rejects_a_malformed_job_id_before_ever_reaching_the_network() {
 fn a_reserved_but_unimplemented_command_says_so_instead_of_blaming_the_config() {
     Command::cargo_bin("memcastle")
         .unwrap()
-        .arg("wings")
+        .arg("maintenance")
         .assert()
         .failure()
         .stderr(contains("memcastle::cli::not_implemented"));

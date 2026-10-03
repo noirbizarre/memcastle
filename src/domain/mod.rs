@@ -15,6 +15,7 @@ mod ids;
 mod job;
 mod memory_mode;
 mod palace;
+mod path;
 mod secret;
 
 pub use checkpoint::{CheckpointDestination, CheckpointItem, CheckpointPayload, FactMutation};
@@ -41,4 +42,7 @@ pub mod channel {
     /// An MCP tool call.
     pub const MCP: &str = "mcp";
 }
-pub use palace::{DEFAULT_PALACE_NAME, Palace, Room, Wing};
+pub use palace::{
+    DEFAULT_PALACE_NAME, Deleted, DrawerSummary, Palace, Room, RoomSummary, Wing, WingSummary,
+};
+pub use path::{NameKind, PalacePath, validate_name};

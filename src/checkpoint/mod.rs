@@ -30,7 +30,7 @@ use crate::domain::{
     CheckpointDestination, CheckpointPayload, Drawer, DrawerId, FactMutation, Job, NewRelationship,
     Provenance, RelationshipId, RoomId,
 };
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::jobs::{JobContext, JobOutcome};
 use crate::store::SurrealStore;
 
@@ -67,7 +67,7 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: CheckpointParams) -> R
             return Ok(JobOutcome::Paused);
         }
 
-        let room = resolve_room(store, item.destination, item.wing.as_deref()).await?;
+        let (room, room_path) = resolve_room(store, item.destination, item.wing.as_deref()).await?;
 
         let drawer = Drawer::new(
             // Derived, not random: a crash between the write below and the
@@ -82,7 +82,22 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: CheckpointParams) -> R
                 requested_by: job.requested_by.clone(),
                 job_id: Some(job.id),
             },
-        );
+        )
+        .with_name(item.name.clone());
+        if let Some(name) = &item.name {
+            // A replayed item finds its own drawer by id and is left alone;
+            // only a *different* drawer holding the name is a conflict. The
+            // caller asked for this exact name, so it fails the item rather
+            // than quietly dropping the name the way mining does.
+            if !store.drawer_exists(drawer.id).await?
+                && store.get_drawer_by_name(room, name).await?.is_some()
+            {
+                return Err(Error::DrawerNameTaken {
+                    room: room_path,
+                    name: name.clone(),
+                });
+            }
+        }
         store.create_drawer_once(&drawer).await?;
 
         if let Some(fact) = &item.fact {
@@ -106,17 +121,19 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: CheckpointParams) -> R
 /// operates at (a handful of items, not thousands like mining's files),
 /// the extra idempotent `get_or_create_*` round trips are not worth the
 /// bookkeeping a cache would add.
+///
+/// Also returns the room's `wing/room` path, for error messages.
 async fn resolve_room(
     store: &SurrealStore,
     destination: CheckpointDestination,
     wing: Option<&str>,
-) -> Result<RoomId> {
+) -> Result<(RoomId, String)> {
     let wing_name = wing.unwrap_or_else(|| destination.default_wing());
     let wing = store.get_or_create_wing(wing_name, None).await?;
     let room = store
         .get_or_create_room(wing.id, destination.room_name(), None)
         .await?;
-    Ok(room.id)
+    Ok((room.id, format!("{}/{}", wing.name, room.name)))
 }
 
 /// Apply one item's knowledge-graph mutation, dispatching to the
@@ -203,6 +220,7 @@ mod tests {
         CheckpointItem {
             destination,
             wing: None,
+            name: None,
             content: content.to_string(),
             tags: vec![],
             source: Source {
@@ -282,6 +300,42 @@ mod tests {
         let diary_drawers = store.list_drawers(Some(diary_room.id)).await.unwrap();
         assert_eq!(diary_drawers.len(), 1);
         assert_eq!(diary_drawers[0].source.agent.as_deref(), Some("test-agent"));
+    }
+
+    async fn run_items(store: &SurrealStore, items: Vec<CheckpointItem>) -> Result<JobOutcome> {
+        let payload = CheckpointPayload { items };
+        let mut job = Job::new(
+            JobKind::Checkpoint {
+                payload: payload.clone(),
+            },
+            Priority::High,
+            "test",
+        );
+        let ctx = ctx_for(store, &job, JobControl::default());
+        run(&ctx, &mut job, CheckpointParams { payload }).await
+    }
+
+    #[tokio::test]
+    async fn a_named_item_is_filed_under_its_name_and_a_taken_name_fails_the_item() {
+        let store = memory_store().await;
+        let mut named = item(CheckpointDestination::General, "first");
+        named.name = Some("context".to_string());
+        run_items(&store, vec![named.clone()]).await.unwrap();
+
+        let wing = store.get_wing("general").await.unwrap().unwrap();
+        let room = store.get_room(wing.id, "entries").await.unwrap().unwrap();
+        let found = store.get_drawer_by_name(room.id, "context").await.unwrap();
+        assert_eq!(found.unwrap().content, "first");
+
+        // A different job writing the same name is a conflict, not a silent
+        // unnamed drawer: the caller asked for exactly this name.
+        let mut clash = item(CheckpointDestination::General, "second");
+        clash.name = Some("context".to_string());
+        let result = run_items(&store, vec![clash]).await;
+        assert!(
+            matches!(result, Err(Error::DrawerNameTaken { .. })),
+            "{result:?}"
+        );
     }
 
     #[tokio::test]

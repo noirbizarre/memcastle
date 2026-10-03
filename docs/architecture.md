@@ -501,7 +501,7 @@ Deliberately out of scope, and each is structurally possible without rework give
 - Entity and relationship extraction wired into mining (the schema exists; nothing populates it).
 - A stdio MCP bridge for clients that cannot speak HTTP.
 - The CLI auto-starting a daemon on demand.
-- `wings`/`rooms`/`drawers`/`maintenance` commands (reserved names that return `not_implemented`).
+- A `maintenance` command (a reserved name that returns `not_implemented`).
 - Remote SurrealDB authentication beyond root sign-in.
 - TLS on the daemon's own listener (use a TLS-terminating proxy).
 - A read-only mode, live queries or transactions on the database admin endpoint

@@ -52,6 +52,10 @@ erDiagram
   Its content is never rewritten, paraphrased or truncated.
   It also records where it came from (a file, or a manual entry by an agent), free-form tags,
   and which job wrote it and through which channel (`cli`, `http` or `mcp`).
+  A drawer may also have a **name**, unique within its room, which makes it addressable as `wing/room/name`
+  instead of by UUID.
+  Most drawers have none: mining names a file's drawer after its path, and `drawer create` and a checkpoint
+  item's `name` set one explicitly.
 
 Where a write ends up:
 
@@ -60,6 +64,12 @@ Where a write ends up:
 | `mine` | the `--wing` you give, or the directory's name | `files` |
 | `diary write` | the wing you give | `diary` |
 | `checkpoint` item | the item's `wing`, or `preferences`, `projects`, `diary` or `general` by destination | `diary` for diary items, `entries` otherwise |
+
+Wings and rooms are managed with `memcastle wing`, `room` and `drawer`, see [CLI reference](cli.md#wings-rooms-and-drawers).
+Nothing in the database cascades, so deleting a wing or a room removes its rooms and drawers explicitly, in one
+transaction: the hierarchy is never left with children whose parent is gone, which is the very state `audit` reports
+as orphans.
+Counts shown for wings and rooms are computed when asked, never stored.
 
 Entities and relationships form a knowledge-graph layer that a checkpoint item's `fact` can write to.
 Nothing extracts them from mined content yet.
@@ -83,6 +93,8 @@ That is why `embedding` is empty in every drawer you see.
   `"truncated": true`.
 
 Each mining job files its own drawers, so mining the same directory twice stores its files twice.
+Only the first copy of a file keeps its name: the name is unique within the room, so the later copies are unnamed
+and are reached by their UUID.
 A job that is paused or interrupted and then resumed does not: it continues where it stopped
 and never stores a file twice.
 

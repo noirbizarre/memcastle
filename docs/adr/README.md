@@ -54,3 +54,5 @@ The history is the value.
   and plain data to a pipe, with no flag to choose
 - [ADR-017](017-daemon-lifecycle-commands-live-under-daemon.md) — the daemon's background lifecycle lives under
   `memcastle daemon` (`start`, `stop`, `restart`), and `serve` stays the foreground server
+- [ADR-018](018-palace-hierarchy-management.md) — wings, rooms and drawers are managed through REST and the CLI,
+  with cascading transactional deletes, optional drawer names and no MCP tool

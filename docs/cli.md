@@ -7,7 +7,7 @@ Every other subcommand is an HTTP call to a running daemon, so it fails with `me
 (and points you at `memcastle daemon start`) when none is running.
 Three things differ:
 `status` reports a stopped daemon instead of failing, `daemon restart` starts a daemon when none is running,
-and the reserved commands (see [Not implemented yet](#not-implemented-yet)) fail with `memcastle::cli::not_implemented`
+and the reserved command (see [Not implemented yet](#not-implemented-yet)) fails with `memcastle::cli::not_implemented`
 without contacting a daemon.
 Run `memcastle <command> --help` for the authoritative text of any flag.
 There is no `help` subcommand: `--help` is the one way to ask.
@@ -15,7 +15,8 @@ There is no `help` subcommand: `--help` is the one way to ask.
 Client commands print the daemon's JSON answer, so the output pipes into `jq`.
 `status`, `db start` and `db status` are the exceptions: they print a readable report,
 and `--json` gives the same report as JSON.
-`jobs list` is the other: it prints a table when standard output is a terminal, and JSON when it is not.
+`jobs list`, and the `list` and `show` commands of `wing`, `room` and `drawer`, are the others:
+they print a table or a readable view when standard output is a terminal, and JSON when it is not.
 See [Output, colour and prompts](#output-colour-and-prompts).
 
 ## Output, colour and prompts
@@ -38,8 +39,8 @@ queued yellow, running cyan, paused magenta, completed green, failed red and can
 Standard output and standard error are decided separately:
 with `memcastle status 2> errors.log` the report stays coloured and the log stays plain.
 
-`repair --apply`, `auth generate`, `auth revoke` and `jobs cancel` ask for confirmation, with a prompt on standard error
-that defaults to "no".
+`repair --apply`, `auth generate`, `auth revoke`, `jobs cancel` and the `delete` commands of `wing`, `room` and `drawer`
+ask for confirmation, with a prompt on standard error that defaults to "no".
 `--yes` (or `-y`) skips the question.
 When standard input or standard error is not a terminal, a script or CI job for instance,
 they never ask and proceed, because the caller has already decided.
@@ -207,6 +208,76 @@ The payload is JSON read from `--payload`, or from standard input when omitted;
 its shape is described in [MCP tools and REST API](mcp-and-api.md#checkpoint-payload).
 `--emergency` raises the job to the highest priority, for save-before-crash situations only.
 
+## Wings, rooms and drawers
+
+```sh
+memcastle wing list
+memcastle wing show <WING>
+memcastle wing create <WING> [--description <TEXT>]
+memcastle wing delete <WING> [--yes]
+
+memcastle room list [--wing <WING>]
+memcastle room show <WING>/<ROOM>
+memcastle room create <WING>/<ROOM> [--description <TEXT>]
+memcastle room delete <WING>/<ROOM> [--yes]
+
+memcastle drawer list --room <WING>/<ROOM> [--limit <N>]
+memcastle drawer show <WING>/<ROOM>/<DRAWER>
+memcastle drawer create <WING>/<ROOM>/<NAME> [--content <TEXT> | --file <PATH>]
+memcastle drawer delete <WING>/<ROOM>/<DRAWER> [--yes]
+```
+
+These manage the palace hierarchy, see [Storage and data](storage.md#the-data-model) for what the three levels are.
+`wings`, `rooms` and `drawers` are aliases of the singular groups.
+
+A wing or room is addressed by its name or its UUID.
+A drawer is addressed by its name or its UUID within its room, so `work/project-x/context` and
+`work/project-x/<uuid>` are the same drawer when it is named `context`.
+A drawer's name may itself contain `/` (a mined file is named after its path, as in `files/src/main.rs`),
+which is why everything after the second `/` is the drawer.
+A name cannot be empty, cannot have leading or trailing whitespace, and cannot look like a UUID.
+A wing or room name cannot contain `/`.
+A path that breaks these rules is refused locally, before the daemon is contacted, with `memcastle::palace::invalid_path`.
+
+`list` and `show` print a table or a readable view in a terminal, and JSON when standard output is a pipe or a file.
+`wing show` prints the wing's totals and its rooms.
+`drawer list` shows the newest drawers first with a preview of each, never the whole content,
+and `drawer show` prints the content verbatim after a few lines of metadata.
+`room list` without `--wing` lists the rooms of every wing.
+
+`create` is idempotent for wings and rooms: creating one that exists succeeds and changes nothing,
+and the JSON answer says `"created": false`.
+`room create` and `drawer create` also create the wing, and the room, when they do not exist yet,
+as mining, checkpoint and diary writes do.
+Content is immutable, so `drawer create` can only conflict on the name:
+writing a name again with the same content is a no-op, and with other content it is refused with
+`memcastle::palace::drawer_name_taken`.
+The content comes from `--content`, from `--file` (`-` is standard input), or from standard input when neither is given.
+
+`delete` removes the record and everything under it, permanently:
+a wing takes its rooms and their drawers, a room takes its drawers.
+In a terminal it first prints what is about to go, then asks:
+
+```text
+Wing: work
+Rooms: 12
+Drawers: 37
+
+Delete this wing and all contained data? [y/N]
+```
+
+`--yes` skips the question, see [Output, colour and prompts](#output-colour-and-prompts).
+Without a terminal it proceeds without asking, like every other command that confirms.
+Deleting a wing or room is refused with `memcastle::palace::busy` while a mining job, a checkpoint job or a repair job
+that applies is queued, running or paused, because such a job files into wings and rooms by name and would bring the
+wing back.
+Cancel the job or wait for it, then try again.
+The check is coarse on purpose and is not atomic with the delete:
+a job submitted in the instant between the two is not caught.
+
+There is no MCP tool for any of this, see [MCP tools and REST API](mcp-and-api.md#wings-rooms-and-drawers).
+Looking is gated as a read and changing as a write, see [Memory modes](memory-modes.md).
+
 ## Maintenance
 
 ### `audit`
@@ -285,5 +356,5 @@ reported as `memcastle::client::remote_rejected`.
 
 ## Not implemented yet
 
-`wings`, `rooms`, `drawers` and `maintenance` are reserved names.
-They exist so the command surface is stable, and they return a `not_implemented` error today.
+`maintenance` is a reserved name.
+It exists so the command surface is stable, and it returns a `not_implemented` error today.
