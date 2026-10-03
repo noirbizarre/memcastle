@@ -468,7 +468,10 @@ and most MCP clients already support a URL-based transport, so no bridging proce
 A stdio bridge for clients that can only spawn a subprocess is deferred;
 tool logic never touches a transport type, so adding one is additive.
 
-The tool surface mirrors what the CLI and REST offer, so an integration never has to leave MCP.
+The tool surface mirrors the CLI and REST *memory* operations,
+so an integration never has to leave MCP to remember or recall.
+Management stays off it on purpose:
+there are no tools for wings, rooms and drawers, authentication tokens, the database endpoint or daemon lifecycle.
 It is listed in [MCP tools and REST API](mcp-and-api.md).
 The instruction text sent at `initialize` is generated from the registered tools, and a test compares the two,
 so it cannot drift from the surface.
