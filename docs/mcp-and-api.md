@@ -75,6 +75,10 @@ MemCastle does not decide what is worth remembering; the calling integration doe
 | `source` | Where the memory came from: `kind` is `file` or `manual`, `uri` and `agent` are optional. |
 | `fact` | Optional knowledge-graph change made alongside the drawer: `{"op": "add" \| "supersede" \| "invalidate", ...}`. |
 
+Over MCP, `payload` is a JSON object, and the tool's input schema describes its shape.
+A JSON-encoded string of that object is accepted too, because some clients serialise it before sending.
+A string that is not valid JSON is refused as `memcastle::input::invalid`, blamed on `payload`.
+
 Every item produces a drawer.
 A job that is interrupted resumes where it stopped and never stores an item twice.
 
