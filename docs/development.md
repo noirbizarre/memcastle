@@ -99,7 +99,7 @@ It greps `src/main.rs`, `src/cli.rs`, `src/client/`, `src/mcp/` and `src/api/`
 for a direct `store` or `jobs` import (including grouped `use crate::{store::..}` imports,
 even when rustfmt spreads them over several lines).
 The one allowed exception is `main.rs`'s `SurrealStore` import, which `memcastle migrate` needs.
-The pattern matches text, not syntax, so a diagnostic-code string such as `memcastle::jobs::not_found` trips it too:
+The pattern matches text, not syntax, so a diagnostic-code string such as `memcastle::jobs::not_found` trips it too, even inside a comment:
 tests should read a code from the error (`Error::body().code`) rather than spell it out in these directories.
 If you find yourself wanting to import `store` from one of those,
 the fix is almost always to add a method to `app::AppServices` instead,

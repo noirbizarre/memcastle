@@ -116,7 +116,7 @@ pass_filenames = false
 id = "store-isolation"
 name = "cli/mcp/api/client/main reach storage only through app::AppServices"
 language = "system"
-entry = '''bash -c '! grep -rnP --include=*.rs "(?<![A-Za-z0-9_])(crate|memcastle)::(\{[^}]*)?(store|jobs)\b" src/main.rs src/cli.rs src/client src/mcp src/api | grep -vP "^src/main\.rs:\d+:use memcastle::store::SurrealStore;$"; ! grep -rlPz --include=*.rs "use (crate|memcastle)::\{[^;]*?\b(store|jobs)::" src/main.rs src/cli.rs src/client src/mcp src/api' '''
+entry = '''bash -c '! grep -rnP --include=*.rs "(?<![A-Za-z0-9_])(crate|memcastle)::(\{[^}]*)?(store|jobs)\b" src/main.rs src/cli.rs src/client src/mcp src/api | grep -vP "^src/main\.rs:\d+:use memcastle::store::SurrealStore;$"&& ! grep -rlPz --include=*.rs "use (crate|memcastle)::\{[^;]*?\b(store|jobs)::" src/main.rs src/cli.rs src/client src/mcp src/api' '''
 files = '^src/(main\.rs|cli\.rs|client/|mcp/|api/)'
 pass_filenames = false
 
