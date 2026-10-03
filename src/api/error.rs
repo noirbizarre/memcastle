@@ -18,8 +18,13 @@ impl From<Error> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = match &self.0 {
-            Error::JobNotFound { .. } | Error::RelationshipNotFound { .. } => StatusCode::NOT_FOUND,
+            Error::JobNotFound { .. }
+            | Error::RelationshipNotFound { .. }
+            | Error::WingNotFound { .. }
+            | Error::RoomNotFound { .. }
+            | Error::DrawerNotFound { .. } => StatusCode::NOT_FOUND,
             Error::InvalidJobTransition { .. }
+            | Error::InvalidPalacePath { .. }
             | Error::InvalidInput { .. }
             | Error::InvalidJobId { .. }
             | Error::InvalidBasedOnJob { .. }
@@ -31,7 +36,12 @@ impl IntoResponse for ApiError {
             // The request is fine; the job's recorded state (Running, but with
             // no worker) is what conflicts with it, and a restart resolves it.
             // A 500 would blame the daemon for something the caller can fix.
-            Error::JobOrphaned { .. } | Error::DbEndpointRunning { .. } => StatusCode::CONFLICT,
+            // A name already taken, or a delete that a running job would undo:
+            // the request is well-formed but conflicts with the palace's state.
+            Error::JobOrphaned { .. }
+            | Error::DbEndpointRunning { .. }
+            | Error::DrawerNameTaken { .. }
+            | Error::PalaceBusy { .. } => StatusCode::CONFLICT,
             // The caller asked for something the daemon will not do (an unsafe
             // bind, or an endpoint for a database it does not embed): theirs to fix.
             Error::DbEndpointUnsafe { .. } | Error::DbEndpointUnavailable { .. } => {

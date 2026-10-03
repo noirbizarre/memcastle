@@ -14,6 +14,8 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::json;
 
+mod palace;
+pub mod palace_view;
 pub mod status;
 pub mod table;
 

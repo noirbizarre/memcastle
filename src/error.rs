@@ -547,6 +547,96 @@ pub enum Error {
         /// The configured backend kind.
         backend: String,
     },
+
+    /// No wing answers to the given name or id.
+    #[error("wing `{wing}` not found")]
+    #[diagnostic(
+        code(memcastle::palace::wing_not_found),
+        help(
+            "list the wings with `memcastle wing list`, or create it with `memcastle wing create`"
+        )
+    )]
+    WingNotFound {
+        /// The name or id that was looked up.
+        wing: String,
+    },
+
+    /// The wing exists but has no room answering to the given name or id.
+    #[error("room `{room}` not found in wing `{wing}`")]
+    #[diagnostic(
+        code(memcastle::palace::room_not_found),
+        help(
+            "list the wing's rooms with `memcastle room list --wing <wing>`, \
+             or create it with `memcastle room create <wing>/<room>`"
+        )
+    )]
+    RoomNotFound {
+        /// The wing that was searched.
+        wing: String,
+        /// The name or id that was looked up.
+        room: String,
+    },
+
+    /// The room exists but holds no drawer answering to the given name or id.
+    #[error("drawer `{drawer}` not found in `{room}`")]
+    #[diagnostic(
+        code(memcastle::palace::drawer_not_found),
+        help("list the room's drawers with `memcastle drawer list --room <wing>/<room>`")
+    )]
+    DrawerNotFound {
+        /// The `wing/room` that was searched.
+        room: String,
+        /// The name or id that was looked up.
+        drawer: String,
+    },
+
+    /// A `wing/room/drawer` path, or one of its names, is not usable.
+    #[error("invalid path `{raw}`: {message}")]
+    #[diagnostic(
+        code(memcastle::palace::invalid_path),
+        help(
+            "paths read `<wing>`, `<wing>/<room>` or `<wing>/<room>/<drawer>`; \
+             wing and room names cannot contain `/`"
+        )
+    )]
+    InvalidPalacePath {
+        /// What was given.
+        raw: String,
+        /// What was wrong with it.
+        message: String,
+    },
+
+    /// A drawer with that name already exists in the room, holding other
+    /// content. Drawer content is immutable, so the name cannot be reused.
+    #[error("a drawer named `{name}` already exists in `{room}` with different content")]
+    #[diagnostic(
+        code(memcastle::palace::drawer_name_taken),
+        help(
+            "pick another name, or delete the existing drawer first with `memcastle drawer delete`"
+        )
+    )]
+    DrawerNameTaken {
+        /// The `wing/room` the name is taken in.
+        room: String,
+        /// The name.
+        name: String,
+    },
+
+    /// A wing or room cannot be deleted while a job that writes to the palace
+    /// is pending: it could silently re-create what was just removed.
+    #[error("cannot delete {target} while {count} palace-writing job(s) are active")]
+    #[diagnostic(
+        code(memcastle::palace::busy),
+        help(
+            "wait for the jobs to finish, or cancel them: see `memcastle jobs list` and `memcastle jobs cancel`"
+        )
+    )]
+    PalaceBusy {
+        /// What was to be deleted, e.g. "wing `work`".
+        target: String,
+        /// How many mining, checkpoint or repair jobs are queued, running or paused.
+        count: usize,
+    },
 }
 
 /// What every interface reports about a failure: the message, and the two
@@ -594,6 +684,14 @@ impl Error {
     pub fn invalid_input(field: impl Into<String>, message: impl Into<String>) -> Self {
         Self::InvalidInput {
             field: field.into(),
+            message: message.into(),
+        }
+    }
+
+    /// Build an [`Error::InvalidPalacePath`].
+    pub fn invalid_palace_path(raw: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::InvalidPalacePath {
+            raw: raw.into(),
             message: message.into(),
         }
     }
@@ -796,7 +894,7 @@ mod tests {
             Error::config("bad"),
             Error::invalid_input("status", "unknown"),
             Error::invalid_job_id("nope"),
-            Error::not_implemented("memcastle wings"),
+            Error::not_implemented("memcastle maintenance"),
             Error::aborted("cancelling a job"),
             Error::prompt_failed("not a terminal"),
             Error::MigrationsPending {
@@ -868,6 +966,29 @@ mod tests {
             Error::DbEndpointUnavailable {
                 backend: "remote".to_string(),
             },
+            Error::WingNotFound {
+                wing: "work".to_string(),
+            },
+            Error::RoomNotFound {
+                wing: "work".to_string(),
+                room: "x".to_string(),
+            },
+            Error::DrawerNotFound {
+                room: "work/x".to_string(),
+                drawer: "y".to_string(),
+            },
+            Error::InvalidPalacePath {
+                raw: "a//b".to_string(),
+                message: "empty segment".to_string(),
+            },
+            Error::DrawerNameTaken {
+                room: "work/x".to_string(),
+                name: "y".to_string(),
+            },
+            Error::PalaceBusy {
+                target: "wing `work`".to_string(),
+                count: 1,
+            },
         ]
     }
 
@@ -909,7 +1030,13 @@ mod tests {
             | Error::DbEndpointUnsafe { .. }
             | Error::DbEndpointRunning { .. }
             | Error::DbEndpointBind { .. }
-            | Error::DbEndpointUnavailable { .. } => {}
+            | Error::DbEndpointUnavailable { .. }
+            | Error::WingNotFound { .. }
+            | Error::RoomNotFound { .. }
+            | Error::DrawerNotFound { .. }
+            | Error::InvalidPalacePath { .. }
+            | Error::DrawerNameTaken { .. }
+            | Error::PalaceBusy { .. } => {}
         }
     }
 

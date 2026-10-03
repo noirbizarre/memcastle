@@ -26,7 +26,7 @@ pub struct SearchHit {
 /// `RecordId` never has to be handled on the Rust side (see `store::mod`'s
 /// module doc) and every datetime round-trips through a plain RFC3339
 /// string that `chrono`'s default `serde` support parses directly.
-const DRAWER_COLUMNS: &str = "record::id(id) AS id, room, content, content_hash, source, tags, \
+pub(super) const DRAWER_COLUMNS: &str = "record::id(id) AS id, room, name, content, content_hash, source, tags, \
      embedding, provenance, <string>valid_from AS valid_from, valid_to, \
      <string>created_at AS created_at, <string>updated_at AS updated_at";
 
@@ -38,13 +38,16 @@ impl SurrealStore {
         self.db
             .query(
                 "CREATE type::record('drawer', $id) SET \
-                 room = $room, content = $content, content_hash = $content_hash, \
+                 room = $room, name = $name, content = $content, content_hash = $content_hash, \
                  source = $source, tags = $tags, embedding = $embedding, provenance = $provenance, \
                  valid_from = <datetime>$valid_from, valid_to = $valid_to, \
                  created_at = <datetime>$created_at, updated_at = <datetime>$updated_at",
             )
             .bind(("id", drawer.id.to_string()))
             .bind(("room", drawer.room.to_string()))
+            // `None` binds as `NONE`, which is what an `option<string>` field
+            // wants: unnamed drawers must not collide on the unique index.
+            .bind(("name", drawer.name.clone()))
             .bind(("content", drawer.content.clone()))
             .bind(("content_hash", drawer.content_hash.clone()))
             .bind(("source", super::bindable(&drawer.source)?))
@@ -98,12 +101,12 @@ impl SurrealStore {
         Ok(!rows.is_empty())
     }
 
-    /// Permanently delete a drawer — the only deletion this store
-    /// supports (see this module's doc comment: every other drawer write
-    /// is a fresh `CREATE`, never an update or a delete). Introduced for
-    /// `crate::repair::run`'s "remove orphan drawer" action: an orphan (a
-    /// drawer whose `room` no longer resolves) has nothing left to
-    /// preserve history for.
+    /// Permanently delete one drawer. Used by `crate::repair::run`'s "remove
+    /// orphan drawer" action (an orphan has nothing left to preserve history
+    /// for) and by `AppServices::delete_drawer`. Deleting a whole room or wing
+    /// is [`Self::delete_room`] / [`Self::delete_wing`], which do it in one
+    /// transaction. Succeeds for an id that does not exist: callers that must
+    /// report that check first.
     pub async fn delete_drawer(&self, id: DrawerId) -> Result<()> {
         self.db
             .query("DELETE type::record('drawer', $id)")

@@ -143,6 +143,19 @@ pub enum Command {
     /// Inspect and control jobs.
     #[command(subcommand)]
     Jobs(JobsCommand),
+    /// List, show, create and delete wings: the top-level buckets of the
+    /// palace, typically one per project. `wings` is an alias.
+    #[command(subcommand, alias = "wings")]
+    Wing(WingCommand),
+    /// List, show, create and delete rooms, addressed as `<wing>/<room>`.
+    /// `rooms` is an alias.
+    #[command(subcommand, alias = "rooms")]
+    Room(RoomCommand),
+    /// List, show, create and delete drawers, addressed as
+    /// `<wing>/<room>/<drawer>`, where a drawer is a name or a UUID. `drawers`
+    /// is an alias.
+    #[command(subcommand, alias = "drawers")]
+    Drawer(DrawerCommand),
     /// Manage the daemon's authentication token. Administrative, and never
     /// available to MCP clients.
     #[command(subcommand)]
@@ -157,12 +170,6 @@ pub enum Command {
     /// `fish`, `powershell` or `elvish`. Needs neither a daemon nor a
     /// configuration file.
     Completions(CompletionsArgs),
-    /// List wings. Not yet implemented.
-    Wings,
-    /// List rooms. Not yet implemented.
-    Rooms,
-    /// List drawers. Not yet implemented.
-    Drawers,
     /// Maintenance operations (dedup, stale-data sweep, ...). Not yet implemented.
     Maintenance,
 }
@@ -376,6 +383,118 @@ pub enum DiaryCommand {
         /// Maximum number of entries to return, newest first.
         #[arg(long, default_value_t = memcastle::app::DEFAULT_DIARY_LIMIT)]
         limit: u32,
+    },
+}
+
+/// `memcastle wing` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum WingCommand {
+    /// List wings with their room and drawer counts. A table in a terminal,
+    /// JSON when standard output is piped or redirected.
+    List,
+    /// Show one wing: its totals and its rooms.
+    Show {
+        /// The wing's name or UUID.
+        wing: String,
+    },
+    /// Create a wing. Creating one that already exists succeeds and changes
+    /// nothing.
+    Create {
+        /// The new wing's name. It cannot contain `/` or look like a UUID.
+        wing: String,
+        /// A free-text description.
+        #[arg(long)]
+        description: Option<String>,
+    },
+    /// Delete a wing and every room and drawer in it, permanently. In a
+    /// terminal this shows what will be removed and asks first. Refused while
+    /// a mining, checkpoint or applying repair job is pending.
+    Delete {
+        /// The wing's name or UUID.
+        wing: String,
+        /// Skip the confirmation asked for in a terminal.
+        #[arg(short, long)]
+        yes: bool,
+    },
+}
+
+/// `memcastle room` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum RoomCommand {
+    /// List rooms with their drawer counts, in one wing or (without `--wing`)
+    /// in every wing. A table in a terminal, JSON when standard output is
+    /// piped or redirected.
+    List {
+        /// Only this wing's rooms (name or UUID).
+        #[arg(long)]
+        wing: Option<String>,
+    },
+    /// Show one room.
+    Show {
+        /// The room, as `<wing>/<room>`.
+        room: String,
+    },
+    /// Create a room, and its wing if that does not exist yet. Creating a room
+    /// that already exists succeeds and changes nothing.
+    Create {
+        /// The new room, as `<wing>/<room>`.
+        room: String,
+        /// A free-text description.
+        #[arg(long)]
+        description: Option<String>,
+    },
+    /// Delete a room and every drawer in it, permanently. In a terminal this
+    /// shows what will be removed and asks first. Refused while a mining,
+    /// checkpoint or applying repair job is pending.
+    Delete {
+        /// The room, as `<wing>/<room>`.
+        room: String,
+        /// Skip the confirmation asked for in a terminal.
+        #[arg(short, long)]
+        yes: bool,
+    },
+}
+
+/// `memcastle drawer` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum DrawerCommand {
+    /// List a room's drawers, newest first, with a preview of each. A table in
+    /// a terminal, JSON when standard output is piped or redirected.
+    List {
+        /// The room, as `<wing>/<room>`.
+        #[arg(long)]
+        room: String,
+        /// Maximum number of drawers to list.
+        #[arg(long)]
+        limit: Option<u32>,
+    },
+    /// Show one drawer in full.
+    Show {
+        /// The drawer, as `<wing>/<room>/<name or UUID>`.
+        drawer: String,
+    },
+    /// Write a named drawer, creating its room and wing if they do not exist.
+    /// The content is immutable: writing the same name again with the same
+    /// content succeeds and changes nothing, with other content it is refused.
+    /// The content comes from `--content`, from `--file`, or from standard
+    /// input.
+    Create {
+        /// The drawer, as `<wing>/<room>/<name>`. The name may contain `/`.
+        drawer: String,
+        /// The content, as an argument.
+        #[arg(long, conflicts_with = "file")]
+        content: Option<String>,
+        /// Read the content from this file; `-` reads standard input.
+        #[arg(long, value_name = "PATH")]
+        file: Option<PathBuf>,
+    },
+    /// Delete one drawer, permanently. In a terminal this asks first.
+    Delete {
+        /// The drawer, as `<wing>/<room>/<name or UUID>`.
+        drawer: String,
+        /// Skip the confirmation asked for in a terminal.
+        #[arg(short, long)]
+        yes: bool,
     },
 }
 
@@ -687,7 +806,9 @@ mod tests {
     fn there_is_no_help_subcommand_at_the_top_or_in_any_group() {
         // `--help` is the one way to ask: `help` only duplicated it.
         assert!(Cli::try_parse_from(["memcastle", "help"]).is_err());
-        for group in ["jobs", "diary", "auth", "db", "daemon"] {
+        for group in [
+            "jobs", "diary", "auth", "db", "daemon", "wing", "room", "drawer",
+        ] {
             assert!(
                 Cli::try_parse_from(["memcastle", group, "help"]).is_err(),
                 "`{group} help` must not exist"
@@ -768,6 +889,12 @@ mod tests {
             vec!["auth", "generate", "--yes"],
             vec!["auth", "revoke", "-y"],
             vec!["jobs", "cancel", "some-id", "--yes"],
+            vec!["wing", "delete", "work", "--yes"],
+            vec!["wing", "delete", "work", "-y"],
+            vec!["room", "delete", "work/x", "--yes"],
+            vec!["room", "delete", "work/x", "-y"],
+            vec!["drawer", "delete", "work/x/y", "--yes"],
+            vec!["drawer", "delete", "work/x/y", "-y"],
         ] {
             let all = std::iter::once("memcastle").chain(args.iter().copied());
             Cli::try_parse_from(all).unwrap_or_else(|e| panic!("{args:?}: {e}"));
@@ -784,5 +911,48 @@ mod tests {
                 "`serve {flag}` must not exist"
             );
         }
+    }
+
+    #[test]
+    fn the_plural_spellings_are_aliases_of_the_singular_groups() {
+        for (plural, singular) in [("wings", "wing"), ("rooms", "room"), ("drawers", "drawer")] {
+            let a = Cli::try_parse_from(["memcastle", plural, "list", "--help"]);
+            let b = Cli::try_parse_from(["memcastle", singular, "list", "--help"]);
+            assert_eq!(
+                a.unwrap_err().kind(),
+                b.unwrap_err().kind(),
+                "`{plural}` must reach the same command as `{singular}`"
+            );
+        }
+        let cli = Cli::try_parse_from(["memcastle", "wings", "show", "work"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Wing(WingCommand::Show { .. })
+        ));
+    }
+
+    #[test]
+    fn drawer_create_takes_content_from_an_argument_or_a_file_but_not_both() {
+        Cli::try_parse_from(["memcastle", "drawer", "create", "w/r/n", "--content", "x"]).unwrap();
+        Cli::try_parse_from(["memcastle", "drawer", "create", "w/r/n", "--file", "-"]).unwrap();
+        assert!(
+            Cli::try_parse_from([
+                "memcastle",
+                "drawer",
+                "create",
+                "w/r/n",
+                "--content",
+                "x",
+                "--file",
+                "f"
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn drawer_list_needs_a_room() {
+        assert!(Cli::try_parse_from(["memcastle", "drawer", "list"]).is_err());
+        Cli::try_parse_from(["memcastle", "drawer", "list", "--room", "w/r"]).unwrap();
     }
 }

@@ -8,6 +8,7 @@
 
 mod auth;
 mod db_endpoint;
+mod palace;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::{
     CheckpointDestination, CheckpointPayload, Drawer, DrawerId, Job, JobId, JobKind, JobStatus,
-    MemoryMode, MiningSource, Priority, Provenance, Source, SourceKind,
+    MemoryMode, MiningSource, NameKind, Priority, Provenance, Source, SourceKind, validate_name,
 };
 use crate::error::{Error, Result};
 use crate::jobs::Scheduler;
@@ -25,6 +26,7 @@ use crate::store::{SearchHit, SurrealStore};
 
 pub use auth::{AuthPolicy, GeneratedToken, RevokeResult};
 pub use db_endpoint::{DbEndpoint, DbEndpointRequest, DbEndpointStatus};
+pub use palace::{Created, DEFAULT_LIST_LIMIT, WingDetail};
 
 /// A point-in-time summary of daemon health, for `GET /api/status`,
 /// `memcastle status`, and the `memcastle_status` MCP tool alike.
@@ -474,6 +476,11 @@ impl AppServices {
         // The caller's own name, so a rejected emergency checkpoint says
         // `emergency_checkpoint`, not the `checkpoint` it never asked for.
         Self::require_write(mode, operation)?;
+        // Up front, so a bad name is a 400 at submission and not a job that
+        // fails halfway through after writing the items before it.
+        for name in payload.items.iter().filter_map(|item| item.name.as_deref()) {
+            validate_name(NameKind::Drawer, name)?;
+        }
         self.scheduler
             .submit(JobKind::Checkpoint { payload }, priority, requested_by)
             .await
@@ -943,6 +950,7 @@ mod tests {
             items: vec![CheckpointItem {
                 destination: CheckpointDestination::General,
                 wing: Some(wing.to_string()),
+                name: None,
                 content: content.to_string(),
                 tags: vec![],
                 source: Source {
@@ -1388,6 +1396,7 @@ mod tests {
             items: vec![crate::domain::CheckpointItem {
                 destination: crate::domain::CheckpointDestination::General,
                 wing: Some("project-x".to_string()),
+                name: None,
                 content: "should never be queued".to_string(),
                 tags: vec![],
                 source: Source {
@@ -1446,6 +1455,7 @@ mod tests {
             items: vec![crate::domain::CheckpointItem {
                 destination: crate::domain::CheckpointDestination::General,
                 wing: Some("project-x".to_string()),
+                name: None,
                 content: "should never be queued".to_string(),
                 tags: vec![],
                 source: Source {
@@ -1469,6 +1479,7 @@ mod tests {
             items: vec![crate::domain::CheckpointItem {
                 destination: crate::domain::CheckpointDestination::General,
                 wing: Some("project-x".to_string()),
+                name: None,
                 content: "a full-mode checkpoint".to_string(),
                 tags: vec![],
                 source: Source {
@@ -1491,6 +1502,7 @@ mod tests {
             items: vec![crate::domain::CheckpointItem {
                 destination: crate::domain::CheckpointDestination::General,
                 wing: Some("project-x".to_string()),
+                name: None,
                 content: "should never be queued".to_string(),
                 tags: vec![],
                 source: Source {
@@ -1512,6 +1524,7 @@ mod tests {
             items: vec![crate::domain::CheckpointItem {
                 destination: crate::domain::CheckpointDestination::General,
                 wing: Some("project-x".to_string()),
+                name: None,
                 content: content.to_string(),
                 tags: vec![],
                 source: Source {

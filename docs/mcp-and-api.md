@@ -58,6 +58,7 @@ MemCastle does not decide what is worth remembering; the calling integration doe
       "destination": "preference",
       "wing": null,
       "content": "Always run the formatter before committing.",
+      "name": null,
       "tags": ["workflow"],
       "source": { "kind": "manual", "uri": null, "agent": "opencode" },
       "fact": null
@@ -73,6 +74,7 @@ MemCastle does not decide what is worth remembering; the calling integration doe
 | `content` | The text to store, verbatim. |
 | `tags` | Free-form labels stored with the drawer. Required, may be empty. |
 | `source` | Where the memory came from: `kind` is `file` or `manual`, `uri` and `agent` are optional. |
+| `name` | Optional name for the drawer, unique within its room, so it can be addressed as `wing/room/name`. A name held by another drawer fails the item with `memcastle::palace::drawer_name_taken`; an unusable one is refused at submission. |
 | `fact` | Optional knowledge-graph change made alongside the drawer: `{"op": "add" \| "supersede" \| "invalidate", ...}`. |
 
 Over MCP, `payload` is a JSON object, and the tool's input schema describes its shape.
@@ -95,9 +97,10 @@ A mode the daemon refuses is a `403` with the code `memcastle::app::mode_forbidd
 A request without a valid token, on a daemon with [authentication](authentication.md) enabled,
 is a `401` with the code `memcastle::auth::unauthorized` and a `WWW-Authenticate: Bearer` header.
 Other statuses are `400` for invalid input, a transition the job's state does not allow, or a database admin endpoint
-that would be unsafe (`memcastle::db::unsafe_bind`), `404` for an unknown job,
-`409` for a job recorded as running that has no worker (restart the daemon) or a database admin endpoint that is already
-open, and `500` for a server failure.
+that would be unsafe (`memcastle::db::unsafe_bind`), `404` for an unknown job, wing, room or drawer,
+`409` for a job recorded as running that has no worker (restart the daemon), a database admin endpoint that is already
+open, a drawer name already held by other content, or a wing or room delete while a job that writes to the palace is
+pending, and `500` for a server failure.
 
 | Route | Purpose | Parameters |
 |---|---|---|
@@ -116,6 +119,18 @@ open, and `500` for a server failure.
 | `POST /api/jobs/{id}/cancel` | Cancel a job. | none |
 | `POST /api/jobs/{id}/retry` | Retry a failed job. | none |
 | `POST /api/shutdown` | Shut the daemon down gracefully. | none |
+| `GET /api/wings` | List wings with their room and drawer counts. | none |
+| `POST /api/wings` | Create a wing, or find it: `201` when created, `200` when it existed. | JSON body: `name`, `description?` |
+| `GET /api/wings/{wing}` | One wing with its totals and rooms. | none |
+| `DELETE /api/wings/{wing}` | Delete the wing, its rooms and their drawers: `{wings, rooms, drawers}` removed. | none |
+| `GET /api/wings/{wing}/rooms` | List a wing's rooms with their drawer counts. | none |
+| `POST /api/wings/{wing}/rooms` | Create a room (and its wing), or find it. | JSON body: `name`, `description?` |
+| `GET /api/wings/{wing}/rooms/{room}` | One room. | none |
+| `DELETE /api/wings/{wing}/rooms/{room}` | Delete the room and its drawers. | none |
+| `GET /api/wings/{wing}/rooms/{room}/drawers` | List the newest drawers, with a preview of each. | query string: `limit` (default 50, at most 200) |
+| `POST /api/wings/{wing}/rooms/{room}/drawers` | Write a drawer, creating its wing and room if needed. | JSON body: `content`, `name?`, `requested_by?` |
+| `GET /api/wings/{wing}/rooms/{room}/drawers/{drawer}` | One drawer in full. | none |
+| `DELETE /api/wings/{wing}/rooms/{room}/drawers/{drawer}` | Delete one drawer. | none |
 | `POST /api/auth/token` | Generate a token, replacing any previous one: `{token, algorithm, version, created_at}`. | none |
 | `DELETE /api/auth/token` | Revoke the generated token: `{"revoked": true}`. | none |
 | `GET /api/db` | Whether the [database admin endpoint](database-access.md) is listening, and where. | none |
@@ -131,6 +146,19 @@ curl -s http://127.0.0.1:8420/api/health
 curl -s 'http://127.0.0.1:8420/api/search?q=formatter&limit=5'
 curl -s http://127.0.0.1:8420/api/jobs?status=running
 ```
+
+### Wings, rooms and drawers
+
+`{wing}` and `{room}` are a name or a UUID, and `{drawer}` is a name or a UUID within its room.
+A drawer name may contain `/`, so `{drawer}` takes the rest of the path.
+Creating something that exists is not an error: the answer is `200` instead of `201`, and its body says `"created": false`.
+The answers of `wing` and `room` carry their counts, computed when asked, and a listing never returns drawer content.
+Reads are gated as reads and creates and deletes as writes, see [Memory modes](memory-modes.md).
+
+There is deliberately no MCP tool for these routes, as for token generation and the database endpoint:
+deleting a wing is a human decision, and an agent that can file memories can already do so through
+`memcastle_checkpoint` and `memcastle_diary_write`.
+The decision is recorded in [ADR 018](adr/018-palace-hierarchy-management.md).
 
 ### Authentication
 

@@ -7,7 +7,7 @@
 use comfy_table::presets::UTF8_FULL_CONDENSED;
 use comfy_table::{ColumnConstraint, ContentArrangement, Table, Width};
 
-use crate::domain::{Job, JobKind};
+use crate::domain::{DrawerSummary, Job, JobKind, RoomSummary, WingSummary};
 use crate::term::Painter;
 
 /// Index of the jobs table's free-text column.
@@ -100,6 +100,106 @@ pub fn render_jobs(jobs: &[Job], painter: Painter, width: Option<u16>) -> String
         painter,
         width,
     )
+}
+
+/// Render `wings` as a table: one row per wing, with its counts.
+///
+/// Wings are addressed by name, so there is no id column to copy from.
+#[must_use]
+pub fn render_wings(wings: &[WingSummary], painter: Painter, width: Option<u16>) -> String {
+    if wings.is_empty() {
+        return painter.dim("No wings.");
+    }
+    let rows = wings
+        .iter()
+        .map(|summary| {
+            vec![
+                summary.wing.name.clone(),
+                summary.rooms.to_string(),
+                summary.drawers.to_string(),
+                local_minute(summary.wing.created_at),
+                summary
+                    .wing
+                    .description
+                    .as_deref()
+                    .map_or_else(|| "-".to_string(), one_line),
+            ]
+        })
+        .collect();
+    render_table(
+        &["WING", "ROOMS", "DRAWERS", "CREATED", "DESCRIPTION"],
+        rows,
+        4,
+        painter,
+        width,
+    )
+}
+
+/// Render `rooms` as a table. The wing is a column because a listing may span
+/// wings, and `wing/room` is how a room is addressed.
+#[must_use]
+pub fn render_rooms(rooms: &[RoomSummary], painter: Painter, width: Option<u16>) -> String {
+    if rooms.is_empty() {
+        return painter.dim("No rooms.");
+    }
+    let rows = rooms
+        .iter()
+        .map(|summary| {
+            vec![
+                summary.wing_name.clone(),
+                summary.room.name.clone(),
+                summary.drawers.to_string(),
+                local_minute(summary.room.created_at),
+                summary
+                    .room
+                    .description
+                    .as_deref()
+                    .map_or_else(|| "-".to_string(), one_line),
+            ]
+        })
+        .collect();
+    render_table(
+        &["WING", "ROOM", "DRAWERS", "CREATED", "DESCRIPTION"],
+        rows,
+        4,
+        painter,
+        width,
+    )
+}
+
+/// Render `drawers` as a table. The id is always shown in full: an unnamed
+/// drawer can only be addressed by it.
+#[must_use]
+pub fn render_drawers(drawers: &[DrawerSummary], painter: Painter, width: Option<u16>) -> String {
+    if drawers.is_empty() {
+        return painter.dim("No drawers.");
+    }
+    let rows = drawers
+        .iter()
+        .map(|drawer| {
+            vec![
+                drawer.id.to_string(),
+                drawer.name.clone().unwrap_or_else(|| "-".to_string()),
+                drawer.chars.to_string(),
+                local_minute(drawer.created_at),
+                one_line(&drawer.preview),
+            ]
+        })
+        .collect();
+    render_table(
+        &["ID", "NAME", "CHARS", "CREATED", "PREVIEW"],
+        rows,
+        4,
+        painter,
+        width,
+    )
+}
+
+/// A timestamp in the reader's timezone, to the minute.
+fn local_minute(at: chrono::DateTime<chrono::Utc>) -> String {
+    at.with_timezone(&chrono::Local)
+        .format("%Y-%m-%d %H:%M")
+        .to_string()
 }
 
 /// A job kind as one short word, plus the one parameter that changes what it
@@ -358,5 +458,56 @@ mod tests {
         failed.progress.message = Some("step 1".to_string());
         failed.error = Some("boom".to_string());
         assert_eq!(detail_label(&failed, Painter::PLAIN), "boom");
+    }
+
+    fn wing_summary(name: &str, rooms: u64, drawers: u64) -> WingSummary {
+        WingSummary {
+            wing: crate::domain::Wing {
+                id: crate::domain::WingId::new(),
+                palace: crate::domain::PalaceId::new(),
+                name: name.to_string(),
+                description: None,
+                created_at: chrono::Utc::now(),
+            },
+            rooms,
+            drawers,
+        }
+    }
+
+    #[test]
+    fn empty_palace_listings_say_so_instead_of_printing_a_bare_header() {
+        assert_eq!(render_wings(&[], Painter::PLAIN, None), "No wings.");
+        assert_eq!(render_rooms(&[], Painter::PLAIN, None), "No rooms.");
+        assert_eq!(render_drawers(&[], Painter::PLAIN, None), "No drawers.");
+    }
+
+    #[test]
+    fn a_wing_row_shows_its_name_and_counts() {
+        let text = render_wings(&[wing_summary("work", 12, 37)], Painter::PLAIN, None);
+        for expected in ["WING", "ROOMS", "DRAWERS", "work", "12", "37"] {
+            assert!(text.contains(expected), "missing {expected}:\n{text}");
+        }
+        assert!(!text.contains('\u{1b}'), "a plain painter emits no escapes");
+    }
+
+    #[test]
+    fn a_drawer_row_carries_its_full_id_and_a_dash_when_it_has_no_name() {
+        let drawer = DrawerSummary {
+            id: crate::domain::DrawerId::new(),
+            room: crate::domain::RoomId::new(),
+            name: None,
+            chars: 5,
+            preview: "line one\nline two".to_string(),
+            source: crate::domain::Source {
+                kind: crate::domain::SourceKind::Manual,
+                uri: None,
+                agent: None,
+            },
+            created_at: chrono::Utc::now(),
+        };
+        let text = render_drawers(std::slice::from_ref(&drawer), Painter::PLAIN, Some(200));
+        assert!(text.contains(&drawer.id.to_string()), "{text}");
+        assert!(text.contains("line one line two"), "{text}");
+        assert!(text.contains(" - "), "{text}");
     }
 }

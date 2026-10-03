@@ -299,6 +299,7 @@ mod tests {
         let drawer = crate::domain::Drawer {
             id: drawer_id,
             room: orphan_room,
+            name: None,
             content: "filed under a room that doesn't exist".to_string(),
             content_hash: "irrelevant".to_string(),
             source: Source {
