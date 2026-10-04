@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent"
 import memcastle from "../src/extension.ts"
 import { MemCastleFailure } from "../src/failures.ts"
@@ -401,5 +404,38 @@ test("a read-only session still wakes up, and an off session injects nothing eve
   } finally {
     await off.fire("session_shutdown", { reason: "quit" })
     off.restore()
+  }
+})
+
+test("a real daemon's diary for the wing a project file declares is injected, wherever the directory is named", async () => {
+  const writer = daemon.session("full")
+  await writer.call("memcastle_diary_write", { agent_identity: "pi", wing: "declared-wing", content: "Declared wing diary." })
+  await writer.close()
+  const root = mkdtempSync(join(tmpdir(), "memcastle-pi-wake-"))
+  try {
+    mkdirSync(join(root, ".config"), { recursive: true })
+    mkdirSync(join(root, "deep/er"), { recursive: true })
+    writeFileSync(join(root, ".config/memcastle.toml"), '[memcastle]\nwing = "declared-wing"\n')
+    const { fire, restore } = await realSession({ MEMCASTLE_WAKE_UP_MODE: "sync" }, join(root, "deep/er"))
+    try {
+      await fire("session_start", { reason: "startup" })
+      const injected = await fire("before_agent_start", { prompt: "hello" })
+      expect(injected?.message?.content).toContain("Declared wing diary.")
+    } finally {
+      await fire("session_shutdown", { reason: "quit" })
+      restore()
+    }
+
+    // The environment outranks the file: a CI run can point the same checkout at another wing.
+    const other = await realSession({ MEMCASTLE_WAKE_UP_MODE: "sync", MEMCASTLE_WING: "no-such-wing" }, join(root, "deep/er"))
+    try {
+      await other.fire("session_start", { reason: "startup" })
+      expect((await other.fire("before_agent_start", { prompt: "hello", systemPrompt: "base" }))?.message).toBeUndefined()
+    } finally {
+      await other.fire("session_shutdown", { reason: "quit" })
+      other.restore()
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
   }
 })

@@ -69,6 +69,21 @@ test("the level can come from the environment variable Pi reads, so the two agen
   expect(system).toEqual([`${SEARCH}\n\n${ALWAYS_LINE}`])
 })
 
+test("a project that names a wing and a room adds one line telling the model to pass them to its searches", async () => {
+  const root = mkdtempSync(join(tmpdir(), "memcastle-oc-recall-"))
+  try {
+    mkdirSync(join(root, ".config"), { recursive: true })
+    writeFileSync(join(root, ".config/memcastle.toml"), '[memcastle]\nwing = "castle"\nroom = "design"\n')
+    const core = (await createCore({ wakeUp: { enabled: false } }, async () => undefined, { HOME: "/nonexistent-home" }, root)) as Core
+    const system: string[] = []
+    await core.systemTransform("ses_1", (text) => system.push(text))
+    expect(system).toHaveLength(1)
+    expect(system[0]?.startsWith(`${SEARCH}\n\nThis project's memory is in wing \`castle\`, room \`design\`.`)).toBe(true)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test("a subagent's request is left alone, and a request with no session id still gets the reminder", async () => {
   const { core, request } = await coreWith()
   await core.sessionCreated("ses_child", "/work/castle", "ses_parent")
@@ -87,8 +102,8 @@ test("the reminder does not depend on the wake-up: a failing one still leaves th
 
 // --- the two integrations stay the same ---------------------------------------------------------------------------
 
-test("the Pi and OpenCode copies of the shared recall, skill-reading and checkpoint code are identical", () => {
-  for (const file of ["recall-core.ts", "skill-text.ts", "checkpoint-core.ts"]) {
+test("the Pi and OpenCode copies of the shared recall, skill-reading, wake-up, project and checkpoint code are identical", () => {
+  for (const file of ["recall-core.ts", "skill-text.ts", "checkpoint-core.ts", "wake-up-core.ts", "project-core.ts"]) {
     const here = readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8")
     const pi = readFileSync(new URL(`../../pi/src/${file}`, import.meta.url), "utf8")
     expect(here).toBe(pi)

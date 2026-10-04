@@ -68,6 +68,7 @@ The environment variables are the ones the MemCastle CLI already reads.
 | `wakeUp.mode` | `MEMCASTLE_WAKE_UP_MODE` | `async` | `sync` makes the first response wait for it; `async` never makes a response wait |
 | `wakeUp.source` | `MEMCASTLE_WAKE_UP_SOURCE` | `project` | The wing to ask about: `user`, `project`, `custom` or `none` |
 | `wakeUp.wing` | `MEMCASTLE_WAKE_UP_WING` | none | The wing for `custom` |
+| none | `MEMCASTLE_WING`, `MEMCASTLE_ROOM` | none | The project's wing and room, overriding `.config/memcastle.toml` (see [Project context](#project-context)) |
 | `forceMemoryRecall.level` | `MEMCASTLE_FORCE_MEMORY_RECALL` | `sometimes` | `off`, `sometimes` or `always`: how hard to push the model to search first |
 | `checkpoint.enabled` | `MEMCASTLE_CHECKPOINT` | `true` | Whether the interval review runs; the tool, the command and the emergency checkpoint work either way |
 | `checkpoint.interval` | `MEMCASTLE_CHECKPOINT_INTERVAL` | `10` | How many exchanges (idle events) separate two interval reviews |
@@ -77,6 +78,20 @@ The environment variables are the ones the MemCastle CLI already reads.
 The daemon is found through its registry file, then the configured address, and each candidate is checked with
 `GET /api/health` because the file is only a hint.
 A mode the plugin cannot parse **fails closed**: it logs why and does nothing, rather than treating a typo as `full`.
+
+### Project context
+
+A project declares its memory scope in `.config/memcastle.toml`, and `MEMCASTLE_WING` and `MEMCASTLE_ROOM` override it.
+The plugin reads both itself, from each session's own directory, so sessions of one process in different projects keep their own scope, and passes the result to MemCastle as ordinary `wing` and `room` arguments:
+the daemon is not asked to resolve anything.
+The file, the discovery rules and the precedence are in [Project configuration](../../docs/project-config.md).
+
+- **Wake-up** asks about the project's wing under the default `project` source; `user`, `custom` and `none` still win.
+- **Checkpoints** file `project` and `diary` items with no wing of their own under the project's wing,
+  and never move a `preference` or a `general` item.
+- **Search** is preceded by one line telling the model which wing and room to pass.
+- A broken file or variable is reported once, and the session carries on without a project scope.
+- An `off` session reads no project file.
 
 ### Wake-up
 
@@ -314,6 +329,7 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | `emergency-checkpoint` | Implemented: a review submitted with `emergency: true` on `experimental.session.compacting` (V1, experimental) and the `compaction` session hook (V2) | #34, done |
 | `persistent-session` | Implemented: one connection per OpenCode session, kept alive, replaced with its mode re-selected when the daemon forgets it | #124, done |
 | `skills` | Implemented: `search-before-answer` and `checkpoint-instructions` are discovered natively from `skills/`, never copied, and `checkpoint-instructions` also instructs the reviewing model | #36, #34, done |
+| `project-context` | Implemented: `.config/memcastle.toml` and `MEMCASTLE_WING` / `MEMCASTLE_ROOM` resolved per session directory, used for the wake-up wing, checkpoint defaults and the search instruction | #183, done |
 | `background-mining` | Not yet | no issue yet |
 | `failure-reporting` | Foundation: the five classes with `help`; user-facing toasts are not wired | later |
 | `audit-repair` | Not yet | no issue yet |

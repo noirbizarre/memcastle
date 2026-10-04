@@ -22,7 +22,7 @@ export function registerWakeUpCommand(pi: ExtensionAPI, manager: () => McpManage
         return
       }
       const { settings } = current
-      const wing = wingFor(settings.wakeUp, ctx.cwd)
+      const wing = wingFor(settings.wakeUp, ctx.cwd, current.project)
       try {
         const briefing = await fetchWakeUp(session, settings.agentIdentity, wing)
         // Naming the wing is what lets the user see why nothing came back: asking about the wrong one is the usual cause.

@@ -18,6 +18,7 @@ import {
   validatePayload,
 } from "./checkpoint-core.ts"
 import { MemCastleFailure } from "./failures.ts"
+import type { ProjectContext } from "./project-core.ts"
 import type { SessionRegistry } from "./registry.ts"
 import type { Settings } from "./settings.ts"
 import { readSkill } from "./skill-text.ts"
@@ -91,9 +92,12 @@ export function createCheckpoints(options: {
   host: ReviewHost | undefined
   log: Log
   report: (name: string, error: unknown) => Promise<void>
+  /** The project a session works in, or `null`: the wing its `project` and `diary` items default to. */
+  projectOf?: (sessionId: string) => ProjectContext | null
   deadlineMs?: number
 }): Checkpoints {
   const { settings, sessions, children, host, log, report } = options
+  const projectOf = options.projectOf ?? (() => null)
   const deadlineMs = options.deadlineMs ?? EMERGENCY_DEADLINE_MS
   const states = new Map<string, SessionState>()
 
@@ -105,6 +109,7 @@ export function createCheckpoints(options: {
         review: new CheckpointReview({
           mode: settings.mode,
           agentIdentity: settings.agentIdentity,
+          project: () => projectOf(sessionId),
           // Read when a review submits, so a connection replaced in the meantime is the one used.
           session: () => sessions.session(sessionId),
           skill: () => readSkill(CHECKPOINT_SKILL),
@@ -185,7 +190,12 @@ export function createCheckpoints(options: {
       const state = stateOf(sessionId)
       if (args.payload !== undefined) {
         // The model classified it itself, so the plugin only checks it and submits it.
-        const payload = validatePayload(args.payload, settings.agentIdentity, "Fix the payload and call the tool again.")
+        const payload = validatePayload(
+          args.payload,
+          settings.agentIdentity,
+          "Fix the payload and call the tool again.",
+          projectOf(sessionId),
+        )
         if (payload.items.length === 0) return describeOutcome({ kind: "nothing", reason: "nothing worth keeping" })
         const job = await submitCheckpoint(sessions.session(sessionId), payload, {
           emergency: args.emergency === true,

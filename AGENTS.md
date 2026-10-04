@@ -129,7 +129,8 @@ src/
 ├── assets/     runtime asset resolution (override, installed, embedded); never user data, never the network
 ├── dbadmin/    the database admin endpoint: SurrealDB's WebSocket protocol over the daemon's own handle
 ├── jobs/       the scheduler: claiming, dispatch, cooperative pause/cancel, crash recovery
-├── mining/     the mining job handler: the source adapter contract, the shared pipeline and chunker, the built-in adapters,
+├── mining/     the mining job handler: the source adapter contract, the shared pipeline and chunker, the built-in adapters
+│               (the directory adapter alone reads a project's `.config/memcastle.toml`, for its default wing),
 │               the registry that names them, and the WebAssembly host that runs installed sources (`wasm/`)
 ├── source/     source packages: manifest, archive, scaffolding, build, and the conformance runner (no store, no jobs)
 ├── checkpoint/ the checkpoint job handler (durable, resumable memory writes)

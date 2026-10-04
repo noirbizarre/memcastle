@@ -55,7 +55,7 @@ export function registerSearchBeforeAnswer(
     // The session may have ended or restarted while the file was read, and its instruction must not leak into another.
     if (manager() !== current) return
 
-    const text = recallInstruction(current.settings.forceMemoryRecall, body)
+    const text = recallInstruction(current.settings.forceMemoryRecall, body, current.project)
     if (text === null) return
     // `event.systemPrompt` already holds earlier handlers' changes, so this adds to them instead of replacing them.
     return { systemPrompt: `${event.systemPrompt}\n\n${text}` }

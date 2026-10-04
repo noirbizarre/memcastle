@@ -1,11 +1,14 @@
 import { afterEach, expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent"
 import memcastle from "../src/extension.ts"
 
 type Handler = (event: unknown, ctx: ExtensionContext) => unknown
 
 /** The only parts of Pi the extension touches: `on`, `registerCommand`, and `ui.notify`. */
-function fakePi() {
+function fakePi(cwd = "/work/memcastle") {
   const handlers = new Map<string, Handler[]>()
   const notes: { message: string; level: string }[] = []
   const pi = {
@@ -16,7 +19,7 @@ function fakePi() {
     // Wake-up registers a command at load; this test only needs it to be accepted.
     registerCommand: () => undefined,
   } as unknown as ExtensionAPI
-  const ctx = { cwd: "/work/memcastle", ui: { notify: (message: string, level: string) => notes.push({ message, level }) } } as unknown as ExtensionContext
+  const ctx = { cwd, ui: { notify: (message: string, level: string) => notes.push({ message, level }) } } as unknown as ExtensionContext
   const fire = async (event: string, payload: object = {}) => {
     for (const handler of handlers.get(event) ?? []) await handler({ type: event, ...payload }, ctx)
   }
@@ -85,4 +88,50 @@ test("shutting down is idempotent, and works when the session never started", as
   memcastle(pi)
   await fire("session_shutdown", { reason: "quit" })
   await fire("session_shutdown", { reason: "quit" })
+})
+
+// --- the project file --------------------------------------------------------------------------------------------
+
+/** A directory whose project file holds an unknown key, which the contract refuses. */
+function brokenProject(): string {
+  const root = mkdtempSync(join(tmpdir(), "memcastle-pi-project-"))
+  mkdirSync(join(root, ".config"), { recursive: true })
+  writeFileSync(join(root, ".config/memcastle.toml"), "[memcastle]\ntoken = \"hunter2\"\n")
+  return root
+}
+
+test("a broken project file is reported once as a warning and the session still starts", async () => {
+  const root = brokenProject()
+  try {
+    process.env.MEMCASTLE_PORT = "1"
+    process.env.MEMCASTLE_PALACE_PATH = "/nonexistent/memcastle-palace"
+    process.env.HOME = "/nonexistent-home"
+    const { pi, notes, fire } = fakePi(root)
+    memcastle(pi)
+    await fire("session_start", { reason: "startup" })
+    await until(() => notes.some((note) => note.message.includes("memcastle daemon start")), "the daemon-unavailable notification")
+
+    const project = notes.filter((note) => note.message.includes("unknown key"))
+    expect(project).toHaveLength(1)
+    expect(project[0]?.level).toBe("warning")
+    expect(project[0]?.message).not.toContain("hunter2")
+    await fire("session_shutdown", { reason: "quit" })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("an off session never reads the project file, so a broken one is not even reported", async () => {
+  const root = brokenProject()
+  try {
+    process.env.MEMCASTLE_MODE = "off"
+    process.env.HOME = "/nonexistent-home"
+    const { pi, notes, fire } = fakePi(root)
+    memcastle(pi)
+    await fire("session_start", { reason: "startup" })
+    await Bun.sleep(100)
+    expect(notes).toEqual([])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })

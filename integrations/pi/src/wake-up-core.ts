@@ -6,6 +6,7 @@
 // tests drive it with a fake caller and a promise they resolve by hand.
 
 import { basename } from "node:path"
+import type { ProjectContext } from "./project-core.ts"
 
 /** `sync` makes the first model request wait for the wake-up; `async` never makes any request wait. */
 export type WakeUpMode = "sync" | "async"
@@ -14,7 +15,8 @@ export type WakeUpMode = "sync" | "async"
  * Which wing the wake-up asks about. The daemon only knows a wing name or no wing at all, so what "user" and
  * "project" mean is this client's decision:
  *   - `user`: the wing checkpoints file preferences under;
- *   - `project`: a wing named after the working directory, which is what mining a directory creates by default;
+ *   - `project`: the wing the project declares (`.config/memcastle.toml` or `MEMCASTLE_WING`), else a wing named after
+ *     the working directory, which is what mining a directory creates by default;
  *   - `custom`: the wing the user named;
  *   - `none`: no wing, so highlights from every wing and no diary.
  */
@@ -105,15 +107,18 @@ export function toWingName(raw: string): string | null {
  * The wing to ask the daemon about for a session working in `cwd`, or `undefined` to ask about no wing.
  * `undefined` is also the answer when `cwd` has no usable name (the filesystem root), because guessing a wing
  * would load another project's context.
+ *
+ * `project` is the shared project context when it names a wing. Only the default `project` source follows it: `user`,
+ * `custom` and `none` are the user's explicit choices for this client, and an explicit choice outranks a project file.
  */
-export function wingFor(settings: WakeUpSettings, cwd: string): string | undefined {
+export function wingFor(settings: WakeUpSettings, cwd: string, project: ProjectContext | null = null): string | undefined {
   switch (settings.source) {
     case "user":
       return USER_WING
     case "custom":
       return toWingName(settings.wing ?? "") ?? undefined
     case "project":
-      return toWingName(basename(cwd)) ?? undefined
+      return project?.wing ?? toWingName(basename(cwd)) ?? undefined
     case "none":
       return undefined
   }

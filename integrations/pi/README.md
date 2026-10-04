@@ -41,6 +41,7 @@ The environment variables are the ones the MemCastle CLI already reads.
 | `MEMCASTLE_WAKE_UP_MODE` | `async` | `sync` makes the first response wait for it; `async` never makes a response wait |
 | `MEMCASTLE_WAKE_UP_SOURCE` | `project` | The wing to ask about: `user`, `project`, `custom` or `none` |
 | `MEMCASTLE_WAKE_UP_WING` | none | The wing for `custom` |
+| `MEMCASTLE_WING`, `MEMCASTLE_ROOM` | none | The project's wing and room, overriding `.config/memcastle.toml` (see [Project context](#project-context)) |
 | `MEMCASTLE_FORCE_MEMORY_RECALL` | `sometimes` | `off`, `sometimes` or `always`: how hard to push the model to search first |
 | `MEMCASTLE_CHECKPOINT` | `true` | Whether the interval review runs; `/memcastle-checkpoint` works either way |
 | `MEMCASTLE_CHECKPOINT_INTERVAL` | `10` | How many exchanges separate two interval reviews |
@@ -52,6 +53,20 @@ The daemon is found through its registry file, then the configured address, and 
 A mode the extension cannot parse **fails closed**: it tells the user why and does nothing, rather than treating a
 typo as `full`.
 An `off` session opens no connection at all.
+
+### Project context
+
+A project declares its memory scope in `.config/memcastle.toml`, and `MEMCASTLE_WING` and `MEMCASTLE_ROOM` override it.
+The extension reads both itself, from Pi's working directory, and passes the result to MemCastle as ordinary `wing` and `room` arguments:
+the daemon is not asked to resolve anything.
+The file, the discovery rules and the precedence are in [Project configuration](../../docs/project-config.md).
+
+- **Wake-up** asks about the project's wing under the default `project` source; `user`, `custom` and `none` still win.
+- **Checkpoints** file `project` and `diary` items with no wing of their own under the project's wing,
+  and never move a `preference` or a `general` item.
+- **Search** is preceded by one line telling the model which wing and room to pass.
+- A broken file or variable is reported once, and the session carries on without a project scope.
+- An `off` session reads no project file.
 
 ### Memory modes
 
@@ -270,6 +285,7 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | `emergency-checkpoint` | Not yet | #24 |
 | `persistent-session` | Implemented: one connection per Pi session, kept alive, replaced with its mode re-selected when the daemon forgets it | #29, done |
 | `skills` | Implemented: `search-before-answer` is injected and `checkpoint-instructions` instructs the reviewing model, both read from `skills/` and never copied; `off` sessions get nothing | #25, #23, done |
+| `project-context` | Implemented: `.config/memcastle.toml` and `MEMCASTLE_WING` / `MEMCASTLE_ROOM` resolved from Pi's directory, used for the wake-up wing, checkpoint defaults and the search instruction | #183, done |
 | `background-mining` | Not yet | #26 |
 | `failure-reporting` | Foundation: the five classes with `help`, shown as Pi notifications | #30 for the rest |
 | `audit-repair` | Not yet | #28 |

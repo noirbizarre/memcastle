@@ -10,6 +10,7 @@
 
 import { MemCastleFailure, failureFromJob } from "./failures.ts"
 import type { ModeLabel } from "./modes.ts"
+import type { ProjectContext } from "./project-core.ts"
 
 // --- settings --------------------------------------------------------------------------------------------------
 
@@ -195,11 +196,29 @@ Each item has \`destination\` (\`preference\`, \`project\`, \`diary\` or \`gener
 Leave out \`source\` and \`fact\`: the client sets them.
 When nothing in the conversation is worth keeping, reply \`{"items": []}\`.`
 
+/** The destinations whose items a project's wing is the default for: its own notes and its own diary, not the user's. */
+const PROJECT_WING_DESTINATIONS: ReadonlySet<string> = new Set(["project", "diary"])
+
+/**
+ * What the reviewer is told about the project's wing, or `null` when the project names none.
+ * The client applies the default itself afterwards, so this only keeps the reviewer from inventing another wing.
+ */
+function projectWingNote(project: ProjectContext | null): string | null {
+  if (project?.wing == null) return null
+  return `This conversation belongs to a project whose wing is \`${project.wing}\`. Leave \`wing\` out of \`project\` and \`diary\` items: the client files them there.`
+}
+
 /** The request that asks a model what in `turns` is worth keeping. `note` is the user's own words on a manual save. */
-export function classificationRequest(skill: string, turns: readonly Turn[], note?: string): ClassificationRequest {
+export function classificationRequest(
+  skill: string,
+  turns: readonly Turn[],
+  note?: string,
+  project: ProjectContext | null = null,
+): ClassificationRequest {
   const asked = note?.trim()
+  const projectNote = projectWingNote(project)
   return {
-    system: `${skill}\n\n---\n\n${REPLY_FORMAT}`,
+    system: `${skill}\n\n---\n\n${REPLY_FORMAT}${projectNote === null ? "" : `\n${projectNote}`}`,
     prompt:
       (asked ? `The user asked for this checkpoint and said: ${asked}\n\n` : "") +
       `Review this conversation and reply with the payload.\n\n<conversation>\n${renderTranscript(turns)}\n</conversation>`,
@@ -234,11 +253,20 @@ const MODEL_HELP =
 /**
  * Check `value` and turn it into the payload MemCastle takes, stamped with the agent identity.
  *
+ * An item with no wing of its own, headed for `project` or `diary`, takes the project's wing: the client applies it
+ * here, at submission, because a checkpoint is a durable job and replaying it must not depend on what a file says by
+ * then. A `preference` or `general` item is the user's and is never moved into a project's wing.
+ *
  * Validation happens here as well as in the daemon because the daemon refuses a whole payload for one bad item, and a
  * reply from a model is the likeliest place to find one. `source` and `fact` are never taken from the input: the source
  * is this client's to state, and a fact needs entity and relationship ids that no MCP tool lets a client obtain.
  */
-export function validatePayload(value: unknown, agent: string, help: string = MODEL_HELP): CheckpointPayload {
+export function validatePayload(
+  value: unknown,
+  agent: string,
+  help: string = MODEL_HELP,
+  project: ProjectContext | null = null,
+): CheckpointPayload {
   const items = (value as { items?: unknown } | null)?.items
   if (!Array.isArray(items)) throw unusable("it has no `items` list", help)
   return {
@@ -254,7 +282,7 @@ export function validatePayload(value: unknown, agent: string, help: string = MO
       const tags = Array.isArray(item.tags) ? item.tags.filter((tag): tag is string => typeof tag === "string" && tag.trim() !== "") : []
       return {
         destination,
-        wing: text(item.wing),
+        wing: text(item.wing) ?? (PROJECT_WING_DESTINATIONS.has(destination) ? (project?.wing ?? null) : null),
         name: text(item.name),
         content,
         tags: tags.map((tag) => tag.trim()),
@@ -284,8 +312,8 @@ function jsonIn(reply: string): unknown {
 }
 
 /** The payload a model's `reply` describes. Throws a `MemCastleFailure` of class `invalid_input` when it is unusable. */
-export function parseClassification(reply: string, agent: string): CheckpointPayload {
-  return validatePayload(jsonIn(reply), agent)
+export function parseClassification(reply: string, agent: string, project: ProjectContext | null = null): CheckpointPayload {
+  return validatePayload(jsonIn(reply), agent, MODEL_HELP, project)
 }
 
 // --- submission ------------------------------------------------------------------------------------------------
@@ -405,6 +433,8 @@ export class CheckpointReview {
     private readonly context: {
       mode: ModeLabel
       agentIdentity: string
+      /** The project the session works in, read when a review runs; `null` or absent when it names no scope. */
+      project?: () => ProjectContext | null
       /** The connection, or `null` when there is none. Read when a review submits, not when it starts. */
       session: () => Caller | null
       /** The body of the shared `checkpoint-instructions` skill. */
@@ -468,8 +498,9 @@ export class CheckpointReview {
 
     const controller = new AbortController()
     this.controller = controller
-    const reply = await io.classify(classificationRequest(await this.context.skill(), turns, options.note), controller.signal)
-    const payload = parseClassification(reply, this.context.agentIdentity)
+    const project = this.context.project?.() ?? null
+    const reply = await io.classify(classificationRequest(await this.context.skill(), turns, options.note, project), controller.signal)
+    const payload = parseClassification(reply, this.context.agentIdentity, project)
     if (payload.items.length === 0) {
       this.reviewed = all.length
       return { kind: "nothing", reason: "nothing worth keeping" }

@@ -31,6 +31,7 @@ nav = [
     { "Running the daemon" = "daemon.md" },
     { "Authentication" = "authentication.md" },
     { "Memory modes" = "memory-modes.md" },
+    { "Project configuration" = "project-config.md" },
     { "Storage and data" = "storage.md" },
     { "Mining sources" = "mining-sources.md" },
     { "Deduplication" = "deduplication.md" },
