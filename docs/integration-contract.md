@@ -169,8 +169,20 @@ The mode is chosen once at the start and is still in force many calls later, so 
 reset the session to `full`.
 The client reconnects after a lost connection and then selects the mode again before anything else.
 
+The daemon forgets a session after five idle minutes, when the daemon restarts, or when the session is deleted.
+It then answers the next request on that session with HTTP 404 `Session not found`, and a new session starts as `full`.
+A client therefore treats a 404 as a lost session and not as a failed call:
+it opens a new session, selects the mode, and sends the same call again once.
+This is safe for a write, because the daemon refuses the request before running anything.
+A connection that fails without a 404, such as a restarted daemon that no longer answers at the old address,
+is reported to the caller, and the next call reconnects.
+A client that stays idle pings the daemon at an interval well inside the five-minute limit, so a quiet session is not
+dropped and then silently replaced.
+
 Daemon-side (tested): one session runs wake-up, checkpoint and recall, and a mode chosen first still applies at the end.
-Client-side (to test): no reconnect between wake-up, recall and checkpoint, and a reconnect re-selects the mode.
+Client-side (tested in Pi and OpenCode): no reconnect between wake-up, recall and checkpoint,
+a forgotten session is replaced with its mode re-selected and a write applied exactly once,
+a restarted daemon is reconnected to in the same mode, and an idle session keeps itself alive.
 
 ### Skills reuse
 

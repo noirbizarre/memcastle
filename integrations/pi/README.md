@@ -43,6 +43,24 @@ A mode the extension cannot parse **fails closed**: it tells the user why and do
 typo as `full`.
 An `off` session opens no connection at all.
 
+### Connection lifecycle
+
+Pi runs one agent session at a time, so the extension holds one MCP connection.
+It is opened in the background on `session_start`, closed in `session_shutdown`, and replaced if the session is started
+again (a reload).
+Between the two it is one MCP session, so the memory mode chosen at the start holds for every call.
+
+- **A forgotten session is replaced.**
+  The daemon drops a session after five idle minutes or a restart and answers HTTP 404.
+  The next call opens a new session, selects the mode again, and is sent once more, so a `read-only` session never
+  becomes `full`.
+- **An idle session pings.**
+  A ping every two minutes keeps the daemon from reaching its idle limit.
+  `keepAliveMs` in the settings changes the interval, and `0` turns it off.
+- **A daemon that stops answering is reported**, as `daemon_unavailable`, and the next call reconnects, finding the
+  daemon again through its registry file in case it moved.
+  The failed call is not retried, because it may already have reached the daemon.
+
 ## Layout
 
 The file names follow `pi-palace`'s map of the pieces, wired to MemCastle instead of MemPalace.
@@ -92,7 +110,7 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | `recall` | Not yet | #25 |
 | `checkpoint` | Not yet | #23 |
 | `emergency-checkpoint` | Not yet | #24 |
-| `persistent-session` | Implemented: one connection per Pi session, mode re-selected on reconnect | #29 for the rest |
+| `persistent-session` | Implemented: one connection per Pi session, kept alive, replaced with its mode re-selected when the daemon forgets it | #29, done |
 | `skills` | Not yet | #25 |
 | `background-mining` | Not yet | #26 |
 | `failure-reporting` | Foundation: the five classes with `help`, shown as Pi notifications | #30 for the rest |

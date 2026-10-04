@@ -26,6 +26,7 @@ export class SessionRegistry {
         token: this.settings.token,
         mode: this.settings.mode,
         timeoutMs: this.settings.timeoutMs,
+        keepAliveMs: this.settings.keepAliveMs,
         clientName: "memcastle-opencode",
       })
       this.sessions.set(sessionId, session)

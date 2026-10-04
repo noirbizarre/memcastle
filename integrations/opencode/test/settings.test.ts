@@ -33,3 +33,11 @@ test("a settings description for the log never contains the token", () => {
   const settings = resolveSettings({ token: "mc_super-secret-token-value" }, {})
   expect(JSON.stringify(describeSettings(settings))).not.toContain("super-secret")
 })
+
+test("the keep-alive interval defaults to a value inside the daemon's idle limit and zero turns it off", () => {
+  expect(resolveSettings(undefined, {}).keepAliveMs).toBe(120_000)
+  expect(resolveSettings({ keepAliveMs: 0 }, {}).keepAliveMs).toBe(0)
+  expect(resolveSettings({ keepAliveMs: 30_000 }, {}).keepAliveMs).toBe(30_000)
+  expect(resolveSettings({ keepAliveMs: -5 }, {}).keepAliveMs).toBe(120_000)
+  expect(resolveSettings({ keepAliveMs: "soon" }, {}).keepAliveMs).toBe(120_000)
+})

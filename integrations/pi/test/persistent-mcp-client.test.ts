@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { MemCastleFailure, failureFromJob } from "../src/failures.ts"
 import { type ModeLabel, toWireMode } from "../src/modes.ts"
+import type { McpSession } from "../src/persistent-mcp-client.ts"
 import { TestDaemon, waitForJob } from "./support/daemon.ts"
 import { fixture, substitute } from "./support/fixtures.ts"
 
@@ -160,4 +161,140 @@ test("after the daemon goes away calls fail as daemon_unavailable instead of ret
   expect(failure.failureClass).toBe("daemon_unavailable")
   expect(failure.toUserMessage()).toContain("memcastle daemon start")
   expect(session.connected).toBe(false)
+})
+
+/** A one-item checkpoint whose `content` carries `token`, so a recall can tell how many times it was stored. */
+function checkpointOf(token: string) {
+  return {
+    items: [
+      {
+        destination: "general",
+        content: `${token} stored through a persistent session`,
+        tags: [],
+        source: { kind: "manual", uri: null, agent: "test-agent" },
+        fact: null,
+      },
+    ],
+  }
+}
+
+/** How many recalled hits carry `token`. */
+async function hitsFor(session: McpSession, token: string): Promise<number> {
+  const hits = await session.call<{ content?: string }[]>("memcastle_recall", { query: token })
+  return hits.filter((hit) => hit.content?.includes(token)).length
+}
+
+test("one session serves wake-up, recall and a checkpoint on a single connection and keeps its mode", async () => {
+  const session = daemon.session("full")
+  await session.connect()
+  const id = session.sessionId
+
+  await session.call("memcastle_wake_up", { agent_identity: "test-agent" })
+  const job = await session.call<{ id: string }>("memcastle_checkpoint", { payload: checkpointOf("persistentone") })
+  expect((await waitForJob(session, job.id)).status).toBe("completed")
+  expect(await hitsFor(session, "persistentone")).toBe(1)
+
+  expect(session.sessionId).toBe(id)
+  expect(session.connects).toBe(1)
+  expect(await session.reportedMode()).toBe("full")
+  await session.close()
+})
+
+test("a read-only session keeps refusing writes on the same connection after reading", async () => {
+  const session = daemon.session("read-only")
+  await session.connect()
+  const id = session.sessionId
+
+  await session.call("memcastle_wake_up", { agent_identity: "test-agent" })
+  await session.call("memcastle_recall", { query: "persistentone" })
+  const failure = await failureOf(() => session.call("memcastle_checkpoint", { payload: checkpointOf("persistentro") }))
+
+  expect(failure.failureClass).toBe("mode_rejected")
+  expect(session.sessionId).toBe(id)
+  expect(session.connects).toBe(1)
+  await session.close()
+})
+
+test("a session the daemon has forgotten is replaced on the next call and keeps its mode", async () => {
+  const session = daemon.session("read-only")
+  await session.connect()
+  const first = session.sessionId
+  await daemon.forget(session)
+
+  // The caller sees an ordinary answer: the lost session is replaced underneath the call.
+  expect(await session.reportedMode()).toBe("read-only")
+
+  expect(session.connects).toBe(2)
+  expect(session.sessionId).not.toBe(first)
+  // A silent fall back to `full` would let this write through.
+  const failure = await failureOf(() => session.call("memcastle_checkpoint", { payload: checkpointOf("persistentlost") }))
+  expect(failure.failureClass).toBe("mode_rejected")
+  await session.close()
+})
+
+test("concurrent calls on a forgotten session share one replacement", async () => {
+  const session = daemon.session("full")
+  await session.connect()
+  await daemon.forget(session)
+
+  await Promise.all([session.call("memcastle_status"), session.call("memcastle_status"), session.call("memcastle_job_list")])
+
+  expect(session.connects).toBe(2)
+  expect(await session.reportedMode()).toBe("full")
+  await session.close()
+})
+
+test("a write sent to a forgotten session is applied exactly once", async () => {
+  const session = daemon.session("full")
+  await session.connect()
+  await daemon.forget(session)
+
+  const job = await session.call<{ id: string }>("memcastle_checkpoint", { payload: checkpointOf("persistentonce") })
+  expect((await waitForJob(session, job.id)).status).toBe("completed")
+
+  expect(await hitsFor(session, "persistentonce")).toBe(1)
+  await session.close()
+})
+
+test("after the daemon restarts the failed call is reported and the next one reconnects in the same mode", async () => {
+  const own = await TestDaemon.start()
+  const session = own.session("read-only", { timeoutMs: 2000 })
+  await session.connect()
+
+  await own.restart()
+
+  // The old address answers nothing, which is not provably a lost session, so it is reported rather than retried.
+  const failure = await failureOf(() => session.call("memcastle_status"))
+  expect(failure.failureClass).toBe("daemon_unavailable")
+  expect(session.connected).toBe(false)
+
+  expect(await session.reportedMode()).toBe("read-only")
+  expect(session.connects).toBe(2)
+  await session.close()
+  await own.stop()
+})
+
+test("an idle session pings the daemon to stay alive without reconnecting", async () => {
+  const session = daemon.session("full", { keepAliveMs: 50 })
+  await session.connect()
+  const id = session.sessionId
+
+  await Bun.sleep(400)
+
+  expect(session.pings).toBeGreaterThanOrEqual(2)
+  expect(session.connects).toBe(1)
+  expect(session.sessionId).toBe(id)
+  await session.close()
+})
+
+test("closing a session stops its pings", async () => {
+  const session = daemon.session("full", { keepAliveMs: 50 })
+  await session.connect()
+  await Bun.sleep(200)
+  await session.close()
+
+  const settled = session.pings
+  await Bun.sleep(300)
+
+  expect(session.pings).toBe(settled)
 })
