@@ -22,9 +22,11 @@ afterEach(() => {
   Object.assign(process.env, saved)
 })
 
-test("the plugin module has an id and a server function, and nothing else for OpenCode to mistake for a plugin", () => {
+test("the plugin module has an id, a V1 server function and a V2 setup function, and nothing else for OpenCode to mistake for a plugin", () => {
   expect(plugin.id).toBe("memcastle")
   expect(typeof plugin.server).toBe("function")
+  expect(typeof plugin.setup).toBe("function")
+  expect(Object.keys(plugin).sort()).toEqual(["id", "server", "setup"])
 })
 
 test("the plugin loads with no daemon running, because it connects lazily rather than at startup", async () => {
