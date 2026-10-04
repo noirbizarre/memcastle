@@ -137,7 +137,8 @@ watermark and is picked up by `--full`.
 ### `directory`
 
 One document per file, identified by its path under the mined root, filed in the room `files` of the wing you give
-(default: the directory's name) and named by that path, so `wing/files/src/lib.rs` addresses it.
+(default: the wing the directory's [project file](project-config.md#mining) declares, else the directory's name)
+and named by that path, so `wing/files/src/lib.rs` addresses it.
 
 - It skips directories named `.git`, `target`, `node_modules`, `.venv`, `venv`, `dist`, `build` and `.cache`, at any depth,
   along with any other directory whose name starts with `.` and any symlink.

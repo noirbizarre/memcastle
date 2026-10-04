@@ -24,6 +24,10 @@ The XDG variables are honoured as the specification describes:
 an unset, empty or relative value is ignored, and the default under your home directory is used instead.
 For example, with `XDG_DATA_HOME=/srv/data` the palace is `/srv/data/memcastle/default`.
 
+A **project** has its own, separate file, `.config/memcastle.toml` in the project's directory.
+It is not this configuration: it holds no daemon setting, and it says which wing and room a project's memory belongs to
+(see [Project configuration](project-config.md)).
+
 The config file is optional.
 If the default file does not exist, built-in defaults are used.
 A file named explicitly with `--config` must exist, because a typo there would otherwise be silently ignored.

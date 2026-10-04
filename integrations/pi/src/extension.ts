@@ -11,8 +11,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { CheckpointSessions, registerCheckpointAgent } from "./checkpoint-agent.ts"
 import { registerCheckpointTool } from "./checkpoint-tool.ts"
 import { registerDailyMine } from "./daily-mine.ts"
+import { MemCastleFailure } from "./failures.ts"
 import { InvalidModeError } from "./modes.ts"
 import { McpManager } from "./mcp-manager.ts"
+import { ProjectScopes } from "./project-core.ts"
 import { registerSearchBeforeAnswer } from "./search-before-answer.ts"
 import { resolveSettings } from "./settings.ts"
 import { registerWakeUp } from "./wake-up.ts"
@@ -34,7 +36,12 @@ export default function memcastle(pi: ExtensionAPI): void {
     // An `off` session behaves as if MemCastle did not exist: no connection, no context, no skill (#27).
     if (settings.mode === "off") return
 
-    manager = new McpManager(settings)
+    // Resolved here, from Pi's own directory, and only now: an `off` session returned above without reading a file.
+    // A broken project file or variable is reported once and the session carries on without a project scope.
+    const project = new ProjectScopes(process.env, (error) =>
+      ctx.ui.notify(`MemCastle: ${error instanceof MemCastleFailure ? error.toUserMessage() : String(error)}`, "warning"),
+    ).for(ctx.cwd)
+    manager = new McpManager(settings, process.env, project)
     // Not awaited: a slow or absent daemon must not hold up the first prompt. The failure is reported once, inside.
     void manager.start((message, level) => ctx.ui.notify(message, level))
   })

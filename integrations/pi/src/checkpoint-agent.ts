@@ -48,6 +48,7 @@ export class CheckpointSessions {
       review: new CheckpointReview({
         mode: settings.mode,
         agentIdentity: settings.agentIdentity,
+        project: () => manager.project,
         session: () => manager.session,
         skill: () => readSkill(CHECKPOINT_SKILL),
       }),

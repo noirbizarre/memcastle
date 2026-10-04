@@ -10,6 +10,7 @@ import {
 } from "../src/checkpoint.ts"
 import { type Caller, DEFAULT_CHECKPOINT, type CheckpointSettings, type Turn } from "../src/checkpoint-core.ts"
 import { MemCastleFailure } from "../src/failures.ts"
+import type { ProjectContext } from "../src/project-core.ts"
 import type { SessionRegistry } from "../src/registry.ts"
 import { resolveSettings } from "../src/settings.ts"
 import plugin from "../src/index.ts"
@@ -54,7 +55,7 @@ function fakeDaemon(options: { job?: object } = {}) {
 const submissions = <T extends { tool: string }>(calls: T[]) => calls.filter((call) => call.tool === CHECKPOINT_TOOL)
 
 function setup(
-  options: { checkpoint?: Partial<CheckpointSettings>; mode?: string; host?: ReviewHost | null; deadlineMs?: number; job?: object } = {},
+  options: { checkpoint?: Partial<CheckpointSettings>; mode?: string; host?: ReviewHost | null; deadlineMs?: number; job?: object; projectOf?: (sessionId: string) => ProjectContext | null } = {},
 ) {
   const settings = resolveSettings({ mode: options.mode ?? "full", checkpoint: { ...DEFAULT_CHECKPOINT, interval: 1, ...options.checkpoint } }, {})
   const daemon = fakeDaemon({ job: options.job })
@@ -69,6 +70,7 @@ function setup(
     log: async (level, message) => void logs.push({ level, message }),
     report: async (_name, error) => void reports.push(error),
     deadlineMs: options.deadlineMs,
+    projectOf: options.projectOf,
   })
   return { checkpoints, children, logs, reports, ...daemon }
 }
@@ -237,6 +239,28 @@ test("the tool submits a payload the model classified itself, validated and stam
       { destination: "preference", wing: null, name: null, content: "Prefers tabs.", tags: [], source: { kind: "manual", uri: null, agent: "opencode" }, fact: null },
     ],
   })
+})
+
+const CASTLE: ProjectContext = { root: "/p", name: "castle", wing: "castle", room: null }
+
+test("the tool files the model's project and diary items under the session's project wing, and not its preferences", async () => {
+  const { checkpoints, calls } = setup({ projectOf: (sessionId) => (sessionId === "ses_1" ? CASTLE : null) })
+  await checkpoints.checkpoint("ses_1", {
+    payload: { items: [{ destination: "project", content: "a" }, { destination: "diary", content: "b" }, { destination: "preference", content: "c" }] },
+  })
+  const items = (submissions(calls)[0]?.args.payload as { items: { wing: string | null }[] }).items
+  expect(items.map((item) => item.wing)).toEqual(["castle", "castle", null])
+
+  // Another session of the same process works elsewhere and is not moved into this project's wing.
+  await checkpoints.checkpoint("ses_2", { payload: { items: [{ destination: "project", content: "d" }] } })
+  expect((submissions(calls)[1]?.args.payload as { items: { wing: string | null }[] }).items[0]?.wing).toBeNull()
+})
+
+test("an interval review of a session in a project submits the reviewer's items under its wing", async () => {
+  const { host } = fakeHost()
+  const { checkpoints, calls } = setup({ host, projectOf: () => CASTLE, checkpoint: { mode: "blocking" } })
+  await checkpoints.sessionIdle("ses_1")
+  expect(submissions(calls)[0]?.args).toMatchObject({ payload: { items: [{ destination: "project", wing: "castle" }] } })
 })
 
 test("the tool refuses a payload that is wrong, with what to fix, and submits nothing", async () => {

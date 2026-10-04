@@ -108,6 +108,9 @@ Every path, environment variable, flag and the precedence between them is in [Co
     a real MCP session replays the language-neutral fixtures in `tests/fixtures/integration/`
     (modes, checkpoint payloads, failure classes), and fails when the contract page, the capability manifest
     and the test names disagree (in-process).
+  - `src/mining/adapters/project_file.rs` — the project file, replaying the cases in
+    `tests/fixtures/project-config/` (unit tests): discovery, nesting, the git and home boundaries, and what is refused.
+    The integrations replay the same cases in TypeScript, see [Project configuration](project-config.md).
   - `integrations/<name>/test/` — the client half of the same contract, one bun suite per integration:
     each starts a real `memcastle serve`, finds it through its registry file and replays the same fixtures through
     the integration's own client.

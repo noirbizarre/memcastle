@@ -33,7 +33,7 @@ export function registerWakeUp(pi: ExtensionAPI, manager: () => McpManager | nul
     if (!current?.settings.wakeUp.enabled || !FRESH_SESSIONS.has(event.reason)) return
 
     const { settings } = current
-    const wing = wingFor(settings.wakeUp, ctx.cwd)
+    const wing = wingFor(settings.wakeUp, ctx.cwd, current.project)
     pending = new PendingWakeUp(
       async () => {
         // The manager's own start reports a daemon that cannot be reached, so this stays quiet about it.

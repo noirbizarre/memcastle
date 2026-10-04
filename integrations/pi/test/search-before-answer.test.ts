@@ -65,6 +65,13 @@ test("the instruction is injected on every turn, and never as a message that wou
   }
 })
 
+test("a project that names a wing adds one line after the shared text, so searches are narrowed the same way", async () => {
+  const settings = resolveSettings(undefined, {})
+  const scoped = { settings, project: { root: "/p", name: "castle", wing: "castle", room: null } } as unknown as McpManager
+  const answer = await setup(scoped).fire("before_agent_start", turn)
+  expect(answer?.systemPrompt).toBe(`You are Pi.\n\n${SHARED}\n\nThis project's memory is in wing \`castle\`. Pass \`wing\` when you search, unless the question is clearly about something else.`)
+})
+
 test("it builds on the prompt earlier handlers produced instead of replacing it", async () => {
   const { fire } = setup(manager("sometimes"))
   const answer = await fire("before_agent_start", { systemPrompt: "base\n\nadded by another extension" })

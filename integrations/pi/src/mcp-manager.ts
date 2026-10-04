@@ -8,6 +8,7 @@
 import { discoverDaemon } from "./daemon-client.ts"
 import { MemCastleFailure } from "./failures.ts"
 import { McpSession } from "./persistent-mcp-client.ts"
+import type { ProjectContext } from "./project-core.ts"
 import type { Settings } from "./settings.ts"
 
 type Env = Readonly<Record<string, string | undefined>>
@@ -40,6 +41,8 @@ export class McpManager {
   constructor(
     readonly settings: Settings,
     private readonly env: Env = process.env,
+    /** The project this Pi session works in (`.config/memcastle.toml` and `MEMCASTLE_*`), or `null` for none. */
+    readonly project: ProjectContext | null = null,
   ) {}
 
   /** The live session, or `null` before `start` and after `stop`. */

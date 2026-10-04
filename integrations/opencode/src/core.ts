@@ -10,6 +10,7 @@ import { type CheckpointArgs, type Checkpoints, type ReviewHost, createCheckpoin
 import type { Turn } from "./checkpoint-core.ts"
 import { MemCastleFailure } from "./failures.ts"
 import { InvalidModeError } from "./modes.ts"
+import { ProjectScopes } from "./project-core.ts"
 import { recallInstruction } from "./recall-core.ts"
 import { SessionRegistry } from "./registry.ts"
 import { describeSettings, resolveSettings } from "./settings.ts"
@@ -112,16 +113,27 @@ export async function createCore(
       }
     }
 
+  // The project of each session's directory: OpenCode serves sessions from several, so it is resolved per directory,
+  // once. A broken file or variable is reported once and its sessions carry on without a project scope.
+  const projects = new ProjectScopes(env, (error) => {
+    void report("project", error)
+  })
+  // Where each session works, so a request that carries only a session id can still find its project.
+  const directories = new Map<string, string>()
+  const projectOf = (sessionId: string | undefined) =>
+    projects.for((sessionId === undefined ? undefined : directories.get(sessionId)) ?? directory)
+
   // One wake-up request per OpenCode session, started once and read by every model request of that session.
   const wakeUps = new Map<string, PendingWakeUp>()
   // Subagent sessions: each would otherwise open its own connection and repeat the briefing the parent already has.
   const children = new Set<string>()
 
-  const checkpoints: Checkpoints = createCheckpoints({ settings, sessions, children, host, log, report })
+  const checkpoints: Checkpoints = createCheckpoints({ settings, sessions, children, host, log, report, projectOf })
 
   const startWakeUp = (sessionId: string, sessionDirectory: string) => {
     if (!settings.wakeUp.enabled || wakeUps.has(sessionId)) return
-    const wing = wingFor(settings.wakeUp, sessionDirectory)
+    directories.set(sessionId, sessionDirectory)
+    const wing = wingFor(settings.wakeUp, sessionDirectory, projects.for(sessionDirectory))
     wakeUps.set(
       sessionId,
       new PendingWakeUp(
@@ -152,7 +164,7 @@ export async function createCore(
     if (settings.forceMemoryRecall.level === "off" || (sessionId !== undefined && children.has(sessionId))) return
     let text: string | null
     try {
-      text = recallInstruction(settings.forceMemoryRecall, await readSkill(SEARCH_BEFORE_ANSWER))
+      text = recallInstruction(settings.forceMemoryRecall, await readSkill(SEARCH_BEFORE_ANSWER), projectOf(sessionId))
     } catch (error) {
       if (recallReported) return
       recallReported = true
@@ -171,11 +183,14 @@ export async function createCore(
     // Without the URL's trailing slash, so the same directory a user configured by hand compares equal.
     skillsDir: resolve(fileURLToPath(SKILLS_DIR)),
     sessionCreated: guarded("session.created", async (sessionId: string, sessionDirectory: string, parentId?: string) => {
+      // Recorded for subagents too: their checkpoints and searches belong to the project they work in.
+      directories.set(sessionId, sessionDirectory)
       if (parentId !== undefined) children.add(sessionId)
       else startWakeUp(sessionId, sessionDirectory)
     }),
     sessionDeleted: guarded("session.deleted", async (sessionId: string) => {
       wakeUps.delete(sessionId)
+      directories.delete(sessionId)
       children.delete(sessionId)
       checkpoints.forget(sessionId)
       await sessions.close(sessionId)
@@ -198,6 +213,7 @@ export async function createCore(
     dispose: guarded("dispose", async () => {
       checkpoints.forgetAll()
       wakeUps.clear()
+      directories.clear()
       children.clear()
       await sessions.closeAll()
     }),

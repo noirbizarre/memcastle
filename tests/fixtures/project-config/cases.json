@@ -1,0 +1,185 @@
+{
+  "_comment": "Each case builds `files` under a fresh root, resolves the project for `start` (relative to the root, empty = the root) with `home` (relative to the root, absent = no home boundary) as $HOME and `env` as the environment, and expects either `expect` (wing/room/name, null for none; null = no project context at all) or an `error` substring in the message. The daemon half (src/mining/adapters/project_file.rs) replays the cases without `env` and checks only the wing; the integrations replay every case and check everything. See docs/project-config.md.",
+  "cases": [
+    {
+      "name": "a directory with no project file has no project context",
+      "files": { "src/lib.rs": "" },
+      "start": "src",
+      "expect": null
+    },
+    {
+      "name": "the file is found from a nested directory and declares wing and room",
+      "files": {
+        ".config/memcastle.toml": "[project]\nname = \"castle\"\n[memcastle]\nwing = \"keep\"\nroom = \"design\"\n",
+        "a/b/x": ""
+      },
+      "start": "a/b",
+      "expect": { "name": "castle", "wing": "keep", "room": "design" }
+    },
+    {
+      "name": "the project name is the wing when no wing is set",
+      "files": { ".config/memcastle.toml": "[project]\nname = \"named\"\n" },
+      "start": "",
+      "expect": { "name": "named", "wing": "named", "room": null }
+    },
+    {
+      "name": "an empty file is a project with no scope",
+      "files": { ".config/memcastle.toml": "" },
+      "start": "",
+      "expect": { "name": null, "wing": null, "room": null }
+    },
+    {
+      "name": "the nearest file wins and nothing is inherited from the parent project",
+      "files": {
+        ".config/memcastle.toml": "[memcastle]\nwing = \"outer\"\nroom = \"outer-room\"\n",
+        "inner/.config/memcastle.toml": "[memcastle]\nroom = \"inner-room\"\n"
+      },
+      "start": "inner",
+      "expect": { "name": null, "wing": null, "room": "inner-room" }
+    },
+    {
+      "name": "the walk stops at the git root so an unrelated parent is never selected",
+      "files": {
+        ".config/memcastle.toml": "[memcastle]\nwing = \"outer\"\n",
+        "repo/.git/HEAD": ""
+      },
+      "start": "repo",
+      "expect": null
+    },
+    {
+      "name": "a git worktree marker file stops the walk like a git directory",
+      "files": {
+        ".config/memcastle.toml": "[memcastle]\nwing = \"outer\"\n",
+        "repo/.git": "gitdir: elsewhere"
+      },
+      "start": "repo",
+      "expect": null
+    },
+    {
+      "name": "a file beside the git marker still governs its own root",
+      "files": {
+        ".config/memcastle.toml": "[memcastle]\nwing = \"mine\"\n",
+        ".git/HEAD": "",
+        "src/x": ""
+      },
+      "start": "src",
+      "expect": { "name": null, "wing": "mine", "room": null }
+    },
+    {
+      "name": "the home directory's own file is never a project file",
+      "files": {
+        ".config/memcastle.toml": "[memcastle]\nwing = \"home\"\n",
+        "work/x": ""
+      },
+      "home": "",
+      "start": "work",
+      "expect": null
+    },
+    {
+      "name": "the walk does not pass the home directory",
+      "files": {
+        ".config/memcastle.toml": "[memcastle]\nwing = \"above-home\"\n",
+        "home/work/x": ""
+      },
+      "home": "home",
+      "start": "home/work",
+      "expect": null
+    },
+    {
+      "name": "an unknown key is refused",
+      "files": { ".config/memcastle.toml": "[memcastle]\nwng = \"x\"\n" },
+      "start": "",
+      "error": "memcastle.toml"
+    },
+    {
+      "name": "a secret in the file is refused",
+      "files": { ".config/memcastle.toml": "[memcastle]\ntoken = \"hunter2\"\n" },
+      "start": "",
+      "error": "memcastle.toml"
+    },
+    {
+      "name": "a palace key is refused because one daemon serves one palace",
+      "files": { ".config/memcastle.toml": "[memcastle]\npalace = \"personal\"\n" },
+      "start": "",
+      "error": "memcastle.toml"
+    },
+    {
+      "name": "text that is not toml is refused",
+      "files": { ".config/memcastle.toml": "this is = = not toml" },
+      "start": "",
+      "error": "memcastle.toml"
+    },
+    {
+      "name": "a wing containing a slash is refused naming the field",
+      "files": { ".config/memcastle.toml": "[memcastle]\nwing = \"a/b\"\n" },
+      "start": "",
+      "error": "[memcastle] wing"
+    },
+    {
+      "name": "an empty room is refused naming the field",
+      "files": { ".config/memcastle.toml": "[memcastle]\nroom = \"\"\n" },
+      "start": "",
+      "error": "[memcastle] room"
+    },
+    {
+      "name": "a uuid-shaped project name is refused naming the field",
+      "files": { ".config/memcastle.toml": "[project]\nname = \"11111111-1111-1111-1111-111111111111\"\n" },
+      "start": "",
+      "error": "[project] name"
+    },
+    {
+      "name": "the reserved mining table is accepted empty",
+      "files": { ".config/memcastle.toml": "[mining]\n[memcastle]\nwing = \"w\"\n" },
+      "start": "",
+      "expect": { "name": null, "wing": "w", "room": null }
+    },
+    {
+      "name": "a key in the reserved mining table is refused",
+      "files": { ".config/memcastle.toml": "[mining]\nchunk_chars = 5\n" },
+      "start": "",
+      "error": "memcastle.toml"
+    },
+    {
+      "name": "the environment overrides the file",
+      "files": { ".config/memcastle.toml": "[memcastle]\nwing = \"file\"\nroom = \"file-room\"\n" },
+      "start": "",
+      "env": { "MEMCASTLE_WING": "env", "MEMCASTLE_ROOM": "env-room" },
+      "expect": { "name": null, "wing": "env", "room": "env-room" }
+    },
+    {
+      "name": "the environment alone is a project context",
+      "files": { "src/x": "" },
+      "start": "src",
+      "env": { "MEMCASTLE_WING": "ephemeral" },
+      "expect": { "name": null, "wing": "ephemeral", "room": null }
+    },
+    {
+      "name": "the environment wing beats the project name too",
+      "files": { ".config/memcastle.toml": "[project]\nname = \"named\"\n" },
+      "start": "",
+      "env": { "MEMCASTLE_WING": "env" },
+      "expect": { "name": "named", "wing": "env", "room": null }
+    },
+    {
+      "name": "a blank environment variable is unset",
+      "files": { ".config/memcastle.toml": "[memcastle]\nwing = \"file\"\n" },
+      "start": "",
+      "env": { "MEMCASTLE_WING": "  ", "MEMCASTLE_ROOM": "" },
+      "expect": { "name": null, "wing": "file", "room": null }
+    },
+    {
+      "name": "an invalid environment wing is an error naming the variable",
+      "files": { ".config/memcastle.toml": "[memcastle]\nwing = \"file\"\n" },
+      "start": "",
+      "env": { "MEMCASTLE_WING": "a/b" },
+      "error": "MEMCASTLE_WING"
+    },
+    {
+      "name": "an invalid environment room is an error naming the variable",
+      "files": {},
+      "start": "",
+      "env": { "MEMCASTLE_ROOM": "a/b" },
+      "error": "MEMCASTLE_ROOM"
+    }
+  ]
+}

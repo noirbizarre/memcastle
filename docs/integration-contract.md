@@ -57,6 +57,7 @@ A gap is allowed only where the last column says so, and then it must be documen
 | `emergency-checkpoint` | `memcastle_checkpoint` with `emergency` | Submit with `emergency: true` before context is lost | Yes |
 | `persistent-session` | one MCP session | Keep one handshake open for the whole agent session | No |
 | `skills` | none | Load the shared instructions from `skills/` | No |
+| `project-context` | none, `wing` and `room` arguments | Resolve the project's wing and room from `.config/memcastle.toml` and `MEMCASTLE_*`, and pass them as ordinary arguments | No |
 | `background-mining` | `memcastle_mine` | Trigger mining on the client's own schedule, never twice for one event | Yes |
 | `failure-reporting` | error bodies, `Job.error` | Tell the failure classes apart and show the user `help` | No |
 | `audit-repair` | `memcastle_audit`, `memcastle_repair` | Offer audit, confirm, dry-run, then apply only what was confirmed | Yes |
@@ -270,6 +271,30 @@ A daemon that is down is not "nothing remembered".
 Daemon-side (tested): each class is produced for real, and carries the documented code and a `help` line.
 Client-side (to test): each class produces a distinct, readable message, and the session continues without MemCastle.
 
+### Project context
+
+Operations: none of its own.
+The resolved project only supplies the `wing` (and, for search, the `room`) that other operations are called with.
+
+A project declares its memory scope in `.config/memcastle.toml`, and `MEMCASTLE_WING` and `MEMCASTLE_ROOM` override it.
+The file, the discovery rules and the precedence are specified in [Project configuration](project-config.md).
+The daemon never resolves a project for a client: each integration reads the file and the environment itself,
+in its own language, so that client lifecycle logic does not move into MemCastle.
+That is why two implementations exist, and why the same fixtures hold them to one contract.
+
+Client responsibility: resolve the project once per working directory, never in an `off` session,
+report a broken file or variable once and carry on without a project scope, and use the context for
+the wake-up wing (the default `project` source; an explicit `user`, `custom` or `none` source wins),
+the wing a `project` or `diary` checkpoint item defaults to (never `preference` or `general`),
+and the wing and room the model is told to pass to its searches.
+Nothing in the file is an authorization boundary, and nothing in it is a secret.
+
+Daemon-side (tested): a mined directory takes the wing its project file declares, resolved by the directory adapter from
+`tests/fixtures/project-config/cases.json` (`src/mining/adapters/project_file.rs`).
+Client-side (tested in Pi and OpenCode): every case of that fixture file resolves the same way in TypeScript,
+the wake-up asks about the project's wing, a checkpoint item takes it, the recall instruction names it,
+two sessions in different directories keep their own project, and an `off` session reads no project file.
+
 ### Audit and repair
 
 Operations: `memcastle_audit`, then `memcastle_repair`, with `memcastle_job_get` for the reports.
@@ -299,7 +324,8 @@ Each integration's README records every gap in the same three lines:
 - **Effect**: what the user loses compared with a client that has it.
 
 Only the capabilities marked as allowing a gap may have one.
-A gap in `session-mode`, `wake-up`, `recall`, `checkpoint`, `persistent-session`, `skills` or `failure-reporting` means
+A gap in `session-mode`, `wake-up`, `recall`, `checkpoint`, `persistent-session`, `skills`, `project-context` or
+`failure-reporting` means
 the integration does not conform yet.
 
 Tool names can differ by client without being a gap.
@@ -330,6 +356,10 @@ The fixtures are strict JSON in `tests/fixtures/integration/`, so any language c
 | `checkpoint-classifications.json` | Model replies a client's review may meet, with the items each must become or the refusal it must get |
 | `failure-classes.json` | The failure classes, how each is detected, and the code and status |
 | `off-isolation.json` | A marker drawer to seed, and every path by which an integration could show an `off` session MemCastle material |
+
+The project-context cases live apart, in `tests/fixtures/project-config/cases.json`, because the daemon's mining reads the
+same file format: each case is a file tree, an optional home directory and environment, and either the wing, room and
+name it must resolve to or the error it must be refused with.
 
 In `modes.json`, an argument written as `{{mine_dir}}` stands for an existing absolute directory the test creates.
 

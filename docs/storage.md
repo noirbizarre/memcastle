@@ -61,7 +61,7 @@ Where a write ends up:
 
 | Written by | Wing | Room |
 |---|---|---|
-| `mine` of a directory | the `--wing` you give, or the directory's name | `files` |
+| `mine` of a directory | the `--wing` you give, else the wing the directory's [project file](project-config.md#mining) declares, else the directory's name | `files` |
 | `mine --source pi` | the `--wing` you give, or `pi` | the session's working directory name, or `sessions` |
 | `diary write` | the wing you give | `diary` |
 | `checkpoint` item | the item's `wing`, or `preferences`, `projects`, `diary` or `general` by destination | `diary` for diary items, `entries` otherwise |

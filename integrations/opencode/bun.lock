@@ -7,6 +7,7 @@
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.32.0",
         "@opencode-ai/plugin": "^1.18.34",
+        "smol-toml": "^1.9.0",
       },
       "devDependencies": {
         "@opencode/plugin": "^2.0.22",
@@ -663,6 +664,8 @@
     "sigstore": ["sigstore@4.1.1", "", { "dependencies": { "@sigstore/bundle": "^4.0.0", "@sigstore/core": "^3.2.1", "@sigstore/protobuf-specs": "^0.5.0", "@sigstore/sign": "^4.1.1", "@sigstore/tuf": "^4.0.2", "@sigstore/verify": "^3.1.1" } }, "sha512-endqECJkfhozrXMK5ngu/UAA0xVcVEFdnHJCElGaExypjW+HK5i6zu3NteLoaX/iFbRUbC3+DjttQs0GARr+5w=="],
 
     "smart-buffer": ["smart-buffer@4.2.0", "", {}, "sha512-94hK0Hh8rPqQl2xXc3HsaBoOXKV20MToPkcXvwbISWLEs+64sBq5kFgn2kJDHb1Pry9yrP0dxrCI9RRci7RXKg=="],
+
+    "smol-toml": ["smol-toml@1.9.0", "", {}, "sha512-hpd+HLON7HdZXqYchMM/+LaTTbdK0AU3NngIJ4KVyWbY9bfQqdL9cD+4yf6dUoU2Ap4VsU0JkQi6FxAI1B2mXQ=="],
 
     "socks": ["socks@2.8.10", "", { "dependencies": { "ip-address": "^10.1.1", "smart-buffer": "^4.2.0" } }, "sha512-e0VyvkVTwVYViNovRkZ9aodhxVlyoMn7eJhVUPxZ+eK9P/7CBkxvvsBOHqFPEH416726W8tLXXXjKwqgTErrCQ=="],
 

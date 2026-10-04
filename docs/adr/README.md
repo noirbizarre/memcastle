@@ -87,3 +87,6 @@ The history is the value.
 - [ADR-028](028-pi-history-is-an-installed-webassembly-source.md) — Pi's conversation history is an installed WebAssembly
   source built from `sources/pi/`, and the core has no Pi-specific code; the native `pi-sessions` adapter is removed
   (supersedes part of ADR-023 and ADR-026)
+- [ADR-029](029-project-local-configuration.md) — a project declares its wing and room in `.config/memcastle.toml`
+  and `MEMCASTLE_WING` / `MEMCASTLE_ROOM`, read by each integration and passed as ordinary arguments; the daemon reads it
+  only to choose a mined directory's wing, and a project file cannot pick a palace

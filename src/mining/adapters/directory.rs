@@ -16,6 +16,7 @@ use crate::domain::{
 use crate::error::{Error, Result};
 
 use super::super::adapter::{Discovery, SourceAdapter};
+use super::project_file::project_wing;
 use super::watermark::{Entry, Watermark, mtime_ns, page};
 
 /// The adapter's name.
@@ -96,10 +97,15 @@ impl SourceAdapter for DirectoryAdapter {
     }
 
     fn default_wing(&self, source: &SourceRef) -> String {
-        Path::new(&source.locator).file_name().map_or_else(
-            || "unnamed".to_string(),
-            |n| n.to_string_lossy().into_owned(),
-        )
+        let root = Path::new(&source.locator);
+        // A project that declares its wing is mined into it, so mining, wake-up and checkpoints meet in one wing;
+        // a directory outside any project keeps the name it always had.
+        project_wing(root).unwrap_or_else(|| {
+            root.file_name().map_or_else(
+                || "unnamed".to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            )
+        })
     }
 
     fn default_room(&self) -> &'static str {
@@ -239,6 +245,26 @@ mod tests {
             .into_iter()
             .map(|c| c.external_id)
             .collect()
+    }
+
+    #[test]
+    fn a_mined_directory_takes_the_wing_its_project_declares_else_its_own_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let plain = dir.path().join("plain");
+        let project = dir.path().join("project");
+        std::fs::create_dir_all(project.join(".config")).unwrap();
+        std::fs::create_dir_all(project.join("docs")).unwrap();
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::write(
+            project.join(".config/memcastle.toml"),
+            "[memcastle]\nwing = \"declared\"\n",
+        )
+        .unwrap();
+        let wing = |d: &Path| adapter().default_wing(&source_of(d));
+        assert_eq!(wing(&plain), "plain");
+        assert_eq!(wing(&project), "declared");
+        // A subdirectory of a project is part of it: its wing is the project's, not its own name.
+        assert_eq!(wing(&project.join("docs")), "declared");
     }
 
     #[tokio::test]

@@ -28,6 +28,9 @@ export function restoreEnv(): void {
 /** Apply `knobs` for the integration about to be loaded, against `daemon`. */
 export function configure(daemon: TestDaemon, knobs: Knobs): void {
   restoreEnv()
+  // A developer's own project scope must not decide which wing a test's session asks about.
+  delete process.env.MEMCASTLE_WING
+  delete process.env.MEMCASTLE_ROOM
   Object.assign(process.env, {
     // Where the daemon's registry file lives, which is how a user's integration finds a daemon too.
     MEMCASTLE_PALACE_PATH: daemon.palacePath,

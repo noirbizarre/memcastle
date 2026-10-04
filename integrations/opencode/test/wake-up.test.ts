@@ -1,4 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import type { Plugin } from "@opencode/plugin"
 import { createCore, type Core, type Level } from "../src/core.ts"
@@ -35,6 +38,7 @@ async function coreWith(
   answer: (args: Record<string, unknown>) => Promise<unknown>,
   options: Record<string, unknown> = {},
   directory = "/work/started-here",
+  env: Record<string, string> = {},
 ) {
   const logs: { level: Level; message: string }[] = []
   const calls: { tool: string; args: Record<string, unknown> }[] = []
@@ -42,7 +46,7 @@ async function coreWith(
     // These tests are about wake-up, so the search-before-answer reminder (tested in recall.test.ts) is switched off.
     { forceMemoryRecall: { level: "off" }, ...options },
     async (level, message) => void logs.push({ level, message }),
-    {},
+    env,
     directory,
   )) as Core
   core.sessions.session = (() => ({
@@ -139,6 +143,80 @@ test("a session that began before the plugin loaded still wakes up, in the direc
   expect((await request("ses_resumed")).join("\n")).toContain("Finished the daemon.")
   expect(calls[0]?.args.wing).toBe("started-here")
   await core.sessionDeleted("ses_resumed")
+})
+
+// --- the project's own wing -----------------------------------------------------------------------------------
+
+const projectDirs: string[] = []
+afterEach(() => {
+  for (const dir of projectDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
+
+/** A directory holding a `.config/memcastle.toml` with `body`, and a `src` directory inside it. */
+function projectWith(body: string): string {
+  const root = mkdtempSync(join(tmpdir(), "memcastle-oc-project-"))
+  projectDirs.push(root)
+  mkdirSync(join(root, ".config"), { recursive: true })
+  mkdirSync(join(root, "src"), { recursive: true })
+  writeFileSync(join(root, ".config/memcastle.toml"), body)
+  return root
+}
+
+test("a session in a project asks about the wing the project declares, found from a nested directory", async () => {
+  const root = projectWith('[memcastle]\nwing = "declared"\n')
+  const { core, request, calls } = await coreWith(async () => RICH, { wakeUp: { mode: "sync" } }, "/work/elsewhere", { HOME: "/nonexistent-home" })
+
+  await core.sessionCreated("ses_1", join(root, "src"))
+  await request("ses_1")
+  expect(calls).toEqual([{ tool: "memcastle_wake_up", args: { agent_identity: "opencode", wing: "declared" } }])
+})
+
+test("two sessions of one process in different projects each ask about their own wing", async () => {
+  const first = projectWith('[memcastle]\nwing = "one"\n')
+  const second = projectWith('[project]\nname = "two"\n')
+  const { core, request, calls } = await coreWith(async () => RICH, { wakeUp: { mode: "sync" } }, "/work/x", { HOME: "/nonexistent-home" })
+
+  await core.sessionCreated("ses_1", first)
+  await core.sessionCreated("ses_2", second)
+  await request("ses_1")
+  await request("ses_2")
+  expect(calls.map((call) => call.args.wing)).toEqual(["one", "two"])
+})
+
+test("MEMCASTLE_WING outranks the project file, and an explicit wake-up source outranks both", async () => {
+  const root = projectWith('[memcastle]\nwing = "declared"\n')
+  const env = { HOME: "/nonexistent-home", MEMCASTLE_WING: "from-env" }
+  const overridden = await coreWith(async () => RICH, { wakeUp: { mode: "sync" } }, "/work/x", env)
+  await overridden.core.sessionCreated("ses_1", root)
+  await overridden.request("ses_1")
+  expect(overridden.calls[0]?.args.wing).toBe("from-env")
+
+  const explicit = await coreWith(async () => RICH, { wakeUp: { mode: "sync", source: "custom", wing: "mine" } }, "/work/x", env)
+  await explicit.core.sessionCreated("ses_1", root)
+  await explicit.request("ses_1")
+  expect(explicit.calls[0]?.args.wing).toBe("mine")
+})
+
+test("a broken project file is reported once, and the session falls back to its directory's name", async () => {
+  const root = projectWith("[memcastle]\ntoken = \"hunter2\"\n")
+  const { core, request, calls, logs } = await coreWith(async () => RICH, { wakeUp: { mode: "sync" } }, "/work/x", { HOME: "/nonexistent-home" })
+
+  await core.sessionCreated("ses_1", root)
+  await request("ses_1")
+  await request("ses_1")
+  expect(calls[0]?.args.wing).toBe(root.split("/").pop())
+  const warnings = logs.filter((entry) => entry.level === "warn")
+  expect(warnings).toHaveLength(1)
+  expect(warnings[0]?.message).toContain("unknown key `token`")
+  expect(warnings[0]?.message).not.toContain("hunter2")
+})
+
+test("an off process never reads a project file, so a broken one is not even reported", async () => {
+  const root = projectWith('[memcastle]\ntoken = "hunter2"\n')
+  const logs: { level: Level; message: string }[] = []
+  const core = await createCore({ mode: "off" }, async (level, message) => void logs.push({ level, message }), { HOME: "/nonexistent-home" }, root)
+  expect(core).toBeUndefined()
+  expect(logs.filter((entry) => entry.level !== "info")).toEqual([])
 })
 
 // --- when nothing is injected ---------------------------------------------------------------------------------
