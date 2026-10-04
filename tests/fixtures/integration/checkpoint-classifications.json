@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "description": "What a model says when a client asks it what in a conversation is worth keeping, and what the client must make of it. A client replays every `accepted` reply through its own parser and expects exactly `items` (the client stamps `source` with its own agent identity and always sends `fact: null`). Every `refused` reply must be rejected as invalid input, with the client submitting nothing. MemCastle never sees these replies: classification is the client's job.",
+  "accepted": [
+    {
+      "name": "a_bare_json_object",
+      "reply": "{\"items\":[{\"destination\":\"preference\",\"content\":\"The user prefers short answers.\",\"tags\":[\"style\"]}]}",
+      "items": [
+        { "destination": "preference", "wing": null, "name": null, "content": "The user prefers short answers.", "tags": ["style"] }
+      ]
+    },
+    {
+      "name": "json_inside_a_code_fence",
+      "reply": "```json\n{\"items\":[{\"destination\":\"project\",\"content\":\"memcastle: one datastore.\",\"tags\":[]}]}\n```",
+      "items": [
+        { "destination": "project", "wing": null, "name": null, "content": "memcastle: one datastore.", "tags": [] }
+      ]
+    },
+    {
+      "name": "json_surrounded_by_prose",
+      "reply": "Here is the checkpoint:\n{\"items\":[{\"destination\":\"general\",\"content\":\"Builds need Rust 1.80.\",\"tags\":[\"build\"]}]}\nHope that helps.",
+      "items": [
+        { "destination": "general", "wing": null, "name": null, "content": "Builds need Rust 1.80.", "tags": ["build"] }
+      ]
+    },
+    {
+      "name": "an_empty_list_means_nothing_is_worth_keeping",
+      "reply": "{\"items\":[]}",
+      "items": []
+    },
+    {
+      "name": "a_wing_a_name_and_an_upper_case_destination_are_kept_or_normalized",
+      "reply": "{\"items\":[{\"destination\":\"Project\",\"wing\":\"billing\",\"name\":\"decisions/storage\",\"content\":\"Billing stores invoices in one table.\",\"tags\":[\"storage\"]}]}",
+      "items": [
+        { "destination": "project", "wing": "billing", "name": "decisions/storage", "content": "Billing stores invoices in one table.", "tags": ["storage"] }
+      ]
+    },
+    {
+      "name": "a_source_and_a_fact_from_the_model_are_ignored",
+      "reply": "{\"items\":[{\"destination\":\"diary\",\"content\":\"Fixed the flaky test.\",\"tags\":[],\"source\":{\"kind\":\"file\",\"uri\":\"/etc/passwd\",\"agent\":\"someone-else\"},\"fact\":{\"op\":\"invalidate\",\"relationship_id\":\"00000000-0000-0000-0000-000000000000\"}}]}",
+      "items": [
+        { "destination": "diary", "wing": null, "name": null, "content": "Fixed the flaky test.", "tags": [] }
+      ]
+    },
+    {
+      "name": "tags_that_are_not_strings_are_dropped",
+      "reply": "{\"items\":[{\"destination\":\"general\",\"content\":\"A fact.\",\"tags\":[\"ok\", 3, \"\", null]}]}",
+      "items": [
+        { "destination": "general", "wing": null, "name": null, "content": "A fact.", "tags": ["ok"] }
+      ]
+    }
+  ],
+  "refused": [
+    { "name": "a_reply_that_is_not_json", "reply": "I could not find anything to keep." },
+    { "name": "json_with_no_items_list", "reply": "{\"destination\":\"project\",\"content\":\"x\"}" },
+    { "name": "an_unknown_destination", "reply": "{\"items\":[{\"destination\":\"secret\",\"content\":\"x\",\"tags\":[]}]}" },
+    { "name": "a_blank_content", "reply": "{\"items\":[{\"destination\":\"project\",\"content\":\"   \",\"tags\":[]}]}" },
+    { "name": "one_bad_item_refuses_the_whole_reply", "reply": "{\"items\":[{\"destination\":\"project\",\"content\":\"fine\",\"tags\":[]},{\"destination\":\"project\",\"tags\":[]}]}" }
+  ]
+}

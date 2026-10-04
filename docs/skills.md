@@ -105,6 +105,8 @@ OpenCode lists the skills through its own `skill` tool, from `skills/` where the
 `search-before-answer` in the system prompt of every request.
 Both read the same `forceMemoryRecall.level` setting (`off`, `sometimes` or `always`), which is the client's policy and
 never MemCastle's.
+Pi also gives `checkpoint-instructions` to the model that reviews a conversation for its interval and manual checkpoints,
+as that model's instructions, so what is worth keeping is worded the same way whoever writes the checkpoint.
 
 ## Versions
 

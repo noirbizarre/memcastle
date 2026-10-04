@@ -1,14 +1,14 @@
 // The MemCastle extension for Pi.
 //
 // This file only decides *when* to talk to MemCastle; every memory operation is a call to the daemon over MCP.
-// It is a foundation: the connection, mode and failure handling are real and tested, and each capability module it
-// registers is empty, with the issue that fills it in.
+// The connection, mode and failure handling are real and tested, and so are wake-up, search-before-answer and
+// checkpointing; a capability module that is still empty names the issue that fills it in.
 //
 // Pi may load an extension without starting a session, so the factory only registers handlers. Nothing is opened
 // until `session_start`, and everything is closed, idempotently, in `session_shutdown`.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
-import { registerCheckpointAgent } from "./checkpoint-agent.ts"
+import { CheckpointSessions, registerCheckpointAgent } from "./checkpoint-agent.ts"
 import { registerCheckpointTool } from "./checkpoint-tool.ts"
 import { registerDailyMine } from "./daily-mine.ts"
 import { InvalidModeError } from "./modes.ts"
@@ -50,7 +50,9 @@ export default function memcastle(pi: ExtensionAPI): void {
   registerWakeUp(pi, current)
   registerWakeUpCommand(pi, current)
   registerSearchBeforeAnswer(pi, current)
-  registerCheckpointAgent(pi, current)
-  registerCheckpointTool(pi, current)
+  // The interval review and the manual command share one counter and one review at a time per Pi session.
+  const checkpoints = new CheckpointSessions()
+  registerCheckpointAgent(pi, current, checkpoints)
+  registerCheckpointTool(pi, current, checkpoints)
   registerDailyMine(pi, current)
 }

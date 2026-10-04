@@ -41,7 +41,7 @@ test("loading the extension only registers handlers: nothing is opened until a s
   process.env.MEMCASTLE_MODE = "readonly" // would be reported if the factory read settings
   const { pi, handlers, notes } = fakePi()
   memcastle(pi)
-  expect([...handlers.keys()].sort()).toEqual(["before_agent_start", "session_shutdown", "session_start"])
+  expect([...handlers.keys()].sort()).toEqual(["agent_end", "before_agent_start", "session_shutdown", "session_start"])
   expect(notes).toEqual([])
 })
 

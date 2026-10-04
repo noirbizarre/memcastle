@@ -54,3 +54,10 @@ test("wake-up reads its own environment variables and does not mistake MEMCASTLE
   expect(settings.wakeUp.mode).toBe("sync")
   expect(resolveSettings(undefined, {}).wakeUp).toEqual({ enabled: true, mode: "async", source: "project", wing: null })
 })
+
+test("checkpoint settings are resolved with the rest, and its blocking mode is not the memory mode", () => {
+  const settings = resolveSettings({ mode: "read-only", checkpoint: { mode: "blocking", interval: 4 } }, { MEMCASTLE_CHECKPOINT_MODE: "silent" })
+  expect(settings.mode).toBe("read-only")
+  expect(settings.checkpoint).toMatchObject({ mode: "blocking", interval: 4, enabled: true })
+  expect(resolveSettings(undefined, { MEMCASTLE_MODE: "read-only" }).checkpoint.mode).toBe("silent")
+})

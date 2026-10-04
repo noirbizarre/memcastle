@@ -148,7 +148,7 @@ and report a failed job.
 
 Daemon-side (tested): every valid fixture is accepted, completes and is recallable, and every invalid fixture is refused
 with its code and leaves no job behind.
-Client-side (to test): the client sends well-formed payloads for what its classifier produced, and surfaces a refusal.
+Client-side (tested in Pi): the client sends well-formed payloads for what its classifier produced, and surfaces a refusal.
 
 ### Emergency checkpoint
 
@@ -303,6 +303,7 @@ The fixtures are strict JSON in `tests/fixtures/integration/`, so any language c
 | `capabilities.json` | The matrix ids, their operations and the daemon test for each |
 | `modes.json` | The label to wire mapping, every gated operation and what each mode must do with it |
 | `checkpoint-payloads.json` | Valid payloads with a token to recall them by, and invalid ones with the code they are refused with |
+| `checkpoint-classifications.json` | Model replies a client's review may meet, with the items each must become or the refusal it must get |
 | `failure-classes.json` | The failure classes, how each is detected, and the code and status |
 
 In `modes.json`, an argument written as `{{mine_dir}}` stands for an existing absolute directory the test creates.

@@ -6,7 +6,8 @@ admin endpoint (AGENTS.md invariant 8, enforced by the `integrations-http-only` 
 
 **Status: scaffold.**
 The connection, memory-mode, discovery and failure foundations are real and tested against a real daemon.
-Wake-up is implemented; the other capability modules are registered but empty, and each names the issue that fills it in.
+Wake-up, search-before-answer and checkpointing (interval and manual) are implemented; the other capability modules are
+registered but empty, and each names the issue that fills it in.
 
 It deliberately does **not** port `pi-palace`'s workaround of routing every write through a daemon queue to avoid
 lock contention.
@@ -41,6 +42,10 @@ The environment variables are the ones the MemCastle CLI already reads.
 | `MEMCASTLE_WAKE_UP_SOURCE` | `project` | The wing to ask about: `user`, `project`, `custom` or `none` |
 | `MEMCASTLE_WAKE_UP_WING` | none | The wing for `custom` |
 | `MEMCASTLE_FORCE_MEMORY_RECALL` | `sometimes` | `off`, `sometimes` or `always`: how hard to push the model to search first |
+| `MEMCASTLE_CHECKPOINT` | `true` | Whether the interval review runs; `/memcastle-checkpoint` works either way |
+| `MEMCASTLE_CHECKPOINT_INTERVAL` | `10` | How many exchanges separate two interval reviews |
+| `MEMCASTLE_CHECKPOINT_MODE` | `silent` | `silent` reviews in the background; `blocking` makes the agent wait and shows the result |
+| `MEMCASTLE_CHECKPOINT_MODEL` | none | `provider/id` of the model that reviews the conversation; none means the session's own |
 
 The daemon is found through its registry file, then the configured address, and each candidate is checked with
 `GET /api/health` because the file is only a hint.
@@ -109,6 +114,51 @@ It is a client policy: MemCastle itself never forces a search, and no daemon set
 - A mistyped level falls back to `sometimes` rather than breaking the session, because it only changes what the model
   is told.
 
+### Checkpointing
+
+Every `MEMCASTLE_CHECKPOINT_INTERVAL` exchanges, the extension asks its own model what in the conversation is worth
+keeping, and submits the answer to MemCastle as a checkpoint.
+`/memcastle-checkpoint` does the same on demand.
+The settings are named after `pi-palace`'s `piPalace.interval`, `piPalace.mode` and `piPalace.model`.
+
+Classification happens here and never in MemCastle: the daemon stores what it is handed and decides nothing.
+The reviewing model is given the shared [`checkpoint-instructions`](../../skills/checkpoint-instructions/SKILL.md) skill,
+read from `skills/` and never copied, and replies with a payload of items, each tagged `preference`, `project`, `diary`
+or `general`.
+The extension validates that reply, stamps each item with `source.agent` (the `agentIdentity`, default `pi`), and
+submits it with `memcastle_checkpoint`.
+
+- **An exchange is a prompt and the agent's whole answer to it**, counted at `agent_end`.
+  A tool-heavy answer is one exchange, not one per model turn.
+- **Each review reads only what the last one did not.**
+  Tool output, summaries and the injected wake-up are not part of what it reads.
+  A review that fails before the daemon has the items is retried over the same exchanges.
+- **`silent`**, the default, never makes the agent wait: the review runs in the background, and only a failure is shown.
+  **`blocking`** shows a status while it runs, waits for the job to complete and says what was saved.
+  `MEMCASTLE_CHECKPOINT_MODE` is not `MEMCASTLE_MODE`: the first is whether the agent waits, the second is what a
+  session may do to memory.
+- **`MEMCASTLE_CHECKPOINT_MODEL`** is the model that reviews, as `provider/id`.
+  A model Pi does not know is reported, naming the setting; it is never replaced silently.
+  The review is a model call the user pays for, so a cheaper model is a reasonable choice.
+- **`/memcastle-checkpoint [hint]`** forces a review now, whatever `MEMCASTLE_CHECKPOINT` says, and always shows its
+  result.
+  Text after the command is passed to the reviewing model as the user's own words about what to keep.
+  It postpones the next interval review, so the same exchanges are not reviewed twice.
+- **Nothing worth keeping is a result, not an error.**
+  Nothing is submitted, because the daemon refuses an empty payload.
+- **A failure says what to do.**
+  A job that failed carries the daemon's reason and `memcastle_job_retry`; a reply the model got wrong says nothing was
+  saved and suggests a more capable model; a daemon that is down carries how to start it.
+  None of them is shown as "nothing worth keeping".
+- A `read-only` session never reviews on its own, since the daemon would refuse the write after a paid model call.
+  `/memcastle-checkpoint` there says why nothing was saved.
+  An `off` session has no manager, so nothing is reviewed and the command says MemCastle is not active.
+- The review never emits a fact mutation: that needs entity and relationship ids that no MCP tool lets a client obtain,
+  so `fact` is always `null`, as the shared skill says.
+- A mistyped checkpoint value falls back to its default rather than breaking the session.
+
+The emergency checkpoint before a compaction is a separate capability (#24).
+
 ### Connection lifecycle
 
 Pi runs one agent session at a time, so the extension holds one MCP connection.
@@ -145,14 +195,15 @@ src/wake-up-cli.ts            `/memcastle-wake-up`: show what a session start wo
 src/recall-core.ts            search-before-answer without a host: the level and the text to inject (the same file as OpenCode's)
 src/skill-text.ts             reads a shared skill from `skills/` and strips its frontmatter (the same file as OpenCode's)
 src/search-before-answer.ts   injects that skill into the system prompt at every `before_agent_start`
-src/checkpoint-agent.ts       interval review by the extension's own model (#23), empty
-src/checkpoint-tool.ts        the manual checkpoint (#23) and the pre-compaction one (#24), empty
+src/checkpoint-core.ts        checkpointing without a host: settings, the review, the payload, submission (the same file as OpenCode's)
+src/checkpoint-agent.ts       the interval review: counts `agent_end`, reads Pi's transcript, asks Pi's model
+src/checkpoint-tool.ts        `/memcastle-checkpoint`: the manual save; the pre-compaction one (#24) is not here yet
 src/daily-mine.ts             background mining on the extension's own schedule (#26), empty
 test/                         bun tests against a real `memcastle serve`; they read tests/fixtures/integration/
 ```
 
-`modes`, `failures`, `settings`, `daemon-client`, `persistent-mcp-client`, `wake-up-core`, `recall-core` and
-`skill-text` are a deliberate copy of the small client
+`modes`, `failures`, `settings`, `daemon-client`, `persistent-mcp-client`, `wake-up-core`, `recall-core`,
+`checkpoint-core` and `skill-text` are a deliberate copy of the small client
 the OpenCode integration carries, not a shared package: the two ecosystems differ in how many sessions share a process.
 Both suites replay the same fixtures, which is what keeps the copies honest
 (see [ADR-022](../../docs/adr/022-integrations-are-bun-packages-tested-against-a-real-daemon.md)).
@@ -179,10 +230,10 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | `session-mode` | Foundation: label translation, mode selected on connect, `off` opens nothing | #27 |
 | `wake-up` | Implemented: fetched at session start, injected as a message before the first (`sync`) or first-ready (`async`) response, never blocks on a down daemon | #22, done |
 | `recall` | Implemented: the shared `search-before-answer` skill is appended to the system prompt every turn, at the `forceMemoryRecall` level | #25, done |
-| `checkpoint` | Not yet | #23 |
+| `checkpoint` | Implemented: an interval review by Pi's own model and `/memcastle-checkpoint`, both submitting a classified payload and reporting a failed job with how to retry it | #23, done |
 | `emergency-checkpoint` | Not yet | #24 |
 | `persistent-session` | Implemented: one connection per Pi session, kept alive, replaced with its mode re-selected when the daemon forgets it | #29, done |
-| `skills` | Implemented: `search-before-answer` is read from `skills/` and injected, never copied; `off` sessions get nothing | #25, done |
+| `skills` | Implemented: `search-before-answer` is injected and `checkpoint-instructions` instructs the reviewing model, both read from `skills/` and never copied; `off` sessions get nothing | #25, #23, done |
 | `background-mining` | Not yet | #26 |
 | `failure-reporting` | Foundation: the five classes with `help`, shown as Pi notifications | #30 for the rest |
 | `audit-repair` | Not yet | #28 |
