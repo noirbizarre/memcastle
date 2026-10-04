@@ -136,7 +136,7 @@ Skills taken from `main` may describe tools a released binary does not have yet,
 
 ## What the tests check
 
-`tests/skills.rs` reads every skill the way a client does, with no build step, and checks that:
+`tests/in_process/skills.rs` reads every skill the way a client does, with no build step, and checks that:
 
 - each directory holds a `SKILL.md` whose `name` equals the directory, with a description that says when to use it
 - the skills on disk and the table above list the same names

@@ -8,7 +8,7 @@
 //! What this cannot prove, and the contract assigns to each integration's own tests: that the client calls these
 //! operations at the right lifecycle point, and that a disabled session injects no MemCastle-derived context.
 
-mod common;
+use crate::common;
 
 use std::collections::BTreeSet;
 

@@ -14,7 +14,7 @@ use axum::routing::post;
 use memcastle::config::EmbeddingProvider;
 use serde_json::{Value, json};
 
-mod common;
+use crate::common;
 
 use common::TestDaemon;
 

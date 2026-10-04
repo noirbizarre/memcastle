@@ -133,7 +133,7 @@ a source whoever wrote it.
   and opens the network only inside the manifest's flag.
   `tests/dependencies.rs`: no source-specific SDK or native database binding in `Cargo.lock`, and the engine is built
   without the features a source host never uses.
-  `tests/auth.rs`: every `/api/source-packages` route is guarded and no MCP tool installs or changes a source.
+  `tests/in_process/auth.rs`: every `/api/source-packages` route is guarded and no MCP tool installs or changes a source.
 
 ## Alternatives rejected
 

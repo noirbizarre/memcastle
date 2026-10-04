@@ -36,7 +36,8 @@ The wire name for the "off" mode is `disabled`.
 - **The fixtures are strict JSON** under `tests/fixtures/integration/`: the capability manifest, the mode rules,
   the checkpoint payloads and the failure classes.
   JSON is read by any language, so the Pi and OpenCode suites replay the same files the Rust suite does.
-- **The daemon half is proved once,** by `tests/integration_contract.rs`, against a real daemon over a real MCP session.
+- **The daemon half is proved once,** by `tests/in_process/integration_contract.rs`,
+  against a real daemon over a real MCP session.
   Each capability names its test in the manifest, and a test fails when the manifest, the page and the test names disagree.
 - **The client half stays with each client.**
   When a client calls an operation, and whether a disabled session leaks context,

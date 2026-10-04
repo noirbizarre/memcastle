@@ -35,7 +35,7 @@ A renamed tool leaves an agent following instructions that fail at run time, and
   A test requires a parsable range with a lower bound that the crate's own version satisfies.
   The `memcastle-setup` skill compares the installed binary with the range, so an agent notices skills that are newer
   than its binary.
-- **`tests/skills.rs` holds a skill to the surface it names.**
+- **`tests/in_process/skills.rs` holds a skill to the surface it names.**
   Every `memcastle_*` tool must be registered by a real daemon, every command must be in the CLI's help, and every route
   must be in the documented table.
   A skill may not point an agent at the database endpoint, storage or the credential routes.

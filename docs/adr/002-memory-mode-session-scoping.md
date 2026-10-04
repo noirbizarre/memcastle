@@ -52,7 +52,7 @@ reads are rejected with the same typed `Error::ModeForbidden` as writes, never a
 
 - A daemon-global `MEMCASTLE_ENABLED=false` flag — the task brief rules this out explicitly:
   the daemon keeps running, only the opting-out client stops using memory;
-  every other client's in-flight jobs/reads are unaffected (`tests/concurrency.rs` asserts this).
+  every other client's in-flight jobs/reads are unaffected (`tests/in_process/concurrency.rs` asserts this).
 - Per-capability mode flags (separate toggles for search vs. checkpoint vs. diary) —
   out of scope for V1, a simplicity call, not a discovered constraint.
 - An empty `Ok` result for `Disabled` reads instead of an error —

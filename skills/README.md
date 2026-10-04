@@ -38,7 +38,7 @@ The split follows what an agent does over a session, not the MCP tool list: ther
 ## Rules for authors
 
 - Reference only what this release exposes: `memcastle_*` tools, `memcastle` CLI commands and documented `/api/` routes.
-  `tests/skills.rs` fails when a skill names something that does not exist.
+  `tests/in_process/skills.rs` fails when a skill names something that does not exist.
 - Never describe the database endpoint, storage internals or the credential routes.
 - A skill that calls a mode-gated tool says to stop on `memcastle::app::mode_forbidden` and never to call
   `memcastle_set_mode` to get around it.
@@ -47,7 +47,7 @@ The split follows what an agent does over a session, not the MCP tool list: ther
 - Declare `metadata.memcastle-version` as a semver range, normally `>=x.y.z` with the release that introduced the last
   thing the skill relies on.
   Raise the floor when the skill starts to depend on a later release, or when a breaking change ships with the skill
-  update, and only once `Cargo.toml` carries that release: `tests/skills.rs` requires the crate to satisfy the range.
+  update, and only once `Cargo.toml` carries that release: `tests/in_process/skills.rs` requires the crate to satisfy the range.
 - Write Markdown as the rest of the documentation is written (semantic linefeeds, 120 columns): `SKILL.md` files are
   linted with it. This README is a working document outside that lint scope.
 

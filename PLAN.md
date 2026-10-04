@@ -85,7 +85,7 @@ phase makes it a thin MemCastle adapter instead of a fork. Depends on Phase 1.
 | [#29](https://github.com/noirbizarre/memcastle/issues/29) | Persistent MCP connection for the session |
 | [#30](https://github.com/noirbizarre/memcastle/issues/30) | Actionable, classified failure handling UX |
 | [#123](https://github.com/noirbizarre/memcastle/issues/123) | Shared Pi/OpenCode integration contract and conformance fixtures (`docs/integration-contract.md`) |
-| [#122](https://github.com/noirbizarre/memcastle/issues/122) | Distribute reusable agent skills: five shared skills, install workflow, `tests/skills.rs` (`docs/skills.md`) |
+| [#122](https://github.com/noirbizarre/memcastle/issues/122) | Distribute reusable agent skills: five shared skills, install workflow, `tests/in_process/skills.rs` (`docs/skills.md`) |
 
 ## Phase 3 — OpenCode integration
 

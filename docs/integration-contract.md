@@ -63,7 +63,7 @@ A gap is allowed only where the last column says so, and then it must be documen
 | `audit-repair` | `memcastle_audit`, `memcastle_repair` | Offer audit, confirm, dry-run, then apply only what was confirmed | Yes |
 
 The sections below give the expected behaviour and say what must be proved against a real daemon.
-"Daemon-side" is proved once, by `tests/integration_contract.rs`, replaying the fixtures.
+"Daemon-side" is proved once, by `tests/in_process/integration_contract.rs`, replaying the fixtures.
 "Client-side" is proved by each integration's own tests, because only it knows its lifecycle.
 
 ### Session identity and memory mode
@@ -225,8 +225,8 @@ them.
 Pi appends `search-before-answer` to the system prompt, and OpenCode also lists the skills through its own skill
 mechanism.
 Nothing is tested against a daemon, and the matrix records that with a `null` daemon test.
-What is tested is the skills themselves: `tests/skills.rs` checks every tool, command and route a skill names against
-this release (see [ADR-020](adr/020-skills-are-versioned-with-the-repository.md)).
+What is tested is the skills themselves:
+`tests/in_process/skills.rs` checks every tool, command and route a skill names against this release (see [ADR-020](adr/020-skills-are-versioned-with-the-repository.md)).
 
 ### Background mining
 
@@ -363,7 +363,7 @@ name it must resolve to or the error it must be refused with.
 
 In `modes.json`, an argument written as `{{mine_dir}}` stands for an existing absolute directory the test creates.
 
-`tests/integration_contract.rs` replays them against an in-process daemon over MCP, using the helpers in
+`tests/in_process/integration_contract.rs` replays them against an in-process daemon over MCP, using the helpers in
 `tests/common/mcp.rs`.
 A client-side suite in another language reads the same files and checks the same expectations through its own client,
 which is how Pi and OpenCode are held to the same behaviour.

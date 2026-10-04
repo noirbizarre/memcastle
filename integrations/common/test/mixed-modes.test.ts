@@ -1,6 +1,6 @@
 // Six sessions, two integrations, three modes, one daemon, all at once.
 //
-// The daemon proves once that it keeps each MCP session's mode apart (`tests/integration_contract.rs`). What only a
+// The daemon proves once that it keeps each MCP session's mode apart (`tests/in_process/integration_contract.rs`). What only a
 // client test can prove is the other half: that each integration, loaded in the same process as another one in a
 // different mode, does what its own mode dictates and nothing else. A `full` session's checkpoint must land while an
 // `off` session beside it does nothing, and a `read-only` session must read without ever attempting a write.

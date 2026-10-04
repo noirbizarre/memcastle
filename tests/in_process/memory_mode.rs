@@ -6,7 +6,7 @@
 //! exercises the wire boundary — header parsing and the resulting status
 //! codes/response bodies — plus that a rejected write never actually lands.
 
-mod common;
+use crate::common;
 
 use common::TestDaemon;
 use reqwest::StatusCode;

@@ -4,7 +4,7 @@
 //!
 //! The built-in `heuristic` provider is used: deterministic, no model, nothing to stub.
 
-mod common;
+use crate::common;
 
 use std::path::Path;
 use std::time::{Duration, SystemTime};
@@ -16,8 +16,8 @@ use memcastle::config::ExtractionProvider;
 use memcastle::domain::{Job, JobStatus};
 use serde_json::{Value, json};
 
-const TEAM: &str = include_str!("fixtures/sources/extraction/team.md");
-const ARCHITECTURE: &str = include_str!("fixtures/sources/extraction/architecture.md");
+const TEAM: &str = include_str!("../fixtures/sources/extraction/team.md");
+const ARCHITECTURE: &str = include_str!("../fixtures/sources/extraction/architecture.md");
 
 fn client() -> reqwest::Client {
     reqwest::Client::new()

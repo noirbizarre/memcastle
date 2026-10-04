@@ -6,9 +6,9 @@
 //! Fixtures that require bypassing normal write paths (a manufactured
 //! orphan drawer) live as unit tests in `src/repair/mod.rs`'s own
 //! `#[cfg(test)]` module, alongside direct `SurrealStore` access — the same
-//! split `src/audit/mod.rs` and `tests/audit.rs` use.
+//! split `src/audit/mod.rs` and `tests/in_process/audit.rs` use.
 
-mod common;
+use crate::common;
 
 use common::{TestDaemon, wait_for_job_status};
 use memcastle::domain::{Job, JobStatus};

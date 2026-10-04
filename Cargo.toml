@@ -202,7 +202,7 @@ assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
 insta = { version = "1", features = ["filters"] }
-# Only `tests/concurrency.rs` needs this (`join_all` over many simulated
+# Only `tests/in_process/concurrency.rs` needs this (`join_all` over many simulated
 # clients) — not a real dependency, so it stays out of `[dependencies]`.
 futures = "0.3.34"
 
@@ -219,7 +219,7 @@ features = ["process"]
 version = "3.3.0"
 features = ["kv-mem"]
 
-# Only `tests/mcp_memory_mode.rs` needs a real MCP *client* (to prove memory
+# Only `tests/in_process/mcp_memory_mode.rs` needs a real MCP *client* (to prove memory
 # mode is negotiated per MCP session, not per connection or globally) —
 # unions with the main dependency's `server`/`schemars` features above,
 # same trade-off as `surrealdb` just above.
@@ -228,7 +228,7 @@ version = "3.4.1"
 default-features = false
 features = ["client", "transport-streamable-http-client-reqwest"]
 
-# Only `tests/db_endpoint.rs` needs a raw WebSocket client: the JSON and CBOR
+# Only `tests/in_process/db_endpoint.rs` needs a raw WebSocket client: the JSON and CBOR
 # wire formats the admin endpoint also speaks are not ones the Rust SDK sends
 # (it only speaks `flatbuffers`), and a custom `Origin` header cannot be set
 # through the SDK at all.
