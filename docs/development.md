@@ -166,14 +166,16 @@ compiles `wasmtime` and Cranelift from scratch and takes several minutes longer.
 
 | Job | Compiling | Running | Whole job |
 |---|---|---|---|
-| Tests, Linux (basic, 1114 tests) | 57 s | 170 to 240 s | 5 to 6 min |
-| Tests, macOS (basic) | 86 s | 157 s | about 5.5 min |
-| Tests, Windows (basic) | 120 s | 359 s | about 10.5 min |
-| WebAssembly tests, Linux (25 tests) | 60 s | 31 s | 2.3 min |
+| Tests, Linux (basic, 1119 tests) | 46 s | 224 s | 5.4 min |
+| Tests, macOS (basic) | 25 s | 67 s | 2.5 min |
+| Tests, Windows (basic) | 75 s | 215 s | 7.3 min |
+| WebAssembly tests, Linux (38 tests) | 10 s with warm caches, 2.8 min cold | 38 s | 1.5 to 4.3 min |
 | Source, one leg per `sources/<name>/` | 10 s | seconds | about 1 min |
 
-The 25 WebAssembly tests run in under a minute in CI, and their job finishes well before the basic Linux one.
-The time left in the basic suite is its 1114 pre-existing tests, not WebAssembly.
+The WebAssembly tests run in under a minute in CI, and their job finishes well before the basic Linux one.
+Both suites build only the test binaries they run: the wasm job passes `--test 'wasm_*'` to Cargo,
+and the daemon tests that start a server in the test process are one binary, `tests/in_process`, rather than sixteen.
+The time left in the basic suite is its roughly 1100 tests, not compiling or WebAssembly.
 
 #### Building components in tests
 
