@@ -6,6 +6,8 @@
 
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { type CheckpointArgs, type Checkpoints, type ReviewHost, createCheckpoints } from "./checkpoint.ts"
+import type { Turn } from "./checkpoint-core.ts"
 import { MemCastleFailure } from "./failures.ts"
 import { InvalidModeError } from "./modes.ts"
 import { recallInstruction } from "./recall-core.ts"
@@ -42,8 +44,19 @@ export interface Core {
    * OpenCode 1 types it that way.
    */
   systemTransform(sessionId: string | undefined, inject: (text: string) => void): Promise<void>
-  /** Submit an emergency checkpoint just before OpenCode summarises and loses the transcript (#34). */
-  compacting(): Promise<void>
+  /**
+   * The agent finished a run in `sessionId` (`session.idle`): count one exchange, and review the conversation when
+   * the interval is reached (#34). OpenCode has no timer hook, so counting idle events is the closest equivalent.
+   */
+  sessionIdle(sessionId: string): Promise<void>
+  /**
+   * Submit an emergency checkpoint just before OpenCode summarises and loses the transcript (#34). `transcript` is the
+   * conversation when the host already holds it. Waits for the review for a bounded time and never throws, so the
+   * compaction always goes ahead.
+   */
+  compacting(sessionId: string | undefined, transcript?: readonly Turn[]): Promise<void>
+  /** The `memcastle_checkpoint` tool: a manual checkpoint, with the model's own payload or the plugin's review (#34). */
+  checkpoint(sessionId: string, args: CheckpointArgs): Promise<string>
   /** Refuse to load a MemCastle skill into an `off` session (#35). */
   toolBefore(): Promise<void>
   /** Close every connection, which also tells the daemon to forget each session. */
@@ -62,6 +75,9 @@ export async function createCore(
   // Where OpenCode was started: the directory of a session that began before the plugin loaded, which never
   // fired a `session.created` to say where it is.
   directory: string = process.cwd(),
+  // How to read a session's conversation and ask a model about it. Without one the plugin cannot review (#34), and a
+  // checkpoint can only be submitted with a payload the model wrote itself.
+  host?: ReviewHost,
 ): Promise<Core | undefined> {
   let settings
   try {
@@ -102,6 +118,8 @@ export async function createCore(
   const wakeUps = new Map<string, PendingWakeUp>()
   // Subagent sessions: each would otherwise open its own connection and repeat the briefing the parent already has.
   const children = new Set<string>()
+
+  const checkpoints: Checkpoints = createCheckpoints({ settings, sessions, children, host, log, report })
 
   const startWakeUp = (sessionId: string, sessionDirectory: string) => {
     if (!settings.wakeUp.enabled || wakeUps.has(sessionId)) return
@@ -161,6 +179,7 @@ export async function createCore(
     sessionDeleted: guarded("session.deleted", async (sessionId: string) => {
       wakeUps.delete(sessionId)
       children.delete(sessionId)
+      checkpoints.forget(sessionId)
       await sessions.close(sessionId)
     }),
     // OpenCode rebuilds the system prompt for every model request (the title model's included), so unlike a message
@@ -170,10 +189,17 @@ export async function createCore(
       await injectWakeUp(sessionId, inject)
       await injectRecall(sessionId, inject)
     },
+    sessionIdle: guarded("session.idle", (sessionId: string) => checkpoints.sessionIdle(sessionId)),
     // `experimental.*` (V1) can change without notice; the contract allows documenting a gap if it does.
-    compacting: guarded("session.compacting", async () => undefined),
+    // Guarded because a compaction must go ahead whatever happens here.
+    compacting: guarded("session.compacting", (sessionId: string | undefined, transcript?: readonly Turn[]) =>
+      checkpoints.compacting(sessionId, transcript),
+    ),
+    // Not guarded: the tool's caller is the model, and what it needs is the failure itself, with its help.
+    checkpoint: (sessionId, args) => checkpoints.checkpoint(sessionId, args),
     toolBefore: guarded("tool.execute.before", async () => undefined),
     dispose: guarded("dispose", async () => {
+      checkpoints.forgetAll()
       wakeUps.clear()
       children.clear()
       await sessions.closeAll()

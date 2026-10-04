@@ -148,7 +148,8 @@ and report a failed job.
 
 Daemon-side (tested): every valid fixture is accepted, completes and is recallable, and every invalid fixture is refused
 with its code and leaves no job behind.
-Client-side (tested in Pi): the client sends well-formed payloads for what its classifier produced, and surfaces a refusal.
+Client-side (tested in Pi and OpenCode): the client sends well-formed payloads for what its classifier produced,
+and surfaces a refusal.
 
 ### Emergency checkpoint
 
@@ -161,7 +162,7 @@ Client responsibility: submit it at the client's last point before context is lo
 Where the client exposes no such point, this capability has a documented gap and a manual command is the fallback.
 
 Daemon-side (tested): priorities are 100 and 75.
-Client-side (to test): the adapter sends `emergency: true` at that lifecycle point.
+Client-side (tested in OpenCode): the adapter sends `emergency: true` at that lifecycle point.
 
 ### Persistent MCP session
 

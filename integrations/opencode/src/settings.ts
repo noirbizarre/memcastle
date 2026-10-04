@@ -5,6 +5,7 @@
 
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { type CheckpointSettings, resolveCheckpoint } from "./checkpoint-core.ts"
 import { type ModeLabel, toWireMode } from "./modes.ts"
 import { DEFAULT_KEEP_ALIVE_MS } from "./session.ts"
 import { type RecallSettings, resolveForceMemoryRecall } from "./recall-core.ts"
@@ -38,6 +39,11 @@ export interface Settings {
    * MemCastle never forces a search, and a session whose memory mode is `off` gets no instruction at all.
    */
   forceMemoryRecall: RecallSettings
+  /**
+   * Interval, manual and emergency checkpoints. Nested because its `mode` (`silent` or `blocking`) is whether the
+   * review is awaited, a different thing from the memory mode above.
+   */
+  checkpoint: CheckpointSettings
 }
 
 type Env = Readonly<Record<string, string | undefined>>
@@ -86,6 +92,7 @@ export function resolveSettings(options: Record<string, unknown> | undefined, en
     keepAliveMs: keepAlive(opts.keepAliveMs),
     wakeUp: resolveWakeUp(opts.wakeUp, env),
     forceMemoryRecall: resolveForceMemoryRecall(opts.forceMemoryRecall, env),
+    checkpoint: resolveCheckpoint(opts.checkpoint, env),
   }
 }
 

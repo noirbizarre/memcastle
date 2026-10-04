@@ -40,11 +40,25 @@ test("the plugin loads with no daemon running, because it connects lazily rather
   await hooks.dispose?.()
 })
 
-test("a hook that has nothing to do yet never throws into OpenCode", async () => {
-  const { input } = fakeInput()
+test("a checkpoint hook that fails never throws into OpenCode, and the failure reaches the log", async () => {
+  process.env.MEMCASTLE_PORT = "1"
+  process.env.MEMCASTLE_PALACE_PATH = "/nonexistent/memcastle-palace"
+  const { input, logs } = fakeInput()
   const hooks = await plugin.server(input)
   await hooks.event?.({ event: { type: "session.idle", properties: { sessionID: "ses_1" } } as never })
+  // The fake client cannot read a conversation, so the review fails, and compaction must go ahead regardless.
   await hooks["experimental.session.compacting"]?.({ sessionID: "ses_1" }, { context: [] })
+  expect(logs.some((entry) => entry.level === "warn" && entry.message.startsWith("emergency checkpoint"))).toBe(true)
+  await hooks.dispose?.()
+})
+
+test("the plugin adds the checkpoint tool and the slash command, once", async () => {
+  const { input } = fakeInput()
+  const hooks = await plugin.server(input)
+  expect(Object.keys(hooks.tool ?? {})).toEqual(["memcastle_checkpoint"])
+  const config: { command?: Record<string, unknown> } = {}
+  await hooks.config?.(config as never)
+  expect(Object.keys(config.command ?? {})).toEqual(["memcastle-checkpoint"])
   await hooks.dispose?.()
 })
 

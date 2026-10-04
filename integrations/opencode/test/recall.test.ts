@@ -87,8 +87,8 @@ test("the reminder does not depend on the wake-up: a failing one still leaves th
 
 // --- the two integrations stay the same ---------------------------------------------------------------------------
 
-test("the Pi and OpenCode copies of the shared recall and skill-reading code are identical", () => {
-  for (const file of ["recall-core.ts", "skill-text.ts"]) {
+test("the Pi and OpenCode copies of the shared recall, skill-reading and checkpoint code are identical", () => {
+  for (const file of ["recall-core.ts", "skill-text.ts", "checkpoint-core.ts"]) {
     const here = readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8")
     const pi = readFileSync(new URL(`../../pi/src/${file}`, import.meta.url), "utf8")
     expect(here).toBe(pi)
@@ -158,7 +158,8 @@ test("OpenCode 2: both shared skills are registered natively, and one the user a
     location: { directory: "/work" },
     event: { subscribe: async function* () {} },
     session: { hook: async () => ({ dispose: async () => undefined }) },
-    tool: { hook: async () => ({ dispose: async () => undefined }) },
+    tool: { hook: async () => ({ dispose: async () => undefined }), transform: async () => ({ dispose: async () => undefined }) },
+    command: { transform: async () => ({ dispose: async () => undefined }) },
     skill: {
       transform: async (callback: (editor: unknown) => void) => ((transform = callback), { dispose: async () => undefined }),
     },
@@ -186,7 +187,8 @@ test("OpenCode 2: a host that refuses skills does not stop the plugin from loadi
     location: { directory: "/work" },
     event: { subscribe: async function* () {} },
     session: { hook: async () => ({ dispose: async () => undefined }) },
-    tool: { hook: async () => ({ dispose: async () => undefined }) },
+    tool: { hook: async () => ({ dispose: async () => undefined }), transform: async () => ({ dispose: async () => undefined }) },
+    command: { transform: async () => ({ dispose: async () => undefined }) },
     skill: {
       transform: async () => {
         throw new Error("skills are not available")
