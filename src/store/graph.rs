@@ -16,7 +16,9 @@ use std::collections::HashMap;
 use chrono::Utc;
 use serde::Deserialize;
 
-use crate::domain::{Drawer, DrawerId, EntityId, SearchFilter, SearchHit, Signals};
+use crate::domain::{
+    Drawer, DrawerId, EntityId, FactProvenance, Mention, SearchFilter, SearchHit, Signals,
+};
 use crate::error::Result;
 
 use super::SurrealStore;
@@ -45,6 +47,18 @@ impl SurrealStore {
     /// `(in, out)` index means linking twice leaves one edge. Returns whether
     /// this call created the edge.
     pub async fn link_drawer_entity(&self, drawer: DrawerId, entity: EntityId) -> Result<bool> {
+        self.link_drawer_entity_with(drawer, entity, None).await
+    }
+
+    /// [`Self::link_drawer_entity`] for a link an extractor derived: the edge
+    /// records `provenance`. An existing edge is left as it was (a person's
+    /// link is not relabelled as extracted, nor the reverse).
+    pub async fn link_drawer_entity_with(
+        &self,
+        drawer: DrawerId,
+        entity: EntityId,
+        provenance: Option<&FactProvenance>,
+    ) -> Result<bool> {
         let mut response = self
             .db
             .query(
@@ -53,17 +67,33 @@ impl SurrealStore {
                       AND out = type::record('entity', $entity)); \
                  IF array::len($existing) = 0 { \
                     RELATE (type::record('drawer', $drawer))->mentions->(type::record('entity', $entity)) \
-                      SET created_at = <datetime>$now; \
+                      SET created_at = <datetime>$now, provenance = $provenance; \
                     RETURN true; \
                  } ELSE { RETURN false; };",
             )
             .bind(("drawer", drawer.to_string()))
             .bind(("entity", entity.to_string()))
             .bind(("now", super::stored(Utc::now())))
+            .bind(("provenance", provenance.map(super::bindable).transpose()?))
             .await?
             .check()?;
         let created: Option<bool> = response.take(response.num_statements() - 1)?;
         Ok(created.unwrap_or(false))
+    }
+
+    /// Every drawer that mentions `entity`, newest link first, with the
+    /// provenance of the link (`None` for one a person made).
+    pub async fn list_entity_mentions(&self, entity: EntityId) -> Result<Vec<Mention>> {
+        let mut response = self
+            .db
+            .query(
+                "SELECT record::id(in) AS drawer, <string>created_at AS created_at, provenance \
+                 FROM mentions WHERE out = type::record('entity', $entity) \
+                 ORDER BY created_at DESC",
+            )
+            .bind(("entity", entity.to_string()))
+            .await?;
+        super::take_rows(&mut response, 0)
     }
 
     /// The names of the entities `drawer` mentions, sorted.

@@ -166,6 +166,10 @@ async fn every_other_route_is_guarded_including_ones_that_do_not_exist() {
         (Method::POST, "/api/drawers/x/supersede"),
         (Method::PUT, "/api/drawers/x/embedding"),
         (Method::POST, "/api/drawers/x/mentions"),
+        // The knowledge graph, read-only.
+        (Method::GET, "/api/entities"),
+        (Method::GET, "/api/entities/x/relationships"),
+        (Method::GET, "/api/entities/x/mentions"),
         (Method::POST, "/mcp"),
         // A path no route serves must not answer 404 to an anonymous caller,
         // or the router's shape could be probed without a token.

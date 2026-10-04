@@ -71,9 +71,9 @@ DEFINE INDEX IF NOT EXISTS drawer_embedding_idx ON TABLE drawer
     FIELDS embedding HNSW DIMENSION 768 DIST COSINE TYPE F32;
 
 -- Knowledge-graph tables, wired by `store::entities` (create/supersede/
--- invalidate/list relationships). The only populator is a checkpoint item's
--- optional `fact` mutation; mining doesn't extract entities yet — that is
--- #40's deliberate future work, not an oversight.
+-- invalidate/list relationships). Populated by a checkpoint item's optional
+-- `fact` mutation and by the extraction job (`extract::job`, docs/adr/024),
+-- which reads mined drawers and only ever adds graph data.
 DEFINE TABLE IF NOT EXISTS entity SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS name ON TABLE entity TYPE string;
 DEFINE FIELD IF NOT EXISTS kind ON TABLE entity TYPE string;
@@ -84,11 +84,15 @@ DEFINE INDEX IF NOT EXISTS entity_name_kind ON TABLE entity FIELDS name, kind UN
 
 -- Which drawers mention which entities: the bridge from canonical memory into
 -- the graph. Derived data (a drawer's content never depends on it), written by
--- `store::graph::link_drawer_entity` — today by REST, and by #40's extractor
--- once it exists. The unique (in, out) index makes linking idempotent, and
--- graph-aware retrieval walks `drawer -> mentions -> entity -> relates_to`.
+-- `store::graph::link_drawer_entity` — by REST, and by the extraction job. The
+-- unique (in, out) index makes linking idempotent, and graph-aware retrieval
+-- walks `drawer -> mentions -> entity -> relates_to`.
 DEFINE TABLE IF NOT EXISTS mentions TYPE RELATION IN drawer OUT entity SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS created_at ON TABLE mentions TYPE datetime;
+-- Who derived the link (`domain::FactProvenance`): the extractor, the job and
+-- the drawer's mining origin. `NONE` for a link a person made. `FLEXIBLE`: see
+-- the comment on `drawer.source` above.
+DEFINE FIELD IF NOT EXISTS provenance ON TABLE mentions TYPE option<object> FLEXIBLE;
 DEFINE INDEX IF NOT EXISTS mentions_edge ON TABLE mentions FIELDS in, out UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS relates_to TYPE RELATION IN entity OUT entity SCHEMAFULL;
@@ -97,6 +101,11 @@ DEFINE FIELD IF NOT EXISTS confidence ON TABLE relates_to TYPE float;
 DEFINE FIELD IF NOT EXISTS valid_from ON TABLE relates_to TYPE datetime;
 -- `option<string>`: see the `drawer.valid_to` comment above.
 DEFINE FIELD IF NOT EXISTS valid_to ON TABLE relates_to TYPE option<string>;
+-- The drawer, job and extractor an extracted fact was derived from
+-- (`domain::FactProvenance`); `NONE` for a fact somebody asserted directly.
+DEFINE FIELD IF NOT EXISTS provenance ON TABLE relates_to TYPE option<object> FLEXIBLE;
+-- Backs "close the facts whose evidence was superseded" and "what did this drawer yield".
+DEFINE INDEX IF NOT EXISTS relates_to_provenance_drawer ON TABLE relates_to FIELDS provenance.drawer;
 
 -- The durable job queue. SCHEMAFULL on everything the scheduler itself
 -- reasons about (`status` in particular — an invalid status must never

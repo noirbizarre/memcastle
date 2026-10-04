@@ -195,6 +195,16 @@ pub enum JobKind {
         #[serde(default)]
         wing: Option<String>,
     },
+    /// Read every mined drawer not yet read and add the entities and
+    /// relationships it names to the knowledge graph — see
+    /// `crate::extract::job`. Derived data only: it adds graph records (each
+    /// with the provenance of the drawer it came from) and never changes a
+    /// drawer, and re-running finds nothing left to do.
+    Extract {
+        /// Restrict the sweep to one wing by name; `None` sweeps the palace.
+        #[serde(default)]
+        wing: Option<String>,
+    },
 }
 
 /// A repair that says nothing about `dry_run` must fail safe: destructive
@@ -888,6 +898,17 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn an_extract_job_is_tagged_on_the_wire_and_its_wing_is_optional() {
+        let json = serde_json::to_value(JobKind::Extract {
+            wing: Some("docs".into()),
+        })
+        .unwrap();
+        assert_eq!(json, serde_json::json!({"type": "extract", "wing": "docs"}));
+        let bare: JobKind = serde_json::from_value(serde_json::json!({"type": "extract"})).unwrap();
+        assert!(matches!(bare, JobKind::Extract { wing: None }));
     }
 
     #[test]

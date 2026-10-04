@@ -20,6 +20,7 @@ impl IntoResponse for ApiError {
         let status = match &self.0 {
             Error::JobNotFound { .. }
             | Error::RelationshipNotFound { .. }
+            | Error::EntityNotFound { .. }
             | Error::WingNotFound { .. }
             | Error::RoomNotFound { .. }
             | Error::DrawerNotFound { .. } => StatusCode::NOT_FOUND,
@@ -31,9 +32,12 @@ impl IntoResponse for ApiError {
             | Error::EmptyLabel { .. }
             // The caller asked for a ranking this daemon cannot serve right now.
             | Error::SemanticUnavailable { .. }
-            | Error::EmbeddingsNotConfigured => StatusCode::BAD_REQUEST,
+            | Error::EmbeddingsNotConfigured
+            | Error::ExtractionNotConfigured => StatusCode::BAD_REQUEST,
             // The embedding provider is an upstream, not the caller and not us.
-            Error::EmbeddingFailed { .. } | Error::EmbeddingDimension { .. } => StatusCode::BAD_GATEWAY,
+            Error::EmbeddingFailed { .. }
+            | Error::EmbeddingDimension { .. }
+            | Error::ExtractionFailed { .. } => StatusCode::BAD_GATEWAY,
             Error::ModeForbidden { .. } => StatusCode::FORBIDDEN,
             // 401, not 403: the caller is unidentified, which is different from
             // an identified caller being refused by its memory mode.

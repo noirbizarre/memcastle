@@ -341,6 +341,21 @@ backfilling after you configure a provider and for forcing a sweep.
 It only fills each drawer's embedding and never changes its content, and running it again does nothing.
 It is a write, so it is refused in `read_only` and `disabled` modes.
 
+### `extract`
+
+```sh
+memcastle extract [--wing <WING>]
+```
+
+Submits a job that reads every mined drawer not yet read and adds the entities and relationships it names to the
+knowledge graph, see [Extraction](configuration.md#extraction).
+It needs an `[extraction]` provider and is refused with `memcastle::extract::not_configured` without one.
+You rarely run it: the daemon queues the same job after a mining job completes and once at startup, so this is for
+backfilling after you configure a provider and for forcing a sweep.
+It only adds graph records and never changes a drawer, and running it again does nothing.
+It is a write, so it is refused in `read_only` and `disabled` modes.
+Read the result with `GET /api/entities`, see [the knowledge graph](mcp-and-api.md#the-knowledge-graph).
+
 ### `audit`
 
 ```sh

@@ -142,3 +142,9 @@ And the thing that differs between sources (discovery, authentication, formats) 
 - Authentication for external providers is designed for but not built: a credential reference is stored and never a
   value, and `config::Secret` is where a value would be held in memory.
   The first adapter that needs one decides how the reference is resolved, in its own ADR if that is not obvious.
+
+## Amendment (2026-10-04)
+
+The enrich stage reserved above now exists, as the `Extract` job of [ADR-024](024-entity-extraction-as-an-enrich-job.md).
+It attaches exactly where this ADR said it would: after ingest, reading what was filed and never rewriting a drawer.
+The pipeline, the chunker and the adapters did not change.

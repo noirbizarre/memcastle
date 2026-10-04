@@ -218,6 +218,17 @@ pub enum Error {
         id: String,
     },
 
+    /// A graph read named an entity that does not exist.
+    #[error("entity {id} not found")]
+    #[diagnostic(
+        code(memcastle::graph::entity_not_found),
+        help("list entities with `GET /api/entities` to find the id of the one you mean")
+    )]
+    EntityNotFound {
+        /// The id that was looked up.
+        id: String,
+    },
+
     /// A job transition was rejected by the state machine.
     #[error("job {id} cannot go from {from} to {event}")]
     #[diagnostic(
@@ -716,6 +727,29 @@ pub enum Error {
         message: String,
     },
 
+    /// Something asked for entity extraction while no provider is configured.
+    #[error("no extraction provider is configured")]
+    #[diagnostic(
+        code(memcastle::extract::not_configured),
+        help(
+            "set `provider = \"heuristic\"`, `\"command\"` or `\"http\"` in the `[extraction]` section of the config file (see docs/configuration.md); extraction is off by default"
+        )
+    )]
+    ExtractionNotConfigured,
+
+    /// The extraction provider was configured but did not return a usable answer.
+    #[error("the extraction provider failed: {message}")]
+    #[diagnostic(
+        code(memcastle::extract::failed),
+        help(
+            "check the `[extraction]` section of the config and that the provider is reachable; the job can be retried and drawers already read are not read again"
+        )
+    )]
+    ExtractionFailed {
+        /// What the provider reported.
+        message: String,
+    },
+
     /// A search asked for vector ranking, but no vector could be produced.
     #[error("{ranking} ranking needs a query embedding, and none is available")]
     #[diagnostic(
@@ -1031,6 +1065,9 @@ mod tests {
             Error::RelationshipNotFound {
                 id: "x".to_string(),
             },
+            Error::EntityNotFound {
+                id: "x".to_string(),
+            },
             Error::InvalidJobTransition {
                 id: "x".to_string(),
                 from: "queued".to_string(),
@@ -1120,6 +1157,10 @@ mod tests {
             Error::EmbeddingFailed {
                 message: "timeout".to_string(),
             },
+            Error::ExtractionNotConfigured,
+            Error::ExtractionFailed {
+                message: "timeout".to_string(),
+            },
             Error::SemanticUnavailable {
                 ranking: "hybrid".to_string(),
             },
@@ -1148,6 +1189,7 @@ mod tests {
             | Error::EmptyLabel { .. }
             | Error::Serialization { .. }
             | Error::RelationshipNotFound { .. }
+            | Error::EntityNotFound { .. }
             | Error::InvalidJobTransition { .. }
             | Error::JobNotFound { .. }
             | Error::InvalidBasedOnJob { .. }
@@ -1181,6 +1223,8 @@ mod tests {
             | Error::EmbeddingDimension { .. }
             | Error::EmbeddingsNotConfigured
             | Error::EmbeddingFailed { .. }
+            | Error::ExtractionNotConfigured
+            | Error::ExtractionFailed { .. }
             | Error::SemanticUnavailable { .. }
             | Error::SourceCursorInvalid { .. } => {}
         }

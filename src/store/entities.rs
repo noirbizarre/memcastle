@@ -21,7 +21,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::domain::{
-    Entity, EntityId, NewRelationship, Relationship, RelationshipId, require_label,
+    Entity, EntityId, FactProvenance, NewRelationship, Relationship, RelationshipId, require_label,
 };
 use crate::error::{Error, Result};
 
@@ -36,7 +36,7 @@ const ENTITY_COLUMNS: &str = "record::id(id) AS id, name, kind, properties";
 /// them) — aliased to `from`/`to` to match [`Relationship`]'s field names.
 const RELATIONSHIP_COLUMNS: &str = "record::id(id) AS id, record::id(in) AS from, \
      record::id(out) AS to, predicate, confidence, \
-     <string>valid_from AS valid_from, valid_to";
+     <string>valid_from AS valid_from, valid_to, provenance";
 
 impl SurrealStore {
     /// Find the entity named `name` of kind `kind`, or create it.
@@ -102,6 +102,20 @@ impl SurrealStore {
         new: NewRelationship,
         valid_from: DateTime<Utc>,
     ) -> Result<Relationship> {
+        self.create_relationship_with(id, new, valid_from, None)
+            .await
+    }
+
+    /// [`Self::create_relationship`] for a fact derived from a drawer: the edge
+    /// records `provenance` (which drawer, job and extractor it came from), so
+    /// it stays traceable and can be closed when its evidence is superseded.
+    pub async fn create_relationship_with(
+        &self,
+        id: RelationshipId,
+        new: NewRelationship,
+        valid_from: DateTime<Utc>,
+        provenance: Option<FactProvenance>,
+    ) -> Result<Relationship> {
         let predicate = require_label("predicate", &new.predicate)?;
         let relationship = Relationship {
             id,
@@ -111,6 +125,7 @@ impl SurrealStore {
             confidence: new.confidence,
             valid_from,
             valid_to: None,
+            provenance,
         };
         if self.relationship_exists(id).await? {
             return Ok(relationship);
@@ -175,6 +190,8 @@ impl SurrealStore {
             confidence: new.confidence,
             valid_from: at,
             valid_to: None,
+            // A supersession is somebody's assertion, not an extraction.
+            provenance: None,
         };
         if self.relationship_exists(new_id).await? {
             return Ok(replacement);
@@ -272,6 +289,64 @@ impl SurrealStore {
         Ok(rows.pop().map(|r| r.edges).unwrap_or_default())
     }
 
+    /// The entity with this id, or `None`.
+    pub async fn get_entity(&self, id: EntityId) -> Result<Option<Entity>> {
+        let mut response = self
+            .db
+            .query(format!(
+                "SELECT {ENTITY_COLUMNS} FROM entity WHERE id = type::record('entity', $id)"
+            ))
+            .bind(("id", id.to_string()))
+            .await?;
+        let mut rows: Vec<Entity> = super::take_rows(&mut response, 0)?;
+        Ok(rows.pop())
+    }
+
+    /// The entity called `name` of any kind, preferring a specific kind over
+    /// `other`, then the lowest id so the answer is stable. Lets the extraction
+    /// job attach a vaguely-typed mention to an entity something better typed
+    /// already created, instead of splitting one thing in two.
+    pub async fn find_entity_by_name(&self, name: &str) -> Result<Option<Entity>> {
+        let mut response = self
+            .db
+            .query(format!(
+                "SELECT {ENTITY_COLUMNS} FROM entity WHERE name = $name"
+            ))
+            .bind(("name", name.to_string()))
+            .await?;
+        let mut rows: Vec<Entity> = super::take_rows(&mut response, 0)?;
+        rows.sort_by(|a, b| {
+            (a.kind == "other")
+                .cmp(&(b.kind == "other"))
+                .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
+        });
+        Ok(rows.into_iter().next())
+    }
+
+    /// Entities, optionally narrowed to a kind and to names containing
+    /// `name_contains` (case-insensitive), by name, at most `limit`.
+    pub async fn list_entities(
+        &self,
+        name_contains: Option<&str>,
+        kind: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Entity>> {
+        let kind = kind.and_then(crate::domain::normalize_label);
+        let mut response = self
+            .db
+            .query(format!(
+                "SELECT {ENTITY_COLUMNS} FROM entity \
+                 WHERE ($kind = NONE OR kind = $kind) \
+                   AND ($needle = NONE OR string::lowercase(name) CONTAINS $needle) \
+                 ORDER BY name ASC, id ASC LIMIT $limit"
+            ))
+            .bind(("kind", kind))
+            .bind(("needle", name_contains.map(str::to_lowercase)))
+            .bind(("limit", limit))
+            .await?;
+        super::take_rows(&mut response, 0)
+    }
+
     /// Shared write path for a fresh edge: `create_relationship` and
     /// `supersede_relationship`'s replacement half both open a brand-new,
     /// currently-valid `relates_to` record the same way.
@@ -280,7 +355,8 @@ impl SurrealStore {
             .query(
                 "RELATE (type::record('entity', $from))->relates_to->(type::record('entity', $to)) \
                  SET id = type::record('relates_to', $id), predicate = $predicate, \
-                     confidence = $confidence, valid_from = <datetime>$valid_from, valid_to = $valid_to",
+                     confidence = $confidence, valid_from = <datetime>$valid_from, valid_to = $valid_to, \
+                     provenance = $provenance",
             )
             .bind(("id", relationship.id.to_string()))
             .bind(("from", relationship.from.to_string()))
@@ -291,6 +367,15 @@ impl SurrealStore {
             .bind((
                 "valid_to",
                 relationship.valid_to.map(super::stored),
+            ))
+            // `None` binds as `NONE`, which the `option<object>` column wants.
+            .bind((
+                "provenance",
+                relationship
+                    .provenance
+                    .as_ref()
+                    .map(super::bindable)
+                    .transpose()?,
             ))
             .await?
             .check()?;

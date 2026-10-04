@@ -271,6 +271,7 @@ fn kind_label(kind: &JobKind) -> String {
         JobKind::Checkpoint { .. } => "checkpoint".to_string(),
         JobKind::Audit { .. } => "audit".to_string(),
         JobKind::Embed { .. } => "embed".to_string(),
+        JobKind::Extract { .. } => "extract".to_string(),
         JobKind::Repair { dry_run: true, .. } => "repair (dry run)".to_string(),
         JobKind::Repair { dry_run: false, .. } => "repair (apply)".to_string(),
     }

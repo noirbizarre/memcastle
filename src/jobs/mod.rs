@@ -27,6 +27,7 @@ use crate::config::MiningConfig;
 use crate::domain::{Job, JobEvent, JobId, JobKind, JobStatus, Priority};
 use crate::embed::Embeddings;
 use crate::error::Result;
+use crate::extract::Extraction;
 use crate::store::SurrealStore;
 
 pub use control::{JobContext, JobControl};
@@ -116,6 +117,9 @@ pub struct Scheduler {
     embeddings: Embeddings,
     /// The `[mining]` settings handed to every mining job's context.
     mining: MiningConfig,
+    /// The extraction provider handed to every job's context, and consulted
+    /// to decide whether finishing a mining job should queue a sweep.
+    extraction: Extraction,
 }
 
 impl Scheduler {
@@ -137,6 +141,52 @@ impl Scheduler {
             last_renewed: std::sync::Mutex::new(tokio::time::Instant::now()),
             embeddings: Embeddings::disabled(),
             mining: MiningConfig::default(),
+            extraction: Extraction::disabled(),
+        }
+    }
+
+    /// Give the scheduler an extraction provider (see `[extraction]`).
+    #[must_use]
+    pub fn with_extraction(mut self, extraction: Extraction) -> Self {
+        self.extraction = extraction;
+        self
+    }
+
+    /// Queue an extraction sweep unless there is nothing to do it with or one
+    /// is already waiting.
+    ///
+    /// Called after a mining job completes (only mined drawers are read) and
+    /// at startup. Coalesced on *queued* jobs exactly like
+    /// [`Self::ensure_embedding_sweep`], and never an error to the caller:
+    /// extraction is derived data, so failing to schedule it must not fail
+    /// the job that triggered it.
+    pub async fn ensure_extraction_sweep(&self) {
+        if !self.extraction.is_configured() {
+            return;
+        }
+        let queued = match self.store.list_jobs(Some(JobStatus::Queued)).await {
+            Ok(jobs) => jobs,
+            Err(error) => {
+                warn!(%error, "could not check for a queued extraction sweep");
+                return;
+            }
+        };
+        if queued
+            .iter()
+            .any(|job| matches!(job.kind, JobKind::Extract { .. }))
+        {
+            return;
+        }
+        if let Err(error) = self
+            .submit(
+                JobKind::Extract { wing: None },
+                Priority::Background,
+                // Not a channel: nobody asked, the daemon did.
+                "system",
+            )
+            .await
+        {
+            warn!(%error, "could not queue an extraction sweep");
         }
     }
 
@@ -653,6 +703,7 @@ impl Scheduler {
         let ctx = JobContext::new(job.id, control.clone(), self.store.clone())
             .with_lease(self.worker.clone())
             .with_embeddings(self.embeddings.clone())
+            .with_extraction(self.extraction.clone())
             .with_mining(self.mining.clone());
 
         let kind_wrote_drawers =
@@ -681,6 +732,14 @@ impl Scheduler {
             JobKind::Embed { wing } => {
                 crate::embed::job::run(&ctx, &mut job, crate::embed::job::EmbedParams { wing })
                     .await
+            }
+            JobKind::Extract { wing } => {
+                crate::extract::job::run(
+                    &ctx,
+                    &mut job,
+                    crate::extract::job::ExtractParams { wing },
+                )
+                .await
             }
             JobKind::Repair {
                 dry_run,
@@ -757,6 +816,11 @@ impl Scheduler {
         if event == JobEvent::Complete && kind_wrote_drawers {
             self.ensure_embedding_sweep().await;
         }
+        // Only a mining job files drawers with an origin, which is all the
+        // extraction sweep reads.
+        if event == JobEvent::Complete && matches!(job.kind, JobKind::Mine { .. }) {
+            self.ensure_extraction_sweep().await;
+        }
     }
 }
 
@@ -770,6 +834,7 @@ fn kind_name(kind: &JobKind) -> &'static str {
         JobKind::Audit { .. } => "audit",
         JobKind::Repair { .. } => "repair",
         JobKind::Embed { .. } => "embed",
+        JobKind::Extract { .. } => "extract",
     }
 }
 
@@ -807,6 +872,36 @@ mod tests {
             "writes must coalesce into one waiting sweep"
         );
         assert!(matches!(queued[0].kind, JobKind::Embed { wing: None }));
+        assert_eq!(queued[0].priority, Priority::Background);
+    }
+
+    #[tokio::test]
+    async fn no_extraction_sweep_is_queued_without_a_provider() {
+        let scheduler = scheduler().await;
+        scheduler.ensure_extraction_sweep().await;
+        assert_eq!(scheduler.store.count_jobs(None).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn repeated_mines_queue_a_single_waiting_extraction_sweep() {
+        let scheduler = scheduler().await.with_extraction(Extraction::new(
+            crate::extract::heuristic::HeuristicExtractor,
+            &crate::config::ExtractionConfig::default(),
+        ));
+        for _ in 0..5 {
+            scheduler.ensure_extraction_sweep().await;
+        }
+        let queued = scheduler
+            .store
+            .list_jobs(Some(JobStatus::Queued))
+            .await
+            .unwrap();
+        assert_eq!(
+            queued.len(),
+            1,
+            "mines must coalesce into one waiting sweep"
+        );
+        assert!(matches!(queued[0].kind, JobKind::Extract { wing: None }));
         assert_eq!(queued[0].priority, Priority::Background);
     }
 

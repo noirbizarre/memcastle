@@ -311,6 +311,112 @@ impl Default for EmbeddingsConfig {
     }
 }
 
+/// Where entities and relationships are extracted from mined text.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExtractionProvider {
+    /// No extraction: mined drawers stay unconnected in the knowledge graph.
+    #[default]
+    None,
+    /// A small deterministic extractor built into the daemon: capitalised names and a fixed table of phrases.
+    /// Nothing leaves the process, and nothing needs configuring.
+    Heuristic,
+    /// An external program the daemon runs, speaking JSON over stdin/stdout. The program owns any credentials and
+    /// any model.
+    Command,
+    /// An OpenAI-compatible `/chat/completions` HTTP endpoint (OpenAI, Ollama, llama.cpp, vLLM, ...).
+    Http,
+}
+
+impl std::str::FromStr for ExtractionProvider {
+    type Err = String;
+
+    fn from_str(raw: &str) -> std::result::Result<Self, String> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "none" => Ok(Self::None),
+            "heuristic" => Ok(Self::Heuristic),
+            "command" => Ok(Self::Command),
+            "http" => Ok(Self::Http),
+            other => Err(format!(
+                "unknown extraction provider `{other}`; expected one of: none, heuristic, command, http"
+            )),
+        }
+    }
+}
+
+impl ExtractionProvider {
+    /// The name recorded as a fact's extractor.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Heuristic => "heuristic",
+            Self::Command => "command",
+            Self::Http => "http",
+        }
+    }
+}
+
+/// The default time, in seconds, one extraction call may take. Longer than embedding's: a model reads and writes.
+pub const DEFAULT_EXTRACTION_TIMEOUT_SECS: u64 = 120;
+/// The default number of drawers read per extraction pass (and per command call).
+pub const DEFAULT_EXTRACTION_BATCH_SIZE: usize = 8;
+/// The default most entities kept from one drawer.
+pub const DEFAULT_EXTRACTION_MAX_ENTITIES: usize = 32;
+/// The default most relationships kept from one drawer.
+pub const DEFAULT_EXTRACTION_MAX_RELATIONS: usize = 64;
+/// The default confidence below which an extracted relationship is dropped.
+pub const DEFAULT_EXTRACTION_MIN_CONFIDENCE: f32 = 0.3;
+
+/// Entity extraction settings (`[extraction]`).
+///
+/// Extraction is derived data: the palace works without it, and it only ever adds entities and relationships to the
+/// knowledge graph, never rewriting a drawer. `command` and `http` send mined text to whatever they reach, which is
+/// why the default is `none`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExtractionConfig {
+    /// Which mechanism reads drawers and finds entities and relationships.
+    pub provider: ExtractionProvider,
+    /// For `provider = "command"`: the program and its arguments, run without a shell. File-only.
+    pub command: Vec<String>,
+    /// For `provider = "http"`: the API base URL, e.g. `http://localhost:11434/v1`; `/chat/completions` is appended.
+    pub url: Option<String>,
+    /// For `provider = "http"`: the model name sent with each request. Also passed to a `command` provider.
+    pub model: Option<String>,
+    /// For `provider = "http"`: a bearer API key. Prefer `MEMCASTLE_EXTRACTION_API_KEY` so the secret stays out of
+    /// the file.
+    #[serde(skip_serializing)]
+    pub api_key: Option<Secret>,
+    /// How long, in seconds, one extraction call may take before it is abandoned (and, for a command, killed).
+    pub timeout_secs: u64,
+    /// How many drawers one pass reads; bounds a provider's request size.
+    pub batch_size: usize,
+    /// The most entities kept from one drawer.
+    pub max_entities: usize,
+    /// The most relationships kept from one drawer.
+    pub max_relations: usize,
+    /// Relationships below this confidence, in `[0, 1]`, are dropped.
+    pub min_confidence: f32,
+}
+
+impl Default for ExtractionConfig {
+    fn default() -> Self {
+        Self {
+            provider: ExtractionProvider::None,
+            command: Vec::new(),
+            url: None,
+            model: None,
+            api_key: None,
+            timeout_secs: DEFAULT_EXTRACTION_TIMEOUT_SECS,
+            batch_size: DEFAULT_EXTRACTION_BATCH_SIZE,
+            max_entities: DEFAULT_EXTRACTION_MAX_ENTITIES,
+            max_relations: DEFAULT_EXTRACTION_MAX_RELATIONS,
+            min_confidence: DEFAULT_EXTRACTION_MIN_CONFIDENCE,
+        }
+    }
+}
+
 /// The default chunk size, in characters. Under the 8,000 characters the embedding sweep reads of a drawer
 /// (docs/adr/021), so a chunk is embedded whole.
 pub const DEFAULT_MINING_CHUNK_CHARS: usize = 6_000;
@@ -512,6 +618,9 @@ pub struct Config {
     /// Mining settings.
     #[serde(default)]
     pub mining: MiningConfig,
+    /// Entity extraction settings.
+    #[serde(default)]
+    pub extraction: ExtractionConfig,
 }
 
 impl Config {
@@ -659,6 +768,27 @@ impl Config {
         if let Some(n) = lookup("MEMCASTLE_EMBEDDINGS_TIMEOUT_SECS") {
             self.embeddings.timeout_secs = parse_override("MEMCASTLE_EMBEDDINGS_TIMEOUT_SECS", &n)?;
         }
+        if let Some(raw) = lookup("MEMCASTLE_EXTRACTION_PROVIDER") {
+            self.extraction.provider = raw
+                .parse()
+                .map_err(|e| Error::config(format!("MEMCASTLE_EXTRACTION_PROVIDER: {e}")))?;
+        }
+        if let Some(url) = lookup("MEMCASTLE_EXTRACTION_URL") {
+            self.extraction.url = Some(url.trim().to_string());
+        }
+        if let Some(model) = lookup("MEMCASTLE_EXTRACTION_MODEL") {
+            self.extraction.model = Some(model.trim().to_string());
+        }
+        if let Some(n) = lookup("MEMCASTLE_EXTRACTION_TIMEOUT_SECS") {
+            self.extraction.timeout_secs = parse_override("MEMCASTLE_EXTRACTION_TIMEOUT_SECS", &n)?;
+        }
+        if let Some(n) = lookup("MEMCASTLE_EXTRACTION_BATCH_SIZE") {
+            self.extraction.batch_size = parse_override("MEMCASTLE_EXTRACTION_BATCH_SIZE", &n)?;
+        }
+        if let Some(n) = lookup("MEMCASTLE_EXTRACTION_MIN_CONFIDENCE") {
+            self.extraction.min_confidence =
+                parse_override("MEMCASTLE_EXTRACTION_MIN_CONFIDENCE", &n)?;
+        }
         if let Some(n) = lookup("MEMCASTLE_MINING_CHUNK_CHARS") {
             self.mining.chunk_chars = parse_override("MEMCASTLE_MINING_CHUNK_CHARS", &n)?;
         }
@@ -675,6 +805,9 @@ impl Config {
         // `parse_override`, whose error would echo the value.
         if let Some(key) = lookup("MEMCASTLE_EMBEDDINGS_API_KEY") {
             self.embeddings.api_key = Some(Secret::new(key.trim()));
+        }
+        if let Some(key) = lookup("MEMCASTLE_EXTRACTION_API_KEY") {
+            self.extraction.api_key = Some(Secret::new(key.trim()));
         }
         // Deliberately not `parse_override`: its error embeds the raw value,
         // and this one is a secret. An empty variable (a secret manager that
@@ -824,7 +957,75 @@ impl Config {
             )));
         }
         self.validate_embeddings()?;
+        self.validate_extraction()?;
         self.validate_mining()?;
+        Ok(())
+    }
+
+    /// The `[extraction]` invariants: a selected provider must be fully specified, so a half-written section fails
+    /// at load, not on the first sweep, and the bounds keep a typo from asking a model for nothing or everything.
+    fn validate_extraction(&self) -> Result<()> {
+        let extraction = &self.extraction;
+        match extraction.provider {
+            ExtractionProvider::None | ExtractionProvider::Heuristic => {}
+            ExtractionProvider::Command => {
+                if extraction
+                    .command
+                    .first()
+                    .is_none_or(|program| program.trim().is_empty())
+                {
+                    return Err(Error::config(
+                        "extraction.command is empty; with `provider = \"command\"` set it to the \
+                         program and arguments to run, e.g. `command = [\"/usr/local/bin/extract\"]`",
+                    ));
+                }
+            }
+            ExtractionProvider::Http => {
+                let url = extraction.url.as_deref().unwrap_or_default();
+                if !(url.starts_with("http://") || url.starts_with("https://")) {
+                    return Err(Error::config(
+                        "extraction.url (or MEMCASTLE_EXTRACTION_URL) must be an http:// or https:// \
+                         URL when `provider = \"http\"`, e.g. `http://localhost:11434/v1`",
+                    ));
+                }
+                if extraction
+                    .model
+                    .as_deref()
+                    .is_none_or(|model| model.trim().is_empty())
+                {
+                    return Err(Error::config(
+                        "extraction.model (or MEMCASTLE_EXTRACTION_MODEL) is required when \
+                         `provider = \"http\"`",
+                    ));
+                }
+            }
+        }
+        if !(1..=3_600).contains(&extraction.timeout_secs) {
+            return Err(Error::config(
+                "extraction.timeout_secs (or MEMCASTLE_EXTRACTION_TIMEOUT_SECS) must be between 1 and 3600 seconds",
+            ));
+        }
+        if !(1..=256).contains(&extraction.batch_size) {
+            return Err(Error::config(
+                "extraction.batch_size (or MEMCASTLE_EXTRACTION_BATCH_SIZE) must be between 1 and 256",
+            ));
+        }
+        if !(1..=1_000).contains(&extraction.max_entities) {
+            return Err(Error::config(
+                "extraction.max_entities must be between 1 and 1000",
+            ));
+        }
+        if !(1..=10_000).contains(&extraction.max_relations) {
+            return Err(Error::config(
+                "extraction.max_relations must be between 1 and 10000",
+            ));
+        }
+        // `contains` is false for NaN, so a non-number is rejected too.
+        if !(0.0..=1.0).contains(&extraction.min_confidence) {
+            return Err(Error::config(
+                "extraction.min_confidence (or MEMCASTLE_EXTRACTION_MIN_CONFIDENCE) must be between 0 and 1",
+            ));
+        }
         Ok(())
     }
 
@@ -1708,6 +1909,116 @@ mod tests {
     fn an_embedding_api_key_is_neither_printed_nor_serialised() {
         let mut config = valid_config();
         config.embeddings.api_key = Some(Secret::new("sk-very-secret"));
+        assert!(!format!("{config:?}").contains("sk-very-secret"));
+        assert!(!toml::to_string(&config).unwrap().contains("sk-very-secret"));
+    }
+
+    #[test]
+    fn extraction_is_off_by_default_and_the_default_section_validates() {
+        let config = valid_config();
+        assert_eq!(config.extraction.provider, ExtractionProvider::None);
+        config.validate().expect("a palace needs no extractor");
+    }
+
+    #[test]
+    fn the_built_in_heuristic_needs_no_further_settings() {
+        let mut config = valid_config();
+        config.extraction.provider = ExtractionProvider::Heuristic;
+        config
+            .validate()
+            .expect("heuristic is complete as it stands");
+    }
+
+    #[test]
+    fn a_selected_extraction_provider_must_be_fully_specified() {
+        let mut http = valid_config();
+        http.extraction.provider = ExtractionProvider::Http;
+        let message = http.validate().unwrap_err().to_string();
+        assert!(message.contains("extraction.url"), "{message}");
+        http.extraction.url = Some("http://localhost:1/v1".into());
+        let message = http.validate().unwrap_err().to_string();
+        assert!(message.contains("extraction.model"), "{message}");
+        http.extraction.model = Some("m".into());
+        http.validate().expect("a complete http provider is valid");
+
+        let mut command = valid_config();
+        command.extraction.provider = ExtractionProvider::Command;
+        let message = command.validate().unwrap_err().to_string();
+        assert!(message.contains("extraction.command"), "{message}");
+        command.extraction.command = vec!["/usr/local/bin/extract".into()];
+        command
+            .validate()
+            .expect("a command with a program is valid");
+    }
+
+    #[test]
+    fn extraction_bounds_are_range_checked() {
+        let cases: [fn(&mut ExtractionConfig); 5] = [
+            |c| c.timeout_secs = 0,
+            |c| c.batch_size = 0,
+            |c| c.max_entities = 0,
+            |c| c.max_relations = 0,
+            |c| c.min_confidence = 1.5,
+        ];
+        for case in cases {
+            let mut config = valid_config();
+            case(&mut config.extraction);
+            assert!(config.validate().is_err());
+        }
+        let mut nan = valid_config();
+        nan.extraction.min_confidence = f32::NAN;
+        assert!(nan.validate().is_err(), "NaN is not a confidence");
+    }
+
+    #[test]
+    fn extraction_environment_overrides_replace_the_file_values() {
+        let mut config = valid_config();
+        config
+            .apply_overrides_from(env(&[
+                ("MEMCASTLE_EXTRACTION_PROVIDER", "http"),
+                ("MEMCASTLE_EXTRACTION_URL", " http://localhost:1234/v1 "),
+                ("MEMCASTLE_EXTRACTION_MODEL", "m"),
+                ("MEMCASTLE_EXTRACTION_TIMEOUT_SECS", "5"),
+                ("MEMCASTLE_EXTRACTION_BATCH_SIZE", "2"),
+                ("MEMCASTLE_EXTRACTION_MIN_CONFIDENCE", "0.7"),
+                ("MEMCASTLE_EXTRACTION_API_KEY", "sk-secret "),
+            ]))
+            .unwrap();
+        assert_eq!(config.extraction.provider, ExtractionProvider::Http);
+        assert_eq!(
+            config.extraction.url.as_deref(),
+            Some("http://localhost:1234/v1")
+        );
+        assert_eq!(config.extraction.timeout_secs, 5);
+        assert_eq!(config.extraction.batch_size, 2);
+        assert!((config.extraction.min_confidence - 0.7).abs() < f32::EPSILON);
+        assert_eq!(
+            config.extraction.api_key.as_ref().unwrap().expose(),
+            "sk-secret"
+        );
+        config
+            .validate()
+            .expect("a complete http provider is valid");
+    }
+
+    #[test]
+    fn a_malformed_extraction_provider_override_names_the_variable_and_the_choices() {
+        let mut config = valid_config();
+        let message = config
+            .apply_overrides_from(env(&[("MEMCASTLE_EXTRACTION_PROVIDER", "gpt")]))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains("MEMCASTLE_EXTRACTION_PROVIDER"),
+            "{message}"
+        );
+        assert!(message.contains("heuristic"), "{message}");
+    }
+
+    #[test]
+    fn an_extraction_api_key_is_neither_printed_nor_serialised() {
+        let mut config = valid_config();
+        config.extraction.api_key = Some(Secret::new("sk-very-secret"));
         assert!(!format!("{config:?}").contains("sk-very-secret"));
         assert!(!toml::to_string(&config).unwrap().contains("sk-very-secret"));
     }

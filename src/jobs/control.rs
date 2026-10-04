@@ -16,6 +16,7 @@ use crate::config::MiningConfig;
 use crate::domain::{Job, JobId, JobProgress};
 use crate::embed::Embeddings;
 use crate::error::Result;
+use crate::extract::Extraction;
 use crate::store::SurrealStore;
 
 /// The scheduler's handle onto one running job, used to request pause or
@@ -81,6 +82,9 @@ pub struct JobContext {
     embeddings: Embeddings,
     /// Mining limits (`[mining]`): chunk size, file size, documents per run.
     mining: MiningConfig,
+    /// The entity extraction provider, for the extract handler. Disabled
+    /// unless the scheduler was given one.
+    extraction: Extraction,
 }
 
 impl JobContext {
@@ -94,7 +98,21 @@ impl JobContext {
             lease_owner: None,
             embeddings: Embeddings::disabled(),
             mining: MiningConfig::default(),
+            extraction: Extraction::disabled(),
         }
+    }
+
+    /// Give this context the daemon's extraction provider.
+    #[must_use]
+    pub fn with_extraction(mut self, extraction: Extraction) -> Self {
+        self.extraction = extraction;
+        self
+    }
+
+    /// The extraction provider (possibly none), for the extract handler.
+    #[must_use]
+    pub fn extraction(&self) -> &Extraction {
+        &self.extraction
     }
 
     /// Give this context the daemon's mining settings.

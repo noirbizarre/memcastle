@@ -20,6 +20,7 @@ use crate::app::{AppServices, AuthPolicy, DbEndpoint, RuntimeContext};
 use crate::config::{Config, Secret};
 use crate::embed::Embeddings;
 use crate::error::{Error, Result};
+use crate::extract::Extraction;
 use crate::jobs::Scheduler;
 use crate::store::SurrealStore;
 
@@ -90,8 +91,11 @@ pub async fn run(config: Config) -> Result<()> {
     // query vectors. Built before anything serves so a bad `[embeddings]`
     // section fails startup, not the first search.
     let embeddings = Embeddings::from_config(&config.embeddings)?;
+    // Likewise for `[extraction]`: a half-written section fails startup.
+    let extraction = Extraction::from_config(&config.extraction)?;
     let mut scheduler = Scheduler::new(store.clone(), config.jobs.max_concurrency)
         .with_embeddings(embeddings.clone())
+        .with_extraction(extraction.clone())
         .with_mining(config.mining.clone())
         .with_drain_timeout(Duration::from_secs(config.jobs.drain_timeout_secs))
         .with_lease_ttl(Duration::from_secs(config.jobs.lease_ttl_secs));
@@ -111,6 +115,8 @@ pub async fn run(config: Config) -> Result<()> {
     // Drawers written before a provider was configured (or while it was down)
     // are covered by one sweep at startup; a no-op without a provider.
     scheduler.ensure_embedding_sweep().await;
+    // Likewise for mined drawers nobody has read yet; a no-op without a provider.
+    scheduler.ensure_extraction_sweep().await;
 
     let shutdown = CancellationToken::new();
     let dispatch_handle = {
@@ -123,6 +129,7 @@ pub async fn run(config: Config) -> Result<()> {
     let backend_info_kind = backend_info.kind.to_string();
     let app = AppServices::new(store, Arc::clone(&scheduler))
         .with_embeddings(embeddings)
+        .with_extraction(extraction)
         .with_runtime(RuntimeContext {
             // The real bound address, not the requested one: `status` must agree
             // with the registry file when port 0 was asked for.

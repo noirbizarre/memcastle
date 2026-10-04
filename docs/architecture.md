@@ -214,8 +214,12 @@ unlike every other relationship in the model (wing to palace, room to wing, draw
 which is a plain foreign-key column on a regular table.
 A `mentions` edge (`TYPE RELATION IN drawer OUT entity`) links a drawer to the entities it talks about, which is how
 graph-aware search gets from canonical memory into the graph.
-What is missing is an extractor: nothing derives entities or relationships from mined content yet,
-so `mentions` links are made explicitly (`POST /api/drawers/{id}/mentions`) until #40 lands.
+The `extract` job fills the graph from mined content: it reads drawers that carry a source origin and adds entities,
+`mentions` links and `relates_to` edges, each recording the drawer, job and extractor it came from
+(`domain::FactProvenance`), and from a closed vocabulary of entity kinds and predicates.
+It never writes a drawer.
+Links can also be made explicitly (`POST /api/drawers/{id}/mentions`), and a checkpoint's `fact` still takes free-form labels.
+See [ADR-024](adr/024-entity-extraction-as-an-enrich-job.md).
 
 ## Search
 
@@ -441,6 +445,13 @@ Two fields mean "where do I read progress from" and "where do I read what it fou
   The database is its cursor: each pass asks for the next unembedded drawers, so pausing, crashing or running it again
   loses and repeats nothing, and only the `embedding` field is ever written.
   It is queued automatically after drawer-writing jobs and writes, and at startup.
+- **`Extract`** (`src/extract/job.rs`) reads every current mined drawer with no marker in `drawer_extraction`
+  and writes the entities, `mentions` links and `relates_to` edges its provider finds, then the marker.
+  Like `Embed` the database is its cursor, and every write is idempotent, so a crash or a retry repeats nothing.
+  It first closes the open facts whose evidence drawer has since been superseded.
+  The provider (`heuristic`, a `command`, or an OpenAI-compatible `http` endpoint) sits behind the `Extractor` trait,
+  and `Extraction::extract` holds every answer to the closed vocabulary and its bounds.
+  It is queued after a mining job completes and at startup, when a provider is configured.
 - **`Audit`** (`src/audit`) is a read-only consistency report, scoped to what is structurally possible
   with a single database.
   It checks for orphan drawers (a `room` reference that no longer resolves), dangling `provenance.job_id` references,
@@ -567,13 +578,15 @@ See [ADR-015](adr/015-database-admin-endpoint.md).
 
 Deliberately out of scope, and each is structurally possible without rework given the module boundaries above:
 
-- Semantic processing of mined documents (summaries, entity extraction, #40): mining stops at filing drawers, and the
-  source model leaves a stage for it that reads what was filed.
+- Semantic processing of mined documents beyond entity extraction (summaries): mining stops at filing drawers, and the
+  `extract` job is the stage that reads what was filed.
 - Mining sources that need credentials (Slack, GitHub, Atlassian, ...): the model stores a credential *reference* and
   never a secret, and no shipped adapter needs one yet.
 - Propagating a deletion at the source: a document that disappears is not noticed.
-- Extracting entities from text to resolve a query's words to the graph (#40): expansion starts from drawers already found.
-- Entity and relationship extraction wired into mining (the schema exists; nothing populates it).
+- Extracting entities from a *query* to resolve its words to the graph: extraction reads drawers, and expansion starts from
+  drawers already found.
+- Re-extracting drawers when the provider changes, merging entities that are the same thing under two names,
+  and extracting from drawers that were not mined (checkpoints, the diary).
 - A stdio MCP bridge for clients that cannot speak HTTP.
 - The CLI auto-starting a daemon on demand.
 - A `maintenance` command (a reserved name that returns `not_implemented`).

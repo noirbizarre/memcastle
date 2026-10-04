@@ -20,8 +20,8 @@ mod cli;
 
 use cli::{
     AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, CompletionsArgs, DaemonCommand,
-    DbCommand, DiaryCommand, DrawerCommand, EmbedArgs, JobCommand, MigrateArgs, MineArgs,
-    RecallArgs, RepairArgs, RoomCommand, SearchArgs, ServeArgs, StatusArgs, WakeUpArgs,
+    DbCommand, DiaryCommand, DrawerCommand, EmbedArgs, ExtractArgs, JobCommand, MigrateArgs,
+    MineArgs, RecallArgs, RepairArgs, RoomCommand, SearchArgs, ServeArgs, StatusArgs, WakeUpArgs,
     WingCommand,
 };
 use memcastle::app::{DbEndpointRequest, DbEndpointStatus, WakeUpBudget};
@@ -204,6 +204,7 @@ async fn run_command(
         Command::Checkpoint(args) => cmd_checkpoint(&config, mode, args).await,
         Command::Audit(args) => cmd_audit(&config, mode, args).await,
         Command::Embed(args) => cmd_embed(&config, mode, args).await,
+        Command::Extract(args) => cmd_extract(&config, mode, args).await,
         Command::Repair(args) => cmd_repair(&config, mode, args).await,
         Command::Diary(cmd) => cmd_diary(&config, mode, cmd).await,
         Command::Job(cmd) => cmd_job(&config, mode, cmd).await,
@@ -612,6 +613,12 @@ async fn cmd_audit(config: &Config, mode: Option<MemoryMode>, args: AuditArgs) -
 
 async fn cmd_embed(config: &Config, mode: Option<MemoryMode>, args: EmbedArgs) -> Result<()> {
     let job = client(config, mode).submit_embed(args.wing).await?;
+    print_json(&job)?;
+    Ok(())
+}
+
+async fn cmd_extract(config: &Config, mode: Option<MemoryMode>, args: ExtractArgs) -> Result<()> {
+    let job = client(config, mode).submit_extract(args.wing).await?;
     print_json(&job)?;
     Ok(())
 }

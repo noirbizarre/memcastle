@@ -141,6 +141,10 @@ pub enum Command {
     /// Submit an embedding job: compute the vector of every drawer that has
     /// none, so semantic search covers it. Needs an `[embeddings]` provider.
     Embed(EmbedArgs),
+    /// Submit an extraction job: read every mined drawer not yet read and add
+    /// the entities and relationships it names to the knowledge graph. Needs
+    /// an `[extraction]` provider.
+    Extract(ExtractArgs),
     /// Submit a repair job: a narrow, dry-run-first set of destructive
     /// palace-consistency fixes (see `memcastle::repair`'s module doc for
     /// exactly what it does).
@@ -394,6 +398,14 @@ pub struct AuditArgs {
 #[derive(Debug, Args)]
 pub struct EmbedArgs {
     /// Only embed the drawers of this wing, by name.
+    #[arg(long)]
+    pub wing: Option<String>,
+}
+
+/// Arguments for `memcastle extract`.
+#[derive(Debug, Args)]
+pub struct ExtractArgs {
+    /// Only read the drawers of this wing, by name.
     #[arg(long)]
     pub wing: Option<String>,
 }
