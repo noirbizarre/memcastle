@@ -148,17 +148,18 @@ A filter on `mise run test` still excludes the `wasm_` binaries; use `mise run t
 
 Measured on GitHub's runners after the suites were split, so that a change aimed at speed has a baseline to beat.
 Compiling is the test binaries built instrumented for coverage; running is nextest's own summary line.
+The figures are from runs that restored their caches; the first run of a new job, or one whose cache was evicted,
+compiles `wasmtime` and Cranelift from scratch and takes several minutes longer.
 
 | Job | Compiling | Running | Whole job |
 |---|---|---|---|
-| Tests, Linux (basic, 1114 tests) | 56 s | 172 s | about 5 min |
+| Tests, Linux (basic, 1114 tests) | 57 s | 170 to 240 s | 5 to 6 min |
 | Tests, macOS (basic) | 86 s | 157 s | about 5.5 min |
 | Tests, Windows (basic) | 120 s | 359 s | about 10.5 min |
-| WebAssembly tests, Linux (25 tests), cold cache | 4 to 6 min | 46 to 60 s | 6.5 to 8 min |
+| WebAssembly tests, Linux (25 tests) | 59 s | 49 s | 2.5 min |
+| Source, one leg per `sources/<name>/` | 10 s | seconds | about 1 min |
 
-A cold cache dominates the new jobs: `wasmtime` and Cranelift are most of what is compiled.
-The 25 WebAssembly tests themselves run in about a minute, of which the slowest is a test waiting on Cargo's lock
-while another builds a component into the same shared target directory.
+The 25 WebAssembly tests run in under a minute in CI, and their job finishes well before the basic Linux one.
 The time left in the basic suite is its 1114 pre-existing tests, not WebAssembly.
 
 ## The architecture guard
