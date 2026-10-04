@@ -57,8 +57,6 @@ export interface Core {
   compacting(sessionId: string | undefined, transcript?: readonly Turn[]): Promise<void>
   /** The `memcastle_checkpoint` tool: a manual checkpoint, with the model's own payload or the plugin's review (#34). */
   checkpoint(sessionId: string, args: CheckpointArgs): Promise<string>
-  /** Refuse to load a MemCastle skill into an `off` session (#35). */
-  toolBefore(): Promise<void>
   /** Close every connection, which also tells the daemon to forget each session. */
   dispose(): Promise<void>
 }
@@ -197,7 +195,6 @@ export async function createCore(
     ),
     // Not guarded: the tool's caller is the model, and what it needs is the failure itself, with its help.
     checkpoint: (sessionId, args) => checkpoints.checkpoint(sessionId, args),
-    toolBefore: guarded("tool.execute.before", async () => undefined),
     dispose: guarded("dispose", async () => {
       checkpoints.forgetAll()
       wakeUps.clear()

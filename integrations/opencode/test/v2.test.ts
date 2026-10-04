@@ -94,7 +94,6 @@ test("setup registers the lifecycle hooks and returns a cleanup function", async
   expect(fake.hooks).toEqual([
     { domain: "session", name: "context" },
     { domain: "session", name: "compaction" },
-    { domain: "tool", name: "execute.before" },
   ])
   expect(typeof cleanup).toBe("function")
   await cleanup?.()
