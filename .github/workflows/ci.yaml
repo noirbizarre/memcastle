@@ -79,6 +79,8 @@ jobs:
       - name: Run hooks
         run: prek run --all-files --show-diff-on-failure
 
+  # The basic suite: every test binary but the `wasm_*` ones (.config/nextest.toml), so it needs no WebAssembly target
+  # and its time does not include building components. The `wasm` job below runs the rest.
   test:
     name: 🧪 Tests (${{ matrix.os.name }})
     runs-on: ${{ matrix.os.runner }}
@@ -100,8 +102,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
-          # `tests/source_conformance.rs` builds the reference WASM source under `sources/`.
-          targets: wasm32-wasip2
       - uses: Swatinem/rust-cache@v2
 
       # mold is Linux-only (it doesn't support the Windows/macOS linkers),
@@ -165,6 +165,98 @@ jobs:
         with:
           directory: target/nextest/ci
           report_type: test_results
+
+  # The WebAssembly suite: every `tests/wasm_*.rs` binary, which builds components with Cargo and runs them in the
+  # sandbox. Linux only, by decision (issue #181): the basic suite still covers the host's unit tests on every OS.
+  # It runs in parallel with the `test` matrix, so it only costs wall-clock time if it is the longest job.
+  # This job is local to this repository; the template does not have it.
+  wasm:
+    name: 🧬 WebAssembly tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+          # The test components are built for this target.
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+      - uses: rui314/setup-mold@v1
+      - uses: mozilla-actions/sccache-action@v0.0.11
+
+      - uses: jdx/mise-action@v5
+        with:
+          cache: true
+
+      # If instrumenting breaks the `wasm32-wasip2` builds (`can't find crate for profiler_builtins` has been seen
+      # locally), run this step with plain `cargo nextest run --profile ci-wasm` and drop the coverage steps.
+      - name: Run tests (with coverage)
+        run: |
+          cargo llvm-cov nextest --profile ci-wasm
+          cargo llvm-cov report --lcov --output-path lcov.info
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          files: lcov.info
+          # What only this suite covers (`src/mining/wasm`, most of `src/source`) is reported under its own flag,
+          # which `.github/codecov.yml` waits for before it posts.
+          flags: wasm
+
+      - name: Upload test results to Codecov
+        uses: codecov/codecov-action@v7
+        if: ${{ !cancelled() }}
+        with:
+          directory: target/nextest/ci-wasm
+          report_type: test_results
+
+  # One CI leg per directory under sources/, found at run time: adding `sources/<new>/` adds a leg and needs no
+  # workflow edit.
+  sources-list:
+    name: 📋 List the sources
+    runs-on: ubuntu-latest
+    outputs:
+      sources: ${{ steps.list.outputs.sources }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: List sources/*/
+        id: list
+        run: |
+          # A source is a directory with a manifest, so a stray directory or README never becomes a leg.
+          names=$(for manifest in sources/*/memcastle-source.toml; do basename "$(dirname "$manifest")"; done | jq -R . | jq -sc .)
+          echo "sources=$names" >> "$GITHUB_OUTPUT"
+
+  sources:
+    name: 🧩 Source (${{ matrix.source }})
+    needs: sources-list
+    # A matrix with no entries is an error, not an empty run.
+    if: needs.sources-list.outputs.sources != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        source: ${{ fromJSON(needs.sources-list.outputs.sources) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+      - uses: rui314/setup-mold@v1
+      - uses: mozilla-actions/sccache-action@v0.0.11
+
+      - uses: jdx/mise-action@v5
+        with:
+          cache: true
+
+      # `sources:test` depends on `build`, so `memcastle` is built first, then runs `memcastle source test` on
+      # the one source. The name goes through the environment, never into the script text.
+      # With many sources, build `memcastle` once in a job of its own and share it as an artifact.
+      - name: Build and test the source
+        env:
+          SOURCE: ${{ matrix.source }}
+        run: mise run sources:test -- "$SOURCE"
 
   # The client half of the integration contract: each package under integrations/ is typechecked and tested against a
   # real `memcastle serve` (ADR-022). It builds the daemon because that is what the tests talk to, and it is its own

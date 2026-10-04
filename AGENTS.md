@@ -108,9 +108,9 @@ An invariant nothing checks is a comment, and it will be violated.
     its own reach (see `docs/adr/026-pluggable-source-adapters-as-webassembly-components.md`).
     Enforced by `tests/source_isolation.rs` (the host calls nothing that inherits the environment, standard streams,
     arguments or a writable directory, and opens the network only inside the manifest's flag),
-    by `tests/source_projects.rs` (a real source cannot read outside its grant, see the environment, outrun its time
+    by `tests/wasm_projects.rs` (a real source cannot read outside its grant, see the environment, outrun its time
     limit or memory, or run an unlisted program),
-    by `tests/source_runtime.rs` (no install without the exact consent, an altered component is never run)
+    by `tests/wasm_runtime.rs` (no install without the exact consent, an altered component is never run)
     and by `tests/auth.rs` (every `/api/source-packages` route is guarded, no MCP tool installs or changes a source).
 
 ## Layout
@@ -216,7 +216,9 @@ so staying inside the request is a rule here and not a courtesy.
   of profile files and takes tens of minutes of every core.
   Run it only when the user asks for a coverage session.
 - **Run what you touched.**
-  While iterating, run the tests of the module or binary you changed (`mise run test -- <filter>`).
+  While iterating, run the tests of the module or binary you changed
+  (`mise run test -- <filter>`; that is the basic suite, and the `tests/wasm_*.rs` binaries are
+  `mise run test:wasm -- <filter>`).
   Run the full suite once, before pushing.
 - **Two strikes, then ask.**
   If the same approach fails twice (a tool, a flag, a workaround), stop and ask rather than building a third one.

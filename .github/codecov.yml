@@ -1,11 +1,13 @@
-# The `test` job is a three-OS matrix and each leg uploads its own report.
-# Without this, Codecov posts the project status as soon as the first reports
-# settle — in practice before Windows, which is ~4x slower than the other two,
-# has uploaded. That compares a partial report against a complete base and
-# reports a coverage drop that did not happen.
+# The `test` job is a three-OS matrix and each leg uploads its own report, and
+# the `wasm` job uploads a fourth. Without this, Codecov posts the project
+# status as soon as the first reports settle — in practice before Windows,
+# which is ~4x slower than the other two, has uploaded. That compares a partial
+# report against a complete base and reports a coverage drop that did not
+# happen. The `wasm` report matters most: the host code only that suite covers
+# (`src/mining/wasm`, much of `src/source`) is missing from the three OS reports.
 codecov:
   notify:
-    after_n_builds: 3
+    after_n_builds: 4
 
 # Every leg runs on every commit, so a missing report means a broken run,
 # not an untested platform — nothing should be carried forward to hide it.
@@ -15,6 +17,10 @@ flags:
   windows:
     carryforward: false
   macos:
+    carryforward: false
+  # The WebAssembly suite runs on every commit too, so a missing report is a
+  # failed job, not a reason to reuse an old one.
+  wasm:
     carryforward: false
 
 coverage:
@@ -36,5 +42,5 @@ coverage:
 # Require any change in coverage to post
 comment:
   require_changes: true
-  # Held back for the same reason as the status above.
-  after_n_builds: 3
+  # Held back for the same reason as the status above: three OS legs plus `wasm`.
+  after_n_builds: 4

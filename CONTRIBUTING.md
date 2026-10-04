@@ -22,7 +22,10 @@ CI uses `dtolnay/rust-toolchain` because it needs per-job components and cross-c
 | `mise run build` | Build the binary |
 | `mise cli <args>` | Run `memcastle` from source (passes flags through) |
 | `mise run setup` | Install `memcastle` into `~/.cargo/bin` |
-| `mise run test` | Run the tests (accepts nextest selectors) |
+| `mise run test` | Run the basic tests, without the WebAssembly suite (accepts nextest selectors) |
+| `mise run test:wasm` | Run the WebAssembly suite, every `tests/wasm_*.rs` binary (slow, needs the `wasm32-wasip2` target) |
+| `mise run sources:check` | Build and conformance-test every source under `sources/` |
+| `mise run sources:test -- <name>` | Build and conformance-test one source under `sources/` |
 | `mise run cover` | Run the tests with coverage |
 | `mise run format` | Format |
 | `mise run format:check` | Check the formatting without rewriting |
@@ -32,7 +35,7 @@ CI uses `dtolnay/rust-toolchain` because it needs per-job components and cross-c
 | `mise run spell` | typos |
 | `mise run guards` | The architecture guard hooks (`store-isolation`, `single-writer`, `job-status-only-via-apply`, `no-hand-rolled-ddl`) over the whole tree |
 | `mise run snapshots` | Review pending insta snapshots |
-| `mise run check` | Every lint, the guards and the tests, without modifying the working tree |
+| `mise run check` | Every lint, the guards, both test suites and the sources, without modifying the working tree |
 | `mise run ci` | `check` plus the documentation build |
 | `mise run docs` | Serve the documentation locally |
 | `mise run docs:build` | Build the documentation |

@@ -5,6 +5,8 @@
 # 30-second periods without progress is a hang, and killing it turns a job that
 # would burn the full runner timeout into one that fails in two minutes.
 slow-timeout = { period = "30s", terminate-after = 4 }
+# The basic suite: everything but the `wasm_*` binaries (see the project-specific section below).
+default-filter = "not binary(/^wasm_/)"
 
 [profile.ci]
 # CI wants the full picture from one run, not the first failure.
@@ -18,9 +20,26 @@ path = "junit.xml"
 
 # --- project-specific --------------------------------------------------------
 
+# A test binary that builds or runs a WebAssembly component is named `wasm_*` (docs/development.md), and that prefix is
+# the whole definition of the wasm suite: a new `tests/wasm_*.rs` lands in it with no change here. The basic suite is
+# the fast one, and runs on every OS; the wasm suite needs the `wasm32-wasip2` target and runs on Linux only.
+# The basic filter is set on `profile.default` at the top of this file, and `ci` inherits it.
+# `mise run test:wasm`.
+[profile.wasm]
+default-filter = "binary(/^wasm_/)"
+
+# What CI's `wasm` job runs. `ci` inherits the basic filter, so this one overrides it.
+[profile.ci-wasm]
+inherits = "ci"
+default-filter = "binary(/^wasm_/)"
+
+[profile.ci-wasm.junit]
+path = "junit.xml"
+
 # These binaries build WebAssembly components with Cargo and compile them with Cranelift (docs/adr/026). Each test is
 # its own process, and they queue on Cargo's build-directory lock, so a test can legitimately wait for several builds
 # on a cold cache: that is not a hang.
+# Overrides are inherited, but a profile's filter only selects what it runs, so this one applies to `wasm`/`ci-wasm`.
 [[profile.default.overrides]]
-filter = "binary(source_projects) | binary(source_conformance) | binary(source_runtime)"
+filter = "binary(/^wasm_/)"
 slow-timeout = { period = "60s", terminate-after = 6 }

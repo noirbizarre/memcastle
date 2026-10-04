@@ -79,7 +79,7 @@ description = "Build the binary"
 run = "cargo build"
 
 [tasks.test]
-description = "Run tests (accepts nextest selectors)"
+description = "Run the basic tests, without the WebAssembly suite (accepts nextest selectors)"
 raw_args = true
 run = "cargo nextest run"
 
@@ -130,9 +130,10 @@ run = "cargo insta review"
 
 [tasks.check]
 description = "Run every check that does not modify the working tree"
-# `guards` and `integrations:check` are project-specific: without them `check`/`ci` pass locally while the
-# architecture hooks (which otherwise run only on commit and in CI) and the integration suites fail later.
-depends = ["format:check", "lint", "lint:actions", "lint:md", "spell", "guards", "test", "integrations:check"]
+# `guards`, `test:wasm`, `sources:check` and `integrations:check` are project-specific: without them `check`/`ci` pass
+# locally while the architecture hooks (which otherwise run only on commit and in CI), the WebAssembly suite, the
+# reference sources and the integration suites fail later.
+depends = ["format:check", "lint", "lint:actions", "lint:md", "spell", "guards", "test", "test:wasm", "sources:check", "integrations:check"]
 
 [tasks.ci]
 description = "The local equivalent of CI's lint, test and documentation steps"
@@ -252,6 +253,13 @@ prek run --all-files no-hand-rolled-ddl
 prek run --all-files integrations-http-only
 """
 
+[tasks."test:wasm"]
+description = "Run the WebAssembly suite: every tests/wasm_*.rs binary (slow, needs the wasm32-wasip2 target)"
+# `raw_args` so nextest selectors reach it, like `test`. The `wasm` profile selects the `wasm_` binaries
+# (.config/nextest.toml); `test` excludes them, which is what keeps the everyday loop fast.
+raw_args = true
+run = "cargo nextest run --profile wasm"
+
 [tasks."integrations:check"]
 description = "Typecheck and test every package under integrations/ against a real daemon"
 # bun is declared here and not in `[tools]`, for the same reason as cargo-insta: only this task needs it, and
@@ -284,4 +292,15 @@ for manifest in sources/*/memcastle-source.toml; do
   echo "==> $source"
   ./target/debug/memcastle source test "$source"
 done
+"""
+
+[tasks."sources:test"]
+description = "Build and conformance-test one reference WebAssembly source: mise run sources:test -- <name>"
+# What CI runs for each directory under sources/, one job per source.
+usage = 'arg "<name>" help="A directory name under sources/"'
+depends = ["build"]
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+./target/debug/memcastle source test "sources/${usage_name?}"
 """
