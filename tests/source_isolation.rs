@@ -169,3 +169,53 @@ fn extraction_names_no_source_and_never_writes_what_it_reads() {
         }
     }
 }
+
+#[test]
+fn deduplication_names_no_source_and_touches_no_file_or_source_bookkeeping() {
+    // The mining pipeline calls deduplication for every chunk it stores (docs/adr/025), so the one thing it must not
+    // do is teach the pipeline where a chunk came from. It compares drawers by what they say, in the store and the
+    // graph, and never reads a file or writes a source's cursor or document records.
+    for file in rust_files("src/dedup") {
+        let source = shipped_code(&file);
+        for forbidden in PROVIDER_NAMES.iter().chain(
+            [
+                "adapters::",
+                "std::fs",
+                "tokio::fs",
+                "File::open",
+                "read_dir",
+                "save_source_cursor",
+                "save_source_document",
+                "get_or_create_source",
+            ]
+            .iter(),
+        ) {
+            assert!(
+                !source.contains(forbidden),
+                "{file} contains `{forbidden}`; deduplication must not name a source or read a file"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_matching_policy_is_pure_domain_code() {
+    // Whether two drawers or two entities are the same thing is a domain decision (docs/adr/025): it must stay
+    // computable without a database, a runtime or the filesystem, which is also what keeps it unit-testable.
+    for file in ["src/domain/fingerprint.rs", "src/domain/resolution.rs"] {
+        let source = shipped_code(file);
+        for forbidden in [
+            "surrealdb",
+            "tokio",
+            "reqwest",
+            "std::fs",
+            "std::env",
+            "crate::store",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{file} mentions `{forbidden}`; the matching policy must stay pure"
+            );
+        }
+    }
+}

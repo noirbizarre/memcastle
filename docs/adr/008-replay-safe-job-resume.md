@@ -68,3 +68,11 @@ Mining no longer relies on this guarantee alone.
 job over the same input files nothing new.
 Mining's derived ids now also name the source, document, chunk and chunk hash (`mine-chunk:...`), and the old
 `mine-drawer:{index}` string stays only in drawers already written.
+
+## Amendment: deduplication (2026-10-04)
+
+The guarantee is still per job, but it is no longer the only protection against the same memory twice.
+[ADR-025](025-memory-deduplication-and-entity-resolution.md) recognises an exact copy already in the room and a likely
+copy (a typo, a case variant) by what the drawers say, as a domain decision beside this one, never as a replacement:
+the derived ids still make a replay a no-op, and deduplication never compares a drawer with itself.
+"Deduplicate by content hash" stays rejected as the *identity* of a record; it is used as one signal among several.

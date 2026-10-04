@@ -214,6 +214,8 @@ Mining is a Background (0) job, so it never delays a checkpoint, and a relative 
 The daemon has no scheduler and does not deduplicate *requests*: asking twice is two jobs.
 What it does deduplicate is the work: a source remembers where it stopped and which version of each document it filed,
 so the second job finds nothing new to file.
+It also does not store the same memory twice: an exact copy of a checkpoint item or a diary entry already in its room is
+not written again, and a likely copy is stored and linked, see [Deduplication](deduplication.md).
 "Once a day" and "never twice for one event" are therefore the client's to keep, and an integration never needs to read
 a source itself: it only decides when to ask.
 

@@ -21,6 +21,7 @@
 //!   gated by the watermark `store::migration_state` tracks, so each one
 //!   runs exactly once.
 
+mod dedup_keys;
 mod diary_provenance;
 mod timestamps;
 
@@ -86,6 +87,11 @@ const DATA_MIGRATIONS: &[DataMigration] = &[
         version: 2,
         name: "canonical-timestamps",
         apply: timestamps::apply,
+    },
+    DataMigration {
+        version: 3,
+        name: "dedup-keys",
+        apply: dedup_keys::apply,
     },
 ];
 

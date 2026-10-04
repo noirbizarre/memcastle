@@ -45,7 +45,17 @@ model cannot hold up a mining cursor.
 Each fact records the source, document, chunk and revision it was read from, so it can be traced to the drawer that is its
 evidence and stops being current when that drawer is replaced.
 Any source that mines through the model above is covered, because extraction reads drawers, not sources.
-See [ADR-024](adr/024-entity-extraction-as-an-enrich-job.md).
+Names that differ only in spelling across documents converge on one entity, and each mention keeps the spelling its
+document used.
+See [ADR-024](adr/024-entity-extraction-as-an-enrich-job.md) and [Deduplication](deduplication.md).
+
+### Duplicates across documents
+
+Two documents with the same text are two documents, so mining stores both.
+After storing a chunk, though, it notes what the chunk resembles among the drawers already in its room: an identical or
+nearly identical chunk gets a `similar_to` link with the evidence, and the job's result counts these as `similar`.
+Nothing is skipped or merged, and the pipeline learns nothing about sources from it.
+See [Deduplication](deduplication.md).
 
 ### Identity, cursor and documents
 
@@ -106,7 +116,7 @@ count, last job and last run.
 Over HTTP, a source job is `{"type": "mine", "provider": "pi-sessions", "locator": "...", "full": false}` on
 `POST /api/jobs`, and over MCP `memcastle_mine` takes `source`, `locator` and `full` beside `path` and `wing`.
 Mining is a write, so a [read-only or disabled session](memory-modes.md) cannot start it.
-The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unchanged`, `skipped` and `truncated`.
+The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unchanged`, `skipped`, `similar` and `truncated`.
 
 ## The sources MemCastle ships
 

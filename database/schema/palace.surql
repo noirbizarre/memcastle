@@ -59,6 +59,25 @@ DEFINE INDEX IF NOT EXISTS drawer_room_idx ON TABLE drawer FIELDS room;
 DEFINE FIELD IF NOT EXISTS name ON TABLE drawer TYPE option<string>;
 DEFINE INDEX IF NOT EXISTS drawer_room_name ON TABLE drawer FIELDS room, name UNIQUE;
 
+-- Deduplication (docs/adr/025). `fingerprint` is derived from `content` (SHA-256 of the text with case,
+-- punctuation and whitespace ignored), never a replacement for it, and `NONE` on a drawer written before it
+-- existed until the `dedup-keys` migration fills it. Both indexes are non-unique on purpose: a superseded
+-- drawer, a copy in another room and a mined chunk all legitimately share a hash. Whether two drawers are the
+-- same memory is decided in `domain`, not by a constraint; these only find candidates.
+DEFINE FIELD IF NOT EXISTS fingerprint ON TABLE drawer TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS drawer_content_hash_idx ON TABLE drawer FIELDS content_hash;
+DEFINE INDEX IF NOT EXISTS drawer_fingerprint_idx ON TABLE drawer FIELDS fingerprint;
+
+-- A likely duplicate: the newer drawer (`in`) resembles the older one (`out`). Never a merge: both drawers stay,
+-- and the edge records why they were linked so the call can be reviewed or undone by deleting the edge.
+DEFINE TABLE IF NOT EXISTS similar_to TYPE RELATION IN drawer OUT drawer SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS kind ON TABLE similar_to TYPE string ASSERT $value IN ["exact", "normalized", "near"];
+DEFINE FIELD IF NOT EXISTS similarity ON TABLE similar_to TYPE float;
+-- `domain::DuplicateSignals`. `FLEXIBLE`: see the comment on `drawer.source`.
+DEFINE FIELD IF NOT EXISTS signals ON TABLE similar_to TYPE object FLEXIBLE;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE similar_to TYPE datetime;
+DEFINE INDEX IF NOT EXISTS similar_to_edge ON TABLE similar_to FIELDS in, out UNIQUE;
+
 -- Retrieval over drawer content, all on this one table: a BM25 full-text index
 -- and, beside it, an HNSW index over `embedding`. The vector index's DIMENSION
 -- is the palace's fixed embedding length (`domain::EMBEDDING_DIMENSION`, which
@@ -81,6 +100,22 @@ DEFINE FIELD IF NOT EXISTS properties ON TABLE entity TYPE object FLEXIBLE;
 -- One (name, kind) pair per entity: mirrors `wing_palace_name` above so
 -- `create_entity`'s get-or-create is race-safe, not just "usually fine".
 DEFINE INDEX IF NOT EXISTS entity_name_kind ON TABLE entity FIELDS name, kind UNIQUE;
+-- Entity resolution (docs/adr/025): `key` is the name with case, punctuation and spacing ignored
+-- (`domain::entity_key`), `aliases` the other spellings recorded for the entity and `alias_keys` their keys.
+-- All `NONE` on an entity written before resolution existed, until the `dedup-keys` migration fills them. The
+-- indexes are non-unique: resolution decides identity, and older data may already hold two entities with a key.
+DEFINE FIELD IF NOT EXISTS key ON TABLE entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS aliases ON TABLE entity TYPE option<array<string>>;
+DEFINE FIELD IF NOT EXISTS alias_keys ON TABLE entity TYPE option<array<string>>;
+DEFINE INDEX IF NOT EXISTS entity_key_idx ON TABLE entity FIELDS key;
+DEFINE INDEX IF NOT EXISTS entity_alias_keys_idx ON TABLE entity FIELDS alias_keys;
+
+-- Two entities that might be one but were not equated: the newer (`in`) resembles the older (`out`). Kept so a
+-- person or a later pass can resolve it; nothing reads it to merge on its own.
+DEFINE TABLE IF NOT EXISTS possibly_same_as TYPE RELATION IN entity OUT entity SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS similarity ON TABLE possibly_same_as TYPE float;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE possibly_same_as TYPE datetime;
+DEFINE INDEX IF NOT EXISTS possibly_same_as_edge ON TABLE possibly_same_as FIELDS in, out UNIQUE;
 
 -- Which drawers mention which entities: the bridge from canonical memory into
 -- the graph. Derived data (a drawer's content never depends on it), written by
@@ -93,6 +128,9 @@ DEFINE FIELD IF NOT EXISTS created_at ON TABLE mentions TYPE datetime;
 -- the drawer's mining origin. `NONE` for a link a person made. `FLEXIBLE`: see
 -- the comment on `drawer.source` above.
 DEFINE FIELD IF NOT EXISTS provenance ON TABLE mentions TYPE option<object> FLEXIBLE;
+-- The name as the drawer spelled it and how it was resolved to this entity (`domain::Observation`), so
+-- converging two spellings on one entity loses neither. `NONE` on a link written before resolution existed.
+DEFINE FIELD IF NOT EXISTS observation ON TABLE mentions TYPE option<object> FLEXIBLE;
 DEFINE INDEX IF NOT EXISTS mentions_edge ON TABLE mentions FIELDS in, out UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS relates_to TYPE RELATION IN entity OUT entity SCHEMAFULL;

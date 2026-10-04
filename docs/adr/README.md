@@ -74,3 +74,7 @@ The history is the value.
 - [ADR-024](024-entity-extraction-as-an-enrich-job.md) — entity extraction is an enrich job that only adds graph
   records, with provenance on every edge and a closed vocabulary for extracted facts, from a built-in heuristic or
   an external provider
+- [ADR-025](025-memory-deduplication-and-entity-resolution.md) — deduplication is a conservative domain decision:
+  an exact copy in a room is not stored twice, a typo or a case variant is stored and linked with its evidence, and
+  entity spelling variants converge while ambiguous names stay distinct; nothing is merged and nothing needs a model
+  (amends ADR-008, ADR-023 and ADR-024)

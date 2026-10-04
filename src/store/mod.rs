@@ -48,12 +48,14 @@ use embedded_schema_gen::embedded_schema;
 
 mod auth;
 mod drawers;
+mod duplicates;
 mod entities;
 mod extraction;
 mod graph;
 mod jobs;
 mod migration_state;
 mod palace;
+mod resolution;
 mod retrieval;
 mod sources;
 mod timestamps;
@@ -68,6 +70,8 @@ use surrealdb::opt::auth::Root;
 use crate::domain::Secret;
 use crate::error::{Error, Result};
 
+pub use duplicates::{DrawerCandidate, SimilarDrawer, SimilarSide};
+pub use resolution::{PossibleEntity, PossibleSide};
 pub use retrieval::MatchMode;
 
 /// Convert a struct or data-carrying enum to a bindable value.

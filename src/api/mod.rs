@@ -101,7 +101,12 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
             "/api/drawers/{id}/mentions",
             post(palace::link_drawer_entity),
         )
-        // The knowledge graph, read-only: entities, what they relate to and which
+        // The likely duplicates recorded for a drawer (docs/adr/025): read-only evidence, never a merge.
+        .route(
+            "/api/drawers/{id}/duplicates",
+            get(palace::drawer_duplicates),
+        )
+        // The knowledge graph: entities, what they relate to and which
         // drawers mention them, each with provenance and validity.
         .route("/api/entities", get(graph::list_entities))
         .route(
@@ -109,6 +114,13 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
             get(graph::entity_relationships),
         )
         .route("/api/entities/{id}/mentions", get(graph::entity_mentions))
+        // Entity resolution (docs/adr/025): names that might be one entity but were not equated, and the one
+        // write that settles such a name by hand.
+        .route(
+            "/api/entities/{id}/candidates",
+            get(graph::entity_candidates),
+        )
+        .route("/api/entities/{id}/aliases", post(graph::add_entity_alias))
         // Administrative, and deliberately REST-only: there is no MCP tool for
         // these, so an agent integration cannot mint or revoke credentials.
         .route(

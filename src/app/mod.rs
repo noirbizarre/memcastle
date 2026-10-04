@@ -17,6 +17,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::config::DedupConfig;
 use crate::domain::{
     CheckpointDestination, CheckpointPayload, Drawer, DrawerId, FactMutation, Job, JobId, JobKind,
     JobStatus, MemoryMode, MiningSource, NameKind, Priority, Provenance, Source, SourceKind,
@@ -280,6 +281,8 @@ pub struct AppServices {
     /// Whether entity extraction is configured, so a job that could only fail
     /// is refused up front; disabled unless an `[extraction]` provider is.
     extraction: Extraction,
+    /// The `[dedup]` settings, for the writes the services make themselves (diary, drawer create, mentions).
+    dedup: DedupConfig,
 }
 
 impl AppServices {
@@ -295,7 +298,15 @@ impl AppServices {
             db_endpoint: Arc::new(DbEndpoint::default()),
             embeddings: Embeddings::disabled(),
             extraction: Extraction::disabled(),
+            dedup: DedupConfig::default(),
         }
+    }
+
+    /// Give the services the deduplication settings (see `[dedup]`).
+    #[must_use]
+    pub fn with_dedup(mut self, dedup: DedupConfig) -> Self {
+        self.dedup = dedup;
+        self
     }
 
     /// Tell the services whether entity extraction is configured.
@@ -1094,7 +1105,27 @@ impl AppServices {
                 job_id: None,
             },
         );
-        self.store.create_drawer(&drawer).await?;
+        // An exact copy of this agent's own entry is not stored twice: the
+        // agent is handed the entry it already has. Other agents' entries are
+        // never compared, since identities do not see each other's diary.
+        let drawer = match crate::dedup::write(
+            &self.store,
+            &drawer,
+            &self.dedup,
+            crate::dedup::Rules::DIARY,
+        )
+        .await?
+        {
+            crate::dedup::Outcome::Stored { .. } => drawer,
+            crate::dedup::Outcome::Duplicate { existing } => {
+                return self.store.get_drawer(existing).await?.ok_or_else(|| {
+                    Error::DrawerNotFound {
+                        room: "-".to_string(),
+                        drawer: existing.to_string(),
+                    }
+                });
+            }
+        };
         // Derived data, queued after the canonical write succeeded and never
         // able to fail it.
         self.scheduler.ensure_embedding_sweep().await;

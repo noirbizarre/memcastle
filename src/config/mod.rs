@@ -417,6 +417,37 @@ impl Default for ExtractionConfig {
     }
 }
 
+/// The default similarity, in `(0, 1]`, at or above which two drawers in one room are recorded as near-duplicates.
+pub const DEFAULT_DEDUP_NEAR_THRESHOLD: f32 = 0.9;
+
+/// Deduplication settings (`[dedup]`, docs/adr/025).
+///
+/// Deduplication never merges memory: an exact duplicate in the same room is not stored twice, a near-duplicate is
+/// stored and linked to what it resembles, and an entity spelled differently converges on one entity only when the
+/// match is unambiguous. These settings only decide how eagerly that happens.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DedupConfig {
+    /// Whether writes are checked against what the room already holds. Off means every write is stored and nothing
+    /// is linked; entity names still converge on casing and punctuation, which is spelling, not a judgement.
+    pub enabled: bool,
+    /// The similarity at or above which a new drawer is linked to an existing one in its room as a near-duplicate.
+    pub near_threshold: f32,
+    /// Whether an entity observed with a one-character typo converges on the entity it resembles when that match is
+    /// unique, and whether ambiguous resemblances are recorded as candidates.
+    pub entity_fuzzy: bool,
+}
+
+impl Default for DedupConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            near_threshold: DEFAULT_DEDUP_NEAR_THRESHOLD,
+            entity_fuzzy: true,
+        }
+    }
+}
+
 /// The default chunk size, in characters. Under the 8,000 characters the embedding sweep reads of a drawer
 /// (docs/adr/021), so a chunk is embedded whole.
 pub const DEFAULT_MINING_CHUNK_CHARS: usize = 6_000;
@@ -621,6 +652,9 @@ pub struct Config {
     /// Entity extraction settings.
     #[serde(default)]
     pub extraction: ExtractionConfig,
+    /// Memory deduplication and entity resolution settings.
+    #[serde(default)]
+    pub dedup: DedupConfig,
 }
 
 impl Config {
@@ -788,6 +822,15 @@ impl Config {
         if let Some(n) = lookup("MEMCASTLE_EXTRACTION_MIN_CONFIDENCE") {
             self.extraction.min_confidence =
                 parse_override("MEMCASTLE_EXTRACTION_MIN_CONFIDENCE", &n)?;
+        }
+        if let Some(v) = lookup("MEMCASTLE_DEDUP_ENABLED") {
+            self.dedup.enabled = parse_override("MEMCASTLE_DEDUP_ENABLED", &v)?;
+        }
+        if let Some(n) = lookup("MEMCASTLE_DEDUP_NEAR_THRESHOLD") {
+            self.dedup.near_threshold = parse_override("MEMCASTLE_DEDUP_NEAR_THRESHOLD", &n)?;
+        }
+        if let Some(v) = lookup("MEMCASTLE_DEDUP_ENTITY_FUZZY") {
+            self.dedup.entity_fuzzy = parse_override("MEMCASTLE_DEDUP_ENTITY_FUZZY", &v)?;
         }
         if let Some(n) = lookup("MEMCASTLE_MINING_CHUNK_CHARS") {
             self.mining.chunk_chars = parse_override("MEMCASTLE_MINING_CHUNK_CHARS", &n)?;
@@ -959,6 +1002,19 @@ impl Config {
         self.validate_embeddings()?;
         self.validate_extraction()?;
         self.validate_mining()?;
+        self.validate_dedup()?;
+        Ok(())
+    }
+
+    /// The `[dedup]` invariants. A threshold of 0 would link every pair of drawers, so the floor is well above
+    /// "unrelated"; one above 1 could never match.
+    fn validate_dedup(&self) -> Result<()> {
+        // `contains` is false for NaN, so a non-number is rejected too.
+        if !(0.5..=1.0).contains(&self.dedup.near_threshold) {
+            return Err(Error::config(
+                "dedup.near_threshold (or MEMCASTLE_DEDUP_NEAR_THRESHOLD) must be between 0.5 and 1",
+            ));
+        }
         Ok(())
     }
 
@@ -1968,6 +2024,36 @@ mod tests {
         let mut nan = valid_config();
         nan.extraction.min_confidence = f32::NAN;
         assert!(nan.validate().is_err(), "NaN is not a confidence");
+    }
+
+    #[test]
+    fn dedup_is_on_by_default_with_a_conservative_threshold() {
+        let config = valid_config();
+        assert!(config.dedup.enabled && config.dedup.entity_fuzzy);
+        assert!((config.dedup.near_threshold - 0.9).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn a_dedup_threshold_that_would_link_unrelated_drawers_is_rejected() {
+        for bad in [0.0, 0.2, 1.1, f32::NAN] {
+            let mut config = valid_config();
+            config.dedup.near_threshold = bad;
+            assert!(config.validate().is_err(), "{bad} must be refused");
+        }
+    }
+
+    #[test]
+    fn dedup_environment_overrides_replace_the_file_values() {
+        let mut config = valid_config();
+        config
+            .apply_overrides_from(env(&[
+                ("MEMCASTLE_DEDUP_ENABLED", "false"),
+                ("MEMCASTLE_DEDUP_NEAR_THRESHOLD", "0.8"),
+                ("MEMCASTLE_DEDUP_ENTITY_FUZZY", "false"),
+            ]))
+            .unwrap();
+        assert!(!config.dedup.enabled && !config.dedup.entity_fuzzy);
+        assert!((config.dedup.near_threshold - 0.8).abs() < f32::EPSILON);
     }
 
     #[test]

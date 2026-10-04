@@ -7,6 +7,7 @@
 
 use crate::domain::{Entity, EntityId, MemoryMode, Mention, Relationship};
 use crate::error::{Error, Result};
+use crate::store::PossibleEntity;
 
 use super::{AppServices, MAX_READ_LIMIT};
 
@@ -64,6 +65,44 @@ impl AppServices {
         Self::require_read(mode, "entity_mentions")?;
         self.require_entity(entity).await?;
         self.store.list_entity_mentions(entity).await
+    }
+
+    /// The entities `entity` resembles without having been equated with it, or that resemble it: names
+    /// entity resolution could not settle (docs/adr/025). Nothing here is merged; each is awaiting a decision.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ModeForbidden`] unless `mode` permits reads, [`Error::EntityNotFound`], or a store error.
+    pub async fn entity_candidates(
+        &self,
+        entity: EntityId,
+        mode: MemoryMode,
+    ) -> Result<Vec<PossibleEntity>> {
+        Self::require_read(mode, "entity_candidates")?;
+        self.require_entity(entity).await?;
+        self.store.list_possible_entities(entity).await
+    }
+
+    /// Record `alias` as another spelling of `entity`, so every later sighting of it converges there. The way to
+    /// settle one of [`Self::entity_candidates`] by hand. Idempotent. A write, so refused unless `mode` permits.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ModeForbidden`], [`Error::EntityNotFound`], [`Error::EmptyLabel`] for a blank alias, or a store
+    /// error.
+    pub async fn add_entity_alias(
+        &self,
+        entity: EntityId,
+        alias: &str,
+        mode: MemoryMode,
+    ) -> Result<Entity> {
+        Self::require_write(mode, "entity_alias")?;
+        self.store
+            .add_entity_alias(entity, alias)
+            .await?
+            .ok_or_else(|| Error::EntityNotFound {
+                id: entity.to_string(),
+            })
     }
 
     async fn require_entity(&self, entity: EntityId) -> Result<()> {

@@ -23,7 +23,7 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-use crate::config::MiningConfig;
+use crate::config::{DedupConfig, MiningConfig};
 use crate::domain::{Job, JobEvent, JobId, JobKind, JobStatus, Priority};
 use crate::embed::Embeddings;
 use crate::error::Result;
@@ -120,6 +120,8 @@ pub struct Scheduler {
     /// The extraction provider handed to every job's context, and consulted
     /// to decide whether finishing a mining job should queue a sweep.
     extraction: Extraction,
+    /// The `[dedup]` settings handed to every job's context.
+    dedup: DedupConfig,
 }
 
 impl Scheduler {
@@ -142,7 +144,15 @@ impl Scheduler {
             embeddings: Embeddings::disabled(),
             mining: MiningConfig::default(),
             extraction: Extraction::disabled(),
+            dedup: DedupConfig::default(),
         }
+    }
+
+    /// Give the scheduler the deduplication settings (see `[dedup]`).
+    #[must_use]
+    pub fn with_dedup(mut self, dedup: DedupConfig) -> Self {
+        self.dedup = dedup;
+        self
     }
 
     /// Give the scheduler an extraction provider (see `[extraction]`).
@@ -704,6 +714,7 @@ impl Scheduler {
             .with_lease(self.worker.clone())
             .with_embeddings(self.embeddings.clone())
             .with_extraction(self.extraction.clone())
+            .with_dedup(self.dedup.clone())
             .with_mining(self.mining.clone());
 
         let kind_wrote_drawers =

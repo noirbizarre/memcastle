@@ -17,7 +17,8 @@ use chrono::Utc;
 use serde::Deserialize;
 
 use crate::domain::{
-    Drawer, DrawerId, EntityId, FactProvenance, Mention, SearchFilter, SearchHit, Signals,
+    Drawer, DrawerId, EntityId, FactProvenance, Mention, Observation, SearchFilter, SearchHit,
+    Signals,
 };
 use crate::error::Result;
 
@@ -59,6 +60,22 @@ impl SurrealStore {
         entity: EntityId,
         provenance: Option<&FactProvenance>,
     ) -> Result<bool> {
+        self.link_drawer_entity_observed(drawer, entity, provenance, None)
+            .await
+    }
+
+    /// [`Self::link_drawer_entity_with`] that also records how the drawer spelled the entity and why that spelling
+    /// was taken to be it (`observation`), so resolving two spellings to one entity loses neither.
+    ///
+    /// The edge is unique per (drawer, entity): a drawer that spells one entity two ways keeps the first
+    /// observation, which is enough to find the spelling in the drawer's own text.
+    pub async fn link_drawer_entity_observed(
+        &self,
+        drawer: DrawerId,
+        entity: EntityId,
+        provenance: Option<&FactProvenance>,
+        observation: Option<&Observation>,
+    ) -> Result<bool> {
         let mut response = self
             .db
             .query(
@@ -67,7 +84,7 @@ impl SurrealStore {
                       AND out = type::record('entity', $entity)); \
                  IF array::len($existing) = 0 { \
                     RELATE (type::record('drawer', $drawer))->mentions->(type::record('entity', $entity)) \
-                      SET created_at = <datetime>$now, provenance = $provenance; \
+                      SET created_at = <datetime>$now, provenance = $provenance, observation = $observation; \
                     RETURN true; \
                  } ELSE { RETURN false; };",
             )
@@ -75,6 +92,7 @@ impl SurrealStore {
             .bind(("entity", entity.to_string()))
             .bind(("now", super::stored(Utc::now())))
             .bind(("provenance", provenance.map(super::bindable).transpose()?))
+            .bind(("observation", observation.map(super::bindable).transpose()?))
             .await?
             .check()?;
         let created: Option<bool> = response.take(response.num_statements() - 1)?;
@@ -87,7 +105,7 @@ impl SurrealStore {
         let mut response = self
             .db
             .query(
-                "SELECT record::id(in) AS drawer, <string>created_at AS created_at, provenance \
+                "SELECT record::id(in) AS drawer, <string>created_at AS created_at, provenance, observation \
                  FROM mentions WHERE out = type::record('entity', $entity) \
                  ORDER BY created_at DESC",
             )

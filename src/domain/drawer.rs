@@ -89,8 +89,9 @@ pub struct Provenance {
 /// One verbatim chunk of content, filed under a room.
 ///
 /// `content` is never mutated after creation — a re-mine creates a new
-/// drawer (or, once dedup lands, is rejected) rather than overwriting one,
-/// so provenance and history stay honest. A correction is a *supersession*:
+/// drawer rather than overwriting one (and an agent write identical to a
+/// drawer the room already holds is not stored twice, docs/adr/025), so
+/// provenance and history stay honest. A correction is a *supersession*:
 /// the old drawer gains a `valid_to` and a replacement opens from that instant.
 /// `embedding` is derived data filled in after the fact by the embedding sweep
 /// (or by a caller), never part of what the drawer says.
@@ -107,7 +108,8 @@ pub struct Drawer {
     pub name: Option<String>,
     /// The verbatim, original content.
     pub content: String,
-    /// SHA-256 of `content`, for cheap exact-duplicate detection.
+    /// SHA-256 of `content`, for cheap exact-duplicate detection. A *normalised* fingerprint (case, punctuation and
+    /// whitespace ignored) is derived from `content` when the drawer is stored and is not part of this type.
     pub content_hash: String,
     /// Where this content came from.
     pub source: Source,

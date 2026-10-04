@@ -27,8 +27,8 @@
 use chrono::Utc;
 
 use crate::domain::{
-    CheckpointDestination, CheckpointPayload, Drawer, DrawerId, FactMutation, Job, NewRelationship,
-    Provenance, RelationshipId, RoomId,
+    CheckpointDestination, CheckpointPayload, Drawer, DrawerId, FactMutation, Job, JobProgress,
+    NewRelationship, Provenance, RelationshipId, RoomId,
 };
 use crate::error::{Error, Result};
 use crate::jobs::{JobContext, JobOutcome};
@@ -51,6 +51,13 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: CheckpointParams) -> R
     let CheckpointParams { payload } = params;
     let store = ctx.store();
     let start = JobContext::resume_index(job, "next_index");
+    // Items that were already in their room and so were not stored again. Carried in the checkpoint so a job that
+    // pauses and resumes still reports all of them, not just the ones since the resume.
+    let mut duplicates = job
+        .checkpoint
+        .get("duplicates")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
     tracing::info!(
         items = payload.items.len(),
         resume_from = start,
@@ -62,8 +69,7 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: CheckpointParams) -> R
             return Ok(JobOutcome::Cancelled);
         }
         if ctx.should_pause() {
-            ctx.checkpoint_at(job, index, payload.items.len(), "checkpointed", "items")
-                .await?;
+            checkpoint_progress(ctx, job, index, payload.items.len(), duplicates).await?;
             return Ok(JobOutcome::Paused);
         }
 
@@ -98,17 +104,60 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: CheckpointParams) -> R
                 });
             }
         }
-        store.create_drawer_once(&drawer).await?;
+        // An unnamed item identical to one the room holds is not stored
+        // twice (it still advances the checkpoint: the memory exists, the
+        // item is not lost); near-duplicates are stored and linked. A named
+        // item is an identity of its own, and a diary entry is only compared
+        // with its own agent's.
+        let rules = crate::dedup::Rules {
+            skip_exact: item.name.is_none(),
+            per_agent: item.destination == CheckpointDestination::Diary,
+        };
+        match crate::dedup::write(store, &drawer, ctx.dedup(), rules).await? {
+            crate::dedup::Outcome::Stored { .. } => {}
+            crate::dedup::Outcome::Duplicate { existing } => {
+                duplicates += 1;
+                tracing::info!(index, %existing, "checkpoint item already stored; not duplicated");
+            }
+        }
 
         if let Some(fact) = &item.fact {
             apply_fact_mutation(store, job, index, fact).await?;
         }
 
-        ctx.checkpoint_at(job, index + 1, payload.items.len(), "checkpointed", "items")
-            .await?;
+        checkpoint_progress(ctx, job, index + 1, payload.items.len(), duplicates).await?;
     }
 
+    // `items` and `duplicates` are totals for the whole job, resumes included.
+    job.result = Some(serde_json::json!({
+        "items": payload.items.len(),
+        "duplicates": duplicates,
+    }));
     Ok(JobOutcome::Completed)
+}
+
+/// [`JobContext::checkpoint_at`] with the running duplicate count beside the resume index, so the count survives a
+/// pause or a crash like the position does.
+async fn checkpoint_progress(
+    ctx: &JobContext,
+    job: &mut Job,
+    index: usize,
+    total: usize,
+    duplicates: u64,
+) -> Result<()> {
+    let progress = JobProgress {
+        // Saturating, as in `checkpoint_at`: a huge count must not wrap to a small one.
+        current: u32::try_from(index).unwrap_or(u32::MAX),
+        total: Some(u32::try_from(total).unwrap_or(u32::MAX)),
+        message: Some(format!("checkpointed {index}/{total} items")),
+    };
+    // Only when there is something to carry, so a checkpoint with no duplicates keeps the shape every earlier
+    // version wrote (`{"next_index": n}`) and a job resumed across an upgrade reads it unchanged.
+    let mut state = serde_json::json!({ "next_index": index });
+    if duplicates > 0 {
+        state["duplicates"] = duplicates.into();
+    }
+    ctx.checkpoint(job, progress, state).await
 }
 
 /// Resolve which room a checkpoint item files under: `wing` (the item's own

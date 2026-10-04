@@ -116,6 +116,12 @@ max_entities = 32          # kept from one drawer
 max_relations = 64
 min_confidence = 0.3       # relationships below this are dropped
 
+# How eagerly duplicate memories and entity spellings are recognised; see "Deduplication".
+[dedup]
+enabled = true             # false stores every drawer and links nothing
+near_threshold = 0.9       # similarity, 0.5 to 1, at which a drawer is linked as a likely copy
+entity_fuzzy = true        # a unique one-character typo converges on the entity it resembles
+
 # How mining cuts and bounds what it reads; see "Mining sources".
 [mining]
 chunk_chars = 6000          # characters per drawer; a longer document becomes several drawers
@@ -191,6 +197,9 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `extraction.max_entities` (1 to 1000) | none | `32` |
 | `extraction.max_relations` (1 to 10000) | none | `64` |
 | `extraction.command` (a list) | none | none |
+| `dedup.enabled` (`true` or `false`) | `MEMCASTLE_DEDUP_ENABLED` | `true` |
+| `dedup.near_threshold` (0.5 to 1) | `MEMCASTLE_DEDUP_NEAR_THRESHOLD` | `0.9` |
+| `dedup.entity_fuzzy` (`true` or `false`) | `MEMCASTLE_DEDUP_ENTITY_FUZZY` | `true` |
 | `mining.chunk_chars` (200 to 100000) | `MEMCASTLE_MINING_CHUNK_CHARS` | `6000` |
 | `mining.max_file_bytes` (1 to 67108864) | `MEMCASTLE_MINING_MAX_FILE_BYTES` | `2097152` |
 | `mining.max_documents` (1 to 1000000) | `MEMCASTLE_MINING_MAX_DOCUMENTS` | `2000` |
@@ -431,6 +440,22 @@ has no sensible confidence or falls below `min_confidence`.
 - Every fact records the drawer, source document, job and extractor it came from, and holds from the document's own
   date when the source has one.
   When a re-mine replaces a drawer, the facts it supported stop being current and the new drawer is read.
+
+## Deduplication
+
+The `[dedup]` section controls how eagerly MemCastle recognises the same memory, or the same entity, written twice.
+It never merges anything: the most it does is not store an exact copy, link a likely copy to what it resembles,
+and let an entity spelled differently converge on the one it is a variant of.
+The rules, and what each writer gets back, are on the [Deduplication](deduplication.md) page.
+
+- `enabled = false` stores every drawer and records no link.
+  Entity names still converge when they differ only in case, punctuation or spacing, which is spelling and not a
+  judgement.
+- `near_threshold` is the similarity at which a drawer is linked as a `near` duplicate of another in its room.
+  Raise it towards `1` to link only the closest copies; below `0.5` it would link unrelated drawers, so it is refused.
+  It never makes MemCastle skip a write: only an exact copy does.
+- `entity_fuzzy = false` leaves casing, punctuation and alias convergence on,
+  and turns off the one-character typo rule and the `possibly_same_as` candidates.
 
 ## The database admin endpoint
 

@@ -198,11 +198,16 @@ impl AppServices {
                 drawer: drawer.to_string(),
             });
         }
-        let entity = self
+        // The name converges on an entity it is a variant of (casing,
+        // punctuation, an alias, a unique typo); the spelling is kept on the link.
+        let (entity, observation) = self
             .store
-            .get_or_create_entity(name, kind, serde_json::json!({}))
+            .resolve_or_create_entity(name, kind, self.dedup.entity_fuzzy)
             .await?;
-        let created = self.store.link_drawer_entity(drawer, entity.id).await?;
+        let created = self
+            .store
+            .link_drawer_entity_observed(drawer, entity.id, None, Some(&observation))
+            .await?;
         Ok(EntityLink {
             drawer,
             entity,
@@ -445,12 +450,33 @@ impl AppServices {
         .with_name(name.map(str::to_string));
 
         let Some(name) = name else {
-            self.store.create_drawer(&drawer).await?;
-            self.scheduler.ensure_embedding_sweep().await;
-            return Ok(Created {
-                created: true,
-                item: drawer,
-            });
+            // An unnamed drawer has no identity beyond its words, so an exact
+            // copy already in the room is returned instead of stored again.
+            return match crate::dedup::write(
+                &self.store,
+                &drawer,
+                &self.dedup,
+                crate::dedup::Rules::MEMORY,
+            )
+            .await?
+            {
+                crate::dedup::Outcome::Stored { .. } => {
+                    self.scheduler.ensure_embedding_sweep().await;
+                    Ok(Created {
+                        created: true,
+                        item: drawer,
+                    })
+                }
+                crate::dedup::Outcome::Duplicate { existing } => Ok(Created {
+                    created: false,
+                    item: self.store.get_drawer(existing).await?.ok_or_else(|| {
+                        Error::DrawerNotFound {
+                            room: format!("{}/{}", wing.name, room.name),
+                            drawer: existing.to_string(),
+                        }
+                    })?,
+                }),
+            };
         };
 
         let taken = || Error::DrawerNameTaken {
@@ -467,7 +493,13 @@ impl AppServices {
                 Err(taken())
             };
         }
-        if let Err(error) = self.store.create_drawer(&drawer).await {
+        // A name is an identity of its own, so a named write is always stored;
+        // an identical drawer under another name is only linked to.
+        let rules = crate::dedup::Rules {
+            skip_exact: false,
+            ..crate::dedup::Rules::MEMORY
+        };
+        if let Err(error) = crate::dedup::write(&self.store, &drawer, &self.dedup, rules).await {
             // Two writers racing for one name: the unique index let one win.
             // Report the loser as a name conflict rather than a storage fault.
             return if self
@@ -486,6 +518,27 @@ impl AppServices {
             created: true,
             item: drawer,
         })
+    }
+
+    /// The drawers `drawer` was recorded as a likely duplicate of, or that were recorded as likely duplicates of
+    /// it, with the evidence for each (docs/adr/025). Nothing is merged: every drawer here still stands on its own.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ModeForbidden`] unless `mode` permits reads, [`Error::DrawerNotFound`], or a store error.
+    pub async fn drawer_duplicates(
+        &self,
+        drawer: DrawerId,
+        mode: MemoryMode,
+    ) -> Result<Vec<crate::store::SimilarDrawer>> {
+        Self::require_read(mode, "drawer_duplicates")?;
+        if !self.store.drawer_exists(drawer).await? {
+            return Err(Error::DrawerNotFound {
+                room: "-".to_string(),
+                drawer: drawer.to_string(),
+            });
+        }
+        self.store.list_similar_drawers(drawer).await
     }
 
     /// Delete one drawer, by name or id.
