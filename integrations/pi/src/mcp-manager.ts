@@ -22,6 +22,7 @@ export function createSession(settings: Settings, env: Env = process.env): McpSe
     token: settings.token,
     mode: settings.mode,
     timeoutMs: settings.timeoutMs,
+    keepAliveMs: settings.keepAliveMs,
     clientName: "memcastle-pi",
   })
 }
