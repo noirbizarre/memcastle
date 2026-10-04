@@ -271,9 +271,17 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_editor_is_given_the_seed_and_what_it_saves_is_returned() {
-        // `sed -i` stands in for an editor: it rewrites the scratch file it is handed, with an argument first.
-        let saved = edit_with(Some("sed -i s/draft/final/"), "a draft note\n").unwrap();
-        assert_eq!(saved, "a final note\n");
+        // A script run through `sh` stands in for an editor, with an argument before the file it is handed. It
+        // appends to what it finds, which proves both that the seed was written and that the result is read back.
+        // `sed -i` is no stand-in: its argument syntax differs between GNU and BSD, so it fails on macOS.
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("editor.sh");
+        std::fs::write(&script, "printf '%s' \"$1 \" >> \"$2\"\n").unwrap();
+        let editor = format!("sh {} added", script.display());
+
+        let saved = edit_with(Some(&editor), "a draft note\n").unwrap();
+
+        assert_eq!(saved, "a draft note\nadded ");
     }
 
     #[cfg(unix)]
