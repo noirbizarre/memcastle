@@ -77,8 +77,16 @@ fn case_json() -> String {
 /// The `memcastle` version requirement a new source starts with: this release line, which is as far as a contract
 /// can be promised to hold.
 fn memcastle_requirement() -> String {
-    let version = semver::Version::parse(env!("CARGO_PKG_VERSION"))
-        .unwrap_or_else(|_| semver::Version::new(0, 0, 0));
+    requirement_for(
+        &semver::Version::parse(env!("CARGO_PKG_VERSION"))
+            .unwrap_or_else(|_| semver::Version::new(0, 0, 0)),
+    )
+}
+
+/// The requirement a source scaffolded by MemCastle `version` starts with: its own release line.
+///
+/// Before 1.0 a minor release may break the contract, so the line is the minor; from 1.0 it is the major.
+fn requirement_for(version: &semver::Version) -> String {
     if version.major == 0 {
         format!(
             ">={0}.{1}.0, <{0}.{2}.0",
@@ -316,5 +324,18 @@ mod tests {
     fn the_generated_case_parses_as_a_conformance_case() {
         let parsed: super::super::conformance::Case = serde_json::from_str(&case_json()).unwrap();
         assert_eq!(parsed.documents.len(), 3);
+    }
+
+    #[test]
+    fn a_scaffold_starts_on_its_own_release_line_and_the_requirement_is_one_cargo_would_accept() {
+        let before = semver::Version::new(0, 7, 3);
+        let after = semver::Version::new(2, 1, 0);
+        assert_eq!(requirement_for(&before), ">=0.7.0, <0.8.0");
+        assert_eq!(requirement_for(&after), ">=2.0.0, <3.0.0");
+        for (version, inside, outside) in [(before, "0.7.9", "0.8.0"), (after, "2.9.0", "3.0.0")] {
+            let requirement = semver::VersionReq::parse(&requirement_for(&version)).unwrap();
+            assert!(requirement.matches(&semver::Version::parse(inside).unwrap()));
+            assert!(!requirement.matches(&semver::Version::parse(outside).unwrap()));
+        }
     }
 }

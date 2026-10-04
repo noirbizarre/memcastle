@@ -225,4 +225,60 @@ read = ["locator"]
         assert!(error.contains(">=99"), "{error}");
         assert!(check_compatible(&parse(GOOD, &[]).unwrap()).is_ok());
     }
+
+    #[test]
+    fn the_remaining_rules_each_name_what_they_refuse() {
+        let cases = [
+            (
+                GOOD.replace("description = \"demo documents\"", "description = \"  \""),
+                "source.description",
+            ),
+            (
+                GOOD.replace(
+                    "description = \"demo documents\"",
+                    "description = \"a\\nb\"",
+                ),
+                "source.description",
+            ),
+            (
+                GOOD.replace("contract = \"0.1\"", "contract = \"x\""),
+                "compatibility.contract",
+            ),
+            (
+                format!("{GOOD}\n[permissions]\nenv = [\"NOT-A-NAME\"]\n"),
+                "permissions.env",
+            ),
+            (
+                format!("{GOOD}\n[permissions]\nenv = [\"\"]\n"),
+                "permissions.env",
+            ),
+            (format!("{GOOD}\n[limits]\nmemory_mib = 0\n"), "limits"),
+            (format!("{GOOD}\n[limits]\ntimeout_secs = 0\n"), "limits"),
+            (
+                format!("{GOOD}\n[build]\ncommand = []\noutput = \"x\"\n"),
+                "build.command",
+            ),
+            (
+                format!("{GOOD}\n[build]\ncommand = [\"make\"]\noutput = \"\"\n"),
+                "build.output",
+            ),
+        ];
+        for (text, expected) in cases {
+            let error = parse(&text, &[]).unwrap_err().to_string();
+            assert!(
+                error.contains(expected),
+                "expected `{expected}` in `{error}`"
+            );
+        }
+    }
+
+    #[test]
+    fn valid_environment_names_programs_and_limits_are_accepted() {
+        let text = format!(
+            "{GOOD}\n[permissions]\nenv = [\"GITHUB_TOKEN\"]\nprocess = [\"git\"]\nnetwork = true\n\n[limits]\nmemory_mib = 64\ntimeout_secs = 5\n"
+        );
+        let manifest = parse(&text, &[]).unwrap();
+        assert_eq!(manifest.permissions.env, ["GITHUB_TOKEN"]);
+        assert_eq!(manifest.limits.memory_mib, Some(64));
+    }
 }

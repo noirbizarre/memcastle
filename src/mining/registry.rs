@@ -301,3 +301,106 @@ pub async fn resolve(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+
+    use super::*;
+    use crate::domain::{Compatibility, ManifestSource, SourceManifest};
+
+    fn record(contract: &str) -> SourcePackageRecord {
+        let now = Utc::now();
+        SourcePackageRecord {
+            name: "demo".to_string(),
+            state: SourcePackageState::Enabled,
+            digest: sha256_hex(b"component"),
+            manifest: SourceManifest {
+                source: ManifestSource {
+                    name: "demo".to_string(),
+                    version: "1.0.0".to_string(),
+                    description: "demo".to_string(),
+                },
+                compatibility: Compatibility {
+                    contract: contract.to_string(),
+                    memcastle: ">=0.1".to_string(),
+                },
+                capabilities: SourceCapabilities::default(),
+                permissions: Permissions::default(),
+                limits: Default::default(),
+                build: None,
+                test: None,
+            },
+            installed_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn install_component(dir: &Path, bytes: &[u8]) {
+        std::fs::create_dir_all(dir.join("demo")).unwrap();
+        std::fs::write(dir.join("demo/source.wasm"), bytes).unwrap();
+    }
+
+    #[test]
+    fn an_intact_compatible_package_has_no_reason_to_be_unavailable() {
+        let dir = tempfile::tempdir().unwrap();
+        install_component(dir.path(), b"component");
+        assert_eq!(unavailable_reason(&record("0.1"), dir.path()), None);
+        let described = describe_package(&record("0.1"), dir.path());
+        assert_eq!(described.state, SourceState::Enabled);
+        assert_eq!(described.version.as_deref(), Some("1.0.0"));
+    }
+
+    #[test]
+    fn a_package_for_another_contract_is_unavailable_and_the_reason_is_the_incompatibility() {
+        let dir = tempfile::tempdir().unwrap();
+        install_component(dir.path(), b"component");
+        let reason = unavailable_reason(&record("0.9"), dir.path()).unwrap();
+        assert!(reason.contains("contract 0.9"), "{reason}");
+        assert_eq!(
+            describe_package(&record("0.9"), dir.path()).state,
+            SourceState::Unavailable
+        );
+    }
+
+    #[test]
+    fn a_package_whose_component_is_missing_or_altered_says_which() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = unavailable_reason(&record("0.1"), dir.path()).unwrap();
+        assert!(missing.contains("missing"), "{missing}");
+
+        install_component(dir.path(), b"something else");
+        let altered = unavailable_reason(&record("0.1"), dir.path()).unwrap();
+        assert!(altered.contains("no longer matches"), "{altered}");
+    }
+
+    #[test]
+    fn a_disabled_package_is_not_minable_and_the_state_is_named() {
+        let dir = tempfile::tempdir().unwrap();
+        install_component(dir.path(), b"component");
+        let mut disabled = record("0.1");
+        disabled.state = SourcePackageState::Disabled;
+        let error = minable_package(&disabled, dir.path())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("disabled"), "{error}");
+        assert!(minable_package(&record("0.1"), dir.path()).is_ok());
+        let unavailable = minable_package(&record("0.9"), dir.path())
+            .unwrap_err()
+            .to_string();
+        assert!(unavailable.contains("unavailable"), "{unavailable}");
+    }
+
+    #[test]
+    fn a_built_in_source_answers_for_its_name_description_and_default_room_like_the_adapter_does() {
+        let directory = AnySource::Directory(DirectoryAdapter::new(1));
+        let pi = AnySource::PiSessions(PiSessionsAdapter::new(Some(Path::new("/"))));
+        assert_eq!(directory.provider(), "directory");
+        assert!(!directory.description().is_empty());
+        assert_eq!(directory.default_room(), "files");
+        assert_eq!(pi.provider(), "pi-sessions");
+        assert!(!pi.description().is_empty());
+        assert!(!pi.default_room().is_empty());
+        assert!(pi.capabilities().retains_raw);
+    }
+}

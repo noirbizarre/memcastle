@@ -202,4 +202,28 @@ mod tests {
         store.delete_source_package("demo").await.unwrap();
         assert!(store.list_source_packages().await.unwrap().is_empty());
     }
+
+    #[tokio::test]
+    async fn a_row_whose_manifest_no_longer_parses_is_reported_as_malformed_not_skipped() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        store
+            .db
+            .query(
+                "UPSERT type::record('source_package', 'broken') SET name = 'broken', state = 'enabled', \
+                 digest = 'd', manifest = {}, installed_at = time::now(), updated_at = time::now()",
+            )
+            .await
+            .unwrap()
+            .check()
+            .unwrap();
+
+        let error = store
+            .get_source_package("broken")
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("source_package manifest"), "{error}");
+        assert!(store.list_source_packages().await.is_err());
+    }
 }

@@ -214,21 +214,24 @@ pub fn contract_version(raw: &str) -> std::result::Result<(u64, u64), String> {
 ///
 /// A sentence saying why not, for the error that reports it.
 pub fn contract_compatibility(declared: &str) -> std::result::Result<(), String> {
-    let (host_major, host_minor) =
+    let host =
         contract_version(CONTRACT_VERSION).map_err(|_| "unparsable host contract".to_string())?;
-    let (major, minor) = contract_version(declared)?;
-    let compatible = if host_major == 0 {
-        // Before 1.0 every minor release may break the contract.
-        major == 0 && minor == host_minor
-    } else {
-        major == host_major && minor <= host_minor
-    };
-    if compatible {
+    if contracts_agree(host, contract_version(declared)?) {
         Ok(())
     } else {
         Err(format!(
             "it was built for contract {declared}, and this MemCastle implements {CONTRACT_VERSION}"
         ))
+    }
+}
+
+/// The policy itself, on `(major, minor)` pairs, so both halves of it can be tested whatever the host implements today.
+fn contracts_agree((host_major, host_minor): (u64, u64), (major, minor): (u64, u64)) -> bool {
+    if host_major == 0 {
+        // Before 1.0 every minor release may break the contract.
+        major == 0 && minor == host_minor
+    } else {
+        major == host_major && minor <= host_minor
     }
 }
 
@@ -437,5 +440,21 @@ mod tests {
         for word in ["locator", "network", "git", "TOKEN"] {
             assert!(described.contains(word), "{described}");
         }
+    }
+
+    #[test]
+    fn from_one_point_zero_a_source_runs_on_the_same_major_with_at_least_its_minor() {
+        // The host implements 2.3.
+        let host = (2, 3);
+        assert!(contracts_agree(host, (2, 3)));
+        assert!(contracts_agree(host, (2, 0)), "an older minor still runs");
+        assert!(
+            !contracts_agree(host, (2, 4)),
+            "a newer minor is not implemented yet"
+        );
+        assert!(!contracts_agree(host, (1, 3)) && !contracts_agree(host, (3, 3)));
+        // Before 1.0 only the identical minor does.
+        assert!(contracts_agree((0, 5), (0, 5)));
+        assert!(!contracts_agree((0, 5), (0, 4)) && !contracts_agree((0, 5), (1, 5)));
     }
 }

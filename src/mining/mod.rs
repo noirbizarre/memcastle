@@ -924,4 +924,20 @@ mod tests {
                 && !pi.capabilities.needs_credentials
         );
     }
+
+    #[test]
+    fn an_older_daemons_provider_listing_still_reads_as_an_enabled_built_in_source() {
+        // Before installable sources a provider was exactly these three fields.
+        let info: ProviderInfo = serde_json::from_value(json!({
+            "name": "directory",
+            "description": "files",
+            "capabilities": {"incremental": true, "retains_raw": false, "needs_credentials": false},
+        }))
+        .unwrap();
+
+        assert_eq!(info.origin, SourceOrigin::Builtin);
+        assert_eq!(info.state, SourceState::Enabled);
+        assert!(info.version.is_none() && info.unavailable_reason.is_none());
+        assert!(info.permissions.is_empty());
+    }
 }

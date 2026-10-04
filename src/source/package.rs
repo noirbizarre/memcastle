@@ -334,4 +334,98 @@ memcastle = ">=0.1"
         // Removing what is not there is fine.
         remove(dir.path(), "demo").unwrap();
     }
+
+    fn archive_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut archive = tar::Builder::new(flate2::write::GzEncoder::new(
+            Vec::new(),
+            flate2::Compression::fast(),
+        ));
+        for (name, bytes) in entries {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o644);
+            archive.append_data(&mut header, name, *bytes).unwrap();
+        }
+        archive.into_inner().unwrap().finish().unwrap()
+    }
+
+    #[test]
+    fn files_that_are_not_part_of_a_package_and_directories_are_ignored_not_extracted() {
+        let mut archive = tar::Builder::new(flate2::write::GzEncoder::new(
+            Vec::new(),
+            flate2::Compression::fast(),
+        ));
+        let mut dir = tar::Header::new_gnu();
+        dir.set_entry_type(tar::EntryType::Directory);
+        dir.set_size(0);
+        dir.set_mode(0o755);
+        archive
+            .append_data(&mut dir, "somewhere/", std::io::empty())
+            .unwrap();
+        for (name, bytes) in [
+            (MANIFEST_FILE, MANIFEST.as_bytes()),
+            (COMPONENT_FILE, WASM),
+            ("install.sh", b"rm -rf /"),
+        ] {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o755);
+            archive.append_data(&mut header, name, bytes).unwrap();
+        }
+        let bytes = archive.into_inner().unwrap().finish().unwrap();
+
+        let package = unpack(&bytes, &[]).unwrap();
+
+        assert!(
+            package.extras.is_empty(),
+            "nothing but the listed files is ever read"
+        );
+    }
+
+    #[test]
+    fn a_component_entry_that_is_not_webassembly_is_refused_when_unpacking() {
+        let bytes = archive_of(&[
+            (MANIFEST_FILE, MANIFEST.as_bytes()),
+            (COMPONENT_FILE, b"#!/bin/sh"),
+        ]);
+        let error = unpack(&bytes, &[]).unwrap_err().to_string();
+        assert!(error.contains("not a WebAssembly binary"), "{error}");
+    }
+
+    #[test]
+    fn an_archive_that_claims_to_expand_past_the_ceiling_is_refused_before_it_is_read() {
+        use std::io::Write;
+        // Only the header of a 300 MiB entry: the size is checked before a byte of it is read, which is what makes a
+        // decompression bomb cheap to refuse.
+        let mut header = tar::Header::new_gnu();
+        header.set_path(COMPONENT_FILE).unwrap();
+        header.set_size(300 * 1024 * 1024);
+        header.set_mode(0o644);
+        header.set_cksum();
+        let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        gzip.write_all(header.as_bytes()).unwrap();
+        let bytes = gzip.finish().unwrap();
+
+        let error = unpack(&bytes, &[]).unwrap_err().to_string();
+
+        assert!(error.contains("256 MiB"), "{error}");
+    }
+
+    #[test]
+    fn removing_something_that_cannot_be_removed_is_an_error_naming_it() {
+        let dir = tempfile::tempdir().unwrap();
+        // A file where the source's directory should be: it exists, and is not a directory.
+        std::fs::write(dir.path().join("demo"), "in the way").unwrap();
+        assert!(matches!(remove(dir.path(), "demo"), Err(Error::Io { .. })));
+    }
+
+    #[test]
+    fn inspecting_applies_the_reserved_built_in_names() {
+        let bytes = pack(&MANIFEST.replace("demo", "directory"), WASM, &[]).unwrap();
+        assert!(
+            inspect(&bytes).is_err(),
+            "a package may not take a built-in name"
+        );
+        assert!(inspect(&pack(MANIFEST, WASM, &[]).unwrap()).is_ok());
+    }
 }

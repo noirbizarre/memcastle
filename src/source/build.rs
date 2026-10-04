@@ -215,6 +215,7 @@ fn check_is_component(bytes: &[u8], path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::MiningConfig;
 
     #[test]
     fn a_core_module_is_told_apart_from_a_component_and_the_error_says_how_to_fix_it() {
@@ -249,5 +250,117 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("[build]"), "{error}");
+    }
+
+    const MANIFEST: &str = "[source]\nname = \"demo\"\nversion = \"0.1.0\"\ndescription = \"d\"\n\n[compatibility]\ncontract = \"0.1\"\nmemcastle = \">=0.1\"\n";
+
+    fn project(extra: &str) -> (tempfile::TempDir, Project) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(MANIFEST_FILE), format!("{MANIFEST}{extra}")).unwrap();
+        let project = Project::open(dir.path()).unwrap();
+        (dir, project)
+    }
+
+    #[test]
+    fn a_manifest_that_cannot_be_read_for_another_reason_than_absence_is_an_io_error() {
+        let dir = tempfile::tempdir().unwrap();
+        // A directory where the manifest should be: it exists, and cannot be read as a file.
+        std::fs::create_dir(dir.path().join(MANIFEST_FILE)).unwrap();
+        assert!(matches!(Project::open(dir.path()), Err(Error::Io { .. })));
+    }
+
+    #[test]
+    fn a_build_command_that_cannot_be_started_names_it_and_points_at_the_readme() {
+        let (_dir, project) =
+            project("\n[build]\ncommand = [\"memcastle-no-such-program\"]\noutput = \"x.wasm\"\n");
+        let error = project.build().unwrap_err().to_string();
+        assert!(
+            error.contains("memcastle-no-such-program") && error.contains("README.md"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_build_that_succeeds_without_producing_the_output_says_which_file_is_missing() {
+        // `cargo --version` exits successfully on every platform and writes nothing.
+        let (_dir, project) =
+            project("\n[build]\ncommand = [\"cargo\", \"--version\"]\noutput = \"nowhere.wasm\"\n");
+        let error = project.build().unwrap_err().to_string();
+        assert!(
+            error.contains("nowhere.wasm") && error.contains("build.output"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_build_that_fails_reports_how_it_exited() {
+        let (_dir, project) =
+            project("\n[build]\ncommand = [\"cargo\", \"--no-such-flag\"]\noutput = \"x.wasm\"\n");
+        let error = project.build().unwrap_err().to_string();
+        assert!(error.contains("exited with"), "{error}");
+    }
+
+    #[test]
+    fn a_build_that_produces_a_core_module_is_refused_with_the_way_out() {
+        let (dir, project) =
+            project("\n[build]\ncommand = [\"cargo\", \"--version\"]\noutput = \"m.wasm\"\n");
+        std::fs::write(dir.path().join("m.wasm"), b"\0asm\x01\0\0\0").unwrap();
+        let error = project.build().unwrap_err().to_string();
+        assert!(error.contains("core WebAssembly module"), "{error}");
+    }
+
+    #[test]
+    fn a_good_build_places_the_component_in_dist() {
+        let (dir, project) =
+            project("\n[build]\ncommand = [\"cargo\", \"--version\"]\noutput = \"c.wasm\"\n");
+        std::fs::write(dir.path().join("c.wasm"), b"\0asm\x0d\0\x01\0").unwrap();
+        let placed = project.build().unwrap();
+        assert_eq!(placed, project.component_path());
+        assert!(placed.is_file());
+    }
+
+    #[tokio::test]
+    async fn testing_needs_a_test_section_and_a_built_component() {
+        let (_dir, without) = project("");
+        let error = without
+            .test(&MiningConfig::default())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("[test]"), "{error}");
+
+        let (_dir, unbuilt) = project("\n[test]\nfixtures = \"fixtures\"\n");
+        let error = unbuilt
+            .test(&MiningConfig::default())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("memcastle source build"), "{error}");
+    }
+
+    #[test]
+    fn packaging_needs_a_built_component_and_then_writes_the_archive_with_the_readme() {
+        let (dir, project) = project("");
+        let error = project.package(None).unwrap_err().to_string();
+        assert!(error.contains("memcastle source build"), "{error}");
+
+        std::fs::create_dir(dir.path().join("dist")).unwrap();
+        std::fs::write(project.component_path(), b"\0asm\x0d\0\x01\0").unwrap();
+        std::fs::write(dir.path().join("README.md"), "hello").unwrap();
+        let target = dir.path().join("out/custom.tar.gz");
+
+        let (written, package) = project.package(Some(&target)).unwrap();
+
+        assert_eq!(written, target);
+        assert_eq!(
+            package.extras.len(),
+            1,
+            "the README travels with the package"
+        );
+        assert!(target.is_file());
+        assert_eq!(
+            project.archive_path().file_name().unwrap(),
+            "demo-0.1.0.tar.gz"
+        );
     }
 }

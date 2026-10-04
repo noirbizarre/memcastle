@@ -646,4 +646,134 @@ mod tests {
         assert!(text.contains("line one line two"), "{text}");
         assert!(text.contains(" - "), "{text}");
     }
+
+    fn provider(name: &str, origin: crate::mining::SourceOrigin) -> crate::mining::ProviderInfo {
+        crate::mining::ProviderInfo {
+            name: name.to_string(),
+            description: format!("reads {name}"),
+            capabilities: crate::domain::SourceCapabilities {
+                incremental: true,
+                retains_raw: false,
+                needs_credentials: false,
+            },
+            origin,
+            version: None,
+            state: crate::domain::SourceState::Enabled,
+            unavailable_reason: None,
+            permissions: crate::domain::Permissions::default(),
+        }
+    }
+
+    fn package(name: &str) -> crate::mining::ProviderInfo {
+        let mut info = provider(name, crate::mining::SourceOrigin::Package);
+        info.version = Some("1.2.3".to_string());
+        info.permissions.network = true;
+        info
+    }
+
+    #[test]
+    fn a_built_in_source_is_listed_as_built_in_and_a_package_with_its_version_state_and_permissions()
+     {
+        let report = crate::app::SourcesReport {
+            providers: vec![
+                provider("directory", crate::mining::SourceOrigin::Builtin),
+                package("slack"),
+            ],
+            sources: vec![],
+        };
+
+        let text = render_sources(&report, Painter::PLAIN, Some(200));
+
+        for header in ["SOURCE", "STATE", "PERMISSIONS", "READS"] {
+            assert!(text.contains(header), "missing {header}:\n{text}");
+        }
+        assert!(text.contains("built in"), "{text}");
+        assert!(
+            text.contains("slack 1.2.3"),
+            "the version is part of what a package is:\n{text}"
+        );
+        assert!(text.contains("use the network"), "{text}");
+        assert!(text.contains("No source has been mined yet."), "{text}");
+    }
+
+    #[test]
+    fn why_a_source_is_unavailable_is_printed_under_the_table() {
+        let mut broken = package("slack");
+        broken.state = crate::domain::SourceState::Unavailable;
+        broken.unavailable_reason = Some("its component file is missing".to_string());
+        let report = crate::app::SourcesReport {
+            providers: vec![broken],
+            sources: vec![],
+        };
+
+        let text = render_sources(&report, Painter::PLAIN, Some(200));
+
+        assert!(text.contains("unavailable"), "{text}");
+        assert!(
+            text.contains("slack is unavailable: its component file is missing"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn mined_sources_are_listed_after_the_providers_with_their_last_run() {
+        let report = crate::app::SourcesReport {
+            providers: vec![provider("directory", crate::mining::SourceOrigin::Builtin)],
+            sources: vec![
+                crate::app::SourceSummary {
+                    id: crate::domain::SourceId::derive(uuid::Uuid::nil(), "a"),
+                    provider: "directory".into(),
+                    account: None,
+                    locator: "/notes".into(),
+                    cursor: serde_json::Value::Null,
+                    last_job: None,
+                    last_run_at: None,
+                    documents: 7,
+                },
+                crate::app::SourceSummary {
+                    id: crate::domain::SourceId::derive(uuid::Uuid::nil(), "b"),
+                    provider: "directory".into(),
+                    account: None,
+                    locator: "/other".into(),
+                    cursor: serde_json::Value::Null,
+                    last_job: Some(crate::domain::JobId::new()),
+                    last_run_at: Some(chrono::Utc::now()),
+                    documents: 1,
+                },
+            ],
+        };
+
+        let text = render_sources(&report, Painter::PLAIN, Some(200));
+
+        assert!(text.contains("/notes") && text.contains("/other"), "{text}");
+        assert!(
+            text.contains("never"),
+            "a source that never ran says so:\n{text}"
+        );
+        assert!(text.contains("LAST JOB"), "{text}");
+    }
+
+    #[test]
+    fn one_source_shows_its_capabilities_and_only_a_packages_permissions() {
+        let built_in = render_source(
+            &provider("directory", crate::mining::SourceOrigin::Builtin),
+            Painter::PLAIN,
+        );
+        assert!(built_in.contains("(built in)"), "{built_in}");
+        assert!(
+            !built_in.contains("permissions:"),
+            "native code was granted nothing: {built_in}"
+        );
+
+        let mut broken = package("slack");
+        broken.unavailable_reason = Some("it no longer matches".to_string());
+        let text = render_source(&broken, Painter::PLAIN);
+        assert!(text.contains("1.2.3"), "{text}");
+        assert!(text.contains("permissions:  use the network"), "{text}");
+        assert!(
+            text.contains("incremental yes, keeps raw no, needs credentials no"),
+            "{text}"
+        );
+        assert!(text.contains("unavailable: it no longer matches"), "{text}");
+    }
 }

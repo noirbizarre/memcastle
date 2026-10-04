@@ -2173,4 +2173,41 @@ mod tests {
         assert!(!format!("{config:?}").contains("sk-very-secret"));
         assert!(!toml::to_string(&config).unwrap().contains("sk-very-secret"));
     }
+
+    #[test]
+    fn installed_source_settings_come_from_the_file_then_the_environment() {
+        let mut config: Config = toml::from_str("[mining]\nsource_timeout_secs = 5").unwrap();
+        assert_eq!(config.mining.source_timeout_secs, 5);
+        assert_eq!(
+            config.mining.source_memory_mib,
+            DEFAULT_MINING_SOURCE_MEMORY_MIB
+        );
+
+        config
+            .apply_overrides_from(env(&[
+                ("MEMCASTLE_MINING_SOURCES_DIR", "/srv/sources"),
+                ("MEMCASTLE_MINING_SOURCE_MEMORY_MIB", "128"),
+                ("MEMCASTLE_MINING_SOURCE_TIMEOUT_SECS", "9"),
+            ]))
+            .unwrap();
+
+        assert_eq!(config.mining.sources_dir(), PathBuf::from("/srv/sources"));
+        assert_eq!(config.mining.source_memory_mib, 128);
+        assert_eq!(config.mining.source_timeout_secs, 9);
+        // Unset, the directory is the default under the XDG data directory.
+        assert!(MiningConfig::default().sources_dir().ends_with("sources"));
+    }
+
+    #[test]
+    fn a_malformed_source_variable_is_named_in_the_error() {
+        for name in [
+            "MEMCASTLE_MINING_SOURCE_MEMORY_MIB",
+            "MEMCASTLE_MINING_SOURCE_TIMEOUT_SECS",
+        ] {
+            let err = Config::default()
+                .apply_overrides_from(env(&[(name, "lots")]))
+                .unwrap_err();
+            assert!(err.to_string().contains(name), "{err}");
+        }
+    }
 }

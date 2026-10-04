@@ -208,4 +208,45 @@ mod tests {
             "{error:?}"
         );
     }
+
+    #[test]
+    fn a_granted_program_that_does_not_exist_fails_to_start_and_is_not_a_denial() {
+        let error = run(
+            &grant(&["memcastle-no-such-program"]),
+            "memcastle-no-such-program",
+            &[],
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, ProcessError::Failed(ref m) if m.contains("could not be started")),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn more_output_than_the_cap_is_an_error_not_an_unbounded_answer() {
+        // 17 MiB of zeros, a MiB over the cap.
+        let error = run(
+            &grant(&["head"]),
+            "head",
+            &[
+                "-c".to_string(),
+                (17 * 1024 * 1024).to_string(),
+                "/dev/zero".to_string(),
+            ],
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, ProcessError::Failed(ref m) if m.contains("more than 16 MiB")),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_program_that_fails_reports_its_exit_status_rather_than_an_error() {
+        let output = run(&grant(&["false"]), "false", &[], None).unwrap();
+        assert_ne!(output.status, 0);
+    }
 }

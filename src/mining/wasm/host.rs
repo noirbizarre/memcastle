@@ -192,4 +192,96 @@ mod tests {
         assert!(readable_directories(&reading(&["/definitely/not/here"]), None).is_empty());
         assert!(readable_directories(&reading(&["locator"]), None).is_empty());
     }
+
+    fn host_state(permissions: &Permissions) -> HostState {
+        state(permissions, None, 16 * 1024 * 1024, Duration::from_secs(5)).unwrap()
+    }
+
+    #[test]
+    fn a_home_relative_grant_resolves_against_the_home_directory() {
+        let Some(home) = dirs::home_dir().and_then(|home| home.canonicalize().ok()) else {
+            return;
+        };
+        // `~/` alone is the home directory itself.
+        let directories = readable_directories(&reading(&["~/"]), None);
+        assert_eq!(directories, [home]);
+    }
+
+    #[test]
+    fn an_absolute_grant_is_canonicalised_and_listed_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap();
+        let directories = readable_directories(&reading(&[path, &format!("{path}/.")]), None);
+        assert_eq!(directories, [dir.path().canonicalize().unwrap()]);
+    }
+
+    #[test]
+    fn only_the_environment_variables_a_manifest_lists_reach_the_process_grant() {
+        // PATH is set in any environment this runs in; the other name is not, so it is silently absent.
+        let permissions = Permissions {
+            env: vec!["PATH".to_string(), "MEMCASTLE_SURELY_UNSET".to_string()],
+            ..Permissions::default()
+        };
+        let state = host_state(&permissions);
+        let names: Vec<_> = state
+            .process
+            .env
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect();
+        assert_eq!(names, ["PATH"]);
+        assert!(host_state(&Permissions::default()).process.env.is_empty());
+    }
+
+    #[test]
+    fn the_network_is_opened_only_when_the_manifest_asks_for_it() {
+        // Opening it must not fail, and asking for nothing must not open it: the isolation test holds the code to the
+        // second, and this holds the first.
+        let permissions = Permissions {
+            network: true,
+            ..Permissions::default()
+        };
+        let _ = host_state(&permissions);
+        let _ = host_state(&Permissions::default());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn running_a_program_through_the_host_is_denied_failed_or_answered_and_a_denial_is_remembered()
+    {
+        use self::memcastle::source::host::Host as _;
+
+        let permissions = Permissions {
+            process: vec!["memcastle-no-such-program".to_string()],
+            ..Permissions::default()
+        };
+        let mut state = host_state(&permissions);
+
+        let denied = state
+            .run_process("cat".to_string(), vec![], None)
+            .unwrap_err();
+        assert!(denied.contains("not permitted"), "{denied}");
+        assert_eq!(
+            state.denied.as_deref(),
+            Some(denied.as_str()),
+            "kept to explain a later failure"
+        );
+
+        let failed = state
+            .run_process("memcastle-no-such-program".to_string(), vec![], None)
+            .unwrap_err();
+        assert!(failed.contains("could not be started"), "{failed}");
+
+        let permissions = Permissions {
+            process: vec!["echo".to_string()],
+            ..Permissions::default()
+        };
+        let mut state = host_state(&permissions);
+        let answered = state
+            .run_process("echo".to_string(), vec!["hi".to_string()], None)
+            .unwrap();
+        assert_eq!(answered.status, 0);
+        assert_eq!(String::from_utf8_lossy(&answered.stdout).trim(), "hi");
+        assert!(state.denied.is_none());
+    }
 }
