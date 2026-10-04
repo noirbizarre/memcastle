@@ -41,10 +41,31 @@ The environment variables are the ones the MemCastle CLI already reads.
 | `endpoint` | none | none | An explicit `http://host:port`, which skips discovery |
 | `agentIdentity` | none | `opencode` | Stored with diary and wake-up calls |
 | `timeoutMs` | none | `5000` | How long to wait for the daemon |
+| `keepAliveMs` | none | `120000` | Ping interval that keeps an idle connection open; `0` turns it off |
 
 The daemon is found through its registry file, then the configured address, and each candidate is checked with
 `GET /api/health` because the file is only a hint.
 A mode the plugin cannot parse **fails closed**: it logs why and does nothing, rather than treating a typo as `full`.
+
+### Connection lifecycle
+
+This differs from the [Pi adapter](../pi/README.md#connection-lifecycle), which holds a single connection.
+One OpenCode process hosts many sessions, and OpenCode's own MCP client shares one connection across all of them.
+MemCastle's memory mode belongs to a connection, so a shared one could not give two sessions different modes
+(see [Session mode](docs/research.md#session-mode-to-set_mode)).
+The plugin therefore owns one connection per OpenCode `sessionID`, and the rest follows from that.
+
+- **Lazy.**
+  A connection is opened on a session's first MemCastle call and never at startup, so a session that does not use
+  MemCastle costs nothing, and a missing daemon does not slow OpenCode down.
+- **Closed with the session.**
+  `session.deleted` closes that session's connection, and `dispose` closes all of them.
+  Both tell the daemon to forget the session.
+- **Independent.**
+  Each session is kept alive, and replaced if the daemon forgets it, on its own.
+  Losing one never disturbs another, and each keeps the mode it was opened with.
+- The recovery and keep-alive rules are the Pi adapter's: a 404 means a lost session, the call is sent once more on a
+  new session with the mode re-selected, and a failure without a 404 is reported and the next call reconnects.
 
 ## Layout
 
@@ -84,7 +105,7 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | `recall` | Not yet | #36 |
 | `checkpoint` | Not yet | #34 |
 | `emergency-checkpoint` | Not yet; planned on `experimental.session.compacting` | #34 |
-| `persistent-session` | Implemented: one connection per session, mode re-selected on reconnect | done |
+| `persistent-session` | Implemented: one connection per OpenCode session, kept alive, replaced with its mode re-selected when the daemon forgets it | #124, done |
 | `skills` | Not yet | #36 |
 | `background-mining` | Not yet | no issue yet |
 | `failure-reporting` | Foundation: the five classes with `help`; user-facing toasts are not wired | later |

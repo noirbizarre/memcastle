@@ -25,14 +25,26 @@ function binary(): string {
   return path
 }
 
+type DaemonProcess = Bun.Subprocess<"ignore", "ignore", "pipe">
+
+function spawnDaemon(env: Env, palacePath: string): DaemonProcess {
+  // Port 0 asks the OS for a free port, so a restarted daemon listens elsewhere, as a real restart may.
+  return Bun.spawn([binary(), "serve", "--palace", palacePath, "--port", "0"], {
+    env,
+    stdout: "ignore",
+    stderr: "pipe",
+  })
+}
+
 export class TestDaemon {
   private constructor(
-    private readonly process: Bun.Subprocess,
+    private process: DaemonProcess,
     private readonly root: string,
     readonly palacePath: string,
     /** The environment the *client* must use to find this daemon: only where the registry file lives. */
     readonly clientEnv: Env,
     readonly token: string | null,
+    private readonly daemonEnv: Env,
   ) {}
 
   static async start(options: { token?: string } = {}): Promise<TestDaemon> {
@@ -50,13 +62,9 @@ export class TestDaemon {
     })
     if (options.token) Object.assign(env, { MEMCASTLE_AUTH_ENABLED: "true", MEMCASTLE_AUTH_TOKEN: options.token })
 
-    const child = Bun.spawn([binary(), "serve", "--palace", palacePath, "--port", "0"], {
-      env,
-      stdout: "ignore",
-      stderr: "pipe",
-    })
+    const child = spawnDaemon(env, palacePath)
     const clientEnv: Env = { HOME: root, XDG_STATE_HOME: stateHome }
-    const daemon = new TestDaemon(child, root, palacePath, clientEnv, options.token ?? null)
+    const daemon = new TestDaemon(child, root, palacePath, clientEnv, options.token ?? null, env)
 
     // Discovery is the code under test here too: the daemon is only "up" once the registry file names it
     // and a live health check agrees.
@@ -90,11 +98,45 @@ export class TestDaemon {
     return new SessionRegistry(settings, this.clientEnv).session(`test-${Math.random()}`)
   }
 
-  async stop(): Promise<void> {
+  /**
+   * Stop the daemon and start another on the same palace and state directory. Every MCP session the old one held
+   * is gone, which is what a client sees when the user restarts the daemon under a running agent.
+   */
+  async restart(): Promise<void> {
+    await this.halt()
+    this.process = spawnDaemon(this.daemonEnv, this.palacePath)
+    const deadline = Date.now() + 60_000
+    for (;;) {
+      try {
+        await discoverDaemon(this.settings({ timeoutMs: 500 }), this.clientEnv)
+        return
+      } catch (error) {
+        if (this.process.exitCode !== null || Date.now() > deadline) throw new Error(`The daemon did not restart: ${String(error)}`)
+        await Bun.sleep(100)
+      }
+    }
+  }
+
+  /** Ask the daemon to forget `session`'s MCP session while the client still believes it is open. */
+  async forget(session: McpSession): Promise<void> {
+    const id = session.sessionId
+    if (!id) throw new Error("the session is not connected, so there is nothing to forget")
+    const endpoint = await discoverDaemon(this.settings({ timeoutMs: 1000 }), this.clientEnv)
+    const headers: Record<string, string> = { "mcp-session-id": id }
+    if (this.token) headers.Authorization = `Bearer ${this.token}`
+    const response = await fetch(endpoint.mcpUrl, { method: "DELETE", headers })
+    if (!response.ok) throw new Error(`the daemon refused to end the session: HTTP ${response.status}`)
+  }
+
+  private async halt(): Promise<void> {
     this.process.kill("SIGTERM")
     const killer = setTimeout(() => this.process.kill("SIGKILL"), 10_000)
     await this.process.exited
     clearTimeout(killer)
+  }
+
+  async stop(): Promise<void> {
+    await this.halt()
     await rm(this.root, { recursive: true, force: true })
   }
 }

@@ -6,6 +6,7 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { type ModeLabel, toWireMode } from "./modes.ts"
+import { DEFAULT_KEEP_ALIVE_MS } from "./session.ts"
 
 export interface Settings {
   /** An explicit `http://host:port`, which skips discovery. */
@@ -23,6 +24,8 @@ export interface Settings {
   agentIdentity: string
   /** How long to wait for the daemon before giving up on a call. */
   timeoutMs: number
+  /** How often an open connection is pinged so the daemon does not drop it as idle; `0` turns that off. */
+  keepAliveMs: number
 }
 
 type Env = Readonly<Record<string, string | undefined>>
@@ -39,6 +42,12 @@ function defaultPalacePath(env: Env): string {
   // The daemon ignores a relative XDG path, and so must this, or the registry hash would differ.
   const base = data?.startsWith("/") ? data : join(env.HOME ?? homedir(), ".local", "share")
   return join(base, "memcastle", "default")
+}
+
+/** A non-negative number of milliseconds, or the default for anything missing or invalid. */
+function keepAlive(value: unknown): number {
+  const ms = typeof value === "number" || typeof value === "string" ? Number(value) : Number.NaN
+  return Number.isFinite(ms) && ms >= 0 && value !== "" ? ms : DEFAULT_KEEP_ALIVE_MS
 }
 
 /**
@@ -61,6 +70,8 @@ export function resolveSettings(options: Record<string, unknown> | undefined, en
     mode: mode as ModeLabel,
     agentIdentity: text(opts.agentIdentity) ?? "opencode",
     timeoutMs: Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 5000,
+    // Unlike the timeout, zero is meaningful here (no pings), so only a missing or invalid value falls back.
+    keepAliveMs: keepAlive(opts.keepAliveMs),
   }
 }
 
