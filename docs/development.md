@@ -144,6 +144,23 @@ mise run test -- --filter-expr 'test(job)'
 A filter on `mise run test` still excludes the `wasm_` binaries; use `mise run test:wasm -- <filter>` for those.
 `mise run cover` runs the basic suite with coverage.
 
+### Where the CI time goes
+
+Measured on GitHub's runners after the suites were split, so that a change aimed at speed has a baseline to beat.
+Compiling is the test binaries built instrumented for coverage; running is nextest's own summary line.
+
+| Job | Compiling | Running | Whole job |
+|---|---|---|---|
+| Tests, Linux (basic, 1114 tests) | 56 s | 172 s | about 5 min |
+| Tests, macOS (basic) | 86 s | 157 s | about 5.5 min |
+| Tests, Windows (basic) | 120 s | 359 s | about 10.5 min |
+| WebAssembly tests, Linux (25 tests), cold cache | 4 to 6 min | 46 to 60 s | 6.5 to 8 min |
+
+A cold cache dominates the new jobs: `wasmtime` and Cranelift are most of what is compiled.
+The 25 WebAssembly tests themselves run in about a minute, of which the slowest is a test waiting on Cargo's lock
+while another builds a component into the same shared target directory.
+The time left in the basic suite is its 1114 pre-existing tests, not WebAssembly.
+
 ## The architecture guard
 
 The non-negotiable invariant in `AGENTS.md` — "the CLI has no business logic MCP/HTTP can't reuse" —
