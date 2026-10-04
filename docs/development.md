@@ -13,12 +13,15 @@ so the storage engine itself needs no C/C++ toolchain.
 
 ```sh
 mise run build      # cargo build
-mise run test       # cargo nextest run (accepts nextest selectors)
+mise run test       # the basic suite: cargo nextest run, without the WebAssembly tests (accepts nextest selectors)
+mise run test:wasm  # the WebAssembly suite: every tests/wasm_*.rs binary (slow; needs the wasm32-wasip2 target)
+mise run sources:check      # build and conformance-test every source under sources/
+mise run sources:test -- directory   # the same for one source, which is what each CI leg runs
 mise run lint       # cargo clippy --all-targets --all-features -- -D warnings
 mise run format     # cargo fmt --all
 mise run guards     # the architecture guard hooks, described below
 mise run integrations:check # typecheck and test each package under integrations/ (needs bun, fetched on demand)
-mise run check      # every lint, the guards and the tests, without modifying the tree
+mise run check      # every lint, the guards, both test suites and the sources, without modifying the tree
 mise run ci         # check plus the docs build: the local equivalent of CI's lint,
                     # test and docs steps
 mise cli <args>      # run memcastle from source, e.g. `mise cli status`
@@ -53,6 +56,15 @@ Every path, environment variable, flag and the precedence between them is in [Co
   `store`'s migrations/persistence — the storage tests use SurrealDB's in-memory engine for speed, plus one test
   against a real SurrealKV directory; survival across a restart is proven at the process boundary in
   `tests/persistence.rs`, because SurrealKV's file lock is not released within one process).
+- **Two suites.** A test binary that builds or runs a WebAssembly component is named `tests/wasm_*.rs`,
+  and that prefix is the whole definition of the WebAssembly suite: `.config/nextest.toml` selects it with
+  `binary(/^wasm_/)`, so a new `wasm_` file joins it with no configuration.
+  Everything else is the basic suite, which is what `mise run test` and the `default` and `ci` nextest profiles run;
+  the `wasm` and `ci-wasm` profiles run the other one.
+  The basic suite runs in CI on Linux, macOS and Windows and needs no WebAssembly target.
+  The WebAssembly suite runs in CI on Linux only, in its own `wasm` job with its own Codecov flag,
+  and each directory under `sources/` also gets a CI leg of its own (`mise run sources:test -- <name>`), found automatically.
+  A test that only reads files, such as `tests/source_docs.rs`, builds nothing and stays in the basic suite.
 - **Integration tests** (`tests/`) run against a tempdir palace and an OS-assigned port.
   Most start the daemon in-process (`tests/common`'s `TestDaemon`); the ones that need a real process boundary
   (SurrealKV's file lock is not released within one process) spawn the `memcastle` binary instead:
@@ -100,15 +112,16 @@ Every path, environment variable, flag and the precedence between them is in [Co
     each starts a real `memcastle serve`, finds it through its registry file and replays the same fixtures through
     the integration's own client.
     Run them with `mise run integrations:check`, see [ADR-022](adr/022-integrations-are-bun-packages-tested-against-a-real-daemon.md).
-  - `tests/source_conformance.rs` — the same conformance cases run against the built-in `directory` source and against the
-    reference WebAssembly source built from `sources/directory/`, and the guide's list of cases and diagnostic codes
-    against what ships (in-process).
-  - `tests/source_runtime.rs` — installable sources against a real daemon: consent, the lifecycle, mining through the
-    shared pipeline, and refusing a component altered on disk (in-process).
-  - `tests/source_projects.rs` — `memcastle source init`, `build`, `test` and `package` for real, the sandbox
+  - `tests/wasm_conformance.rs` — the same conformance cases run against the built-in `directory` source and against the
+    reference WebAssembly source built from `sources/directory/` (in-process, WebAssembly suite).
+  - `tests/source_docs.rs` — the guide's list of conformance cases and of diagnostic codes against what ships
+    (no build, basic suite).
+  - `tests/wasm_runtime.rs` — installable sources against a real daemon: consent, the lifecycle, mining through the
+    shared pipeline, and refusing a component altered on disk (in-process, WebAssembly suite).
+  - `tests/wasm_projects.rs` — `memcastle source init`, `build`, `test` and `package` for real, the sandbox
     (a source cannot read outside its grant, see the environment, outrun its time limit or exceed its memory, or run an
     unlisted program) and installing through the CLI.
-    It builds components with Cargo for `wasm32-wasip2` into one shared directory (subprocess).
+    It builds components with Cargo for `wasm32-wasip2` into one shared directory (subprocess, WebAssembly suite).
   - `tests/skills.rs` — the shared [agent skills](skills.md): every skill is discoverable, and every tool, CLI command
     and REST route it names exists in this release (in-process daemon, plus the real binary's help).
 
@@ -117,6 +130,9 @@ Run a subset with nextest's filter syntax, e.g.:
 ```sh
 mise run test -- --filter-expr 'test(job)'
 ```
+
+A filter on `mise run test` still excludes the `wasm_` binaries; use `mise run test:wasm -- <filter>` for those.
+`mise run cover` runs the basic suite with coverage.
 
 ## The architecture guard
 
@@ -161,6 +177,7 @@ or the jobs (at any depth); only `src/mining/wasm/` names the engine; and the ho
 daemon's environment, standard streams, arguments or a writable directory.
 Building the reference WebAssembly sources needs the `wasm32-wasip2` target (`rustup target add wasm32-wasip2`, which
 `rust-toolchain.toml` requests); `mise run sources:check` builds and tests every source under `sources/`.
+`tests/source_isolation.rs` builds nothing and runs in the basic suite on every OS.
 
 Two more hooks guard the remaining invariants.
 `job-status-only-via-apply` fails on any `.status =` assignment outside `src/domain/job.rs`,

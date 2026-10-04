@@ -1,6 +1,6 @@
 //! A source that does what its file names say, to drive every way a component can answer the host.
 //!
-//! It is compiled by `tests/source_projects.rs` in place of the `rust` template's `src/lib.rs`, never as part of
+//! It is compiled by `tests/wasm_projects.rs` in place of the `rust` template's `src/lib.rs`, never as part of
 //! MemCastle. `discover` lists every file in the directory; what `read` and `normalize` do depends on the name.
 
 use std::path::Path;

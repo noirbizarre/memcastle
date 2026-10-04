@@ -241,6 +241,14 @@ that lacks the files reports the source `unavailable`.
 A source that ships with MemCastle's releases, without being compiled into the binary, would be built from here and use
 exactly the package contract a user installs.
 
+## Testing your source in CI
+
+`memcastle source test` needs no daemon and builds the component first, so it is all a CI job has to run.
+In a project of your own, install the `wasm32-wasip2` target (or your template's toolchain), build `memcastle`,
+and run `memcastle source test .`.
+In this repository nothing needs adding: each directory under `sources/` that holds a `memcastle-source.toml`
+gets its own CI job, which runs `mise run sources:test -- <name>`.
+
 ## Troubleshooting
 
 | Code | Cause |
