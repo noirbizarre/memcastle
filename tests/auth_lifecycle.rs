@@ -4,7 +4,7 @@
 //!
 //! Subprocesses, not an in-process daemon: the verifier must survive a *restart*, and SurrealKV's file lock
 //! is not released within one process (see `tests/persistence.rs`).
-//! The in-process, HTTP-level behaviour (every route guarded, MCP exclusion, rotation) is in `tests/auth.rs`.
+//! The in-process, HTTP-level behaviour (every route guarded, MCP exclusion, rotation) is in `tests/in_process/auth.rs`.
 
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};

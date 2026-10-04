@@ -7,8 +7,11 @@
 //! This binary builds a component, so it is part of the `wasm_` suite; the guide's documentation guards, which build
 //! nothing, are in `tests/source_docs.rs`.
 
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::path::PathBuf;
+
+mod common;
+
+use common::wasm::reference_component;
 
 use memcastle::config::MiningConfig;
 use memcastle::mining::adapters::directory::DirectoryAdapter;
@@ -24,21 +27,11 @@ fn cases() -> PathBuf {
     root().join("tests/fixtures/sources/conformance")
 }
 
-/// The reference source, built once for the whole test binary.
-fn reference_component() -> &'static Path {
-    static BUILT: OnceLock<PathBuf> = OnceLock::new();
-    BUILT.get_or_init(|| {
-        let project =
-            Project::open(&root().join("sources/directory")).expect("the reference source opens");
-        project.build().expect(
-            "the reference source builds; `rustup target add wasm32-wasip2` provides its target",
-        )
-    })
-}
-
 fn wasm_directory() -> WasmAdapter {
     let project = Project::open(&root().join("sources/directory")).unwrap();
-    let bytes = std::fs::read(reference_component()).unwrap();
+    // The reference source as `common::wasm` builds it: a debug build in the shared target directory, not the release
+    // one `mise run sources:check` makes.
+    let (bytes, _) = reference_component();
     WasmAdapter::load(&project.manifest, &bytes, &MiningConfig::default()).unwrap()
 }
 

@@ -1,36 +1,36 @@
 //! Installable WebAssembly sources against a real daemon (docs/adr/026): install with consent, the lifecycle, mining
 //! through the same pipeline as a built-in source, and refusing to run what was altered.
 //!
-//! The package is the reference source under `sources/directory`, built and packaged once for the whole binary.
+//! The package is the reference source under `sources/directory`, built and packaged once per test process.
 
 mod common;
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use common::wasm::reference_component;
 use common::{TestDaemon, wait_for_job_status};
 use memcastle::domain::{Job, JobStatus};
-use memcastle::source::build::Project;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 
 const NAME: &str = "directory-wasm";
 
-/// The reference source's package, built once.
+/// The reference source's package, built once per process.
 fn archive() -> &'static [u8] {
     static ARCHIVE: OnceLock<Vec<u8>> = OnceLock::new();
     ARCHIVE.get_or_init(|| {
-        let project =
-            Project::open(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sources/directory"))
-                .expect("the reference source opens");
-        project.build().expect(
-            "the reference source builds; `rustup target add wasm32-wasip2` provides its target",
-        );
-        let out = tempfile::tempdir().unwrap();
-        let (path, _) = project
-            .package(Some(&out.path().join("pkg.tar.gz")))
-            .unwrap();
-        std::fs::read(path).unwrap()
+        // Packed from the debug component `common::wasm` builds, and the manifest as it is in `sources/directory`: the
+        // package a user installs is the same shape, and a release build with LTO would only make every test wait.
+        let (component, manifest) = reference_component();
+        let readme = std::fs::read(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sources/directory/README.md"),
+        )
+        .ok()
+        .map(|bytes| vec![("README.md".to_string(), bytes)])
+        .unwrap_or_default();
+        memcastle::source::package::pack(&manifest, &component, &readme)
+            .expect("the reference source packs")
     })
 }
 

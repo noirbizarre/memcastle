@@ -6,7 +6,7 @@
 //! on the wire. What is specific to one source (Pi's history, `sources/pi`) is tested with that source, in
 //! `tests/wasm_pi.rs`; what is tested here is what the daemon does for any source.
 
-mod common;
+use crate::common;
 
 use std::path::Path;
 use std::time::{Duration, SystemTime};

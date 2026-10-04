@@ -5,7 +5,7 @@
 //! real subprocess (`tokio::process`, never a blocking `assert_cmd` call: the
 //! daemon shares this test's runtime and a blocked thread would stall it).
 
-mod common;
+use crate::common;
 
 use std::process::Stdio;
 

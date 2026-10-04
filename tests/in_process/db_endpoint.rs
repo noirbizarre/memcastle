@@ -5,9 +5,9 @@
 //! speaks JSON and CBOR and can set the `Origin` header the way a browser would.
 //!
 //! Behaviour that needs a separate process (the CLI, the SurrealKV file lock, the log) lives in
-//! `tests/cli_daemon.rs` and `tests/auth_lifecycle.rs`.
+//! `tests/in_process/cli_daemon.rs` and `tests/auth_lifecycle.rs`.
 
-mod common;
+use crate::common;
 
 use common::TestDaemon;
 use futures::{SinkExt, StreamExt};

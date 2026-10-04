@@ -58,7 +58,9 @@ Every path, environment variable, flag and the precedence between them is in [Co
   `tests/persistence.rs`, because SurrealKV's file lock is not released within one process).
 - **Two suites.** A test binary that builds or runs a WebAssembly component is named `tests/wasm_*.rs`,
   and that prefix is the whole definition of the WebAssembly suite: `.config/nextest.toml` selects it with
-  `binary(/^wasm_/)`, so a new `wasm_` file joins it with no configuration.
+  `binary(/^wasm_/)`, and `mise run test:wasm` and CI's `wasm` job pass the same prefix to Cargo as `--test 'wasm_*'`,
+  so that the other test binaries are not compiled for nothing.
+  A new `wasm_` file therefore joins the suite with no configuration.
   Everything else is the basic suite, which is what `mise run test` and the `default` and `ci` nextest profiles run;
   the `wasm` and `ci-wasm` profiles run the other one.
   The basic suite runs in CI on Linux, macOS and Windows and needs no WebAssembly target.
@@ -66,21 +68,30 @@ Every path, environment variable, flag and the precedence between them is in [Co
   and each directory under `sources/` also gets a CI leg of its own (`mise run sources:test -- <name>`), found automatically.
   A test that only reads files, such as `tests/source_docs.rs`, builds nothing and stays in the basic suite.
 - **Integration tests** (`tests/`) run against a tempdir palace and an OS-assigned port.
+  Those that start the daemon inside the test process are modules of one binary, `tests/in_process/main.rs`:
+  each `tests/` binary links the whole server, about 600 MB with debug info, so sixteen of them were most of what
+  compiling the tests took, and one links it once.
+  To add one, create `tests/in_process/<name>.rs` and list it in `main.rs`.
+  nextest still runs every test in a process of its own, and a test is named `in_process <module>::<test>`,
+  so `mise run test -- -E 'binary(in_process) & test(auth::)'` selects one file's tests.
+  A test that needs a process boundary (a daemon that is killed, a CLI with no daemon) stays a binary of its own.
   Most start the daemon in-process (`tests/common`'s `TestDaemon`); the ones that need a real process boundary
   (SurrealKV's file lock is not released within one process) spawn the `memcastle` binary instead:
-  - `tests/server.rs` — health, status, graceful shutdown, retry (in-process).
-  - `tests/concurrency.rs` — many simulated clients submitting jobs and reading status at once,
+  - `tests/in_process/server.rs` — health, status, graceful shutdown, retry (in-process).
+  - `tests/in_process/concurrency.rs` — many simulated clients submitting jobs and reading status at once,
     proving the shared store stays consistent (in-process).
-  - `tests/memory_mode.rs`, `tests/mcp_memory_mode.rs` — per-request and per-MCP-session memory modes (in-process).
-  - `tests/audit.rs`, `tests/repair.rs` — the audit and repair job kinds end to end (in-process).
+  - `tests/in_process/memory_mode.rs`, `tests/in_process/mcp_memory_mode.rs` — per-request and per-MCP-session
+    memory modes (in-process).
+  - `tests/in_process/audit.rs`, `tests/in_process/repair.rs` — the audit and repair job kinds end to end (in-process).
   - `tests/persistence.rs` — data and job state survive a daemon restart, including a SIGKILL mid-job
     and a pause or cancel requested just before it, `memcastle daemon start`
     and `memcastle daemon restart --bind --port` (subprocess).
   - `tests/mcp_smoke.rs` — the MCP surface end to end: a real MCP client over streamable HTTP against a
     `memcastle serve` subprocess, covering read and write tools, migrations before serving, a second session,
     and persistence across a restart with a reconnecting session (subprocess).
-  - `tests/auth.rs` — optional bearer-token authentication over real HTTP: every route guarded, the open health probe,
-    a configured secret, generate, rotate and revoke, and MCP with a token and with no credential-management tool
+  - `tests/in_process/auth.rs` — optional bearer-token authentication over real HTTP: every route guarded,
+    the open health probe, a configured secret, generate, rotate and revoke,
+    and MCP with a token and with no credential-management tool
     (in-process).
   - `tests/auth_lifecycle.rs` — the authentication lifecycle through the real CLI: generate, restart, enable, a
     rotated and a revoked token, the daemon refusing to start with nothing to check against, and no token ever reaching
@@ -97,14 +108,14 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `tests/migrate.rs` — `memcastle migrate` and its `--check`/`--status` modes (subprocess).
   - `tests/cli.rs` — the binary's argument parsing and its behaviour with no daemon reachable (subprocess),
     including colour, `completions` and the absence of a `help` subcommand.
-  - `tests/palace.rs` — the `/api/wings/...` hierarchy routes: lifecycle, error contract and memory-mode gates
+  - `tests/in_process/palace.rs` — the `/api/wings/...` hierarchy routes: lifecycle, error contract and memory-mode gates
     (in-process).
   - `tests/shutdown.rs` — a stopping process lets the embedded datastore finish stopping before it exits (subprocess).
-  - `tests/db_endpoint.rs` — the database admin endpoint: opt-in, loopback by default, refused origins,
+  - `tests/in_process/db_endpoint.rs` — the database admin endpoint: opt-in, loopback by default, refused origins,
     and sharing the daemon's data (in-process).
-  - `tests/cli_daemon.rs` — CLI flags that change what the daemon is asked: `--mode`, and relative `mine` paths
+  - `tests/in_process/cli_daemon.rs` — CLI flags that change what the daemon is asked: `--mode`, and relative `mine` paths
     against an in-process daemon (subprocess client).
-  - `tests/integration_contract.rs` — the daemon half of the [integration contract](integration-contract.md):
+  - `tests/in_process/integration_contract.rs` — the daemon half of the [integration contract](integration-contract.md):
     a real MCP session replays the language-neutral fixtures in `tests/fixtures/integration/`
     (modes, checkpoint payloads, failure classes), and fails when the contract page, the capability manifest
     and the test names disagree (in-process).
@@ -131,9 +142,11 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `tests/wasm_projects.rs` — `memcastle source init`, `build`, `test` and `package` for real, the sandbox
     (a source cannot read outside its grant, see the environment, outrun its time limit or exceed its memory, or run an
     unlisted program) and installing through the CLI.
-    It builds components with Cargo for `wasm32-wasip2` into one shared directory (subprocess, WebAssembly suite).
-  - `tests/skills.rs` — the shared [agent skills](skills.md): every skill is discoverable, and every tool, CLI command
-    and REST route it names exists in this release (in-process daemon, plus the real binary's help).
+    It builds components with Cargo for `wasm32-wasip2` (subprocess, WebAssembly suite);
+    see [Building components in tests](#building-components-in-tests).
+  - `tests/in_process/skills.rs` — the shared [agent skills](skills.md): every skill is discoverable,
+    and every tool, CLI command and REST route it names exists in this release
+    (in-process daemon, plus the real binary's help).
 
 Run a subset with nextest's filter syntax, e.g.:
 
@@ -143,6 +156,46 @@ mise run test -- --filter-expr 'test(job)'
 
 A filter on `mise run test` still excludes the `wasm_` binaries; use `mise run test:wasm -- <filter>` for those.
 `mise run cover` runs the basic suite with coverage.
+
+### Where the CI time goes
+
+Measured on GitHub's runners after the suites were split, so that a change aimed at speed has a baseline to beat.
+Compiling is the test binaries built instrumented for coverage; running is nextest's own summary line.
+The figures are from runs that restored their caches; the first run of a new job, or one whose cache was evicted,
+compiles `wasmtime` and Cranelift from scratch and takes several minutes longer.
+
+| Job | Compiling | Running | Whole job |
+|---|---|---|---|
+| Tests, Linux (basic, 1119 tests) | 46 s | 224 s | 5.4 min |
+| Tests, macOS (basic) | 25 s | 67 s | 2.5 min |
+| Tests, Windows (basic) | 75 s | 215 s | 7.3 min |
+| WebAssembly tests, Linux (38 tests) | 10 s with warm caches, 2.8 min cold | 38 s | 1.5 to 4.3 min |
+| Source, one leg per `sources/<name>/` | 10 s | seconds | about 1 min |
+
+The WebAssembly tests run in under a minute in CI, and their job finishes well before the basic Linux one.
+Both suites build only the test binaries they run: the wasm job passes `--test 'wasm_*'` to Cargo,
+and the daemon tests that start a server in the test process are one binary, `tests/in_process`, rather than sixteen.
+The time left in the basic suite is its roughly 1100 tests, not compiling or WebAssembly.
+
+#### Building components in tests
+
+Under nextest every test is its own process, so a component built by one test is invisible to the next, and the cost
+is how many times Cargo has to compile what.
+The helpers in `tests/common/wasm.rs` keep that to one small crate per build:
+
+- Every `wasm_*` test builds into one shared debug target directory, so `wit-bindgen` and `serde_json` compile once.
+- Every scaffolded project is seeded with the reference source's `Cargo.lock`.
+  A scaffold ships none, and without it each build updated the crates.io index and re-resolved 35 packages while holding
+  Cargo's package-cache lock, which every other build then waited for.
+- The reference source is built in place, in debug, into that shared directory, so a test never waits for the
+  release build with LTO that `mise run sources:check` and CI's per-source job make.
+- A test that drives `memcastle source init` must call `share_target_of` afterwards.
+  Without it the project builds in release into a `target/` of its own and recompiles every dependency, which used to be
+  the two slowest tests in the suite.
+
+Locally this took the WebAssembly suite from about 225 s to 95 s on a cold target directory and from about 92 s to 38 s
+on a warm one; in CI, on a warm cache, the tests went from 49 s to 31 s and the slowest from 25 s to 14 s.
+What is left of the job is compiling the instrumented test binaries.
 
 ## The architecture guard
 
@@ -168,14 +221,14 @@ it fails on `surrealdb`, `surrealkv`, `SurrealStore`, a `store` or `jobs` path, 
 Like the others it is a text match, so a comment that names one of them trips it too.
 
 The authentication invariant has no hook, because a route or an MCP tool is not something a grep can recognise.
-It is enforced by tests instead: `tests/auth.rs` walks a list of the REST routes
+It is enforced by tests instead: `tests/in_process/auth.rs` walks a list of the REST routes
 (and a route that does not exist) without a token, and fails if an MCP tool's name mentions credentials.
 
 The database admin endpoint ([ADR-015](adr/015-database-admin-endpoint.md)) is guarded the same way:
 a daemon that was only started has no second listener, a non-loopback bind needs the opt-in and authentication,
 a page from another origin is refused, and no MCP tool mentions the database.
-Those are `tests/db_endpoint.rs`, the `/api/db` entries in `tests/auth.rs` and a unit test that `serve` has no flag
-that starts it.
+Those are `tests/in_process/db_endpoint.rs`, the `/api/db` entries in `tests/in_process/auth.rs`
+and a unit test that `serve` has no flag that starts it.
 `surrealdb-core` and `surrealdb-rpc` are pinned to the exact `surrealdb` version: they are SurrealDB internal API,
 so bump all three together.
 

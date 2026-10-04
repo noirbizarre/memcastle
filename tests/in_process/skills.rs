@@ -7,7 +7,7 @@
 //! What this cannot prove, and stays with the reviewer: that the advice is good. It only proves the advice is
 //! about things that exist.
 
-mod common;
+use crate::common;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -627,6 +627,6 @@ fn the_integration_contract_still_records_skills_as_plain_text_with_no_daemon_op
     );
     assert!(
         skills_row["daemon_test"].is_null(),
-        "nothing about the skills row is tested against a daemon; tests/skills.rs checks the files"
+        "nothing about the skills row is tested against a daemon; tests/in_process/skills.rs checks the files"
     );
 }

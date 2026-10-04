@@ -3,7 +3,7 @@
 //! agent sessions at once (see `docs/architecture.md`, "The core idea", and
 //! ADR-002's tests of memory-mode isolation).
 
-mod common;
+use crate::common;
 
 use common::{TestDaemon, get_job, wait_for_all_jobs_completed, wait_for_job_status};
 use futures::future::join_all;

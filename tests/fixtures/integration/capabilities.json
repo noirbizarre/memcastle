@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "The conformance matrix as data: one entry per capability an integration must satisfy. docs/integration-contract.md carries the same ids, and tests/integration_contract.rs fails when the two disagree.",
+  "description": "The conformance matrix as data: one entry per capability an integration must satisfy. docs/integration-contract.md carries the same ids, and tests/in_process/integration_contract.rs fails when the two disagree.",
   "capabilities": [
     {
       "id": "session-mode",

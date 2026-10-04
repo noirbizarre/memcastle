@@ -28,7 +28,7 @@ export interface SharedSkill {
 /**
  * The `name` and `description` of a `SKILL.md`, or `undefined` when the frontmatter has neither.
  *
- * Skill frontmatter is flat `key: value` lines (`tests/skills.rs` holds the files to that), so a line split is enough,
+ * Skill frontmatter is flat `key: value` lines (`tests/in_process/skills.rs` holds the files to that), so a line split is enough,
  * and a description may contain colons because only the first `: ` splits.
  */
 export function frontmatterOf(source: string): { name: string; description: string } | undefined {

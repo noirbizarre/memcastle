@@ -5,7 +5,7 @@
 //! variants converge on one entity while every source keeps its own spelling, and an ambiguous name stays distinct and
 //! says what it might be.
 
-mod common;
+use crate::common;
 
 use std::path::Path;
 use std::time::{Duration, SystemTime};

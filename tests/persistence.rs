@@ -240,7 +240,7 @@ async fn checkpoint_drawers_survive_a_daemon_restart_against_the_same_palace() {
 /// that died uncleanly (SIGKILL — no shutdown hook runs) is picked up by
 /// the next daemon's `server::run` -> `Scheduler::recover` and finished.
 ///
-/// Lives here rather than in `tests/server.rs` because seeding a `Running`
+/// Lives here rather than in `tests/in_process/server.rs` because seeding a `Running`
 /// row needs the palace's SurrealKV lock, which an in-process test cannot
 /// take back after a `Surreal` handle drops (see `store::tests`); a second
 /// real process is the only way to have "the previous owner is gone".

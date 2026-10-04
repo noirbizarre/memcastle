@@ -3,7 +3,7 @@
 //! `Job.result` via `GET /api/jobs/{id}` — see `memcastle::audit`'s module
 //! doc for what the report checks.
 
-mod common;
+use crate::common;
 
 use common::{TestDaemon, wait_for_job_status};
 use memcastle::domain::{Job, JobStatus};

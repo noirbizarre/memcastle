@@ -1,7 +1,7 @@
 //! The hierarchy routes (`/api/wings/...`) against a real daemon: the
 //! lifecycle, the error contract, and the memory-mode gates.
 
-mod common;
+use crate::common;
 
 use common::{TestDaemon, wait_for_job_status};
 use memcastle::domain::JobStatus;

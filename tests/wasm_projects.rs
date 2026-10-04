@@ -1,18 +1,21 @@
 //! Source projects end to end: `memcastle source init`, `build`, `test` and `package`, the sandbox a component runs
 //! in, and installing the result through the CLI (docs/adr/026, docs/writing-sources.md).
 //!
-//! Every project here is built for real with `cargo build --target wasm32-wasip2`, into one shared target directory so
-//! the dependencies compile once. Where a test needs a misbehaving source it scaffolds a project and patches the
+//! Every project here is built for real with `cargo build --target wasm32-wasip2`, into one shared target directory
+//! and from one shared lockfile (`common::wasm`), so the dependencies compile once and nothing resolves against the
+//! network. A test that drives the CLI must call `share_target_of` after `source init`: forgetting it builds in release
+//! into a `target/` of its own and recompiles every dependency, which was two of the slowest tests here. Where a test needs a misbehaving source it scaffolds a project and patches the
 //! source: the sandbox is only proven by running code that tries to leave it.
 
 mod common;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
 
 use assert_cmd::Command as Blocking;
 use assert_cmd::cargo::cargo_bin;
 use common::TestDaemon;
+use common::wasm::{seed_lockfile, share_target, share_target_of, shared_target};
 use memcastle::config::MiningConfig;
 use memcastle::domain::{Candidate, Cursor, RawDocument, SourceKind, SourceRef};
 use memcastle::error::Error;
@@ -22,44 +25,6 @@ use memcastle::source::build::Project;
 use memcastle::source::scaffold::{Template, init};
 use predicates::str::contains;
 use serde_json::Value;
-
-/// Where every project in this binary builds, so Cargo compiles `wit-bindgen` and friends once.
-fn shared_target() -> PathBuf {
-    Path::new(env!("CARGO_TARGET_TMPDIR")).join("source-projects")
-}
-
-/// Point a scaffolded project's build at the shared target directory.
-fn share_target(manifest: &str, name: &str) -> String {
-    let target = shared_target();
-    // A debug build: a project is built a dozen times here and nothing about the sandbox depends on optimisation, so
-    // the release profile's LTO would only make the suite wait.
-    manifest
-        .replace("\"--release\", ", "")
-        .replace(
-            "\"--target-dir\", \"target\"]",
-            &format!("\"--target-dir\", '{}']", target.display()),
-        )
-        .replace(
-            &format!(
-                "output = \"target/wasm32-wasip2/release/{}.wasm\"",
-                name.replace('-', "_")
-            ),
-            &format!(
-                "output = '{}'",
-                target
-                    .join("wasm32-wasip2/debug")
-                    .join(format!("{}.wasm", name.replace('-', "_")))
-                    .display()
-            ),
-        )
-}
-
-/// Make an `init`-ed project in `dir/name` build into the shared target directory too.
-fn share_target_of(dir: &Path, name: &str) {
-    let manifest = dir.join(name).join("memcastle-source.toml");
-    let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, share_target(&text, name)).unwrap();
-}
 
 /// A scaffolded, patched and built project.
 struct Built {
@@ -84,6 +49,7 @@ fn scaffold(
         name,
     ));
     std::fs::write(&manifest, patched).unwrap();
+    seed_lockfile(&root);
     let project = Project::open(&root).unwrap();
     project.build().expect("the scaffolded project builds");
     Built { _dir: dir, project }
@@ -520,6 +486,7 @@ fn a_failing_conformance_case_fails_the_test_command_and_names_what_broke() {
         .args(["source", "init", "broken"])
         .assert()
         .success();
+    share_target_of(work.path(), "broken");
     let project = work.path().join("broken");
     // The cases expect `alpha`; the source now disagrees about what the first file says.
     std::fs::write(project.join("fixtures/text-files/tree/a.txt"), "changed\n").unwrap();
@@ -558,6 +525,7 @@ async fn the_cli_installs_lists_disables_and_removes_a_source_and_never_consents
         .args(["source", "init", "notes"])
         .assert()
         .success();
+    share_target_of(work.path(), "notes");
     let project = work.path().join("notes");
     memcastle_in(&project)
         .args(["source", "package"])

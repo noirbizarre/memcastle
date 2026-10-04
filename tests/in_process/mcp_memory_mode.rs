@@ -7,7 +7,7 @@
 //! integration-level proof that `McpTools`'s mode is scoped to its session, not
 //! a shared/global flag (see `src/mcp/mod.rs`'s doc comment).
 
-mod common;
+use crate::common;
 
 use common::TestDaemon;
 use rmcp::model::CallToolRequestParams;

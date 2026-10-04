@@ -58,16 +58,17 @@ An invariant nothing checks is a comment, and it will be violated.
    and token generation and revocation are REST/CLI operations with no MCP tool.
    A token or secret is never logged, serialised or persisted in plaintext (`config::Secret` redacts it;
    the store holds only a digest) — see `docs/adr/014-optional-token-authentication.md`.
-   Enforced by `tests/auth.rs` (every route and an unknown path refused without a token, no credential-named MCP tool)
+   Enforced by `tests/in_process/auth.rs`
+   (every route and an unknown path refused without a token, no credential-named MCP tool)
    and `tests/auth_lifecycle.rs` (no token in the log, the database or any file).
 7. **The database admin endpoint is opt-in, loopback by default, and runs on the daemon's own handle** —
    only an explicit `memcastle db start` (REST `/api/db`) opens it, `serve` never does, and it never binds beyond loopback
    without `--allow-remote` *and* authentication.
    It serves each connection from a clone of the daemon's `Surreal<Any>`, never a second connection or process,
    and has no MCP tool — see `docs/adr/015-database-admin-endpoint.md`.
-   Enforced by `tests/db_endpoint.rs` (a started daemon has no endpoint, unsafe binds are refused,
+   Enforced by `tests/in_process/db_endpoint.rs` (a started daemon has no endpoint, unsafe binds are refused,
    foreign origins are refused, the endpoint sees and shares the daemon's data),
-   by `tests/auth.rs` (`/api/db` is guarded, no MCP tool mentions the database)
+   by `tests/in_process/auth.rs` (`/api/db` is guarded, no MCP tool mentions the database)
    and by `tests/auth_lifecycle.rs` (no token in the log or any file).
 8. **An integration is lifecycle glue over MCP and HTTP, and nothing else** —
    everything under `integrations/` decides *when* to call MemCastle and never reaches storage, the job code or the
@@ -76,8 +77,8 @@ An invariant nothing checks is a comment, and it will be violated.
    Client lifecycle logic does not move into MemCastle to make two clients look alike.
    Enforced by the prek `integrations-http-only` hook: it fails on `surrealdb`, `surrealkv`, `SurrealStore`, a
    `store`/`jobs` path or `/api/db` anywhere under `integrations/` (Markdown and `node_modules` excepted),
-   and by `tests/integration_contract.rs`, which replays `tests/fixtures/integration/` against a real daemon and fails
-   when the contract page, the capability manifest and the test names disagree.
+   and by `tests/in_process/integration_contract.rs`, which replays `tests/fixtures/integration/` against a real daemon
+   and fails when the contract page, the capability manifest and the test names disagree.
 
 9. **Source-specific code stays out of the mining pipeline, and adapters stay out of storage** —
    everything that differs between mining sources (discovery, reading, normalizing) lives in one adapter under
@@ -111,7 +112,8 @@ An invariant nothing checks is a comment, and it will be violated.
     by `tests/wasm_projects.rs` (a real source cannot read outside its grant, see the environment, outrun its time
     limit or memory, or run an unlisted program),
     by `tests/wasm_runtime.rs` (no install without the exact consent, an altered component is never run)
-    and by `tests/auth.rs` (every `/api/source-packages` route is guarded, no MCP tool installs or changes a source).
+    and by `tests/in_process/auth.rs`
+    (every `/api/source-packages` route is guarded, no MCP tool installs or changes a source).
 
 ## Layout
 
@@ -150,7 +152,7 @@ wit/            the source contract (`memcastle:source`), the one definition com
 sources/        official and reference WebAssembly sources (`directory`, `pi`), one package per directory, built and
                 tested but not compiled into MemCastle
 integrations/   per-agent lifecycle adapters (Pi, OpenCode, ...), in each agent's own language, over MCP and HTTP only
-skills/         reusable agent instructions shared by every integration; `tests/skills.rs` holds them to the
+skills/         reusable agent instructions shared by every integration; `tests/in_process/skills.rs` holds them to the
                 tools, commands and routes they name (docs/skills.md)
 tests/fixtures/integration/   the language-neutral conformance fixtures every integration is held to
 ```

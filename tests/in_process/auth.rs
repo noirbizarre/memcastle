@@ -4,7 +4,7 @@
 //! What restarting does to the verifier, and what the CLI and the daemon's log show, need a separate process
 //! (SurrealKV's file lock outlives an in-process restart) and live in `tests/auth_lifecycle.rs`.
 
-mod common;
+use crate::common;
 
 use common::TestDaemon;
 use memcastle::config::Secret;

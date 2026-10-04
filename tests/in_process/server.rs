@@ -1,6 +1,6 @@
 //! Server boundary tests: start, health/status, graceful shutdown.
 
-mod common;
+use crate::common;
 
 use common::{TestDaemon, get_job, wait_for_job_status};
 use memcastle::domain::{Job, JobId, JobStatus};
