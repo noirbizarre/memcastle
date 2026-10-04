@@ -26,7 +26,8 @@ An invariant nothing checks is a comment, and it will be violated.
    (`daemon start` and `daemon restart` also manage the daemon *process* — they read the registry file
    via `server::lifecycle` and spawn `serve` detached — but touch neither `store` nor `jobs`.
    `source init`, `build`, `test` and `package` work on a project directory with no daemon at all, through `crate::source`,
-   which `tests/source_isolation.rs` holds to touching neither `store` nor `jobs`.)
+   which `tests/source_isolation.rs` holds to touching neither `store` nor `jobs`.
+   `note` also reads the project directory through `crate::project` to choose a wing and room, then calls the daemon.)
    `migrate` is a second, narrow exception alongside `serve`: it connects to storage directly (via
    `crate::migrate::run`/`status`, the same runner `serve` calls on every startup) because migration must work
    without, and before, a daemon exists — see `docs/adr/004-versioned-database-migrations.md`.
@@ -131,8 +132,10 @@ src/
 ├── assets/     runtime asset resolution (override, installed, embedded); never user data, never the network
 ├── dbadmin/    the database admin endpoint: SurrealDB's WebSocket protocol over the daemon's own handle
 ├── jobs/       the scheduler: claiming, dispatch, cooperative pause/cancel, crash recovery
+├── project.rs  the project-local `.config/memcastle.toml` and `MEMCASTLE_WING`/`MEMCASTLE_ROOM`: a directory read, shared by
+│               the directory adapter and the CLI's `note`; no store, no jobs
 ├── mining/     the mining job handler: the source adapter contract, the shared pipeline and chunker, the built-in adapters
-│               (the directory adapter alone reads a project's `.config/memcastle.toml`, for its default wing),
+│               (the directory adapter alone reads a project's `.config/memcastle.toml`, for its default wing, through `project`),
 │               the registry that names them, and the WebAssembly host that runs installed sources (`wasm/`)
 ├── source/     source packages: manifest, archive, scaffolding, build, and the conformance runner (no store, no jobs)
 ├── checkpoint/ the checkpoint job handler (durable, resumable memory writes)

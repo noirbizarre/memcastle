@@ -1,5 +1,5 @@
 {
-  "_comment": "Each case builds `files` under a fresh root, resolves the project for `start` (relative to the root, empty = the root) with `home` (relative to the root, absent = no home boundary) as $HOME and `env` as the environment, and expects either `expect` (wing/room/name, null for none; null = no project context at all) or an `error` substring in the message. The daemon half (src/mining/adapters/project_file.rs) replays the cases without `env` and checks only the wing; the integrations replay every case and check everything. See docs/project-config.md.",
+  "_comment": "Each case builds `files` under a fresh root, resolves the project for `start` (relative to the root, empty = the root) with `home` (relative to the root, absent = no home boundary) as $HOME and `env` as the environment, and expects either `expect` (wing/room/name, null for none; null = no project context at all) or an `error` substring in the message. Both readers replay every case and check everything (src/project.rs in Rust). See docs/project-config.md.",
   "cases": [
     {
       "name": "a directory with no project file has no project context",

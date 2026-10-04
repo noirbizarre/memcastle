@@ -200,9 +200,97 @@ fn ask(question: &str) -> Result<bool> {
         .map_err(|error| Error::prompt_failed(error.to_string()))
 }
 
+/// Open `$VISUAL`, else `$EDITOR`, on a scratch file holding `initial`, and return what was saved.
+///
+/// The variable may carry arguments (`code --wait`), split on whitespace, which is what shells and `git` accept for it.
+/// The scratch file is removed when this returns, so an abandoned note leaves nothing behind.
+///
+/// # Errors
+///
+/// [`Error::InvalidInput`] when no editor is configured or the editor exits unsuccessfully (a failed or cancelled edit
+/// must not be saved as if it were finished), and [`Error::Io`] when the editor cannot be started or the file read.
+pub fn edit(initial: &str) -> Result<String> {
+    let configured = ["VISUAL", "EDITOR"]
+        .iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .find(|value| !value.trim().is_empty());
+    edit_with(configured.as_deref(), initial)
+}
+
+/// [`edit`] with the editor command given, which is the seam the tests use instead of the real environment.
+fn edit_with(editor: Option<&str>, initial: &str) -> Result<String> {
+    use std::io::Write;
+
+    let Some(editor) = editor else {
+        return Err(Error::invalid_input(
+            "note",
+            "no editor is configured: set `$VISUAL` or `$EDITOR`, or give the note as an argument or on standard input",
+        ));
+    };
+    let mut words = editor.split_whitespace();
+    let Some(program) = words.next() else {
+        return Err(Error::invalid_input(
+            "note",
+            "the configured editor is blank",
+        ));
+    };
+    // A `.md` suffix is what lets an editor pick a sensible mode for what is usually prose.
+    let mut file = tempfile::Builder::new()
+        .prefix("memcastle-note-")
+        .suffix(".md")
+        .tempfile()
+        .map_err(|source| Error::io("<scratch file>", source))?;
+    file.write_all(initial.as_bytes())
+        .and_then(|()| file.flush())
+        .map_err(|source| Error::io(file.path().display().to_string(), source))?;
+    let status = std::process::Command::new(program)
+        .args(words)
+        .arg(file.path())
+        .status()
+        .map_err(|source| Error::io(program, source))?;
+    if !status.success() {
+        return Err(Error::invalid_input(
+            "note",
+            format!("the editor `{program}` exited with {status}, so nothing was saved"),
+        ));
+    }
+    std::fs::read_to_string(file.path())
+        .map_err(|source| Error::io(file.path().display().to_string(), source))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editing_without_an_editor_says_how_to_configure_one() {
+        let error = edit_with(None, "").unwrap_err();
+        assert!(error.to_string().contains("$VISUAL"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_editor_is_given_the_seed_and_what_it_saves_is_returned() {
+        // `sed -i` stands in for an editor: it rewrites the scratch file it is handed, with an argument first.
+        let saved = edit_with(Some("sed -i s/draft/final/"), "a draft note\n").unwrap();
+        assert_eq!(saved, "a final note\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_editor_that_fails_saves_nothing() {
+        let error = edit_with(Some("false"), "x").unwrap_err();
+        assert!(error.to_string().contains("nothing was saved"), "{error}");
+    }
+
+    #[test]
+    fn an_editor_that_cannot_start_is_reported_by_name() {
+        let error = edit_with(Some("memcastle-no-such-editor"), "x").unwrap_err();
+        assert!(
+            error.to_string().contains("memcastle-no-such-editor"),
+            "{error}"
+        );
+    }
 
     const ESCAPE: char = '\u{1b}';
 

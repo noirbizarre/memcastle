@@ -139,6 +139,11 @@ pub enum Command {
     /// `test` and `package` are local and need no daemon.
     #[command(subcommand)]
     Source(SourceCommand),
+    /// Capture a note: a thought written down as it comes, filed under the
+    /// current project and kept verbatim. The text is an argument, a file
+    /// (`--file`, `-` for standard input), piped standard input, or written
+    /// in `$VISUAL`/`$EDITOR` (`--edit`, or no text on a terminal).
+    Note(NoteArgs),
     /// Submit a checkpoint job: persist an already-classified batch of
     /// memory writes.
     Checkpoint(CheckpointArgs),
@@ -397,7 +402,7 @@ pub struct RetrievalArgs {
     #[arg(long = "tag")]
     pub tags: Vec<String>,
     /// Only drawers from this kind of source.
-    #[arg(long, value_parser = PossibleValuesParser::new(["file", "manual", "transcript", "other"]))]
+    #[arg(long, value_parser = PossibleValuesParser::new(["file", "manual", "transcript", "note", "other"]))]
     pub source_kind: Option<String>,
     /// Search the memory that was valid at this RFC 3339 instant
     /// (e.g. 2026-01-31T12:00:00Z) instead of now.
@@ -489,6 +494,30 @@ pub struct MineArgs {
     /// or to the source's own default.
     #[arg(long)]
     pub wing: Option<String>,
+}
+
+/// Arguments for `memcastle note`.
+#[derive(Debug, Args)]
+pub struct NoteArgs {
+    /// The note. Several words are joined with spaces, so quoting is
+    /// optional; start with `--` to write text that begins with a dash.
+    #[arg(value_name = "TEXT", conflicts_with = "file")]
+    pub text: Vec<String>,
+    /// Read the note from this file; `-` reads standard input.
+    #[arg(long, short, value_name = "PATH")]
+    pub file: Option<PathBuf>,
+    /// Write the note in `$VISUAL` (else `$EDITOR`), starting from TEXT when
+    /// it is given. The default when no text is given on a terminal.
+    #[arg(long, short, conflicts_with = "file")]
+    pub edit: bool,
+    /// File the note under this wing instead of the project's
+    /// (`MEMCASTLE_WING`, `.config/memcastle.toml`, else the directory's name).
+    #[arg(long)]
+    pub wing: Option<String>,
+    /// File the note in this room instead of the project's
+    /// (`MEMCASTLE_ROOM`, `.config/memcastle.toml`, else `notes`).
+    #[arg(long)]
+    pub room: Option<String>,
 }
 
 /// Arguments for `memcastle checkpoint`.

@@ -414,22 +414,7 @@ impl AppServices {
             validate_name(NameKind::Drawer, name)?;
         }
         let wing = self.ensure_wing(wing).await?;
-        let room = match self.resolve_room(&wing, room).await {
-            Ok(room) => room,
-            Err(Error::RoomNotFound { .. }) => {
-                // An unknown id is not a name to create: `validate_name`
-                // refuses anything shaped like a UUID.
-                if room.parse::<RoomId>().is_ok() {
-                    return Err(Error::RoomNotFound {
-                        wing: wing.name.clone(),
-                        room: room.to_string(),
-                    });
-                }
-                validate_name(NameKind::Room, room)?;
-                self.store.get_or_create_room(wing.id, room, None).await?
-            }
-            Err(error) => return Err(error),
-        };
+        let room = self.ensure_room(&wing, room).await?;
 
         let drawer = Drawer::new(
             DrawerId::new(),
@@ -520,6 +505,77 @@ impl AppServices {
         })
     }
 
+    /// Capture a note: a thought written down as it came, filed in `wing`/`room` and kept verbatim (docs/adr/031).
+    ///
+    /// A note is an unnamed drawer with `source.kind = note`, so it is recalled, searched, embedded, deduplicated and
+    /// (when extraction is configured) read for entities like every other memory, and there is no second store.
+    /// It is written synchronously, like a diary entry, so the caller gets the drawer's stable id back at once.
+    /// `uri` is where it was captured (the working directory, for the CLI); `requested_by` is the channel it came
+    /// through. The drawer's `created_at` and `valid_from` are the capture time.
+    /// An exact copy already in the room is not stored twice: the existing note is returned with `created = false`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidInput`] for blank content, [`Error::InvalidPalacePath`] for an unusable wing or room name,
+    /// [`Error::ModeForbidden`] unless `mode` permits writes, or a store error.
+    pub async fn note_write(
+        &self,
+        wing: &str,
+        room: &str,
+        content: String,
+        uri: Option<String>,
+        requested_by: &str,
+        mode: MemoryMode,
+    ) -> Result<Created<Drawer>> {
+        Self::require_write(mode, "note_write")?;
+        // A blank note is never recallable, so storing one would silently lose what the user believed they saved.
+        if content.trim().is_empty() {
+            return Err(Error::invalid_input("content", "must not be empty"));
+        }
+        let wing = self.ensure_wing(wing).await?;
+        let room = self.ensure_room(&wing, room).await?;
+
+        let drawer = Drawer::new(
+            DrawerId::new(),
+            room.id,
+            content,
+            Source::new(SourceKind::Note, uri, None),
+            vec![],
+            Provenance {
+                requested_by: requested_by.to_string(),
+                job_id: None,
+            },
+        );
+        match crate::dedup::write(
+            &self.store,
+            &drawer,
+            &self.dedup,
+            crate::dedup::Rules::MEMORY,
+        )
+        .await?
+        {
+            crate::dedup::Outcome::Stored { .. } => {
+                // Derived data, queued after the canonical write succeeded and never able to fail it.
+                self.scheduler.ensure_embedding_sweep().await;
+                // Notes carry no mining origin, so nothing else would ever ask for them to be read.
+                self.scheduler.ensure_extraction_sweep().await;
+                Ok(Created {
+                    created: true,
+                    item: drawer,
+                })
+            }
+            crate::dedup::Outcome::Duplicate { existing } => Ok(Created {
+                created: false,
+                item: self.store.get_drawer(existing).await?.ok_or_else(|| {
+                    Error::DrawerNotFound {
+                        room: format!("{}/{}", wing.name, room.name),
+                        drawer: existing.to_string(),
+                    }
+                })?,
+            }),
+        }
+    }
+
     /// The drawers `drawer` was recorded as a likely duplicate of, or that were recorded as likely duplicates of
     /// it, with the evidence for each (docs/adr/025). Nothing is merged: every drawer here still stands on its own.
     ///
@@ -596,6 +652,26 @@ impl AppServices {
                 }
                 validate_name(NameKind::Wing, wing)?;
                 self.store.get_or_create_wing(wing, None).await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// The room of `wing` a name or id refers to, created when `room` is a usable name nothing has yet.
+    async fn ensure_room(&self, wing: &Wing, room: &str) -> Result<Room> {
+        match self.resolve_room(wing, room).await {
+            Ok(room) => Ok(room),
+            Err(Error::RoomNotFound { .. }) => {
+                // An unknown id is not a name to create: `validate_name`
+                // refuses anything shaped like a UUID.
+                if room.parse::<RoomId>().is_ok() {
+                    return Err(Error::RoomNotFound {
+                        wing: wing.name.clone(),
+                        room: room.to_string(),
+                    });
+                }
+                validate_name(NameKind::Room, room)?;
+                self.store.get_or_create_room(wing.id, room, None).await
             }
             Err(error) => Err(error),
         }

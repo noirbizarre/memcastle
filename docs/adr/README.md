@@ -93,3 +93,7 @@ The history is the value.
 - [ADR-030](030-opencode-history-is-an-installed-webassembly-source.md) — OpenCode's conversation history is an
   installed WebAssembly source built from `sources/opencode/` that acquires sessions by running the `opencode` command,
   a wider permission than a file grant, so no OpenCode or SQLite code enters the core
+- [ADR-031](031-note-capture.md) — `memcastle note` captures a thought as an unnamed drawer of source kind `note`, written
+  through a synchronous service like the diary and read for entities like mined content; the CLI resolves the project
+  scope itself with the reader the mining adapter shares, and there is no MCP tool
+  (amends ADR-029)

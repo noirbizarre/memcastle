@@ -21,7 +21,7 @@ mod cli;
 use cli::{
     AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, CompletionsArgs, DaemonCommand,
     DbCommand, DiaryCommand, DrawerCommand, EmbedArgs, ExtractArgs, JobCommand, MigrateArgs,
-    MineArgs, RecallArgs, RepairArgs, RoomCommand, SearchArgs, ServeArgs, SourceCommand,
+    MineArgs, NoteArgs, RecallArgs, RepairArgs, RoomCommand, SearchArgs, ServeArgs, SourceCommand,
     StatusArgs, WakeUpArgs, WingCommand,
 };
 use memcastle::app::{DbEndpointRequest, DbEndpointStatus, WakeUpBudget};
@@ -219,6 +219,7 @@ async fn run_command(
         Command::Mine(args) => cmd_mine(&config, mode, args).await,
         Command::Sources => cmd_sources(&config, mode).await,
         Command::Source(command) => cmd_source(&config, mode, command).await,
+        Command::Note(args) => cmd_note(&config, mode, args).await,
         Command::Checkpoint(args) => cmd_checkpoint(&config, mode, args).await,
         Command::Audit(args) => cmd_audit(&config, mode, args).await,
         Command::Embed(args) => cmd_embed(&config, mode, args).await,
@@ -771,6 +772,102 @@ async fn cmd_source(
         | SourceCommand::Test(_)
         | SourceCommand::Package(_) => Ok(()),
     }
+}
+
+/// The room a note goes to when neither the command line nor the project names one.
+const DEFAULT_NOTE_ROOM: &str = "notes";
+
+/// Capture a note under the current project.
+///
+/// The text and the project scope are resolved locally, before the daemon is contacted, so a missing editor or a
+/// broken project file fails as itself and not after a round trip. The daemon is only told the wing and room, as it is
+/// by every client (docs/adr/029): it never learns what a project is.
+async fn cmd_note(config: &Config, mode: Option<MemoryMode>, args: NoteArgs) -> Result<()> {
+    let text = read_note_text(&args)?;
+    let directory = std::env::current_dir()
+        .map_err(|source| Error::io("<current directory>", source))
+        .map(|dir| dir.canonicalize().unwrap_or(dir))?;
+    let (wing, room) = note_scope(&directory, args.wing, args.room)?;
+    let created = client(config, mode)
+        .write_note(&wing, &room, text, Some(&directory.display().to_string()))
+        .await?;
+    use memcastle::client::palace_view as view;
+    print_for_terminal_or_json(
+        |painter, _| view::render_note(&created.item, created.created, &wing, &room, painter),
+        &created,
+    )
+}
+
+/// The wing and room a note captured in `directory` is filed under.
+///
+/// Per field: the flag, else the project context (`MEMCASTLE_WING`/`MEMCASTLE_ROOM`, then `.config/memcastle.toml`),
+/// else the directory's name for the wing and `notes` for the room.
+/// With both flags given nothing is read from the project, so a broken project file cannot block a note whose
+/// destination was stated outright.
+fn note_scope(
+    directory: &std::path::Path,
+    wing: Option<String>,
+    room: Option<String>,
+) -> Result<(String, String)> {
+    let project = if wing.is_some() && room.is_some() {
+        None
+    } else {
+        memcastle::project::resolve(directory)?
+    };
+    let wing = wing
+        .or_else(|| project.as_ref().and_then(|p| p.wing.clone()))
+        .or_else(|| memcastle::project::wing_from_directory(directory))
+        .ok_or_else(|| {
+            Error::invalid_input(
+                "wing",
+                "cannot name a wing after the current directory, pass `--wing <name>`",
+            )
+        })?;
+    let room = room
+        .or_else(|| project.and_then(|p| p.room))
+        .unwrap_or_else(|| DEFAULT_NOTE_ROOM.to_string());
+    Ok((wing, room))
+}
+
+/// The text of a note: the words given, else `--file` (`-` for standard input), else `--edit`, else piped standard
+/// input, else the editor when a person is at the terminal.
+///
+/// Inline words are kept exactly. Text that came from a file, standard input or an editor loses its trailing
+/// whitespace, because the final newline is an artefact of how it was produced and not part of the thought.
+/// A note with nothing in it is refused rather than stored: a blank drawer is never recallable.
+fn read_note_text(args: &NoteArgs) -> Result<String> {
+    use std::io::{IsTerminal, Read};
+    let from_stdin = || {
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .map(|_| buf)
+            .map_err(|source| Error::io("<stdin>", source))
+    };
+    let inline = args.text.join(" ");
+    let text = match &args.file {
+        Some(path) if path.as_os_str() == "-" => from_stdin()?,
+        Some(path) => std::fs::read_to_string(path)
+            .map_err(|source| Error::io(path.display().to_string(), source))?,
+        None if args.edit => term::edit(&inline)?,
+        None if !args.text.is_empty() => inline,
+        // Piped input is read as is; a terminal means someone is there to type, and a shell prompt that hangs on a
+        // forgotten argument is worse than an editor opening.
+        None if std::io::stdin().is_terminal() => term::edit("")?,
+        None => from_stdin()?,
+    };
+    let kept = if args.file.is_some() || args.edit || args.text.is_empty() {
+        text.trim_end().to_string()
+    } else {
+        text
+    };
+    if kept.trim().is_empty() {
+        return Err(Error::invalid_input(
+            "note",
+            "nothing to save, the note is empty: give the text as an argument, pipe it on standard input or use `--edit`",
+        ));
+    }
+    Ok(kept)
 }
 
 async fn cmd_checkpoint(

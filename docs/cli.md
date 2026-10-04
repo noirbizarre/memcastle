@@ -160,7 +160,7 @@ lexical otherwise.
 Lexical matching returns drawers containing every word of the query and, if there are none, drawers containing any of them.
 `--limit` defaults to 10 and is capped at 200.
 `--wing` restricts results to a wing, `--room` to a room directly, `--tag` (repeatable) to drawers carrying every tag,
-and `--source-kind` to `file`, `manual`, `transcript` or `other`.
+and `--source-kind` to `file`, `manual`, `transcript`, `note` or `other`.
 Only memory valid now is searched unless `--as-of` names an instant (RFC 3339, such as `2026-01-31T12:00:00Z`) or
 `--include-historical` adds superseded memory.
 `--expand` appends drawers related to the hits through the knowledge graph.
@@ -198,6 +198,65 @@ memcastle diary read  --agent-identity <ID> --wing <WING> [--limit <N>]
 Writes an entry to an agent's journal in a wing, or reads the newest entries back.
 `--limit` defaults to 20.
 MemCastle stores and returns the agent identity exactly as given, so use one consistent string per agent.
+
+### `note`
+
+```sh
+memcastle note [TEXT]... [--file <PATH>] [--edit] [--wing <WING>] [--room <ROOM>]
+```
+
+Captures a thought as it comes, without asking you where it goes.
+The note is stored verbatim as a drawer of source kind `note`, so it is found by `search` and `recall`,
+embedded, deduplicated and, when an [extraction provider](configuration.md#extraction) is configured,
+read for the entities and relationships it names, exactly like any other memory.
+There is no separate note store, and no tag or folder to choose.
+
+The text comes from, in order:
+
+1. the words on the command line (several words are joined with a space, so quoting is optional);
+1. `--file <PATH>`, where `-` reads standard input;
+1. `--edit`, which opens `$VISUAL` (else `$EDITOR`, either may carry arguments such as `code --wait`) on a scratch file,
+   starting from the words when you gave some;
+1. piped standard input;
+1. with none of these and a terminal on standard input, the editor.
+
+Text from a file, standard input or an editor loses its trailing whitespace, since a final newline is how the text was
+made and not part of the thought; words given on the command line are kept exactly.
+A note with nothing in it is refused.
+Text that starts with a dash needs `--` first: `memcastle note -- "- buy milk"`.
+
+The note is filed under the current project, resolved from the directory you run the command in, for the wing and
+the room separately:
+
+1. the `--wing` and `--room` flags;
+1. `MEMCASTLE_WING` and `MEMCASTLE_ROOM`;
+1. the nearest [`.config/memcastle.toml`](project-config.md): `[memcastle] wing` (else `[project] name`) and `room`;
+1. the working directory's name for the wing, and `notes` for the room.
+
+With both flags given the project is not read at all.
+A project file or variable that cannot be used is an error naming it (`memcastle::project::invalid`),
+not a silent fallback, because a wrong scope would file the note somewhere you did not mean.
+The rules, including how the project is found, are on the [project configuration](project-config.md) page.
+
+Each note records when it was captured (`created_at` and `valid_from`), the directory it was captured in
+(`source.uri`) and the channel it came through (`provenance.requested_by`, `cli`).
+Writing the same note into the same room again stores nothing and reports the existing one.
+
+The confirmation is a line in a terminal and JSON when piped, with the drawer's `id`, which is the stable handle for
+`memcastle drawer show <wing>/<room>/<id>`:
+
+```sh
+memcastle note "ask Ada about the migration order"
+# Saved note 0198f4c2-... in memcastle/notes
+
+memcastle note "Standup:" "- ship the CLI" "- write docs"    # words are joined with spaces
+git log -5 --oneline | memcastle note                         # piped, longer text
+memcastle note --edit                                         # write it in $EDITOR
+memcastle note --file draft.md                                # from a file
+memcastle note --wing ideas --room inbox "a CLI for tide tables"
+MEMCASTLE_WING=release memcastle note "freeze on Friday"     # one-off scope
+memcastle note "..." | jq -r .id                              # the stable identifier
+```
 
 ### `mine`
 

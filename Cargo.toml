@@ -105,6 +105,9 @@ console = "0.16"
 comfy-table = { version = "8", default-features = false, features = ["custom_styling"] }
 # Confirmations only: no history, fuzzy matching, completion or editor prompts.
 dialoguer = { version = "0.12", default-features = false }
+# The scratch file `memcastle note --edit` hands to $VISUAL/$EDITOR: removed on drop, so an abandoned note leaves
+# nothing behind. Already in the lockfile through the dev-dependencies.
+tempfile = "3"
 
 # Configuration & serialisation
 serde = { version = "1", features = ["derive"] }
@@ -200,7 +203,6 @@ getrandom = "0.4.3"
 [dev-dependencies]
 assert_cmd = "2"
 predicates = "3"
-tempfile = "3"
 insta = { version = "1", features = ["filters"] }
 # Only `tests/in_process/concurrency.rs` needs this (`join_all` over many simulated
 # clients) — not a real dependency, so it stays out of `[dependencies]`.

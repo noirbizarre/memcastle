@@ -21,6 +21,9 @@ fn memcastle(daemon: &TestDaemon) -> Command {
     command
         .env("MEMCASTLE_PALACE_PATH", &daemon.palace_path)
         .env_remove("MEMCASTLE_MODE")
+        // A developer's own project scope must not decide where a test's notes are filed.
+        .env_remove("MEMCASTLE_WING")
+        .env_remove("MEMCASTLE_ROOM")
         // A developer's real token must not leak into a test daemon that has none.
         .env_remove("MEMCASTLE_AUTH_ENABLED")
         .env_remove("MEMCASTLE_AUTH_TOKEN")
@@ -652,4 +655,339 @@ async fn the_delete_commands_never_prompt_without_a_terminal_and_accept_yes() {
     }
     run_ok(&daemon, &["wing", "delete", "b", "-y"]).await;
     daemon.shutdown().await;
+}
+
+/// A directory named `name` under a fresh temp dir, which `memcastle note` stands in: its name is the fallback wing.
+fn project_named(name: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    // The CLI canonicalises its working directory, so the expected locator is the canonical one.
+    let dir = dir.canonicalize().unwrap();
+    (root, dir)
+}
+
+/// Run `memcastle note <args>` standing in `dir`, with `input` on standard input when given.
+async fn note_in(
+    daemon: &TestDaemon,
+    dir: &std::path::Path,
+    args: &[&str],
+    input: Option<&str>,
+    configure: impl FnOnce(&mut Command),
+) -> std::process::Output {
+    use tokio::io::AsyncWriteExt;
+    let mut command = memcastle(daemon);
+    command
+        .current_dir(dir)
+        .arg("note")
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure(&mut command);
+    if input.is_some() {
+        command.stdin(Stdio::piped());
+    }
+    let mut child = command.spawn().expect("spawn memcastle");
+    if let Some(input) = input {
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(input.as_bytes()).await.unwrap();
+        // Dropping closes the pipe, which is what ends `read_to_string`.
+        drop(stdin);
+    }
+    child.wait_with_output().await.unwrap()
+}
+
+/// The confirmation JSON of a note that must have succeeded.
+fn confirmed(output: &std::process::Output) -> serde_json::Value {
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("the confirmation as JSON")
+}
+
+/// The drawer `memcastle drawer show <wing>/<room>/<id>` finds, which proves where a note was filed.
+async fn shown(
+    daemon: &TestDaemon,
+    wing: &str,
+    room: &str,
+    note: &serde_json::Value,
+) -> serde_json::Value {
+    let path = format!("{wing}/{room}/{}", note["id"].as_str().unwrap());
+    serde_json::from_str(&run_ok(daemon, &["drawer", "show", &path]).await).unwrap()
+}
+
+#[tokio::test]
+async fn a_short_note_is_filed_under_the_directory_name_with_its_provenance() {
+    let daemon = TestDaemon::start().await;
+    let (_root, dir) = project_named("keep");
+
+    let output = note_in(&daemon, &dir, &["buy", "oat milk"], None, |_| {}).await;
+    let note = confirmed(&output);
+
+    assert_eq!(note["created"], true);
+    assert!(
+        uuid::Uuid::parse_str(note["id"].as_str().unwrap()).is_ok(),
+        "the confirmation carries a stable id: {note}"
+    );
+    let stored = shown(&daemon, "keep", "notes", &note).await;
+    assert_eq!(
+        stored["content"], "buy oat milk",
+        "words are joined as typed"
+    );
+    assert_eq!(stored["source"]["kind"], "note");
+    assert_eq!(stored["source"]["uri"], dir.display().to_string());
+    assert_eq!(stored["provenance"]["requested_by"], "cli");
+    assert!(stored["created_at"].is_string());
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_multiline_note_on_standard_input_is_kept_verbatim_without_its_final_newline() {
+    let daemon = TestDaemon::start().await;
+    let (_root, dir) = project_named("keep");
+    let text = "Meeting with Ada\n\n  - ship the CLI\n  - write docs\n";
+
+    let note = confirmed(&note_in(&daemon, &dir, &[], Some(text), |_| {}).await);
+
+    let stored = shown(&daemon, "keep", "notes", &note).await;
+    assert_eq!(
+        stored["content"],
+        "Meeting with Ada\n\n  - ship the CLI\n  - write docs"
+    );
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_note_can_be_read_from_a_file_or_from_standard_input_by_name() {
+    let daemon = TestDaemon::start().await;
+    let (_root, dir) = project_named("keep");
+    std::fs::write(dir.join("draft.txt"), "from a file\nsecond line\n").unwrap();
+
+    let from_file =
+        confirmed(&note_in(&daemon, &dir, &["--file", "draft.txt"], None, |_| {}).await);
+    let from_dash = confirmed(
+        &note_in(
+            &daemon,
+            &dir,
+            &["--file", "-"],
+            Some("from a pipe\n"),
+            |_| {},
+        )
+        .await,
+    );
+
+    assert_eq!(
+        shown(&daemon, "keep", "notes", &from_file).await["content"],
+        "from a file\nsecond line"
+    );
+    assert_eq!(
+        shown(&daemon, "keep", "notes", &from_dash).await["content"],
+        "from a pipe"
+    );
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn an_empty_note_is_refused_before_the_daemon_is_asked() {
+    let daemon = TestDaemon::start().await;
+    let (_root, dir) = project_named("keep");
+
+    let output = note_in(&daemon, &dir, &[], Some("  \n\n"), |_| {}).await;
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("nothing to save"));
+    let wings = run_ok(&daemon, &["wing", "list"]).await;
+    assert_eq!(wings.trim(), "[]", "nothing was stored: {wings}");
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_project_file_decides_the_wing_and_room_even_from_a_nested_directory() {
+    let daemon = TestDaemon::start().await;
+    let (_root, dir) = project_named("checkout");
+    std::fs::create_dir_all(dir.join(".config")).unwrap();
+    std::fs::write(
+        dir.join(".config/memcastle.toml"),
+        "[memcastle]\nwing = \"castle\"\nroom = \"design\"\n",
+    )
+    .unwrap();
+    let nested = dir.join("src/deep");
+    std::fs::create_dir_all(&nested).unwrap();
+
+    let note = confirmed(&note_in(&daemon, &nested, &["use a queue"], None, |_| {}).await);
+
+    // Filed under the project's scope, not under the nested directory's name.
+    let stored = shown(&daemon, "castle", "design", &note).await;
+    assert_eq!(stored["content"], "use a queue");
+    assert_eq!(stored["source"]["uri"], nested.display().to_string());
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_environment_beats_the_project_file_and_flags_beat_both() {
+    let daemon = TestDaemon::start().await;
+    let (_root, dir) = project_named("checkout");
+    std::fs::create_dir_all(dir.join(".config")).unwrap();
+    std::fs::write(
+        dir.join(".config/memcastle.toml"),
+        "[memcastle]\nwing = \"castle\"\nroom = \"design\"\n",
+    )
+    .unwrap();
+
+    let from_env = confirmed(
+        &note_in(&daemon, &dir, &["env note"], None, |command| {
+            command
+                .env("MEMCASTLE_WING", "ci")
+                .env("MEMCASTLE_ROOM", "scratch");
+        })
+        .await,
+    );
+    assert_eq!(
+        shown(&daemon, "ci", "scratch", &from_env).await["content"],
+        "env note"
+    );
+
+    let from_flags = confirmed(
+        &note_in(
+            &daemon,
+            &dir,
+            &["--wing", "flagged", "--room", "inbox", "flag note"],
+            None,
+            |command| {
+                command.env("MEMCASTLE_WING", "ci");
+            },
+        )
+        .await,
+    );
+    assert_eq!(
+        shown(&daemon, "flagged", "inbox", &from_flags).await["content"],
+        "flag note"
+    );
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_broken_project_file_is_an_error_naming_it_unless_both_flags_state_the_destination() {
+    let daemon = TestDaemon::start().await;
+    let (_root, dir) = project_named("checkout");
+    std::fs::create_dir_all(dir.join(".config")).unwrap();
+    std::fs::write(
+        dir.join(".config/memcastle.toml"),
+        "[memcastle]\nwng = \"typo\"\n",
+    )
+    .unwrap();
+
+    let refused = note_in(&daemon, &dir, &["lost?"], None, |_| {}).await;
+    assert!(!refused.status.success());
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(stderr.contains("memcastle::project::invalid"), "{stderr}");
+    assert!(stderr.contains("memcastle.toml"), "{stderr}");
+
+    let stated = note_in(
+        &daemon,
+        &dir,
+        &["--wing", "w", "--room", "r", "stated outright"],
+        None,
+        |_| {},
+    )
+    .await;
+    shown(&daemon, "w", "r", &confirmed(&stated)).await;
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_same_note_twice_reports_the_one_already_captured() {
+    let daemon = TestDaemon::start().await;
+    let (_root, dir) = project_named("keep");
+
+    let first = confirmed(&note_in(&daemon, &dir, &["call the plumber"], None, |_| {}).await);
+    let second = confirmed(&note_in(&daemon, &dir, &["call the plumber"], None, |_| {}).await);
+
+    assert_eq!(first["created"], true);
+    assert_eq!(second["created"], false);
+    assert_eq!(second["id"], first["id"]);
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_read_only_cli_cannot_capture_a_note() {
+    let daemon = TestDaemon::start().await;
+    let (_root, dir) = project_named("keep");
+
+    let mut command = memcastle(&daemon);
+    let output = command
+        .current_dir(&dir)
+        .args(["--mode", "read_only", "note", "never stored"])
+        .output()
+        .await
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("memcastle::app::mode_forbidden"));
+    daemon.shutdown().await;
+}
+
+#[cfg(unix)]
+mod editor {
+    use super::*;
+
+    /// A command line for `$EDITOR` that overwrites the file it is handed with `body`: run through `sh`, so the
+    /// script file itself is never executed (a freshly written executable can be "text file busy" under load).
+    fn editor_writing(dir: &std::path::Path, body: &str) -> String {
+        let script = dir.join("editor.sh");
+        std::fs::write(&script, format!("printf '%s' '{body}' > \"$1\"\n")).unwrap();
+        format!("sh {}", script.display())
+    }
+
+    #[tokio::test]
+    async fn a_note_written_in_the_editor_is_saved() {
+        let daemon = TestDaemon::start().await;
+        let (root, dir) = project_named("keep");
+        let editor = editor_writing(root.path(), "from the editor\nsecond line\n");
+
+        let output = note_in(&daemon, &dir, &["--edit"], None, |command| {
+            command.env("EDITOR", &editor).env_remove("VISUAL");
+        })
+        .await;
+
+        let note = confirmed(&output);
+        assert_eq!(
+            shown(&daemon, "keep", "notes", &note).await["content"],
+            "from the editor\nsecond line"
+        );
+        daemon.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn the_visual_editor_wins_over_the_editor_and_an_empty_result_saves_nothing() {
+        let daemon = TestDaemon::start().await;
+        let (root, dir) = project_named("keep");
+        let blank = editor_writing(root.path(), "\n");
+
+        let output = note_in(&daemon, &dir, &["--edit"], None, |command| {
+            command.env("VISUAL", &blank).env("EDITOR", "false");
+        })
+        .await;
+
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("nothing to save"));
+        assert_eq!(run_ok(&daemon, &["wing", "list"]).await.trim(), "[]");
+        daemon.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn without_an_editor_the_error_says_how_to_configure_one() {
+        let daemon = TestDaemon::start().await;
+        let (_root, dir) = project_named("keep");
+
+        let output = note_in(&daemon, &dir, &["--edit"], None, |command| {
+            command.env_remove("VISUAL").env_remove("EDITOR");
+        })
+        .await;
+
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("$VISUAL"));
+        daemon.shutdown().await;
+    }
 }

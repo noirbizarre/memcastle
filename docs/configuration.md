@@ -443,7 +443,8 @@ has no sensible confidence or falls below `min_confidence`.
   After a mining job completes, and once at startup, it queues a low-priority `extract` job,
   coalesced like the embedding sweep.
   `memcastle extract` queues one by hand.
-- Only mined drawers are read (they carry a source origin), and only while they are current.
+- Only mined drawers (they carry a source origin) and [notes](cli.md#note) are read, and only while they are current.
+  Writing a note queues a sweep too, since nothing else would.
   A drawer is read once: changing the provider later does not re-read what was already read.
 - A drawer's first 8,000 characters are sent, whatever it holds.
 - Every fact records the drawer, source document, job and extractor it came from, and holds from the document's own

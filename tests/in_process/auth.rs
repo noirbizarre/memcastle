@@ -132,6 +132,7 @@ async fn every_other_route_is_guarded_including_ones_that_do_not_exist() {
         (Method::GET, "/api/wake-up?agent_identity=a"),
         (Method::GET, "/api/diary"),
         (Method::POST, "/api/diary"),
+        (Method::POST, "/api/notes"),
         (Method::GET, "/api/jobs"),
         (Method::POST, "/api/jobs"),
         (Method::GET, "/api/jobs/x"),

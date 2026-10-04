@@ -52,6 +52,7 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
         .route("/api/recall", get(recall).post(recall_json))
         .route("/api/wake-up", get(wake_up))
         .route("/api/diary", get(diary_read).post(diary_write))
+        .route("/api/notes", post(palace::write_note))
         .route("/api/jobs", get(list_jobs).post(submit_job))
         .route("/api/jobs/{id}", get(get_job))
         .route("/api/jobs/{id}/pause", post(pause_job))
@@ -188,7 +189,7 @@ struct SearchParams {
     /// Comma-separated tags a drawer must all carry.
     #[serde(alias = "tag")]
     tags: Option<String>,
-    /// Restrict to drawers from one source kind: `file`, `manual`, `transcript` or `other`.
+    /// Restrict to drawers from one source kind: `file`, `manual`, `transcript`, `note` or `other`.
     source_kind: Option<String>,
     /// An RFC 3339 instant: search the memory valid then.
     as_of: Option<String>,

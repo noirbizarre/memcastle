@@ -126,6 +126,7 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `GET /api/wake-up` | Session-start context. | `agent_identity`, `wing`, `max_items`, `max_bytes` |
 | `GET /api/diary` | Read diary entries. | `agent_identity`, `wing`, `limit` |
 | `POST /api/diary` | Write a diary entry. | JSON body: `agent_identity`, `wing`, `content`, `requested_by?` |
+| `POST /api/notes` | Capture a note: an unnamed drawer of source kind `note`. `201` when stored, `200` when an identical note was already in the room. There is no MCP tool: agents write memory through `memcastle_checkpoint` and the diary. | JSON body: `wing`, `room`, `content`, `uri?`, `requested_by?` |
 | `GET /api/jobs` | List jobs. | `status` |
 | `POST /api/jobs` | Submit a job. | JSON body, see [below](#submitting-jobs) |
 | `GET /api/jobs/{id}` | Show one job. | none |
@@ -186,7 +187,7 @@ Only the query is required, so a plain `?q=word` means what it always did.
 | `ranking` | `auto` (the default), `lexical`, `semantic` or `hybrid`. |
 | `wing`, `room` | Restrict to a wing or room by name. `recall` ignores `room`. |
 | `tags` | Drawers carrying every one of these tags: a list over MCP, comma-separated in a query string (`tags=a,b`). |
-| `source_kind` | `file`, `manual`, `transcript` or `other`. |
+| `source_kind` | `file`, `manual`, `transcript`, `note` or `other`. |
 | `as_of` | An RFC 3339 instant, such as `2026-01-31T12:00:00Z`: search the memory that was valid then. |
 | `include_historical` | Also return memory that has been superseded. Cannot be combined with `as_of`. |
 | `expand` | Append drawers related to the hits through the knowledge graph. |

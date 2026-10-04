@@ -1,22 +1,31 @@
-//! The project-local `.config/memcastle.toml`, as far as mining reads it: the wing a mined directory belongs to.
+//! The project-local `.config/memcastle.toml` and the `MEMCASTLE_WING` / `MEMCASTLE_ROOM` overrides: which part of the
+//! palace a working directory's memory belongs to.
 //!
-//! The file declares which memory scope a project belongs to (see `docs/project-config.md`).
-//! The daemon reads it for exactly one decision, the default wing of a mined directory, and only here, in the adapter
-//! that reads that directory: the pipeline stays source-agnostic and the rest of the daemon knows no project file.
-//! Everything else the file says (rooms, the environment overrides) is resolved by agent integrations on their own side
-//! and passed to MemCastle as ordinary parameters.
-//!
+//! The contract is in `docs/project-config.md`.
+//! Two places in Rust read it, and both need the *same* reader or a project would file memory in one wing when mined and
+//! in another when noted: the directory mining adapter (the file only, because the daemon's own environment says nothing
+//! about the client talking to it) and the CLI's `note` command (the file and the environment, from the user's shell).
 //! The TypeScript integrations carry their own reader of the same contract, held to this one by the shared fixtures in
 //! `tests/fixtures/project-config/`.
+//!
+//! Nothing here touches the store or the jobs: it reads a directory, which is why the CLI may call it
+//! (AGENTS.md invariant 1).
 
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
 use crate::domain::{NameKind, validate_name};
+use crate::error::Error;
 
 /// The file's location under a project root.
 const PROJECT_FILE: &str = ".config/memcastle.toml";
+
+/// The variable overriding the project's wing.
+pub const WING_VARIABLE: &str = "MEMCASTLE_WING";
+
+/// The variable overriding the project's room.
+pub const ROOM_VARIABLE: &str = "MEMCASTLE_ROOM";
 
 /// A table nothing may be written in yet: accepting it now lets it grow later without a breaking change.
 #[derive(Debug, Default, Deserialize)]
@@ -36,7 +45,6 @@ struct ProjectSection {
 #[serde(deny_unknown_fields)]
 struct ScopeSection {
     wing: Option<String>,
-    /// Scopes search in integrations; mining's room is the adapter's, so it is read only to be validated.
     room: Option<String>,
 }
 
@@ -52,6 +60,19 @@ struct ProjectFile {
     #[serde(default)]
     #[allow(dead_code)] // Reserved: parsed so a stray key under it is refused, never read.
     mining: Reserved,
+}
+
+/// The scope a working directory's project declares.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ProjectContext {
+    /// The directory holding `.config/memcastle.toml`, when a file governs the directory.
+    pub root: Option<PathBuf>,
+    /// `[project] name`.
+    pub name: Option<String>,
+    /// The wing: the environment, else `[memcastle] wing`, else `[project] name`.
+    pub wing: Option<String>,
+    /// The room: the environment, else `[memcastle] room`.
+    pub room: Option<String>,
 }
 
 /// The project file that governs `start`, if any.
@@ -77,13 +98,8 @@ fn discover(start: &Path, home: Option<&Path>) -> Option<PathBuf> {
     None
 }
 
-/// The wing declared for the project containing `start`: `Ok(None)` when no file governs it.
-///
-/// # Errors
-///
-/// A message naming the file and the problem when the file cannot be read, is not valid for the contract, or names a
-/// wing or room MemCastle would refuse.
-fn declared_wing(start: &Path, home: Option<&Path>) -> Result<Option<String>, String> {
+/// What the file governing `start` declares, or `None` when no file does.
+fn declared(start: &Path, home: Option<&Path>) -> Result<Option<ProjectContext>, String> {
     let Some(file) = discover(start, home) else {
         return Ok(None);
     };
@@ -101,23 +117,97 @@ fn declared_wing(start: &Path, home: Option<&Path>) -> Result<Option<String>, St
             validate_name(kind, value).map_err(|e| format!("{at}: {field} is not usable: {e}"))?;
         }
     }
-    Ok(parsed.memcastle.wing.or(parsed.project.name))
+    Ok(Some(ProjectContext {
+        // `.config/memcastle.toml` sits two levels under the root.
+        root: file.parent().and_then(Path::parent).map(Path::to_path_buf),
+        wing: parsed
+            .memcastle
+            .wing
+            .or_else(|| parsed.project.name.clone()),
+        name: parsed.project.name,
+        room: parsed.memcastle.room,
+    }))
+}
+
+/// The override `variable` carries, validated, or `None` when it is unset or blank.
+///
+/// An invalid value is an error and not an ignored one: a wrong override would send memory somewhere unintended.
+fn from_environment(
+    environment: &dyn Fn(&str) -> Option<String>,
+    variable: &str,
+    kind: NameKind,
+) -> Result<Option<String>, String> {
+    let Some(raw) = environment(variable) else {
+        return Ok(None);
+    };
+    let value = raw.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    validate_name(kind, value).map_err(|e| format!("{variable}={value:?} is not usable: {e}"))?;
+    Ok(Some(value.to_string()))
+}
+
+/// The project context for a working directory `start`, or `None` when neither a file nor the environment names a scope.
+///
+/// Per field the environment wins over the file: the environment is for CI, wrappers and temporary overrides, and the
+/// file is the project's persistent intent.
+/// `environment` and `home` are parameters so the tests need not touch the real ones.
+///
+/// # Errors
+///
+/// A message naming the file or the variable and the problem when the file cannot be read, is not valid for the
+/// contract, or names a wing or room MemCastle would refuse.
+pub fn resolve_with(
+    start: &Path,
+    home: Option<&Path>,
+    environment: &dyn Fn(&str) -> Option<String>,
+) -> Result<Option<ProjectContext>, String> {
+    let wing = from_environment(environment, WING_VARIABLE, NameKind::Wing)?;
+    let room = from_environment(environment, ROOM_VARIABLE, NameKind::Room)?;
+    let file = declared(start, home)?;
+    if file.is_none() && wing.is_none() && room.is_none() {
+        return Ok(None);
+    }
+    let file = file.unwrap_or_default();
+    Ok(Some(ProjectContext {
+        root: file.root,
+        name: file.name,
+        wing: wing.or(file.wing),
+        room: room.or(file.room),
+    }))
+}
+
+/// The user's home directory, canonical, which bounds the project walk.
+fn home() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.canonicalize().unwrap_or(h))
+}
+
+/// [`resolve_with`] for the real home directory and the process environment: what a command run from `start` uses.
+///
+/// # Errors
+///
+/// [`Error::ProjectInvalid`] naming the file or the variable at fault.
+pub fn resolve(start: &Path) -> Result<Option<ProjectContext>, Error> {
+    resolve_with(start, home().as_deref(), &|name| std::env::var(name).ok())
+        .map_err(|message| Error::ProjectInvalid { message })
 }
 
 /// The wing the project containing `start` declares, or `None` to use the adapter's own default.
 ///
+/// The file only: the daemon never reads the environment, because its own says nothing about the client.
 /// `default_wing` cannot fail, so a broken file is logged and mining carries on with the default.
 /// Failing the job instead would let one typo in a file nobody asked about block mining a directory that mined fine
 /// before, and the explicit wing an operator can still pass is unaffected either way.
-pub(super) fn project_wing(start: &Path) -> Option<String> {
-    let home = dirs::home_dir().map(|h| h.canonicalize().unwrap_or(h));
-    wing_with_home(start, home.as_deref())
+#[must_use]
+pub fn project_wing(start: &Path) -> Option<String> {
+    wing_with_home(start, home().as_deref())
 }
 
 /// [`project_wing`] with the home directory given, which is the seam the tests use instead of the real `$HOME`.
 fn wing_with_home(start: &Path, home: Option<&Path>) -> Option<String> {
-    match declared_wing(start, home) {
-        Ok(wing) => wing,
+    match declared(start, home) {
+        Ok(context) => context.and_then(|context| context.wing),
         Err(message) => {
             tracing::warn!(
                 directory = %start.display(),
@@ -128,11 +218,39 @@ fn wing_with_home(start: &Path, home: Option<&Path>) -> Option<String> {
     }
 }
 
+/// A wing name for `directory` when nothing declares one: the directory's own name, made acceptable.
+///
+/// Mirrors the integrations' `toWingName`: control characters are dropped, `/` becomes `-`, and a UUID-shaped name
+/// (which MemCastle refuses, because a UUID addresses a record by id) is prefixed.
+/// `None` when nothing usable is left, as for the filesystem root: guessing a wing would file the note under a name
+/// the user never chose.
+#[must_use]
+pub fn wing_from_directory(directory: &Path) -> Option<String> {
+    let raw = directory.file_name()?.to_string_lossy();
+    let name = raw
+        .chars()
+        .filter(|c| !c.is_control())
+        .map(|c| if c == '/' { '-' } else { c })
+        .collect::<String>();
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    if validate_name(NameKind::Wing, name).is_ok() {
+        return Some(name.to_string());
+    }
+    // The one refusal left once the name is clean is a UUID shape.
+    let prefixed = format!("project-{name}");
+    validate_name(NameKind::Wing, &prefixed)
+        .is_ok()
+        .then_some(prefixed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// A temp tree with `files` written under it (parents created), returning its canonical root.
+    /// A temp tree with `files` written under it (parents created), returning its root.
     fn tree(files: &[(&str, &str)]) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         for (path, content) in files {
@@ -143,23 +261,30 @@ mod tests {
         dir
     }
 
+    fn no_environment(_: &str) -> Option<String> {
+        None
+    }
+
+    fn context(
+        dir: &Path,
+        start: &str,
+        home: Option<&Path>,
+    ) -> Result<Option<ProjectContext>, String> {
+        resolve_with(&dir.join(start), home, &no_environment)
+    }
+
     fn wing(dir: &Path, start: &str, home: Option<&Path>) -> Result<Option<String>, String> {
-        declared_wing(&dir.join(start), home)
+        context(dir, start, home).map(|c| c.and_then(|c| c.wing))
     }
 
     #[test]
-    fn the_shared_fixtures_resolve_to_the_same_wing_as_the_integrations_expect() {
+    fn the_shared_fixtures_resolve_to_the_same_context_as_the_integrations_expect() {
         // The integrations resolve the same files in TypeScript; this is what keeps the two readers one contract.
-        let fixtures: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../tests/fixtures/project-config/cases.json"
-        ))
-        .unwrap();
+        let fixtures: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/project-config/cases.json"))
+                .unwrap();
         let mut replayed = 0;
         for case in fixtures["cases"].as_array().unwrap() {
-            // The daemon never reads the environment: those cases belong to the integrations.
-            if case.get("env").is_some() {
-                continue;
-            }
             let name = case["name"].as_str().unwrap();
             let files: Vec<(&str, &str)> = case["files"]
                 .as_object()
@@ -171,7 +296,20 @@ mod tests {
             let home = case
                 .get("home")
                 .map(|h| dir.path().join(h.as_str().unwrap()));
-            let got = wing(dir.path(), case["start"].as_str().unwrap(), home.as_deref());
+            let variables: std::collections::HashMap<String, String> = case
+                .get("env")
+                .and_then(|env| env.as_object())
+                .map(|env| {
+                    env.iter()
+                        .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let got = resolve_with(
+                &dir.path().join(case["start"].as_str().unwrap()),
+                home.as_deref(),
+                &|variable| variables.get(variable).cloned(),
+            );
             if let Some(substring) = case.get("error") {
                 let error = got.expect_err(name);
                 assert!(
@@ -179,13 +317,21 @@ mod tests {
                     "{name}: {error}"
                 );
             } else {
-                // `expect: null` is no project, and a project with no wing is the same answer for mining.
-                let expected = case["expect"]["wing"].as_str().map(str::to_string);
-                assert_eq!(got, Ok(expected), "{name}");
+                let got = got.expect(name);
+                let expect = &case["expect"];
+                if expect.is_null() {
+                    assert_eq!(got, None, "{name}");
+                } else {
+                    let got = got.unwrap_or_else(|| panic!("{name}: no project context"));
+                    let field = |key: &str| expect[key].as_str().map(str::to_string);
+                    assert_eq!(got.name, field("name"), "{name}: name");
+                    assert_eq!(got.wing, field("wing"), "{name}: wing");
+                    assert_eq!(got.room, field("room"), "{name}: room");
+                }
             }
             replayed += 1;
         }
-        assert!(replayed > 15, "the fixtures were not replayed ({replayed})");
+        assert!(replayed > 20, "the fixtures were not replayed ({replayed})");
     }
 
     #[test]
@@ -201,6 +347,16 @@ mod tests {
             ("a/b/x", ""),
         ]);
         assert_eq!(wing(dir.path(), "a/b", None), Ok(Some("castle".into())));
+    }
+
+    #[test]
+    fn the_context_names_the_root_the_file_governs() {
+        let dir = tree(&[
+            (".config/memcastle.toml", "[memcastle]\nwing = \"castle\"\n"),
+            ("a/b/x", ""),
+        ]);
+        let found = context(dir.path(), "a/b", None).unwrap().unwrap();
+        assert_eq!(found.root.as_deref(), Some(dir.path()));
     }
 
     #[test]
@@ -302,5 +458,31 @@ mod tests {
         assert_eq!(wing(ok.path(), "", None), Ok(Some("w".into())));
         let bad = tree(&[(".config/memcastle.toml", "[mining]\nchunk_chars = 5\n")]);
         assert!(wing(bad.path(), "", None).is_err());
+    }
+
+    #[test]
+    fn mining_ignores_the_environment_that_a_client_would_apply() {
+        let dir = tree(&[(".config/memcastle.toml", "[memcastle]\nwing = \"file\"\n")]);
+        let with_env = resolve_with(dir.path(), None, &|name| {
+            (name == WING_VARIABLE).then(|| "env".to_string())
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(with_env.wing.as_deref(), Some("env"));
+        // The daemon half reads the file alone.
+        assert_eq!(wing_with_home(dir.path(), None), Some("file".into()));
+    }
+
+    #[test]
+    fn a_directory_name_becomes_an_acceptable_wing() {
+        assert_eq!(
+            wing_from_directory(Path::new("/work/memcastle")),
+            Some("memcastle".into())
+        );
+        assert_eq!(
+            wing_from_directory(Path::new("/work/11111111-1111-1111-1111-111111111111")),
+            Some("project-11111111-1111-1111-1111-111111111111".into())
+        );
+        assert_eq!(wing_from_directory(Path::new("/")), None);
     }
 }

@@ -117,6 +117,20 @@ pub enum Error {
         message: String,
     },
 
+    /// The project's `.config/memcastle.toml`, or the `MEMCASTLE_WING` /
+    /// `MEMCASTLE_ROOM` variables, cannot be used to scope a command.
+    #[error("the project scope is not usable: {message}")]
+    #[diagnostic(
+        code(memcastle::project::invalid),
+        help(
+            "fix the file or variable it names (see docs/project-config.md), or pass `--wing` and `--room` explicitly"
+        )
+    )]
+    ProjectInvalid {
+        /// The file or variable at fault and what is wrong with it.
+        message: String,
+    },
+
     /// `memcastle migrate --check` found migrations that have not been
     /// applied.
     #[error("{count} migration(s) pending: {pending}")]
@@ -1207,6 +1221,9 @@ mod tests {
             Error::not_implemented("memcastle maintenance"),
             Error::aborted("cancelling a job"),
             Error::prompt_failed("not a terminal"),
+            Error::ProjectInvalid {
+                message: "/p/.config/memcastle.toml is not valid".to_string(),
+            },
             Error::MigrationsPending {
                 count: 1,
                 pending: "canonical-timestamps".to_string(),
@@ -1380,6 +1397,7 @@ mod tests {
             | Error::NotImplemented { .. }
             | Error::Aborted { .. }
             | Error::PromptFailed { .. }
+            | Error::ProjectInvalid { .. }
             | Error::MigrationsPending { .. }
             | Error::Store { .. }
             | Error::StoreMalformed { .. }

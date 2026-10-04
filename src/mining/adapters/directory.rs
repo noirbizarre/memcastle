@@ -16,8 +16,8 @@ use crate::domain::{
 use crate::error::{Error, Result};
 
 use super::super::adapter::{Discovery, SourceAdapter};
-use super::project_file::project_wing;
 use super::watermark::{Entry, Watermark, mtime_ns, page};
+use crate::project::project_wing;
 
 /// The adapter's name.
 pub const PROVIDER: &str = "directory";

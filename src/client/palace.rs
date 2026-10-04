@@ -203,6 +203,33 @@ impl DaemonClient {
         .await
     }
 
+    /// Capture a note in `wing`/`room` (`POST /api/notes`), recording `uri` as where it was captured.
+    ///
+    /// # Errors
+    ///
+    /// As for [`Self::list_wings`]; blank content or an unusable wing or room name is a 400
+    /// [`Error::Remote`].
+    pub async fn write_note(
+        &self,
+        wing: &str,
+        room: &str,
+        content: String,
+        uri: Option<&str>,
+    ) -> Result<Created<Drawer>> {
+        self.send(
+            self.http
+                .post(format!("{}/api/notes", self.base_url))
+                .json(&json!({
+                    "wing": wing,
+                    "room": room,
+                    "content": content,
+                    "uri": uri,
+                    "requested_by": CHANNEL,
+                })),
+        )
+        .await
+    }
+
     /// End a drawer's validity and optionally open a replacement
     /// (`POST /api/drawers/{id}/supersede`).
     ///
