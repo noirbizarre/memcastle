@@ -61,14 +61,17 @@ impl SurrealStore {
     /// is immutable — see [`Drawer`]'s doc comment), so this is always a
     /// fresh `CREATE`, never an upsert.
     pub async fn create_drawer(&self, drawer: &Drawer) -> Result<()> {
-        bind_drawer(self.db.query(CREATE_DRAWER), drawer)?
-            .await?
-            // `.await` alone only reports transport-level failures; a
-            // rejected `SET` (e.g. a schema mismatch) would otherwise fail
-            // silently and leave `create_drawer` reporting success for a
-            // drawer that was never written. See `store::mod`'s doc comment.
-            .check()?;
-        Ok(())
+        // Retried because the write touches the drawer's search indexes, which
+        // a background task also rewrites: see `retrying_on_conflict`.
+        super::retrying_on_conflict(|| async {
+            super::checked(bind_drawer(self.db.query(CREATE_DRAWER), drawer)?.await?)
+                // `.await` alone only reports transport-level failures; a
+                // rejected `SET` (e.g. a schema mismatch) would otherwise fail
+                // silently and leave `create_drawer` reporting success for a
+                // drawer that was never written. See `store::mod`'s doc comment.
+                .map(|_| ())
+        })
+        .await
     }
 
     /// Close the validity of drawer `old` at `at` and, in the same
@@ -103,33 +106,38 @@ impl SurrealStore {
         }
         sql.push_str("COMMIT TRANSACTION;");
 
-        let query = self
-            .db
-            .query(sql)
-            .bind(("old", old.to_string()))
-            .bind(("at", super::stored(at)));
-        let query = match replacement {
-            Some(drawer) => bind_drawer(query, drawer)?,
-            None => query,
-        };
-        let mut response = query.await?;
-        // Every statement of a failed transaction reports an error, and only
-        // the `THROW`'s names the cause, so all of them are inspected rather
-        // than `.check()`'s first.
-        let mut errors: Vec<_> = response.take_errors().into_iter().collect();
-        if errors.is_empty() {
-            return Ok(true);
-        }
-        // The `THROW` above: nothing matched, nothing was written.
-        if errors
-            .iter()
-            .any(|(_, error)| error.to_string().contains("drawer not open"))
-        {
-            return Ok(false);
-        }
-        errors.sort_by_key(|(index, _)| *index);
-        let (_, error) = errors.remove(0);
-        Err(error.into())
+        // Retried on a write conflict (see `retrying_on_conflict`): the
+        // transaction wrote nothing, so running it again is safe.
+        super::retrying_on_conflict(|| async {
+            let query = self
+                .db
+                .query(sql.as_str())
+                .bind(("old", old.to_string()))
+                .bind(("at", super::stored(at)));
+            let query = match replacement {
+                Some(drawer) => bind_drawer(query, drawer)?,
+                None => query,
+            };
+            let mut response = query.await?;
+            // Every statement of a failed transaction reports an error, and
+            // only one names the cause, so all of them are inspected rather
+            // than `.check()`'s first.
+            let errors: Vec<_> = response.take_errors().into_iter().collect();
+            if errors.is_empty() {
+                return Ok(true);
+            }
+            // The `THROW` above: nothing matched, nothing was written.
+            if errors
+                .iter()
+                .any(|(_, error)| error.to_string().contains("drawer not open"))
+            {
+                return Ok(false);
+            }
+            Err(super::root_cause(errors)
+                .expect("a non-empty list of errors has a root cause")
+                .into())
+        })
+        .await
     }
 
     /// Persist `drawer` unless a drawer with that id already exists,
@@ -173,14 +181,19 @@ impl SurrealStore {
     /// transaction. Succeeds for an id that does not exist: callers that must
     /// report that check first.
     pub async fn delete_drawer(&self, id: DrawerId) -> Result<()> {
-        self.db
-            .query("DELETE type::record('drawer', $id)")
-            .bind(("id", id.to_string()))
-            .await?
-            // Same reasoning as `create_drawer`'s `.check()?` — a rejected
+        // Retried like `create_drawer`: deleting rewrites the search indexes.
+        super::retrying_on_conflict(|| async {
+            super::checked(
+                self.db
+                    .query("DELETE type::record('drawer', $id)")
+                    .bind(("id", id.to_string()))
+                    .await?,
+            )
+            // Same reasoning as `create_drawer`'s check — a rejected
             // `DELETE` must not silently report success.
-            .check()?;
-        Ok(())
+            .map(|_| ())
+        })
+        .await
     }
 
     /// List the drawers filed under `room`, newest first — or, with `None`,
@@ -318,5 +331,94 @@ impl SurrealStore {
             .bind(("limit", limit))
             .await?;
         super::take_rows(&mut response, 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use crate::domain::{DrawerId, Provenance, Source, SourceKind};
+
+    use super::*;
+
+    fn drawer(room: RoomId, content: String) -> Drawer {
+        Drawer::new(
+            DrawerId::new(),
+            room,
+            content,
+            Source {
+                kind: SourceKind::Manual,
+                uri: None,
+                agent: None,
+            },
+            vec![],
+            Provenance {
+                requested_by: "test".into(),
+                job_id: None,
+            },
+        )
+    }
+
+    /// The full-text and vector indexes on `drawer` are maintained by a
+    /// SurrealDB background task that wakes shortly after every commit and
+    /// rewrites index keys; a drawer write that overlaps it loses a write
+    /// conflict. Writing steadily for longer than that debounce makes the
+    /// overlap certain, so a write path that does not retry fails here.
+    #[tokio::test]
+    async fn drawer_writes_survive_background_index_compaction() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let wing = store.get_or_create_wing("w", None).await.expect("wing");
+        let room = store
+            .get_or_create_room(wing.id, "r", None)
+            .await
+            .expect("room")
+            .id;
+
+        let started = Instant::now();
+        let mut round = 0_u32;
+        while started.elapsed() < Duration::from_millis(2_500) {
+            round += 1;
+            let first = drawer(room, format!("first drawer of round {round}"));
+            let second = drawer(room, format!("second drawer of round {round}"));
+            store.create_drawer(&first).await.expect("create first");
+            store.create_drawer(&second).await.expect("create second");
+            store
+                .supersede_drawer(first.id, None, chrono::Utc::now())
+                .await
+                .expect("supersede");
+            store.delete_drawer(first.id).await.expect("delete first");
+            store.delete_drawer(second.id).await.expect("delete second");
+        }
+        assert!(round > 1, "the loop must outlast at least one compaction");
+    }
+
+    /// A transaction that loses a conflict fails every statement, and the
+    /// first of them is `NotExecuted`, not the conflict. Deleting a room is
+    /// such a transaction, so this is what proves its retry can see the cause.
+    #[tokio::test]
+    async fn room_deletions_survive_background_index_compaction() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let wing = store.get_or_create_wing("w", None).await.expect("wing");
+
+        let started = Instant::now();
+        let mut round = 0_u32;
+        while started.elapsed() < Duration::from_millis(2_500) {
+            round += 1;
+            let room = store
+                .get_or_create_room(wing.id, &format!("room {round}"), None)
+                .await
+                .expect("room")
+                .id;
+            for n in 0..3 {
+                let content = format!("drawer {n} of room {round}");
+                store
+                    .create_drawer(&drawer(room, content))
+                    .await
+                    .expect("create");
+            }
+            store.delete_room(room).await.expect("delete room");
+        }
+        assert!(round > 1, "the loop must outlast at least one compaction");
     }
 }

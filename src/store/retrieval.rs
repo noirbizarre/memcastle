@@ -321,19 +321,24 @@ impl SurrealStore {
     /// the drawer existed.
     pub async fn set_drawer_embedding(&self, id: DrawerId, embedding: &[f32]) -> Result<bool> {
         check_dimension(embedding)?;
-        let mut response = self
-            .db
-            .query(
-                // `WHERE`, not `UPDATE type::record(..)`: updating a record id
-                // directly *creates* it when absent, which would conjure a
-                // half-formed drawer for one deleted since it was listed.
-                "UPDATE drawer SET embedding = $embedding \
-                 WHERE id = type::record('drawer', $id) RETURN record::id(id) AS id",
+        // Retried: the HNSW index entry is rewritten by this update, and a
+        // background task maintains that index too (see `retrying_on_conflict`).
+        let mut response = super::retrying_on_conflict(|| async {
+            super::checked(
+                self.db
+                    .query(
+                        // `WHERE`, not `UPDATE type::record(..)`: updating a record id
+                        // directly *creates* it when absent, which would conjure a
+                        // half-formed drawer for one deleted since it was listed.
+                        "UPDATE drawer SET embedding = $embedding \
+                         WHERE id = type::record('drawer', $id) RETURN record::id(id) AS id",
+                    )
+                    .bind(("id", id.to_string()))
+                    .bind(("embedding", embedding.to_vec()))
+                    .await?,
             )
-            .bind(("id", id.to_string()))
-            .bind(("embedding", embedding.to_vec()))
-            .await?
-            .check()?;
+        })
+        .await?;
         let rows: Vec<serde_json::Value> = response.take(0)?;
         Ok(!rows.is_empty())
     }

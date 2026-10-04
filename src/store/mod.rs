@@ -102,23 +102,76 @@ pub(crate) fn stored(at: chrono::DateTime<chrono::Utc>) -> String {
 /// Whether `error` is SurrealDB reporting a write conflict — two transactions
 /// touching the same record at once — which it documents as safe to retry.
 fn is_write_conflict(error: &Error) -> bool {
+    matches!(error, Error::Store { source } if is_conflict(source))
+}
+
+/// [`is_write_conflict`] for the driver's own error, before it is wrapped.
+fn is_conflict(error: &surrealdb::Error) -> bool {
     matches!(
-        error,
-        Error::Store { source }
-            if matches!(
-                source.query_details(),
-                Some(surrealdb::types::QueryError::TransactionConflict)
-            )
+        error.query_details(),
+        Some(surrealdb::types::QueryError::TransactionConflict)
     )
+}
+
+/// The error that explains why a query failed, out of every statement's.
+///
+/// When a `BEGIN`/`COMMIT` transaction fails, *every* statement in it reports
+/// an error, but only one names the cause; the rest are `NotExecuted`
+/// ("The query was not executed due to a failed transaction"). The driver's
+/// own `check()` returns the first in statement order, which is usually one of
+/// the useless ones, so a lost write conflict reached callers (and
+/// [`retrying_on_conflict`]) as `NotExecuted` and was neither retried nor
+/// diagnosable. A conflict wins, then any real cause, then whatever is left.
+pub(crate) fn root_cause(
+    errors: impl IntoIterator<Item = (usize, surrealdb::Error)>,
+) -> Option<surrealdb::Error> {
+    let mut errors: Vec<_> = errors.into_iter().collect();
+    // The driver hands them back in a hash map; statement order is what makes
+    // "the first real cause" mean something.
+    errors.sort_by_key(|(index, _)| *index);
+    let rank = |error: &surrealdb::Error| {
+        if is_conflict(error) {
+            0
+        } else if matches!(
+            error.query_details(),
+            Some(surrealdb::types::QueryError::NotExecuted)
+        ) {
+            2
+        } else {
+            1
+        }
+    };
+    errors
+        .into_iter()
+        .min_by_key(|(_, error)| rank(error))
+        .map(|(_, error)| error)
+}
+
+/// `Response::check`, but reporting [`root_cause`] instead of the first
+/// statement's error. Use it for every query that contains a transaction.
+pub(crate) fn checked(
+    mut response: surrealdb::IndexedResults,
+) -> Result<surrealdb::IndexedResults> {
+    // Empty when every statement succeeded, in which case nothing was removed
+    // from `response` and it is returned intact.
+    match root_cause(response.take_errors()) {
+        Some(error) => Err(error.into()),
+        None => Ok(response),
+    }
 }
 
 /// Run `operation`, retrying a few times if it loses a write conflict.
 ///
-/// A job record has two concurrent writers by design: the worker checkpointing
-/// its progress, and the API recording a user's pause or cancel. SurrealDB
-/// resolves that race by failing one transaction with a retryable conflict;
-/// without a retry the loser surfaced as a failed checkpoint (killing the
-/// job) or a 500 on the user's request.
+/// Two things write the same keys at once. A job record has two concurrent
+/// writers by design: the worker checkpointing its progress, and the API
+/// recording a user's pause or cancel. And SurrealDB rewrites the full-text and
+/// vector index keys of `drawer` from a background compaction task that wakes
+/// shortly after every commit, so any drawer write can overlap it. Either way
+/// SurrealDB resolves the race by failing one transaction with a retryable
+/// conflict; without a retry the loser surfaced as a failed checkpoint
+/// (killing the job), a 500 on the user's request or a flaky test. The failed
+/// transaction wrote nothing, so `operation` must be a single statement or
+/// transaction and is simply run again.
 pub(crate) async fn retrying_on_conflict<T, F, Fut>(mut operation: F) -> Result<T>
 where
     F: FnMut() -> Fut,
@@ -475,6 +528,67 @@ mod tests {
         let store = memory_store().await;
         // Re-running must not error — every DEFINE is IF NOT EXISTS.
         store.sync_schema().await.expect("second sync_schema");
+    }
+
+    fn query_error(details: surrealdb::types::QueryError) -> surrealdb::Error {
+        surrealdb::Error::query("boom".to_string(), details)
+    }
+
+    #[test]
+    fn a_failed_transaction_reports_its_conflict_not_its_not_executed_statements() {
+        use surrealdb::types::QueryError::{NotExecuted, TransactionConflict};
+        // Statement order as a conflicted `BEGIN`/`COMMIT` reports it: the
+        // useless errors first, the conflict later.
+        let cause = root_cause([
+            (0, query_error(NotExecuted)),
+            (1, query_error(NotExecuted)),
+            (2, query_error(TransactionConflict)),
+        ])
+        .expect("a cause");
+        assert!(is_conflict(&cause), "{cause:?}");
+    }
+
+    #[test]
+    fn a_real_failure_is_reported_over_the_statements_it_prevented() {
+        use surrealdb::types::QueryError::NotExecuted;
+        let cause = root_cause([
+            (0, query_error(NotExecuted)),
+            (1, surrealdb::Error::internal("disk full".to_string())),
+            (2, query_error(NotExecuted)),
+        ])
+        .expect("a cause");
+        assert_eq!(cause.message(), "disk full");
+        assert!(root_cause([]).is_none(), "no errors means no cause");
+    }
+
+    #[tokio::test]
+    async fn a_conflict_is_retried_until_it_clears_and_other_errors_are_not() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let conflict = || {
+            Error::from(query_error(
+                surrealdb::types::QueryError::TransactionConflict,
+            ))
+        };
+
+        let attempts = AtomicU32::new(0);
+        let result = retrying_on_conflict(|| async {
+            match attempts.fetch_add(1, Ordering::SeqCst) {
+                0..=2 => Err(conflict()),
+                _ => Ok("written"),
+            }
+        })
+        .await;
+        assert_eq!(result.expect("retried to success"), "written");
+        assert_eq!(attempts.load(Ordering::SeqCst), 4);
+
+        let attempts = AtomicU32::new(0);
+        let result: Result<()> = retrying_on_conflict(|| async {
+            attempts.fetch_add(1, Ordering::SeqCst);
+            Err(Error::store_malformed("not a conflict"))
+        })
+        .await;
+        assert!(result.is_err());
+        assert_eq!(attempts.load(Ordering::SeqCst), 1, "only conflicts retry");
     }
 
     #[tokio::test]
