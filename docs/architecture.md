@@ -219,8 +219,9 @@ unlike every other relationship in the model (wing to palace, room to wing, draw
 which is a plain foreign-key column on a regular table.
 A `mentions` edge (`TYPE RELATION IN drawer OUT entity`) links a drawer to the entities it talks about, which is how
 graph-aware search gets from canonical memory into the graph.
-The `extract` job fills the graph from mined content: it reads drawers that carry a source origin and adds entities,
-`mentions` links and `relates_to` edges, each recording the drawer, job and extractor it came from
+The `extract` job fills the graph from mined content: it reads drawers that carry a source origin,
+or that were captured as a note (`memcastle note`), and adds entities, `mentions` links and `relates_to` edges,
+each recording the drawer, job and extractor it came from
 (`domain::FactProvenance`), and from a closed vocabulary of entity kinds and predicates.
 It never writes a drawer.
 Links can also be made explicitly (`POST /api/drawers/{id}/mentions`), and a checkpoint's `fact` still takes free-form labels.

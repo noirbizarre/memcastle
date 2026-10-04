@@ -29,7 +29,7 @@ room = "design"         # narrows searches to one room
 |---|---|
 | `[project] name` | The project's name. It is the wing when `[memcastle] wing` is absent. |
 | `[memcastle] wing` | The wing for this project's wake-up, checkpoints and searches. |
-| `[memcastle] room` | The room searches are narrowed to. Recall, checkpoints, diaries and mining name their own rooms, so it applies to search only. |
+| `[memcastle] room` | The room searches are narrowed to, and the room `memcastle note` files notes in. Recall, checkpoints, diaries and mining name their own rooms, so it applies to nothing else. |
 | `[mining]` | Reserved and empty. |
 
 A wing or room name follows the same rules everywhere in MemCastle:
@@ -59,7 +59,8 @@ A value with surrounding whitespace is trimmed.
 A value that is not a valid wing or room name is an error that names the variable;
 it is not silently ignored, because a wrong override would send memory somewhere unintended.
 
-These two variables are read by agent integrations, in the environment of the agent process.
+These two variables are read by agent integrations, in the environment of the agent process, and by the CLI's `note`
+command, in your shell's.
 The daemon does not read them: its own environment says nothing about the client that is talking to it.
 Authentication tokens (`MEMCASTLE_AUTH_TOKEN`) are a separate concern and are never part of project context.
 
@@ -84,7 +85,8 @@ flowchart LR
 
 ## Finding the project
 
-An integration looks for the file from the directory its session works in, walking toward the root:
+An integration (or `memcastle note`) looks for the file from the directory its session or shell works in,
+walking toward the root:
 
 - the **nearest** `.config/memcastle.toml` wins;
 - a nested project uses its own file and **inherits nothing** from a parent project's file;
@@ -104,6 +106,7 @@ Setting `MEMCASTLE_WING` or `MEMCASTLE_ROOM` is enough to have a context without
 | Pi and OpenCode wake-up | Asks about the project's wing (default `project` source) |
 | Pi and OpenCode checkpoints | Files `project` and `diary` items that have no wing of their own under the project's wing; `preference` and `general` items are the user's and are never moved |
 | Pi and OpenCode search | Tells the model which wing and room to pass to `memcastle_search`, and the wing to `memcastle_recall` |
+| `memcastle note` (the CLI) | Files the note under the project's wing and room, from the directory the command runs in; the wing falls back to the directory's name and the room to `notes` |
 | Directory mining (the daemon) | Mines a directory inside a project into the project's wing, unless a wing is given explicitly |
 
 An integration reads the file and the environment itself and passes the result to MemCastle as ordinary `wing` and `room`
@@ -113,7 +116,12 @@ The rules are the same for every integration, and a shared set of cases, `tests/
 holds each implementation to them
 (see the [integration contract](integration-contract.md#project-context)).
 
-The CLI does not read the project file: it takes `--wing` and `--room` explicitly, as before.
+The CLI reads the file only for `memcastle note`, with the same reader the directory adapter uses (`src/project.rs`),
+the same discovery rules and the same environment variables, then sends the daemon an ordinary wing and room.
+Its other commands take `--wing` and `--room` explicitly, as before.
+Unlike mining, a file or variable that cannot be used is an error (`memcastle::project::invalid`) and not a logged
+fallback: you asked for this note to be filed, and a wrong scope would put it somewhere you did not mean.
+`--wing` and `--room` outrank everything here, and with both given the project is not read.
 
 ### Mining
 

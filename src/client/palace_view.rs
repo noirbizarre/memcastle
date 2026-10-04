@@ -139,6 +139,30 @@ pub fn drawer_stakes(path: &str, drawer: &Drawer, painter: Painter) -> String {
     lines.join("\n")
 }
 
+/// One line confirming a note: its stable id and where it was filed, or that the same note was already there.
+#[must_use]
+pub fn render_note(
+    drawer: &Drawer,
+    created: bool,
+    wing: &str,
+    room: &str,
+    painter: Painter,
+) -> String {
+    if created {
+        format!(
+            "{} note {} in {wing}/{room}",
+            painter.ok("Saved"),
+            drawer.id
+        )
+    } else {
+        format!(
+            "{} note {} in {wing}/{room}, it was already captured",
+            painter.dim("Found"),
+            drawer.id
+        )
+    }
+}
+
 /// One line saying whether a create made something or found it already there.
 #[must_use]
 pub fn render_created(kind: &str, name: &str, created: bool, painter: Painter) -> String {

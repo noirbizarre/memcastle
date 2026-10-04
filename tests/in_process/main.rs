@@ -23,6 +23,7 @@ mod extraction;
 mod integration_contract;
 mod mcp_memory_mode;
 mod memory_mode;
+mod notes;
 mod palace;
 mod repair;
 mod retrieval;

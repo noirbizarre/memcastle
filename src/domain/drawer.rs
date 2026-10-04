@@ -16,6 +16,8 @@ pub enum SourceKind {
     Manual,
     /// Mined from a conversation transcript (an agent's session history).
     Transcript,
+    /// Captured as a note: a thought written down by a person (`memcastle note`), kept verbatim.
+    Note,
     /// Reserved for future ingest modes (chat messages, issues, pages, ...).
     #[serde(other)]
     Other,

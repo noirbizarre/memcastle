@@ -290,7 +290,7 @@ and the wing and room the model is told to pass to its searches.
 Nothing in the file is an authorization boundary, and nothing in it is a secret.
 
 Daemon-side (tested): a mined directory takes the wing its project file declares, resolved by the directory adapter from
-`tests/fixtures/project-config/cases.json` (`src/mining/adapters/project_file.rs`).
+`tests/fixtures/project-config/cases.json` (`src/project.rs`, the reader `memcastle note` shares).
 Client-side (tested in Pi and OpenCode): every case of that fixture file resolves the same way in TypeScript,
 the wake-up asks about the project's wing, a checkpoint item takes it, the recall instruction names it,
 two sessions in different directories keep their own project, and an `off` session reads no project file.

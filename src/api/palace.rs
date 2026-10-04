@@ -161,6 +161,39 @@ pub(super) async fn create_drawer(
     Ok((created_status(created.created), Json(created)))
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct WriteNoteBody {
+    wing: String,
+    room: String,
+    content: String,
+    /// Where the note was captured (the CLI sends its working directory).
+    uri: Option<String>,
+    /// The channel this write came through, `"http"` unless a caller says
+    /// otherwise (the CLI sends `"cli"`).
+    #[serde(default = "default_requested_by")]
+    requested_by: String,
+}
+
+/// `POST /api/notes`: capture a note, `201` when stored and `200` when an identical one was already there.
+pub(super) async fn write_note(
+    State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
+    ApiJson(body): ApiJson<WriteNoteBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    let created = state
+        .app
+        .note_write(
+            &body.wing,
+            &body.room,
+            body.content,
+            body.uri,
+            &body.requested_by,
+            mode,
+        )
+        .await?;
+    Ok((created_status(created.created), Json(created)))
+}
+
 pub(super) async fn show_drawer(
     State(state): State<ApiState>,
     ModeHeader(mode): ModeHeader,

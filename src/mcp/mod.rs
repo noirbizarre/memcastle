@@ -87,7 +87,7 @@ struct SearchArgs {
     /// Only drawers carrying every one of these tags.
     #[serde(default)]
     tags: Vec<String>,
-    /// Only drawers from this kind of source: `file`, `manual`, `transcript` or `other`.
+    /// Only drawers from this kind of source: `file`, `manual`, `transcript`, `note` or `other`.
     source_kind: Option<String>,
     /// An RFC 3339 instant, e.g. `2026-01-31T12:00:00Z`: search the memory
     /// that was valid then instead of now.
@@ -122,7 +122,7 @@ struct RecallArgs {
     /// Only drawers carrying every one of these tags.
     #[serde(default)]
     tags: Vec<String>,
-    /// Only drawers from this kind of source: `file`, `manual`, `transcript` or `other`.
+    /// Only drawers from this kind of source: `file`, `manual`, `transcript`, `note` or `other`.
     source_kind: Option<String>,
     /// An RFC 3339 instant: recall the memory that was valid then.
     as_of: Option<String>,

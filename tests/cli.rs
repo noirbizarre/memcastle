@@ -19,6 +19,7 @@ fn help_lists_the_top_level_commands() {
         .stdout(contains("repair"))
         .stdout(contains("  job "))
         .stdout(contains("recall"))
+        .stdout(contains("  note "))
         .stdout(contains("wake-up"));
 }
 

@@ -211,6 +211,14 @@ In a script, CI job or pipe they never ask, so this error only appears at a keyb
 A confirmation could not be shown or read, for example because you pressed Ctrl-C at the prompt.
 Pass `--yes` to skip it, or run the command from an interactive terminal.
 
+### `memcastle::project::invalid`
+
+A command that files memory under the current project (`note`) could not read the project's scope.
+The message names the file or the variable at fault: a `.config/memcastle.toml` that is not valid TOML,
+holds an unknown key, or names a wing or room MemCastle refuses, or a `MEMCASTLE_WING` or `MEMCASTLE_ROOM` that is not a
+valid name.
+Fix it, or pass `--wing` and `--room` explicitly, see [Project configuration](project-config.md).
+
 ### Colours look wrong, or escape codes show up in a file
 
 Colour follows the output stream: it is on for a terminal and off for a pipe or a file.

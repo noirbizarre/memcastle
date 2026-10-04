@@ -16,9 +16,11 @@ use super::drawers::DRAWER_SEARCH_COLUMNS;
 impl SurrealStore {
     /// Up to `limit` drawers the extraction job has not read yet, oldest first.
     ///
-    /// Only drawers that are still current and that came through a mining source (they carry `source.origin`):
-    /// extraction consumes what the unified Source model filed, and a superseded drawer is history, not something to
-    /// learn new facts from. Oldest first so an interrupted sweep resumes where it stopped.
+    /// Only drawers that are still current and that came through a mining source (they carry `source.origin`) or were
+    /// captured as a note (`source.kind = 'note'`): extraction consumes what the unified Source model filed and what a
+    /// person wrote down on purpose, and a superseded drawer is history, not something to learn new facts from.
+    /// A note has no origin because there is no document to cut it from, and without this clause a note would be
+    /// searchable but never enriched. Oldest first so an interrupted sweep resumes where it stopped.
     pub async fn list_drawers_pending_extraction(
         &self,
         wing: Option<&str>,
@@ -26,7 +28,7 @@ impl SurrealStore {
     ) -> Result<Vec<Drawer>> {
         let sql = format!(
             "SELECT {DRAWER_SEARCH_COLUMNS} FROM drawer \
-             WHERE !valid_to AND source.origin != NONE \
+             WHERE !valid_to AND (source.origin != NONE OR source.kind = 'note') \
                AND record::id(id) NOT IN (SELECT VALUE drawer FROM drawer_extraction) \
                AND ($wing = NULL OR room IN ( \
                      SELECT VALUE record::id(id) FROM room WHERE wing IN ( \
@@ -241,6 +243,44 @@ mod tests {
         assert_eq!(ids, vec![pending.id]);
         assert!(store.drawer_extracted(read.id).await.unwrap());
         assert!(!store.drawer_extracted(pending.id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_note_without_an_origin_is_pending_extraction_but_a_manual_drawer_is_not() {
+        let store = store().await;
+        let r = room(&store, "w").await;
+        let provenance = || Provenance {
+            requested_by: "cli".into(),
+            job_id: None,
+        };
+        let mut note = Drawer::new(
+            DrawerId::new(),
+            r,
+            "Alice works at Acme".to_string(),
+            Source::new(SourceKind::Note, None, None),
+            vec![],
+            provenance(),
+        );
+        note.valid_from = Utc::now() - Duration::days(1);
+        store.create_drawer(&note).await.expect("create note");
+        let manual = Drawer::new(
+            DrawerId::new(),
+            r,
+            "written by hand".to_string(),
+            Source::new(SourceKind::Manual, None, None),
+            vec![],
+            provenance(),
+        );
+        store.create_drawer(&manual).await.expect("create manual");
+
+        let listed = store
+            .list_drawers_pending_extraction(None, 10)
+            .await
+            .expect("pending");
+        assert_eq!(
+            listed.iter().map(|d| d.id).collect::<Vec<_>>(),
+            vec![note.id]
+        );
     }
 
     #[tokio::test]
