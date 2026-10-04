@@ -29,10 +29,16 @@ function fakePi(cwd = "/work/memcastle") {
     cwd,
     ui: { notify: (message: string, level: string) => notes.push({ message, level }) },
   } as unknown as ExtensionContext
-  /** Fire an event at every handler in registration order, and return what the last one answered. */
+  /**
+   * Fire an event at every handler in registration order, and return what they answered, merged the way Pi merges
+   * them: another capability (search-before-answer) answers `before_agent_start` too, with a `systemPrompt`.
+   */
   const fire = async (event: string, payload: object = {}) => {
-    let answer: unknown
-    for (const handler of handlers.get(event) ?? []) answer = await handler({ type: event, ...payload }, ctx)
+    let answer: object | undefined
+    for (const handler of handlers.get(event) ?? []) {
+      const result = (await handler({ type: event, ...payload }, ctx)) as object | undefined
+      if (result) answer = { ...answer, ...result }
+    }
     return answer as { message?: { customType: string; content: string; display: boolean } } | undefined
   }
   return { pi, ctx, notes, commands, fire }
@@ -368,7 +374,8 @@ test("a real daemon with nothing remembered for the project injects nothing", as
   const { fire, notes, restore } = await realSession({ MEMCASTLE_WAKE_UP_MODE: "sync" }, "/work/unknown-project")
   try {
     await fire("session_start", { reason: "startup" })
-    expect(await fire("before_agent_start", { prompt: "hello" })).toBeUndefined()
+    // The turn still carries the search-before-answer system prompt; what must be absent is a wake-up message.
+    expect((await fire("before_agent_start", { prompt: "hello", systemPrompt: "base" }))?.message).toBeUndefined()
     expect(notes).toEqual([])
   } finally {
     await fire("session_shutdown", { reason: "quit" })

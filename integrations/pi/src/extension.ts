@@ -13,6 +13,7 @@ import { registerCheckpointTool } from "./checkpoint-tool.ts"
 import { registerDailyMine } from "./daily-mine.ts"
 import { InvalidModeError } from "./modes.ts"
 import { McpManager } from "./mcp-manager.ts"
+import { registerSearchBeforeAnswer } from "./search-before-answer.ts"
 import { resolveSettings } from "./settings.ts"
 import { registerWakeUp } from "./wake-up.ts"
 import { registerWakeUpCommand } from "./wake-up-cli.ts"
@@ -48,6 +49,7 @@ export default function memcastle(pi: ExtensionAPI): void {
   const current = () => manager
   registerWakeUp(pi, current)
   registerWakeUpCommand(pi, current)
+  registerSearchBeforeAnswer(pi, current)
   registerCheckpointAgent(pi, current)
   registerCheckpointTool(pi, current)
   registerDailyMine(pi, current)

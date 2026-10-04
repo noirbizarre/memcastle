@@ -40,6 +40,7 @@ The environment variables are the ones the MemCastle CLI already reads.
 | `MEMCASTLE_WAKE_UP_MODE` | `async` | `sync` makes the first response wait for it; `async` never makes a response wait |
 | `MEMCASTLE_WAKE_UP_SOURCE` | `project` | The wing to ask about: `user`, `project`, `custom` or `none` |
 | `MEMCASTLE_WAKE_UP_WING` | none | The wing for `custom` |
+| `MEMCASTLE_FORCE_MEMORY_RECALL` | `sometimes` | `off`, `sometimes` or `always`: how hard to push the model to search first |
 
 The daemon is found through its registry file, then the configured address, and each candidate is checked with
 `GET /api/health` because the file is only a hint.
@@ -82,6 +83,32 @@ The wake-up settings are named after `pi-palace`'s `injectWakeUp.*`, and `MEMCAS
 conversation.
 It works whatever `MEMCASTLE_WAKE_UP` says, because asking for it is the opt-in.
 
+### Search before answering
+
+Every turn, the extension adds the shared [`search-before-answer`](../../skills/search-before-answer/SKILL.md) skill to
+the system prompt, so the model searches MemCastle before it answers a question about past work, decisions, people or
+preferences, and quotes what it finds verbatim.
+The text is read from `skills/` in the repository, byte for byte, and is never copied into this package.
+
+The level is named after `pi-palace`'s `forceMemoryRecall.level`.
+It is a client policy: MemCastle itself never forces a search, and no daemon setting changes that.
+
+- **`sometimes`**, the default, injects the skill as written, which asks for a search when a question may depend on
+  something said or decided before and skips it for self-contained questions.
+- **`always`** injects the same text and adds one line, which says to search before every answer.
+  The line lives in the extension and the shared skill is not edited, because the skill's own advice to skip the search
+  is what every other client reads.
+- **`off`** injects nothing.
+- **Every turn, never accumulating.**
+  The text is appended to the system prompt in `before_agent_start`, which Pi rebuilds for each model call.
+  It is not a message, so it does not pile up in the session history, and it is still there after a compaction.
+- A `read-only` session gets it, because searching is allowed there.
+  An `off` session has no manager and gets nothing.
+- An unreadable skill file, which means the extension was installed away from the repository checkout, is reported once
+  per session and the turn carries on without the reminder.
+- A mistyped level falls back to `sometimes` rather than breaking the session, because it only changes what the model
+  is told.
+
 ### Connection lifecycle
 
 Pi runs one agent session at a time, so the extension holds one MCP connection.
@@ -115,13 +142,17 @@ src/failures.ts               the five failure classes, each with the daemon's `
 src/wake-up-core.ts           wake-up without a host: settings, wing, rendering, the in-flight request
 src/wake-up.ts                wake-up on session start: fetch at `session_start`, inject at `before_agent_start`
 src/wake-up-cli.ts            `/memcastle-wake-up`: show what a session start would inject
+src/recall-core.ts            search-before-answer without a host: the level and the text to inject (the same file as OpenCode's)
+src/skill-text.ts             reads a shared skill from `skills/` and strips its frontmatter (the same file as OpenCode's)
+src/search-before-answer.ts   injects that skill into the system prompt at every `before_agent_start`
 src/checkpoint-agent.ts       interval review by the extension's own model (#23), empty
 src/checkpoint-tool.ts        the manual checkpoint (#23) and the pre-compaction one (#24), empty
 src/daily-mine.ts             background mining on the extension's own schedule (#26), empty
 test/                         bun tests against a real `memcastle serve`; they read tests/fixtures/integration/
 ```
 
-`modes`, `failures`, `settings`, `daemon-client`, `persistent-mcp-client` and `wake-up-core` are a deliberate copy of the small client
+`modes`, `failures`, `settings`, `daemon-client`, `persistent-mcp-client`, `wake-up-core`, `recall-core` and
+`skill-text` are a deliberate copy of the small client
 the OpenCode integration carries, not a shared package: the two ecosystems differ in how many sessions share a process.
 Both suites replay the same fixtures, which is what keeps the copies honest
 (see [ADR-022](../../docs/adr/022-integrations-are-bun-packages-tested-against-a-real-daemon.md)).
@@ -147,11 +178,11 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | --- | --- | --- |
 | `session-mode` | Foundation: label translation, mode selected on connect, `off` opens nothing | #27 |
 | `wake-up` | Implemented: fetched at session start, injected as a message before the first (`sync`) or first-ready (`async`) response, never blocks on a down daemon | #22, done |
-| `recall` | Not yet | #25 |
+| `recall` | Implemented: the shared `search-before-answer` skill is appended to the system prompt every turn, at the `forceMemoryRecall` level | #25, done |
 | `checkpoint` | Not yet | #23 |
 | `emergency-checkpoint` | Not yet | #24 |
 | `persistent-session` | Implemented: one connection per Pi session, kept alive, replaced with its mode re-selected when the daemon forgets it | #29, done |
-| `skills` | Not yet | #25 |
+| `skills` | Implemented: `search-before-answer` is read from `skills/` and injected, never copied; `off` sessions get nothing | #25, done |
 | `background-mining` | Not yet | #26 |
 | `failure-reporting` | Foundation: the five classes with `help`, shown as Pi notifications | #30 for the rest |
 | `audit-repair` | Not yet | #28 |
