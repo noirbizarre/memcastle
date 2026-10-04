@@ -41,7 +41,7 @@ pub struct SearchOptions {
     pub ranking: Option<String>,
     /// A drawer must carry all of these tags.
     pub tags: Vec<String>,
-    /// A source kind name (`file`, `manual`, `other`).
+    /// A source kind name (`file`, `manual`, `transcript`, `other`).
     pub source_kind: Option<String>,
     /// An RFC 3339 instant: search as the palace stood then.
     pub as_of: Option<String>,
@@ -72,10 +72,13 @@ impl SearchOptions {
             .map(|raw| match raw.trim().to_ascii_lowercase().as_str() {
                 "file" => Ok(SourceKind::File),
                 "manual" => Ok(SourceKind::Manual),
+                "transcript" => Ok(SourceKind::Transcript),
                 "other" => Ok(SourceKind::Other),
                 _ => Err(Error::invalid_input(
                     "source_kind",
-                    format!("unknown source kind `{raw}`; expected file, manual or other"),
+                    format!(
+                        "unknown source kind `{raw}`; expected file, manual, transcript or other"
+                    ),
                 )),
             })
             .transpose()?;

@@ -60,3 +60,11 @@ Redoing an item must land on the record it already wrote.
   the guarantee is per job, not global deduplication.
 - The derivation strings are a compatibility surface.
   Changing one needs a data migration.
+
+## Amendment (2026-10-04)
+
+Mining no longer relies on this guarantee alone.
+[ADR-023](023-unified-source-model-for-mining.md) gives a mined document an identity and a revision, so a *different*
+job over the same input files nothing new.
+Mining's derived ids now also name the source, document, chunk and chunk hash (`mine-chunk:...`), and the old
+`mine-drawer:{index}` string stays only in drawers already written.

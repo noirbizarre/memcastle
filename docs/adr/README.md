@@ -38,7 +38,7 @@ The history is the value.
   not by an assumption of one daemon
 - [ADR-007](007-memory-mode-gate-follows-data-access.md) — the memory-mode gate follows what an operation
   reads or writes, not its method name (extended by ADR-018)
-- [ADR-008](008-replay-safe-job-resume.md) — resuming a job is replay-safe
+- [ADR-008](008-replay-safe-job-resume.md) — resuming a job is replay-safe (mining's identity amended by ADR-023)
 - [ADR-009](009-shutdown-drains-jobs.md) — shutdown drains running jobs and hands them back to the queue
 - [ADR-010](010-unix-xdg-paths.md) — configuration, data and state follow the Unix XDG layout on Linux and macOS
 - [ADR-011](011-split-bind-address-and-port.md) — the listener's address and port are separate settings,
@@ -58,7 +58,7 @@ The history is the value.
 - [ADR-017](017-daemon-lifecycle-commands-live-under-daemon.md) — the daemon's background lifecycle lives under
   `memcastle daemon` (`start`, `stop`, `restart`), and `serve` stays the foreground server
 - [ADR-018](018-palace-hierarchy-management.md) — wings, rooms and drawers are managed through REST and the CLI,
-  with cascading transactional deletes, optional drawer names and no MCP tool
+  with cascading transactional deletes, optional drawer names and no MCP tool (re-mining amended by ADR-023)
 - [ADR-019](019-shared-integration-contract.md) — integrations share one documented contract and language-neutral
   fixtures, not a framework, and reach MemCastle only over MCP and HTTP
 - [ADR-020](020-skills-are-versioned-with-the-repository.md) — agent skills are plain files versioned with the
@@ -68,3 +68,6 @@ The history is the value.
   or the caller
 - [ADR-022](022-integrations-are-bun-packages-tested-against-a-real-daemon.md) — integrations are self-contained bun
   packages, each with its own small client, tested against a real daemon in their own CI job
+- [ADR-023](023-unified-source-model-for-mining.md) — mining goes through one source model in three stages (acquire,
+  normalize, chunk and ingest), with idempotent ingestion and a cursor MemCastle keeps per source; re-mining no longer
+  duplicates

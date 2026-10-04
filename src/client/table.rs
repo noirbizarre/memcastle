@@ -102,6 +102,66 @@ pub fn render_jobs(jobs: &[Job], painter: Painter, width: Option<u16>) -> String
     )
 }
 
+/// Render the mining sources: the adapters the daemon ships, then the sources
+/// it has mined with where each run stopped.
+#[must_use]
+pub fn render_sources(
+    report: &crate::app::SourcesReport,
+    painter: Painter,
+    width: Option<u16>,
+) -> String {
+    let yes_no = |value: bool| if value { "yes" } else { "no" }.to_string();
+    let providers = render_table(
+        &["SOURCE", "INCREMENTAL", "KEEPS RAW", "CREDENTIALS", "READS"],
+        report
+            .providers
+            .iter()
+            .map(|provider| {
+                vec![
+                    provider.name.clone(),
+                    yes_no(provider.capabilities.incremental),
+                    yes_no(provider.capabilities.retains_raw),
+                    yes_no(provider.capabilities.needs_credentials),
+                    provider.description.clone(),
+                ]
+            })
+            .collect(),
+        4,
+        painter,
+        width,
+    );
+    if report.sources.is_empty() {
+        return format!(
+            "{providers}\n{}",
+            painter.dim("No source has been mined yet.")
+        );
+    }
+    let mined = render_table(
+        &["SOURCE", "LOCATOR", "DOCUMENTS", "LAST RUN", "LAST JOB"],
+        report
+            .sources
+            .iter()
+            .map(|source| {
+                vec![
+                    source.provider.clone(),
+                    source.locator.clone(),
+                    source.documents.to_string(),
+                    source
+                        .last_run_at
+                        .map_or_else(|| "never".to_string(), local_minute),
+                    source
+                        .last_job
+                        .map_or_else(|| "-".to_string(), |job| job.to_string()),
+                ]
+            })
+            .collect(),
+        1,
+        painter,
+        width,
+    );
+    format!("{providers}\n{mined}")
+}
+
 /// Render `wings` as a table: one row per wing, with its counts.
 ///
 /// Wings are addressed by name, so there is no id column to copy from.
@@ -503,6 +563,7 @@ mod tests {
                 kind: crate::domain::SourceKind::Manual,
                 uri: None,
                 agent: None,
+                origin: None,
             },
             created_at: chrono::Utc::now(),
         };

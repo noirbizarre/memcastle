@@ -251,10 +251,21 @@ only a failed job can be retried, only a paused one resumed, and only a queued, 
 ### `mine` finds nothing or stops early
 
 Check the job's `result`:
-`memcastle job show <id>` reports `files_considered` and whether the run was `truncated` at 2000 files.
+`memcastle job show <id>` reports how many `documents` were handled, how many were `unchanged` (already filed, so
+skipped), `skipped` (not readable) and whether the run was `truncated` at the document limit, in which case run it again.
+A source that was mined before remembers where it stopped, so a second `mine` that reports `"documents": 0` has nothing
+new to read; `memcastle mine --full` reads it from the beginning.
 Skipped directories, large files and non-UTF-8 files are listed in [What mining reads](storage.md#what-mining-reads).
-The path given to `mine` is read by the daemon, so it must exist on the daemon's machine.
+The path given to `mine`, and the sessions directory of `pi-sessions`, are read by the daemon, so they must exist on the
+daemon's machine.
 Over MCP and REST it must be absolute; the CLI makes it absolute for you.
+
+### `memcastle::mining::cursor_invalid`
+
+A source's stored cursor is not one its adapter can continue from, for example after a change to how that adapter keeps
+its place.
+Mine it again from the beginning with `memcastle mine --source <name> --full`: unchanged documents are recognised and
+skipped, so nothing is duplicated.
 
 ### Search returns nothing for a query that should match
 

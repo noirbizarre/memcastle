@@ -63,6 +63,7 @@ mod tests {
                 kind: SourceKind::Manual,
                 uri: None,
                 agent: agent.map(str::to_string),
+                origin: None,
             },
             vec![],
             Provenance {

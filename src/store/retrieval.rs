@@ -430,6 +430,7 @@ mod tests {
                 kind: spec.kind,
                 uri: None,
                 agent: None,
+                origin: None,
             },
             spec.tags.iter().map(|t| (*t).to_string()).collect(),
             Provenance {
@@ -639,6 +640,7 @@ mod tests {
                 kind: SourceKind::Manual,
                 uri: None,
                 agent: None,
+                origin: None,
             },
             vec![],
             Provenance {
@@ -977,6 +979,7 @@ mod tests {
                 kind: SourceKind::Manual,
                 uri: None,
                 agent: None,
+                origin: None,
             },
             vec![],
             Provenance {
@@ -997,6 +1000,7 @@ mod tests {
                 kind: SourceKind::Manual,
                 uri: None,
                 agent: None,
+                origin: None,
             },
             vec![],
             Provenance {

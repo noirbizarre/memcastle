@@ -200,6 +200,36 @@ pub struct WakeUpContext {
     pub generated_at: DateTime<Utc>,
 }
 
+/// A source that has been mined, as [`AppServices::list_sources`] reports it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceSummary {
+    /// The source's identifier.
+    pub id: crate::domain::SourceId,
+    /// The adapter that reads it.
+    pub provider: String,
+    /// The account on the provider, if it has accounts.
+    pub account: Option<String>,
+    /// The part of the provider that is read (a directory, a sessions root).
+    pub locator: String,
+    /// Where the last run stopped, in the adapter's own terms; `null` before the first run.
+    pub cursor: serde_json::Value,
+    /// The job that last advanced the cursor.
+    pub last_job: Option<JobId>,
+    /// When the cursor last advanced.
+    pub last_run_at: Option<DateTime<Utc>>,
+    /// How many documents of it have been ingested.
+    pub documents: u64,
+}
+
+/// The sources this daemon can mine and the ones it has mined.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourcesReport {
+    /// The adapters this daemon ships.
+    pub providers: Vec<crate::mining::ProviderInfo>,
+    /// The sources that have been mined, by provider then locator.
+    pub sources: Vec<SourceSummary>,
+}
+
 /// What a job-control request answers: the state the request left the job
 /// heading for. One shape, served identically by REST, MCP and the CLI.
 ///
@@ -492,8 +522,13 @@ impl AppServices {
         }
     }
 
-    /// Submit a mining job for `path`, returning immediately with the
+    /// Submit a mining job for `source`, returning immediately with the
     /// job's id — the CLI/MCP/HTTP caller never runs the mine itself.
+    ///
+    /// `source` is a directory or any registered source adapter (see
+    /// [`crate::mining::providers`]); `full` ignores the source's stored
+    /// cursor and reads it again from the beginning (unchanged documents are
+    /// still skipped, so nothing is duplicated).
     ///
     /// Mining is background work: it always runs at [`Priority::Background`]
     /// so it never delays checkpoint/audit/repair jobs.
@@ -505,16 +540,63 @@ impl AppServices {
     /// # Errors
     ///
     /// Returns an error if the job cannot be persisted,
-    /// [`Error::InvalidInput`] if `path` is relative, or
-    /// [`Error::ModeForbidden`] if `mode` doesn't permit writes.
+    /// [`Error::InvalidInput`] if a directory path is relative or the
+    /// provider is unknown, or [`Error::ModeForbidden`] if `mode` doesn't
+    /// permit writes.
     pub async fn submit_mine(
         &self,
-        path: PathBuf,
+        source: MiningSource,
         wing: Option<String>,
+        full: bool,
         requested_by: &str,
         mode: MemoryMode,
     ) -> Result<Job> {
         Self::require_write(mode, "mine")?;
+        let source = Self::checked_mining_source(source)?;
+        // Up front, like the path: a bad wing name is a 400 at submission,
+        // not a job that fails once it starts. A wing derived from the
+        // directory name is left alone, since the caller did not choose it.
+        if let Some(wing) = wing.as_deref() {
+            self.check_new_wing_name(wing).await?;
+        }
+        self.scheduler
+            .submit(
+                JobKind::Mine { source, wing, full },
+                Priority::Background,
+                requested_by,
+            )
+            .await
+    }
+
+    /// Validate a mining source at submission, and give the `directory`
+    /// provider its one canonical form.
+    fn checked_mining_source(source: MiningSource) -> Result<MiningSource> {
+        let path = match source {
+            MiningSource::Directory { path } => path,
+            MiningSource::Provider { provider, locator } if provider == "directory" => {
+                let Some(locator) = locator else {
+                    return Err(Error::invalid_input(
+                        "path",
+                        "mining a directory needs a path; give an absolute one",
+                    ));
+                };
+                PathBuf::from(locator)
+            }
+            MiningSource::Provider { provider, locator } => {
+                if !crate::mining::is_provider(&provider) {
+                    let known = crate::mining::providers()
+                        .into_iter()
+                        .map(|provider| provider.name)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return Err(Error::invalid_input(
+                        "source",
+                        format!("unknown source `{provider}`; known sources: {known}"),
+                    ));
+                }
+                return Ok(MiningSource::Provider { provider, locator });
+            }
+        };
         // Validated here, like `submit_repair`'s `based_on_job`: a relative path
         // would be resolved against the *daemon's* working directory, not the
         // caller's, and mine the wrong tree or fail minutes later as a job.
@@ -530,22 +612,38 @@ impl AppServices {
                 ),
             ));
         }
-        // Up front, like the path: a bad wing name is a 400 at submission,
-        // not a job that fails once it starts. A wing derived from the
-        // directory name is left alone, since the caller did not choose it.
-        if let Some(wing) = wing.as_deref() {
-            self.check_new_wing_name(wing).await?;
+        Ok(MiningSource::Directory { path })
+    }
+
+    /// The sources this daemon can mine and the ones it has mined: identity,
+    /// where the last run stopped, and how many documents it holds.
+    ///
+    /// Gated as a **read**: it reports palace bookkeeping, not memory content.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the store query fails, or [`Error::ModeForbidden`]
+    /// if `mode` doesn't permit reads.
+    pub async fn list_sources(&self, mode: MemoryMode) -> Result<SourcesReport> {
+        Self::require_read(mode, "source_list")?;
+        let mut sources = Vec::new();
+        for record in self.store.list_sources().await? {
+            let documents = self.store.count_source_documents(record.id).await?;
+            sources.push(SourceSummary {
+                id: record.id,
+                provider: record.provider,
+                account: record.account,
+                locator: record.locator,
+                cursor: record.cursor,
+                last_job: record.last_job,
+                last_run_at: record.last_run_at,
+                documents,
+            });
         }
-        self.scheduler
-            .submit(
-                JobKind::Mine {
-                    source: MiningSource::Directory { path },
-                    wing,
-                },
-                Priority::Background,
-                requested_by,
-            )
-            .await
+        Ok(SourcesReport {
+            providers: crate::mining::providers(),
+            sources,
+        })
     }
 
     /// Submit a synthetic demo job (see `domain::job::JobKind::Demo`) at
@@ -940,6 +1038,7 @@ impl AppServices {
                 uri: None,
                 // Who wrote it: the agent identity, as every writer records it.
                 agent: Some(agent_identity.to_string()),
+                origin: None,
             },
             vec![],
             Provenance {
@@ -1155,6 +1254,7 @@ mod tests {
                     kind: SourceKind::Manual,
                     uri: None,
                     agent: Some("test-agent".to_string()),
+                    origin: None,
                 },
                 fact: None,
             }],
@@ -1400,7 +1500,15 @@ mod tests {
         let app = test_app().await;
 
         let result = app
-            .submit_mine("some/relative/dir".into(), None, "test", MemoryMode::Full)
+            .submit_mine(
+                MiningSource::Directory {
+                    path: "some/relative/dir".into(),
+                },
+                None,
+                false,
+                "test",
+                MemoryMode::Full,
+            )
             .await;
 
         match result {
@@ -1433,8 +1541,11 @@ mod tests {
             assert!(
                 matches!(
                     app.submit_mine(
-                        "/tmp/anything".into(),
+                        MiningSource::Directory {
+                            path: "/tmp/anything".into()
+                        },
                         Some(bad.into()),
+                        false,
                         "test",
                         MemoryMode::Full
                     )
@@ -1605,9 +1716,7 @@ mod tests {
     async fn mining_is_a_write_so_read_only_and_disabled_sessions_cannot_submit_it() {
         let app = test_app().await;
         for mode in [MemoryMode::ReadOnly, MemoryMode::Disabled] {
-            let result = app
-                .submit_mine("/tmp/anything".into(), None, "test", mode)
-                .await;
+            let result = app.submit_mine(anything(), None, false, "test", mode).await;
             assert_mode_forbidden(&result, mode);
         }
         assert!(
@@ -1617,9 +1726,114 @@ mod tests {
                 .is_empty(),
             "a rejected mine must not leave a job behind"
         );
-        app.submit_mine("/tmp/anything".into(), None, "test", MemoryMode::Full)
+        app.submit_mine(anything(), None, false, "test", MemoryMode::Full)
             .await
             .expect("full-mode mine is accepted");
+    }
+
+    fn anything() -> MiningSource {
+        MiningSource::Directory {
+            path: "/tmp/anything".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn mining_through_a_named_source_is_accepted_and_an_unknown_one_is_refused_naming_the_known_ones()
+     {
+        let app = test_app().await;
+        let job = app
+            .submit_mine(
+                MiningSource::Provider {
+                    provider: "pi-sessions".into(),
+                    locator: None,
+                },
+                None,
+                true,
+                "test",
+                MemoryMode::Full,
+            )
+            .await
+            .expect("a shipped provider is accepted");
+        assert!(matches!(job.kind, JobKind::Mine { full: true, .. }));
+
+        let error = app
+            .submit_mine(
+                MiningSource::Provider {
+                    provider: "carrier-pigeon".into(),
+                    locator: None,
+                },
+                None,
+                false,
+                "test",
+                MemoryMode::Full,
+            )
+            .await
+            .unwrap_err();
+        match error {
+            Error::InvalidInput { field, message } => {
+                assert_eq!(field, "source");
+                assert!(message.contains("pi-sessions"), "{message}");
+            }
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn the_directory_provider_is_the_same_as_a_directory_job_and_needs_an_absolute_path() {
+        let app = test_app().await;
+        let job = app
+            .submit_mine(
+                MiningSource::Provider {
+                    provider: "directory".into(),
+                    locator: Some("/tmp/anything".into()),
+                },
+                None,
+                false,
+                "test",
+                MemoryMode::Full,
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                job.kind,
+                JobKind::Mine {
+                    source: MiningSource::Directory { .. },
+                    ..
+                }
+            ),
+            "one canonical form, so the persisted job shape does not fork"
+        );
+        for locator in [None, Some("relative/dir".to_string())] {
+            let result = app
+                .submit_mine(
+                    MiningSource::Provider {
+                        provider: "directory".into(),
+                        locator,
+                    },
+                    None,
+                    false,
+                    "test",
+                    MemoryMode::Full,
+                )
+                .await;
+            assert!(
+                matches!(result, Err(Error::InvalidInput { ref field, .. }) if field == "path"),
+                "{result:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn listing_sources_reports_the_providers_and_is_a_read() {
+        let app = test_app().await;
+        let report = app.list_sources(MemoryMode::ReadOnly).await.unwrap();
+        assert!(report.providers.iter().any(|p| p.name == "directory"));
+        assert!(report.sources.is_empty());
+        assert_mode_forbidden(
+            &app.list_sources(MemoryMode::Disabled).await,
+            MemoryMode::Disabled,
+        );
     }
 
     #[tokio::test]
@@ -1721,6 +1935,7 @@ mod tests {
                     kind: SourceKind::Manual,
                     uri: None,
                     agent: Some("test-agent".to_string()),
+                    origin: None,
                 },
                 fact: None,
             }],
@@ -1780,6 +1995,7 @@ mod tests {
                     kind: SourceKind::Manual,
                     uri: None,
                     agent: Some("test-agent".to_string()),
+                    origin: None,
                 },
                 fact: None,
             }],
@@ -1804,6 +2020,7 @@ mod tests {
                     kind: SourceKind::Manual,
                     uri: None,
                     agent: Some("test-agent".to_string()),
+                    origin: None,
                 },
                 fact: None,
             }],
@@ -1827,6 +2044,7 @@ mod tests {
                     kind: SourceKind::Manual,
                     uri: None,
                     agent: Some("test-agent".to_string()),
+                    origin: None,
                 },
                 fact: None,
             }],
@@ -1849,6 +2067,7 @@ mod tests {
                     kind: SourceKind::Manual,
                     uri: None,
                     agent: Some("test-agent".to_string()),
+                    origin: None,
                 },
                 fact: None,
             }],

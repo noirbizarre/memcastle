@@ -126,8 +126,13 @@ pub enum Command {
     /// highlights, bounded by a deterministic item/byte budget.
     #[command(alias = "wake_up")]
     WakeUp(WakeUpArgs),
-    /// Submit a mining job for a directory.
+    /// Submit a mining job for a directory or a source adapter. Mining is
+    /// incremental: a source remembers where the last run stopped, and
+    /// unchanged documents are not filed again.
     Mine(MineArgs),
+    /// List the sources the daemon can mine and the ones it has mined, with
+    /// where each one's last run stopped.
+    Sources,
     /// Submit a checkpoint job: persist an already-classified batch of
     /// memory writes.
     Checkpoint(CheckpointArgs),
@@ -267,7 +272,7 @@ pub struct RetrievalArgs {
     #[arg(long = "tag")]
     pub tags: Vec<String>,
     /// Only drawers from this kind of source.
-    #[arg(long, value_parser = PossibleValuesParser::new(["file", "manual", "other"]))]
+    #[arg(long, value_parser = PossibleValuesParser::new(["file", "manual", "transcript", "other"]))]
     pub source_kind: Option<String>,
     /// Search the memory that was valid at this RFC 3339 instant
     /// (e.g. 2026-01-31T12:00:00Z) instead of now.
@@ -339,9 +344,24 @@ pub struct WakeUpArgs {
 /// Arguments for `memcastle mine`.
 #[derive(Debug, Args)]
 pub struct MineArgs {
-    /// The directory to mine.
-    pub path: PathBuf,
-    /// The wing to file mined drawers under. Defaults to the directory name.
+    /// The directory to mine. Give this, or `--source`.
+    #[arg(required_unless_present = "source", conflicts_with = "source")]
+    pub path: Option<PathBuf>,
+    /// A source adapter to mine instead of a directory, such as
+    /// `pi-sessions`. `memcastle sources` lists them.
+    #[arg(long)]
+    pub source: Option<String>,
+    /// Where within `--source` to read, when it needs more than its default
+    /// (for `pi-sessions`, an absolute path to a sessions directory).
+    #[arg(long, requires = "source")]
+    pub locator: Option<String>,
+    /// Read the source again from the beginning instead of continuing from
+    /// where the last run stopped. Unchanged documents are still skipped, so
+    /// nothing is duplicated.
+    #[arg(long)]
+    pub full: bool,
+    /// The wing to file mined drawers under. Defaults to the directory name,
+    /// or to the source's own default.
     #[arg(long)]
     pub wing: Option<String>,
 }

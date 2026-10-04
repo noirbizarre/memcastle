@@ -227,6 +227,7 @@ mod tests {
                 kind: SourceKind::Manual,
                 uri: None,
                 agent: Some("test-agent".to_string()),
+                origin: None,
             },
             fact: None,
         }

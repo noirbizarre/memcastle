@@ -27,7 +27,7 @@ use cli::{
 use memcastle::app::{DbEndpointRequest, DbEndpointStatus, WakeUpBudget};
 use memcastle::client::{DaemonClient, StatusView};
 use memcastle::config::{Config, Overrides};
-use memcastle::domain::{MemoryMode, NameKind, PalacePath, validate_name};
+use memcastle::domain::{MemoryMode, MiningSource, NameKind, PalacePath, validate_name};
 use memcastle::store::SurrealStore;
 use memcastle::term::{self, Painter};
 use memcastle::{Error, Result};
@@ -200,6 +200,7 @@ async fn run_command(
         Command::Recall(args) => cmd_recall(&config, mode, args).await,
         Command::WakeUp(args) => cmd_wake_up(&config, mode, args).await,
         Command::Mine(args) => cmd_mine(&config, mode, args).await,
+        Command::Sources => cmd_sources(&config, mode).await,
         Command::Checkpoint(args) => cmd_checkpoint(&config, mode, args).await,
         Command::Audit(args) => cmd_audit(&config, mode, args).await,
         Command::Embed(args) => cmd_embed(&config, mode, args).await,
@@ -535,14 +536,39 @@ async fn cmd_wake_up(config: &Config, mode: Option<MemoryMode>, args: WakeUpArgs
 }
 
 async fn cmd_mine(config: &Config, mode: Option<MemoryMode>, args: MineArgs) -> Result<()> {
-    // Made absolute here, against *this* shell's working directory: the
-    // daemon would otherwise resolve `./project` against its own, which is
-    // wherever it was started and usually not where the user is standing.
-    let path = std::path::absolute(&args.path)
-        .map_err(|source| Error::io(args.path.display().to_string(), source))?;
-    let job = client(config, mode).submit_mine(path, args.wing).await?;
+    let source = match (args.path, args.source) {
+        // Made absolute here, against *this* shell's working directory: the
+        // daemon would otherwise resolve `./project` against its own, which is
+        // wherever it was started and usually not where the user is standing.
+        (Some(path), None) => MiningSource::Directory {
+            path: std::path::absolute(&path)
+                .map_err(|source| Error::io(path.display().to_string(), source))?,
+        },
+        (_, Some(provider)) => MiningSource::Provider {
+            provider,
+            locator: args.locator,
+        },
+        // clap requires one of the two, so this is unreachable from the command line.
+        (None, None) => {
+            return Err(Error::invalid_input(
+                "path",
+                "give a directory to mine, or `--source`",
+            ));
+        }
+    };
+    let job = client(config, mode)
+        .submit_mine(source, args.wing, args.full)
+        .await?;
     print_json(&job)?;
     Ok(())
+}
+
+async fn cmd_sources(config: &Config, mode: Option<MemoryMode>) -> Result<()> {
+    let report = client(config, mode).list_sources().await?;
+    print_for_terminal_or_json(
+        |painter, width| memcastle::client::table::render_sources(&report, painter, width),
+        &report,
+    )
 }
 
 async fn cmd_checkpoint(

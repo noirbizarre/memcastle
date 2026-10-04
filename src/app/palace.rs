@@ -132,6 +132,7 @@ impl AppServices {
                     kind: SourceKind::Manual,
                     uri: None,
                     agent: old.source.agent.clone(),
+                    origin: None,
                 },
                 replacement.tags.unwrap_or_else(|| old.tags.clone()),
                 Provenance {
@@ -432,6 +433,7 @@ impl AppServices {
                 kind: SourceKind::Manual,
                 uri: None,
                 agent: None,
+                origin: None,
             },
             vec![],
             Provenance {
@@ -798,6 +800,7 @@ mod tests {
                     kind: SourceKind::Manual,
                     uri: None,
                     agent: None,
+                    origin: None,
                 },
                 fact: None,
             }],
@@ -846,6 +849,7 @@ mod tests {
                     path: "/tmp".into(),
                 },
                 wing: None,
+                full: false,
             },
             Priority::Normal,
             "test",

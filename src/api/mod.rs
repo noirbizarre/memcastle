@@ -21,7 +21,7 @@ use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 
 use crate::app::{AppServices, WakeUpBudget};
-use crate::domain::{JobId, JobKind, JobStatus, MiningSource};
+use crate::domain::{JobId, JobKind, JobStatus};
 use crate::search::{SearchOptions, SearchQuery};
 
 use extract::{ApiJson, ApiQuery};
@@ -56,6 +56,7 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
         .route("/api/jobs/{id}/resume", post(resume_job))
         .route("/api/jobs/{id}/cancel", post(cancel_job))
         .route("/api/jobs/{id}/retry", post(retry_job))
+        .route("/api/sources", get(list_sources))
         .route("/api/shutdown", post(shutdown_now))
         // The hierarchy. Reads and creates are open to the same callers as any
         // other palace content; deletes have no MCP tool (docs/adr/018).
@@ -144,7 +145,7 @@ struct SearchParams {
     /// Comma-separated tags a drawer must all carry.
     #[serde(alias = "tag")]
     tags: Option<String>,
-    /// Restrict to drawers from one source kind: `file`, `manual` or `other`.
+    /// Restrict to drawers from one source kind: `file`, `manual`, `transcript` or `other`.
     source_kind: Option<String>,
     /// An RFC 3339 instant: search the memory valid then.
     as_of: Option<String>,
@@ -369,12 +370,11 @@ async fn submit_job(
 ) -> Result<impl IntoResponse, ApiError> {
     let body = parse_submit_body(&raw)?;
     let job = match body.kind {
-        JobKind::Mine { source, wing } => {
-            let MiningSource::Directory { path } = source;
+        JobKind::Mine { source, wing, full } => {
             // Gated as a write inside `submit_mine`: mining files drawers.
             state
                 .app
-                .submit_mine(path, wing, &body.requested_by, mode)
+                .submit_mine(source, wing, full, &body.requested_by, mode)
                 .await?
         }
         JobKind::Demo { steps } => state.app.submit_demo(steps, &body.requested_by).await?,
@@ -409,6 +409,14 @@ async fn submit_job(
         }
     };
     Ok(Json(job))
+}
+
+/// The sources this daemon can mine and the ones it has mined (`memcastle sources`).
+async fn list_sources(
+    State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(state.app.list_sources(mode).await?))
 }
 
 async fn get_job(

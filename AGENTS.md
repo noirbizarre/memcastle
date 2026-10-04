@@ -77,6 +77,14 @@ An invariant nothing checks is a comment, and it will be violated.
    and by `tests/integration_contract.rs`, which replays `tests/fixtures/integration/` against a real daemon and fails
    when the contract page, the capability manifest and the test names disagree.
 
+9. **Source-specific code stays out of the mining pipeline, and adapters stay out of storage** —
+   everything that differs between mining sources (discovery, reading, normalizing) lives in one adapter under
+   `src/mining/adapters/`, and the pipeline, the chunker and the domain model know no source by name and read no file.
+   An adapter never touches the store or the jobs, and only the pipeline writes a source's cursor and document records,
+   after the drawers they describe (see `docs/adr/023-unified-source-model-for-mining.md`).
+   Enforced by `tests/source_isolation.rs`, which fails on a provider name or file access in `pipeline.rs`, `chunk.rs`
+   or `adapter.rs`, on an adapter reaching `store` or `jobs`, and on any other module calling the source writers.
+
 ## Layout
 
 ```text
@@ -93,7 +101,7 @@ src/
 ├── assets/     runtime asset resolution (override, installed, embedded); never user data, never the network
 ├── dbadmin/    the database admin endpoint: SurrealDB's WebSocket protocol over the daemon's own handle
 ├── jobs/       the scheduler: claiming, dispatch, cooperative pause/cancel, crash recovery
-├── mining/     the mining job handler
+├── mining/     the mining job handler: the source adapter contract, the shared pipeline and chunker, and one adapter per source
 ├── checkpoint/ the checkpoint job handler (durable, resumable memory writes)
 ├── audit/      the audit job handler (read-only consistency report)
 ├── repair/     the repair job handler (narrow, dry-run-first fixes)

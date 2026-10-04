@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::app::{AppServices, WakeUpBudget};
 use crate::domain::default_dry_run; // one default for REST and MCP, so repair's dry-run-first cannot drift
-use crate::domain::{CheckpointPayload, Job, MemoryMode};
+use crate::domain::{CheckpointPayload, Job, MemoryMode, MiningSource};
 use crate::error::Error;
 
 /// The MCP tool surface. Cheap to clone (holds only `AppServices`, itself
@@ -87,7 +87,7 @@ struct SearchArgs {
     /// Only drawers carrying every one of these tags.
     #[serde(default)]
     tags: Vec<String>,
-    /// Only drawers from this kind of source: `file`, `manual` or `other`.
+    /// Only drawers from this kind of source: `file`, `manual`, `transcript` or `other`.
     source_kind: Option<String>,
     /// An RFC 3339 instant, e.g. `2026-01-31T12:00:00Z`: search the memory
     /// that was valid then instead of now.
@@ -122,7 +122,7 @@ struct RecallArgs {
     /// Only drawers carrying every one of these tags.
     #[serde(default)]
     tags: Vec<String>,
-    /// Only drawers from this kind of source: `file`, `manual` or `other`.
+    /// Only drawers from this kind of source: `file`, `manual`, `transcript` or `other`.
     source_kind: Option<String>,
     /// An RFC 3339 instant: recall the memory that was valid then.
     as_of: Option<String>,
@@ -320,9 +320,18 @@ fn default_diary_limit() -> u32 {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct MineArgs {
-    /// The absolute path to a directory to mine.
-    path: String,
-    /// The wing to file mined drawers under. Defaults to the directory name.
+    /// The absolute path to a directory to mine. Give this, or `source`.
+    path: Option<String>,
+    /// A source adapter to mine instead of a directory, e.g. `pi-sessions` (Pi coding-agent session history).
+    /// `GET /api/sources` lists them.
+    source: Option<String>,
+    /// Where within `source` to read, when it needs more than its default (for `pi-sessions`, a sessions directory).
+    locator: Option<String>,
+    /// Read the source again from the beginning instead of continuing from where the last run stopped. Unchanged
+    /// documents are still skipped, so nothing is duplicated.
+    #[serde(default)]
+    full: bool,
+    /// The wing to file mined drawers under. Defaults to the directory name, or to the source's own default.
     wing: Option<String>,
 }
 
@@ -581,17 +590,36 @@ impl McpTools {
         tool_result("memcastle_wake_up", context)
     }
 
-    #[tool(description = "Submit a mining job for a directory; returns the job id immediately")]
+    #[tool(
+        description = "Submit a mining job for a directory (`path`) or a source adapter (`source`); \
+                        returns the job id immediately. Mining is incremental: a source remembers where \
+                        the last run stopped and unchanged documents are not filed again"
+    )]
     async fn memcastle_mine(
         &self,
         Parameters(args): Parameters<MineArgs>,
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
         let mode = self.mode_for(&parts);
-        let job = self
-            .app
-            .submit_mine(args.path.into(), args.wing, CHANNEL, mode)
-            .await;
+        let source = match (args.path, args.source) {
+            (Some(path), None) => Ok(MiningSource::Directory { path: path.into() }),
+            (None, Some(provider)) => Ok(MiningSource::Provider {
+                provider,
+                locator: args.locator,
+            }),
+            _ => Err(crate::Error::invalid_input(
+                "path",
+                "give exactly one of `path` (a directory) or `source` (a source adapter)",
+            )),
+        };
+        let job = match source {
+            Ok(source) => {
+                self.app
+                    .submit_mine(source, args.wing, args.full, CHANNEL, mode)
+                    .await
+            }
+            Err(error) => Err(error),
+        };
         tool_result("memcastle_mine", job)
     }
 

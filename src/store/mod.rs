@@ -54,6 +54,7 @@ mod jobs;
 mod migration_state;
 mod palace;
 mod retrieval;
+mod sources;
 mod timestamps;
 mod wings;
 
@@ -763,6 +764,7 @@ mod tests {
                 kind: crate::domain::SourceKind::Manual,
                 uri: None,
                 agent: Some("test".into()),
+                origin: None,
             },
             tags: vec![],
             embedding: None,
@@ -908,6 +910,7 @@ mod tests {
                 kind: crate::domain::SourceKind::Manual,
                 uri: None,
                 agent: Some("test".into()),
+                origin: None,
             },
             tags: vec![],
             embedding: None,
@@ -1317,6 +1320,7 @@ mod tests {
                     path: "/tmp".into(),
                 },
                 wing: None,
+                full: false,
             },
             crate::domain::Priority::Background,
             "test",

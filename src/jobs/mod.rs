@@ -23,6 +23,7 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
+use crate::config::MiningConfig;
 use crate::domain::{Job, JobEvent, JobId, JobKind, JobStatus, Priority};
 use crate::embed::Embeddings;
 use crate::error::Result;
@@ -113,6 +114,8 @@ pub struct Scheduler {
     /// The embedding provider handed to every job's context, and consulted to
     /// decide whether finishing a drawer-writing job should queue a sweep.
     embeddings: Embeddings,
+    /// The `[mining]` settings handed to every mining job's context.
+    mining: MiningConfig,
 }
 
 impl Scheduler {
@@ -133,7 +136,15 @@ impl Scheduler {
             exclusive_store: true,
             last_renewed: std::sync::Mutex::new(tokio::time::Instant::now()),
             embeddings: Embeddings::disabled(),
+            mining: MiningConfig::default(),
         }
+    }
+
+    /// Give the scheduler the `[mining]` settings its jobs run with.
+    #[must_use]
+    pub fn with_mining(mut self, mining: MiningConfig) -> Self {
+        self.mining = mining;
+        self
     }
 
     /// Give the scheduler an embedding provider (see `[embeddings]`).
@@ -641,15 +652,20 @@ impl Scheduler {
         // reap this job, this run's checkpoints are refused, not merged.
         let ctx = JobContext::new(job.id, control.clone(), self.store.clone())
             .with_lease(self.worker.clone())
-            .with_embeddings(self.embeddings.clone());
+            .with_embeddings(self.embeddings.clone())
+            .with_mining(self.mining.clone());
 
         let kind_wrote_drawers =
             matches!(job.kind, JobKind::Mine { .. } | JobKind::Checkpoint { .. });
         let outcome = match job.kind.clone() {
             JobKind::Demo { steps } => demo::run(&ctx, &mut job, demo::DemoParams { steps }).await,
-            JobKind::Mine { source, wing } => {
-                crate::mining::run(&ctx, &mut job, crate::mining::MiningParams { source, wing })
-                    .await
+            JobKind::Mine { source, wing, full } => {
+                crate::mining::run(
+                    &ctx,
+                    &mut job,
+                    crate::mining::MiningParams { source, wing, full },
+                )
+                .await
             }
             JobKind::Checkpoint { payload } => {
                 crate::checkpoint::run(

@@ -92,6 +92,7 @@ pub async fn run(config: Config) -> Result<()> {
     let embeddings = Embeddings::from_config(&config.embeddings)?;
     let mut scheduler = Scheduler::new(store.clone(), config.jobs.max_concurrency)
         .with_embeddings(embeddings.clone())
+        .with_mining(config.mining.clone())
         .with_drain_timeout(Duration::from_secs(config.jobs.drain_timeout_secs))
         .with_lease_ttl(Duration::from_secs(config.jobs.lease_ttl_secs));
     if backend.is_shared() {

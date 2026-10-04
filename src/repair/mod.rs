@@ -306,6 +306,7 @@ mod tests {
                 kind: SourceKind::Manual,
                 uri: None,
                 agent: None,
+                origin: None,
             },
             tags: vec![],
             embedding: None,

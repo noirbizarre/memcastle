@@ -32,6 +32,7 @@ nav = [
     { "Authentication" = "authentication.md" },
     { "Memory modes" = "memory-modes.md" },
     { "Storage and data" = "storage.md" },
+    { "Mining sources" = "mining-sources.md" },
     { "Database access" = "database-access.md" },
     { "Migrations and upgrades" = "migrations.md" },
     { "Troubleshooting" = "troubleshooting.md" },
