@@ -35,6 +35,7 @@ function levelOf(failure: MemCastleFailure): "info" | "warning" | "error" {
 
 export class McpManager {
   private current: McpSession | null = null
+  private starting: Promise<boolean> = Promise.resolve(false)
 
   constructor(
     readonly settings: Settings,
@@ -51,7 +52,22 @@ export class McpManager {
    * A down daemon never blocks or fails the Pi session: the extension carries on without MemCastle and says so.
    * Returns whether MemCastle is usable.
    */
-  async start(notify: Notify): Promise<boolean> {
+  start(notify: Notify): Promise<boolean> {
+    const starting = this.open(notify)
+    this.starting = starting
+    return starting
+  }
+
+  /**
+   * Whether the latest `start` ended with a usable connection. Resolves `false` before any `start`.
+   * A capability that needs the connection waits on this instead of connecting again: a failed start has already
+   * told the user, and a second attempt from the capability would tell them twice.
+   */
+  get ready(): Promise<boolean> {
+    return this.starting
+  }
+
+  private async open(notify: Notify): Promise<boolean> {
     // The same Pi session can be started twice (a reload), and the old connection must not be leaked.
     // `current` is replaced before anything is awaited, so a `stop` that arrives next sees the new session.
     const previous = this.current

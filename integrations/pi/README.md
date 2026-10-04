@@ -6,7 +6,7 @@ admin endpoint (AGENTS.md invariant 8, enforced by the `integrations-http-only` 
 
 **Status: scaffold.**
 The connection, memory-mode, discovery and failure foundations are real and tested against a real daemon.
-The capability modules are registered but empty, and each names the issue that fills it in.
+Wake-up is implemented; the other capability modules are registered but empty, and each names the issue that fills it in.
 
 It deliberately does **not** port `pi-palace`'s workaround of routing every write through a daemon queue to avoid
 lock contention.
@@ -36,12 +36,51 @@ The environment variables are the ones the MemCastle CLI already reads.
 | `MEMCASTLE_AUTH_TOKEN` | none | Bearer token, when the daemon requires one |
 | `MEMCASTLE_PALACE_PATH` | `$XDG_DATA_HOME/memcastle/default` | Locates the daemon's registry file |
 | `MEMCASTLE_BIND`, `MEMCASTLE_PORT` | `127.0.0.1`, `8420` | Used when no registry file names a live daemon |
+| `MEMCASTLE_WAKE_UP` | `true` | Whether a session start fetches and injects the wake-up |
+| `MEMCASTLE_WAKE_UP_MODE` | `async` | `sync` makes the first response wait for it; `async` never makes a response wait |
+| `MEMCASTLE_WAKE_UP_SOURCE` | `project` | The wing to ask about: `user`, `project`, `custom` or `none` |
+| `MEMCASTLE_WAKE_UP_WING` | none | The wing for `custom` |
 
 The daemon is found through its registry file, then the configured address, and each candidate is checked with
 `GET /api/health` because the file is only a hint.
 A mode the extension cannot parse **fails closed**: it tells the user why and does nothing, rather than treating a
 typo as `full`.
 An `off` session opens no connection at all.
+
+### Wake-up
+
+At the start of a new session the extension asks MemCastle for `memcastle_wake_up` and puts the answer in front of the
+model as established context: the agent's latest diary entry and the most recent highlights earlier sessions
+checkpointed, quoted verbatim.
+The request starts at `session_start`, so the daemon has a head start on the first prompt.
+
+The wake-up settings are named after `pi-palace`'s `injectWakeUp.*`, and `MEMCASTLE_WAKE_UP_MODE` is not
+`MEMCASTLE_MODE`: the first is when the briefing arrives, the second is what a session may do to memory.
+
+- **`sync`** makes the first response wait for the wake-up, for at most the call timeout.
+  After that wait a slow daemon is not waited for again; a later prompt picks the briefing up when it arrives.
+- **`async`**, the default, never makes a response wait.
+  The briefing goes in with the first prompt that finds it already in, so on a healthy daemon that is usually the first.
+- **`source`** picks the wing, because the daemon only knows a wing name or no wing.
+  `user` is the `preferences` wing, which is where checkpoints file a preference by default.
+  `project` is the working directory's name made acceptable as a wing name, which is the wing mining a directory creates.
+  `custom` is `MEMCASTLE_WAKE_UP_WING`, and falls back to `project` when no wing is set.
+  `none` asks about no wing: the diary is skipped, and highlights come from every wing.
+  A wing needs a diary written under the same `agentIdentity` (default `pi`) for a diary entry to appear.
+  Highlights are not filtered by identity.
+- **Injected once.**
+  The briefing is a Pi message in the session history, so it stays in context without being sent again.
+  A resumed, reloaded or forked session already holds it and does not fetch again.
+- **Empty is normal.**
+  A new palace, or a wing with nothing in it, injects nothing and says nothing.
+- **A down daemon never blocks the session.**
+  The user is told once, with the daemon's `help`, and the session carries on without it.
+  An `off` session injects nothing.
+- A mistyped wake-up value falls back to its default rather than breaking the session, because wake-up only reads.
+
+`/memcastle-wake-up` shows what a session start would inject, for the current directory, without adding it to the
+conversation.
+It works whatever `MEMCASTLE_WAKE_UP` says, because asking for it is the opt-in.
 
 ### Connection lifecycle
 
@@ -73,15 +112,16 @@ src/persistent-mcp-client.ts  one MCP session; selects the mode on every (re)con
 src/mcp-manager.ts            owns that session for the Pi session; reports failures with the daemon's `help`
 src/modes.ts                  client labels (full, read-only, off) to wire values (full, read_only, disabled)
 src/failures.ts               the five failure classes, each with the daemon's `help`
-src/wake-up.ts                wake-up on session start (#22), empty
-src/wake-up-cli.ts            a command to run the wake-up on demand (#22), empty
+src/wake-up-core.ts           wake-up without a host: settings, wing, rendering, the in-flight request
+src/wake-up.ts                wake-up on session start: fetch at `session_start`, inject at `before_agent_start`
+src/wake-up-cli.ts            `/memcastle-wake-up`: show what a session start would inject
 src/checkpoint-agent.ts       interval review by the extension's own model (#23), empty
 src/checkpoint-tool.ts        the manual checkpoint (#23) and the pre-compaction one (#24), empty
 src/daily-mine.ts             background mining on the extension's own schedule (#26), empty
 test/                         bun tests against a real `memcastle serve`; they read tests/fixtures/integration/
 ```
 
-`modes`, `failures`, `settings`, `daemon-client` and `persistent-mcp-client` are a deliberate copy of the small client
+`modes`, `failures`, `settings`, `daemon-client`, `persistent-mcp-client` and `wake-up-core` are a deliberate copy of the small client
 the OpenCode integration carries, not a shared package: the two ecosystems differ in how many sessions share a process.
 Both suites replay the same fixtures, which is what keeps the copies honest
 (see [ADR-022](../../docs/adr/022-integrations-are-bun-packages-tested-against-a-real-daemon.md)).
@@ -106,7 +146,7 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | Capability | Status | Where it lands |
 | --- | --- | --- |
 | `session-mode` | Foundation: label translation, mode selected on connect, `off` opens nothing | #27 |
-| `wake-up` | Not yet | #22 |
+| `wake-up` | Implemented: fetched at session start, injected as a message before the first (`sync`) or first-ready (`async`) response, never blocks on a down daemon | #22, done |
 | `recall` | Not yet | #25 |
 | `checkpoint` | Not yet | #23 |
 | `emergency-checkpoint` | Not yet | #24 |

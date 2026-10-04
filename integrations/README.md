@@ -81,7 +81,7 @@ native tooling, nothing more.
 ## Status
 
 The Pi and OpenCode packages are scaffolds: their connection, mode, discovery and failure foundations work and are
-tested, and their lifecycle hooks are empty.
+tested, and wake-up on session start is implemented in both (#22, #33); their other lifecycle hooks are empty.
 The persistent MCP session is complete in both: one connection for the whole session, kept alive, and replaced with its
 mode re-selected if the daemon forgets it.
 Tracked as GitHub issues under the
