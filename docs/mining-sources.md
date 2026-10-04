@@ -211,8 +211,8 @@ memcastle mine --source opencode
 ```
 
 Installing lists what the source asks for and needs your consent to exactly that:
-running the program `opencode`, and the environment variable `XDG_DATA_HOME` (OpenCode reads it to find its data when you have moved it; `PATH` and `HOME` are
-always passed to a program).
+running the program `opencode`, and the environment variable `XDG_DATA_HOME`
+(OpenCode reads it to find its data when you have moved it; `PATH` and `HOME` are always passed to a program).
 It asks for no file access, no network, and needs no credentials.
 A program is a wider grant than a file: `opencode` runs with the daemon's own authority over the machine,
 and the sandbox only decides *which program*, not what that program does.
