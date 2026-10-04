@@ -19,7 +19,7 @@ use serde_json::json;
 
 use crate::domain::{
     Drawer, EntityId, EntityKind, ExtractedGraph, FactProvenance, Job, JobProgress,
-    NewRelationship, RelationshipId,
+    NewRelationship, Observation, RelationshipId,
 };
 use crate::error::{Error, Result};
 use crate::jobs::{JobContext, JobOutcome};
@@ -81,6 +81,8 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: ExtractParams) -> Resu
     // read: the facts of a superseded drawer are history, not current knowledge.
     totals.closed += store.close_facts_of_retired_drawers().await?;
 
+    // Spelling variants (case, punctuation, aliases) always converge; typos only when deduplication allows it.
+    let fuzzy = ctx.dedup().enabled && ctx.dedup().entity_fuzzy;
     let pass = u32::try_from(extraction.batch_size()).unwrap_or(u32::MAX);
     loop {
         if let Some(stop) = ctx.stop_requested() {
@@ -95,7 +97,8 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: ExtractParams) -> Resu
         let texts: Vec<String> = drawers.iter().map(|d| d.content.clone()).collect();
         let graphs = extraction.extract(&texts).await?;
         for (drawer, graph) in drawers.iter().zip(graphs) {
-            let (entities, relations) = write_graph(store, job, extractor, drawer, graph).await?;
+            let (entities, relations) =
+                write_graph(store, job, extractor, drawer, graph, fuzzy).await?;
             totals.drawers += 1;
             totals.entities += entities;
             totals.relations += relations;
@@ -129,6 +132,7 @@ async fn write_graph(
     extractor: &'static str,
     drawer: &Drawer,
     graph: ExtractedGraph,
+    fuzzy: bool,
 ) -> Result<(u64, u64)> {
     let origin = drawer.source.origin.clone();
     let provenance = FactProvenance {
@@ -155,9 +159,11 @@ async fn write_graph(
     let mut ids: HashMap<String, EntityId> = HashMap::new();
     let mut linked = 0u64;
     for entity in &graph.entities {
-        let id = resolve_entity(store, &entity.name, entity.kind).await?;
+        let (id, observation) = resolve_entity(store, &entity.name, entity.kind, fuzzy).await?;
+        // The mention keeps the drawer's own spelling and how it was resolved, so converging two spellings on
+        // one entity loses neither.
         if store
-            .link_drawer_entity_with(drawer.id, id, Some(&provenance))
+            .link_drawer_entity_observed(drawer.id, id, Some(&provenance), Some(&observation))
             .await?
         {
             linked += 1;
@@ -208,23 +214,25 @@ async fn write_graph(
     Ok((linked, written))
 }
 
-/// The entity `name` of `kind`, created if need be.
+/// The entity `name` of `kind` refers to, created if need be, and how that was decided.
 ///
-/// An entity an extractor could not classify (`other`) joins an existing entity of the same name rather than
-/// splitting it from a better-typed one.
-async fn resolve_entity(store: &SurrealStore, name: &str, kind: EntityKind) -> Result<EntityId> {
-    if kind == EntityKind::Other
-        && let Some(existing) = store.find_entity_by_name(name).await?
-    {
-        return Ok(existing.id);
-    }
+/// A spelling variant of an entity the graph knows converges on it (docs/adr/025); an entity an extractor could
+/// not classify (`other`) joins an existing entity of the same name rather than splitting it from a better-typed
+/// one. Only graph records are read and written: no drawer is touched.
+async fn resolve_entity(
+    store: &SurrealStore,
+    name: &str,
+    kind: EntityKind,
+    fuzzy: bool,
+) -> Result<(EntityId, Observation)> {
     // Check-then-create races with another daemon on a shared palace: the loser hits the unique index, and a
     // second try finds the winner's entity.
-    let create = || store.get_or_create_entity(name, kind.as_str(), json!({}));
-    match create().await {
-        Ok(entity) => Ok(entity.id),
-        Err(_) => Ok(create().await?.id),
-    }
+    let resolve = || store.resolve_or_create_entity(name, kind.as_str(), fuzzy);
+    let (entity, observation) = match resolve().await {
+        Ok(resolved) => resolved,
+        Err(_) => resolve().await?,
+    };
+    Ok((entity.id, observation))
 }
 
 #[cfg(test)]
@@ -396,6 +404,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn spelling_variants_from_different_documents_converge_and_keep_each_sources_spelling() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "a.md", "Ada works on MemCastle.");
+        write(dir.path(), "b.md", "ADA works on MemCastle.");
+        mine(&store, dir.path()).await;
+
+        extract(&store).await;
+
+        let people = store.list_entities(None, Some("person"), 10).await.unwrap();
+        assert_eq!(
+            people.len(),
+            1,
+            "casing alone must not split an entity: {people:?}"
+        );
+        let ada = &people[0];
+        let mentions = store.list_entity_mentions(ada.id).await.unwrap();
+        assert_eq!(
+            mentions.len(),
+            2,
+            "both documents still vouch for the entity"
+        );
+        let mut spellings: Vec<String> = mentions
+            .iter()
+            .map(|m| m.observation.as_ref().expect("an observation").name.clone())
+            .collect();
+        spellings.sort();
+        assert_eq!(
+            spellings,
+            ["ADA", "Ada"],
+            "the source-specific names are not lost"
+        );
+        assert!(mentions.iter().all(|m| m.provenance.is_some()));
+        assert_eq!(
+            ada.aliases.len(),
+            1,
+            "the spelling that is not the canonical one is an alias"
+        );
+    }
+
+    #[tokio::test]
     async fn a_second_sweep_finds_nothing_to_read() {
         let store = SurrealStore::connect_memory_for_tests().await;
         let dir = tempfile::tempdir().unwrap();
@@ -424,7 +473,7 @@ mod tests {
         // The same drawer written twice, as a crash before the marker would make a replay do.
         let job = extract_job();
         for _ in 0..2 {
-            write_graph(&store, &job, "heuristic", &drawer, graph.clone())
+            write_graph(&store, &job, "heuristic", &drawer, graph.clone(), true)
                 .await
                 .unwrap();
         }

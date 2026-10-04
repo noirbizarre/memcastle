@@ -87,6 +87,10 @@ Every item produces a drawer.
 A payload with no items, or an item whose `content` is blank, is refused at submission as `memcastle::input::invalid`,
 blamed on `payload`, so a job never completes having stored nothing.
 A job that is interrupted resumes where it stopped and never stores an item twice.
+An unnamed item whose content is identical to a drawer already valid in its room is not stored again;
+it still counts as done, and the job's result reports `{"items": n, "duplicates": d}`.
+A named item is always stored, and a likely copy (a typo, a case variant) is stored and linked, never merged:
+see [Deduplication](deduplication.md).
 
 ## REST API
 
@@ -139,15 +143,18 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `GET /api/wings/{wing}/rooms/{room}` | One room. | none |
 | `DELETE /api/wings/{wing}/rooms/{room}` | Delete the room and its drawers. | none |
 | `GET /api/wings/{wing}/rooms/{room}/drawers` | List the newest drawers, with a preview of each. | query string: `limit` (default 50, at most 200) |
-| `POST /api/wings/{wing}/rooms/{room}/drawers` | Write a drawer, creating its wing and room if needed. | JSON body: `content`, `name?`, `requested_by?` |
+| `POST /api/wings/{wing}/rooms/{room}/drawers` | Write a drawer, creating its wing and room if needed: `201` when stored, `200` with `created: false` when an unnamed drawer with identical content was already in the room. | JSON body: `content`, `name?`, `requested_by?` |
 | `GET /api/wings/{wing}/rooms/{room}/drawers/{drawer}` | One drawer in full. | none |
 | `DELETE /api/wings/{wing}/rooms/{room}/drawers/{drawer}` | Delete one drawer. | none |
 | `POST /api/drawers/{id}/supersede` | End a drawer's validity now, with a replacement when `content` is given: `{superseded, replacement}`. | JSON body: `content?`, `tags?`, `requested_by?` |
 | `PUT /api/drawers/{id}/embedding` | Attach a vector you computed to a drawer. | JSON body: `embedding` (768 numbers) |
-| `POST /api/drawers/{id}/mentions` | Record that a drawer mentions an entity, for graph expansion: `201` when linked, `200` when it already was. | JSON body: `name`, `kind` |
+| `GET /api/drawers/{id}/duplicates` | The drawers this one was recorded as a likely duplicate of, or that resemble it, with the evidence: `{drawer, similar}`. See [Deduplication](deduplication.md). | none |
+| `POST /api/drawers/{id}/mentions` | Record that a drawer mentions an entity, for graph expansion: `201` when linked, `200` when it already was. The name converges on an entity it is a variant of. | JSON body: `name`, `kind` |
 | `GET /api/entities` | List entities of the [knowledge graph](#the-knowledge-graph), by name. | query string: `name` (contains, any case), `kind`, `limit` (default 50, at most 200) |
 | `GET /api/entities/{id}/relationships` | The relationships touching an entity, with provenance and validity. | query string: `include_expired` |
-| `GET /api/entities/{id}/mentions` | The drawers that mention an entity, with the provenance of each link. | none |
+| `GET /api/entities/{id}/mentions` | The drawers that mention an entity, with the provenance of each link and the name as that drawer spelled it. | none |
+| `GET /api/entities/{id}/candidates` | The entities this one resembles without having been equated with, or that resemble it. | none |
+| `POST /api/entities/{id}/aliases` | Record another spelling of an entity, so later sightings converge on it. | JSON body: `alias` |
 | `POST /api/auth/token` | Generate a token, replacing any previous one: `{token, algorithm, version, created_at}`. | none |
 | `DELETE /api/auth/token` | Revoke the generated token: `{"revoked": true}`. | none |
 | `GET /api/db` | Whether the [database admin endpoint](database-access.md) is listening, and where. | none |
@@ -300,7 +307,7 @@ A provider that fails is a `502` with `memcastle::extract::failed` on the job, a
 next time.
 There is no MCP tool for it, as there is none for embedding.
 
-The three `GET /api/entities` routes read the graph.
+The `GET /api/entities` routes read the graph.
 A relationship says what it relates and when it holds, and where an extractor derived it, what from:
 
 ```json
@@ -320,6 +327,14 @@ returns that history too.
 Extracted facts use a closed vocabulary: kinds `person`, `organization`, `project`, `tool`, `place`, `concept` and `other`;
 predicates `works_on`, `member_of`, `depends_on`, `uses`, `owns`, `part_of`, `located_in` and `related_to`.
 An unknown entity is a `404` with `memcastle::graph::entity_not_found`.
+
+An entity carries the `aliases` it has been seen under, and a name that differs only in spelling from a known entity
+converges on it instead of adding a second one.
+Each `mentions` entry has an `observation`, the name as the drawer wrote it, the rule that tied it to the entity and a
+confidence, so resolving two spellings to one entity loses neither.
+Names that could not be settled stay separate entities, listed by `GET /api/entities/{id}/candidates`.
+There is no MCP tool for any of it.
+[Deduplication](deduplication.md) has the rules.
 The reasoning is in [ADR-024](adr/024-entity-extraction-as-an-enrich-job.md).
 
 ### Submitting jobs

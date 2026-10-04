@@ -28,6 +28,7 @@ pub(super) const DRAWER_SEARCH_COLUMNS: &str = "record::id(id) AS id, room, name
 /// The statement that writes one drawer, binding the names [`bind_drawer`] sets.
 const CREATE_DRAWER: &str = "CREATE type::record('drawer', $id) SET \
      room = $room, name = $name, content = $content, content_hash = $content_hash, \
+     fingerprint = $fingerprint, \
      source = $source, tags = $tags, embedding = $embedding, provenance = $provenance, \
      valid_from = <datetime>$valid_from, valid_to = $valid_to, \
      created_at = <datetime>$created_at, updated_at = <datetime>$updated_at";
@@ -46,6 +47,13 @@ fn bind_drawer<'r>(
         .bind(("name", drawer.name.clone()))
         .bind(("content", drawer.content.clone()))
         .bind(("content_hash", drawer.content_hash.clone()))
+        // Derived from the content here, in the one place a drawer is written, so no writer can forget it and it
+        // can never disagree with `content`. A text without letters or digits has none: `NONE`, not `""`, so such
+        // drawers do not all "match" each other.
+        .bind((
+            "fingerprint",
+            Some(crate::domain::fingerprint(&drawer.content)).filter(|f| !f.is_empty()),
+        ))
         .bind(("source", super::bindable(&drawer.source)?))
         .bind(("tags", drawer.tags.clone()))
         .bind(("embedding", drawer.embedding.clone()))

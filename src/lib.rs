@@ -33,6 +33,7 @@ pub mod checkpoint;
 pub mod client;
 pub mod config;
 pub mod dbadmin;
+pub mod dedup;
 pub mod domain;
 pub mod embed;
 pub mod error;

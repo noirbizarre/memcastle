@@ -87,6 +87,9 @@ An invariant nothing checks is a comment, and it will be violated.
    Enforced by `tests/source_isolation.rs`, which fails on a provider name or file access in `pipeline.rs`, `chunk.rs`
    or `adapter.rs`, on an adapter reaching `store` or `jobs`, on any other module calling the source writers,
    and on `src/extract` naming a source or calling a drawer writer.
+   Deduplication is called by the pipeline for every chunk it stores, so `src/dedup` obeys the same rule: it names no
+   source, reads no file and writes no source record, and the matching policy in `domain/fingerprint.rs` and
+   `domain/resolution.rs` stays pure (see `docs/adr/025-memory-deduplication-and-entity-resolution.md`).
 
 ## Layout
 
@@ -110,6 +113,7 @@ src/
 ├── repair/     the repair job handler (narrow, dry-run-first fixes)
 ├── search/     the retrieval contract and ranking policy (lexical, semantic, hybrid, temporal, graph expansion)
 ├── embed/      embedding providers (command, OpenAI-compatible HTTP) behind one trait, and the `Embed` job handler
+├── dedup/      drawer deduplication: assess what a new drawer duplicates or resembles, link it, skip an exact copy
 ├── extract/    entity extraction providers (heuristic, command, OpenAI-compatible HTTP) behind one trait, and the `Extract` job handler
 ├── app/        application services — the one layer mcp/api call into (the CLI reaches it over HTTP, via `client/`)
 ├── server/     the daemon composition root + lifecycle (registry file)

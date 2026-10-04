@@ -62,6 +62,10 @@ pub struct Stats {
     pub unchanged: u64,
     /// Documents the adapter chose not to read (binary, too large, gone).
     pub skipped: u64,
+    /// Chunks recorded as likely duplicates of a drawer already in the room (docs/adr/025). They are stored all
+    /// the same: two identical files are two records.
+    #[serde(default)]
+    pub similar: u64,
 }
 
 /// Mine one source with `adapter`, checking in with `ctx` between documents so the job can be paused, resumed or
@@ -153,6 +157,7 @@ pub async fn mine<A: SourceAdapter>(
                             source: &source,
                             room: room.id,
                             job,
+                            dedup: ctx.dedup(),
                         },
                         &raw,
                         &canonical,
@@ -201,6 +206,7 @@ pub async fn mine<A: SourceAdapter>(
         "retired": stats.retired,
         "unchanged": stats.unchanged,
         "skipped": stats.skipped,
+        "similar": stats.similar,
         "limit": settings.max_documents,
         "truncated": truncated,
     }));
@@ -215,6 +221,7 @@ struct Ingest<'a> {
     source: &'a SourceRecord,
     room: crate::domain::RoomId,
     job: &'a Job,
+    dedup: &'a crate::config::DedupConfig,
 }
 
 /// File `canonical` as drawers, reusing, superseding or retiring those `existing` already holds, and return the
@@ -302,6 +309,11 @@ async fn ingest(
             stats.superseded += 1;
         } else if store.create_drawer_once(&drawer).await? {
             stats.created += 1;
+        }
+        // Stored either way (two identical files are two records); what it resembles is noted beside it, so a
+        // person can see the overlap without anything having been merged or skipped.
+        if crate::dedup::link(store, &drawer, ctx.dedup).await? > 0 {
+            stats.similar += 1;
         }
         refs.push(ChunkRef {
             index,

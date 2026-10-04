@@ -80,6 +80,13 @@ A `drawer_extraction` row marks a drawer the job has read, beside the drawer rat
 a drawer.
 See [Extraction](configuration.md#extraction).
 
+Two more edge tables record what [deduplication](deduplication.md) decided and never act on it.
+`similar_to` links a newer drawer to an older one it duplicates or resembles, with the evidence,
+and `possibly_same_as` links an entity to others it might be.
+A drawer carries a derived `fingerprint` (its content with case, punctuation and whitespace ignored, hashed) beside its
+`content_hash`, and an entity a `key` and its `aliases`; all are indexed, none replaces the canonical `content` or `name`,
+and deleting an edge undoes the call.
+
 Everything retrieval uses lives in the same database as the drawers: a BM25 full-text index, an HNSW vector index over
 `embedding`, and the graph edges.
 There is no separate vector file or index to back up, and none can fall out of step with the drawers.

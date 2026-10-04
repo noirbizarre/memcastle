@@ -29,7 +29,11 @@ use super::SurrealStore;
 
 /// The column list every entity read projects. See `drawers::DRAWER_COLUMNS`
 /// for why `id` goes through `record::id()`.
-const ENTITY_COLUMNS: &str = "record::id(id) AS id, name, kind, properties";
+///
+/// `aliases` is `option<array>` in the schema (an entity from before resolution has none), so it is coalesced to
+/// an empty list here rather than in every reader.
+pub(super) const ENTITY_COLUMNS: &str =
+    "record::id(id) AS id, name, kind, properties, aliases ?? [] AS aliases";
 
 /// The column list every relationship read projects. `in`/`out` are
 /// `relates_to`'s built-in graph-edge fields (every `RELATE`d table has
@@ -70,15 +74,19 @@ impl SurrealStore {
             name: name.to_string(),
             kind,
             properties,
+            aliases: Vec::new(),
         };
         self.db
             .query(
                 "CREATE type::record('entity', $id) SET \
-                 name = $name, kind = $kind, properties = $properties",
+                 name = $name, kind = $kind, properties = $properties, \
+                 key = $key, aliases = [], alias_keys = []",
             )
             .bind(("id", entity.id.to_string()))
             .bind(("name", entity.name.clone()))
             .bind(("kind", entity.kind.clone()))
+            // The resolution key, derived from the name here so no entity is ever stored without one.
+            .bind(("key", crate::domain::entity_key(&entity.name)))
             // `Value`'s object variant serializes via `serialize_map`, which
             // the driver's binder handles natively -- unlike `Source`/
             // `Provenance` in `drawers.rs`, no `bindable()` wrapping needed.

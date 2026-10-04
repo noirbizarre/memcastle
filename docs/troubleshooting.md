@@ -161,6 +161,28 @@ Pick another name, or delete the old drawer first.
 Writing the same name with the *same* content succeeds and changes nothing.
 In a mined room, only the first copy of a file keeps its name, see [Storage and data](storage.md#what-mining-reads).
 
+### A memory I wrote is missing, or a drawer is "duplicated"
+
+Writing the same text twice into one room stores one drawer.
+An unnamed `POST /api/wings/{wing}/rooms/{room}/drawers` answers `200` with `created: false` and the drawer that already
+holds it, a diary write returns the agent's existing entry, and a checkpoint item that was an exact copy is counted in the
+job result's `duplicates`.
+The same text in another room, or from another agent's diary, is a different memory and is stored.
+
+A drawer that differs by a typo, or only in case and punctuation, is stored and linked instead.
+`GET /api/drawers/{id}/duplicates` shows what it was linked to and why, and nothing is merged.
+To store every write without any of this, set `dedup.enabled = false`, see
+[Deduplication](configuration.md#deduplication).
+
+### An entity was not merged with another, or was
+
+Names converge on an entity only when they differ in case, punctuation or spacing, are a recorded alias, or are a unique
+one-character typo in a name of six characters or more.
+Anything else stays a separate entity, and `GET /api/entities/{id}/candidates` lists the ones it resembles.
+To settle one by hand, `POST /api/entities/{id}/aliases` records the spelling, and later mentions converge.
+Entities that existed before deduplication are never merged retroactively.
+Turn the typo rule off with `dedup.entity_fuzzy = false`.
+
 ### `memcastle::palace::busy`
 
 A wing or room delete was refused because a mining job, a checkpoint job, or a repair that applies is queued, running

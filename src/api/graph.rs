@@ -1,7 +1,8 @@
-//! The knowledge-graph read routes: entities, their relationships and the drawers that mention them.
+//! The knowledge-graph routes: entities, their relationships and the drawers that mention them.
 //!
-//! Read-only on purpose. Facts are written by checkpoints and by the extraction job, never over these routes, and
-//! there is no MCP counterpart (docs/adr/024). Guarded by the authentication layer like every route but health.
+//! Read-only apart from one write, an alias that settles an ambiguous name by hand (docs/adr/025). Facts are
+//! written by checkpoints and by the extraction job, never over these routes, and there is no MCP counterpart
+//! (docs/adr/024). Guarded by the authentication layer like every route but health.
 
 use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Json};
@@ -9,7 +10,7 @@ use serde::Deserialize;
 
 use crate::domain::EntityId;
 
-use super::extract::ApiQuery;
+use super::extract::{ApiJson, ApiQuery};
 use super::{ApiError, ApiState, ModeHeader};
 
 fn parse_entity_id(raw: &str) -> Result<EntityId, crate::Error> {
@@ -76,4 +77,34 @@ pub(super) async fn entity_mentions(
 ) -> Result<impl IntoResponse, ApiError> {
     let id = parse_entity_id(&id)?;
     Ok(Json(state.app.entity_mentions(id, mode).await?))
+}
+
+/// `GET /api/entities/{id}/candidates`: the entities this one resembles without having been equated with, or that
+/// resemble it. Nothing here is merged.
+pub(super) async fn entity_candidates(
+    State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let id = parse_entity_id(&id)?;
+    Ok(Json(state.app.entity_candidates(id, mode).await?))
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct AliasBody {
+    /// Another spelling of the entity.
+    alias: String,
+}
+
+/// `POST /api/entities/{id}/aliases`: record another spelling of an entity, so later sightings converge on it.
+pub(super) async fn add_entity_alias(
+    State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
+    Path(id): Path<String>,
+    ApiJson(body): ApiJson<AliasBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    let id = parse_entity_id(&id)?;
+    Ok(Json(
+        state.app.add_entity_alias(id, &body.alias, mode).await?,
+    ))
 }

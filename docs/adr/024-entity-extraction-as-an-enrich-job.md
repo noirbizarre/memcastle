@@ -118,3 +118,13 @@ Three forces shape it.
   expansion ignores them because it selects drawers, and `audit` does not report them yet.
 - Only drawers that came through a mining source are read.
   Drawers written by a checkpoint, a diary entry or by hand carry no origin and are not extracted from.
+
+## Amendment: entity resolution (2026-10-04)
+
+[ADR-025](025-memory-deduplication-and-entity-resolution.md) replaces the entity identity above.
+An entity is no longer only `(name, kind)` with a case-sensitive name: a name that differs from a known entity in case,
+punctuation or spacing, is a recorded alias, or is a unique one-character typo in a name of six characters or more
+converges on that entity, and the drawer's own spelling is kept on the `mentions` edge.
+Ambiguous names stay distinct, linked by `possibly_same_as`.
+Entities are still never merged or deleted, and extraction still only adds graph records.
+Several drawers stating the same fact still give several edges.

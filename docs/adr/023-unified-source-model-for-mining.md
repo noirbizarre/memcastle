@@ -148,3 +148,11 @@ And the thing that differs between sources (discovery, authentication, formats) 
 The enrich stage reserved above now exists, as the `Extract` job of [ADR-024](024-entity-extraction-as-an-enrich-job.md).
 It attaches exactly where this ADR said it would: after ingest, reading what was filed and never rewriting a drawer.
 The pipeline, the chunker and the adapters did not change.
+
+## Amendment: deduplication (2026-10-04)
+
+[ADR-025](025-memory-deduplication-and-entity-resolution.md) adds deduplication beside, not instead of, a document's
+identity.
+Mining still stores every chunk (two identical files are two records), and the pipeline now also asks `dedup::link` what
+each stored chunk resembles in its room, recording a `similar_to` edge and counting `similar` in the job's result.
+The pipeline learns nothing about sources from it, and `tests/source_isolation.rs` holds the module to that.

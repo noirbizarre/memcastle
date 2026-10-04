@@ -12,11 +12,13 @@ mod checkpoint;
 mod drawer;
 mod entity;
 mod extraction;
+mod fingerprint;
 mod ids;
 mod job;
 mod memory_mode;
 mod palace;
 mod path;
+mod resolution;
 mod search;
 mod secret;
 mod source;
@@ -24,10 +26,14 @@ mod source;
 pub use checkpoint::{CheckpointDestination, CheckpointItem, CheckpointPayload, FactMutation};
 pub use drawer::{Drawer, Origin, Provenance, Source, SourceKind, content_hash, sha256_hex};
 pub use entity::{
-    Entity, EntityKind, FactProvenance, Mention, NewRelationship, Predicate, Relationship,
-    normalize_label, require_label,
+    Entity, EntityKind, FactProvenance, Mention, NewRelationship, Observation, Predicate,
+    Relationship, normalize_label, require_label,
 };
 pub use extraction::{ExtractedEntity, ExtractedGraph, ExtractedRelation, Limits, MAX_NAME_CHARS};
+pub use fingerprint::{
+    DuplicateKind, DuplicateSignals, EDIT_DISTANCE_LIMIT, classify, fingerprint, normalize_text,
+    similarity, similarity_of_normalized,
+};
 pub use ids::{DrawerId, EntityId, JobId, PalaceId, RelationshipId, RoomId, SourceId, WingId};
 pub(crate) use job::default_dry_run;
 pub use job::{
@@ -35,6 +41,10 @@ pub use job::{
     TransitionError,
 };
 pub use memory_mode::MemoryMode;
+pub use resolution::{
+    EntityCandidate, MIN_TYPO_KEY_CHARS, PossibleMatch, Resolution, ResolutionRule, entity_key,
+    resolve,
+};
 pub use search::{
     EMBEDDING_DIMENSION, RankingMode, SearchFilter, SearchHit, SearchQuery, Signals, Temporal,
 };

@@ -97,6 +97,7 @@ pub async fn run(config: Config) -> Result<()> {
         .with_embeddings(embeddings.clone())
         .with_extraction(extraction.clone())
         .with_mining(config.mining.clone())
+        .with_dedup(config.dedup.clone())
         .with_drain_timeout(Duration::from_secs(config.jobs.drain_timeout_secs))
         .with_lease_ttl(Duration::from_secs(config.jobs.lease_ttl_secs));
     if backend.is_shared() {
@@ -130,6 +131,7 @@ pub async fn run(config: Config) -> Result<()> {
     let app = AppServices::new(store, Arc::clone(&scheduler))
         .with_embeddings(embeddings)
         .with_extraction(extraction)
+        .with_dedup(config.dedup.clone())
         .with_runtime(RuntimeContext {
             // The real bound address, not the requested one: `status` must agree
             // with the registry file when port 0 was asked for.

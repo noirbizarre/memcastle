@@ -15,7 +15,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{DrawerId, EntityId, JobId, Origin, RelationshipId};
+use super::{DrawerId, EntityId, JobId, Origin, RelationshipId, ResolutionRule};
 
 /// A named thing the palace has opinions about (a person, a project, a term).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +28,10 @@ pub struct Entity {
     pub kind: String,
     /// Arbitrary additional attributes.
     pub properties: Value,
+    /// Other spellings this entity was observed under or given, never including `name`. Recorded when entity
+    /// resolution converges a variant on it, so the source's own spelling is not lost (docs/adr/025).
+    #[serde(default)]
+    pub aliases: Vec<String>,
 }
 
 /// A directed, bi-temporal edge between two entities.
@@ -96,6 +100,24 @@ pub struct Mention {
     /// Where an extracted link came from; `None` for one a person made.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<FactProvenance>,
+    /// How the drawer spelled the entity and why that spelling was taken to be it; `None` for a link made before
+    /// entity resolution existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<Observation>,
+}
+
+/// One sighting of an entity in a drawer: the name exactly as the source wrote it and how it was resolved.
+///
+/// Stored on the `mentions` edge so that resolving two spellings to one entity loses neither: the drawer says what
+/// it said, and this says which entity that was taken to mean.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Observation {
+    /// The name as the source spelled it.
+    pub name: String,
+    /// Why that name was taken to be this entity.
+    pub rule: ResolutionRule,
+    /// How sure, in `(0, 1]`.
+    pub confidence: f32,
 }
 
 /// The closed set of entity kinds the extraction job may write.

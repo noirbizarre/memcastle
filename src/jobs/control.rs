@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-use crate::config::MiningConfig;
+use crate::config::{DedupConfig, MiningConfig};
 use crate::domain::{Job, JobId, JobProgress};
 use crate::embed::Embeddings;
 use crate::error::Result;
@@ -85,6 +85,8 @@ pub struct JobContext {
     /// The entity extraction provider, for the extract handler. Disabled
     /// unless the scheduler was given one.
     extraction: Extraction,
+    /// Deduplication settings (`[dedup]`), for the handlers that write drawers and entities.
+    dedup: DedupConfig,
 }
 
 impl JobContext {
@@ -99,7 +101,21 @@ impl JobContext {
             embeddings: Embeddings::disabled(),
             mining: MiningConfig::default(),
             extraction: Extraction::disabled(),
+            dedup: DedupConfig::default(),
         }
+    }
+
+    /// Give this context the daemon's deduplication settings.
+    #[must_use]
+    pub fn with_dedup(mut self, dedup: DedupConfig) -> Self {
+        self.dedup = dedup;
+        self
+    }
+
+    /// The deduplication settings, for handlers that write drawers and entities.
+    #[must_use]
+    pub fn dedup(&self) -> &DedupConfig {
+        &self.dedup
     }
 
     /// Give this context the daemon's extraction provider.

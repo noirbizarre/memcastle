@@ -214,6 +214,20 @@ pub(super) async fn supersede_drawer(
     ))
 }
 
+/// `GET /api/drawers/{id}/duplicates`: the drawers this one was recorded as a likely duplicate of, or that were
+/// recorded as likely duplicates of it, with the evidence. Nothing here is merged.
+pub(super) async fn drawer_duplicates(
+    State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let id = parse_drawer_id(&id)?;
+    let similar = state.app.drawer_duplicates(id, mode).await?;
+    Ok(Json(
+        serde_json::json!({ "drawer": id, "similar": similar }),
+    ))
+}
+
 /// The body of `PUT /api/drawers/{id}/embedding`.
 #[derive(Debug, Deserialize)]
 pub(super) struct EmbeddingBody {

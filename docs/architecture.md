@@ -185,7 +185,12 @@ classDiagram
         +valid_from
         +valid_to
     }
-    class Entity
+    class Entity {
+        +name
+        +kind
+        +key
+        +aliases
+    }
     class Relationship
     Palace "1" --> "*" Wing : contains
     Wing "1" --> "*" Room : contains
@@ -220,6 +225,16 @@ The `extract` job fills the graph from mined content: it reads drawers that carr
 It never writes a drawer.
 Links can also be made explicitly (`POST /api/drawers/{id}/mentions`), and a checkpoint's `fact` still takes free-form labels.
 See [ADR-024](adr/024-entity-extraction-as-an-enrich-job.md).
+
+Deduplication is a domain decision with the database only proposing candidates.
+`domain::fingerprint` and `domain::resolution` hold the policy as pure functions, `store::duplicates` and
+`store::resolution` find candidates and record edges, and `dedup` orchestrates a drawer write for every writer.
+A new drawer is compared with the current drawers of its room: an exact copy is not stored, a likely copy gets a
+`similar_to` edge with its evidence, and nothing is merged.
+A name seen by extraction or by a manual link resolves to an existing entity when it is a spelling variant, a recorded
+alias or a unique typo, keeping the drawer's own spelling on the `mentions` edge, and otherwise stays distinct beside
+`possibly_same_as` candidates.
+See [Deduplication](deduplication.md) and [ADR-025](adr/025-memory-deduplication-and-entity-resolution.md).
 
 ## Search
 
@@ -438,7 +453,8 @@ Two fields mean "where do I read progress from" and "where do I read what it fou
 - **`Checkpoint`** (`src/checkpoint`) persists an already-classified batch of items as durable drawers.
   Classification into destination buckets happens client-side, in the calling integration; MemCastle has no LLM client.
   It mirrors `mining::run`: per-item cooperative pause and cancel, checkpointing `{"next_index": n}` after each item.
-  Every item gets a drawer, and *additionally* applies its `fact` mutation when present,
+  Every item gets a drawer (unless it is an exact copy of one its room already holds, see
+  [Deduplication](deduplication.md)), and *additionally* applies its `fact` mutation when present,
   so a checkpoint item is never only a graph mutation with no drawer to audit it.
   There is deliberately no artificial per-item delay, because an emergency checkpoint exists to save state before a crash.
 - **`Embed`** (`src/embed/job.rs`) computes the embedding of every drawer that has none.
@@ -585,8 +601,10 @@ Deliberately out of scope, and each is structurally possible without rework give
 - Propagating a deletion at the source: a document that disappears is not noticed.
 - Extracting entities from a *query* to resolve its words to the graph: extraction reads drawers, and expansion starts from
   drawers already found.
-- Re-extracting drawers when the provider changes, merging entities that are the same thing under two names,
-  and extracting from drawers that were not mined (checkpoints, the diary).
+- Re-extracting drawers when the provider changes, and extracting from drawers that were not mined (checkpoints, the diary).
+- Merging memories or entities that already exist.
+  [Deduplication](deduplication.md) stops new duplicates and links likely ones, but never merges or deletes, and decides
+  with no model; semantic (embedding) similarity at write time and folding accents are out of scope.
 - A stdio MCP bridge for clients that cannot speak HTTP.
 - The CLI auto-starting a daemon on demand.
 - A `maintenance` command (a reserved name that returns `not_implemented`).

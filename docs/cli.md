@@ -320,6 +320,8 @@ The old drawer keeps its content and stays reachable by id and by `--as-of` sear
 search, diary read or wake-up.
 `drawer mention` records that a drawer mentions an entity, creating the entity if needed, so `search --expand` can reach
 related drawers through it.
+A name that is only a different spelling of an entity the graph already knows (another case, other punctuation, a recorded
+alias or a unique typo) links to that entity instead of creating a second one, see [Deduplication](deduplication.md).
 Both are writes.
 
 There is no MCP tool for any of this, see [MCP tools and REST API](mcp-and-api.md#wings-rooms-and-drawers).
