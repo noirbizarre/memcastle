@@ -16,6 +16,9 @@ use std::time::Duration;
 // can use them, but only `integration_contract.rs` does today.
 pub mod mcp;
 
+// Building WebAssembly components for the `wasm_*` binaries: the shared target directory and lockfile.
+pub mod wasm;
+
 use memcastle::config::{Config, StoreConfig};
 use memcastle::domain::{Job, JobId, JobStatus};
 use memcastle::server::lifecycle::RuntimeInfo;

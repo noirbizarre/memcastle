@@ -131,7 +131,8 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `tests/wasm_projects.rs` — `memcastle source init`, `build`, `test` and `package` for real, the sandbox
     (a source cannot read outside its grant, see the environment, outrun its time limit or exceed its memory, or run an
     unlisted program) and installing through the CLI.
-    It builds components with Cargo for `wasm32-wasip2` into one shared directory (subprocess, WebAssembly suite).
+    It builds components with Cargo for `wasm32-wasip2` (subprocess, WebAssembly suite);
+    see [Building components in tests](#building-components-in-tests).
   - `tests/skills.rs` — the shared [agent skills](skills.md): every skill is discoverable, and every tool, CLI command
     and REST route it names exists in this release (in-process daemon, plus the real binary's help).
 
@@ -161,6 +162,25 @@ compiles `wasmtime` and Cranelift from scratch and takes several minutes longer.
 
 The 25 WebAssembly tests run in under a minute in CI, and their job finishes well before the basic Linux one.
 The time left in the basic suite is its 1114 pre-existing tests, not WebAssembly.
+
+#### Building components in tests
+
+Under nextest every test is its own process, so a component built by one test is invisible to the next, and the cost
+is how many times Cargo has to compile what.
+The helpers in `tests/common/wasm.rs` keep that to one small crate per build:
+
+- Every `wasm_*` test builds into one shared debug target directory, so `wit-bindgen` and `serde_json` compile once.
+- Every scaffolded project is seeded with the reference source's `Cargo.lock`.
+  A scaffold ships none, and without it each build updated the crates.io index and re-resolved 35 packages while holding
+  Cargo's package-cache lock, which every other build then waited for.
+- The reference source is built in place, in debug, into that shared directory, so a test never waits for the
+  release build with LTO that `mise run sources:check` and CI's per-source job make.
+- A test that drives `memcastle source init` must call `share_target_of` afterwards.
+  Without it the project builds in release into a `target/` of its own and recompiles every dependency, which used to be
+  the two slowest tests in the suite.
+
+Locally this took the WebAssembly suite from about 225 s to 95 s on a cold target directory and from about 92 s to 38 s
+on a warm one.
 
 ## The architecture guard
 
