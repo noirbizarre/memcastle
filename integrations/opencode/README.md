@@ -1,6 +1,7 @@
 # MemCastle for OpenCode
 
-An [OpenCode plugin](https://opencode.ai/docs/plugins/) that decides *when* to call MemCastle.
+An [OpenCode plugin](https://opencode.ai/docs/plugins/) that decides *when* to call MemCastle,
+for both OpenCode 1 and OpenCode 2 from one package.
 Everything it asks of MemCastle is an MCP call to the daemon, and it never touches the database, the job code or the
 admin endpoint (AGENTS.md invariant 8, enforced by the `integrations-http-only` hook).
 
@@ -21,6 +22,22 @@ Load it from a project or user plugin directory with a one-line module:
 export { default } from "/path/to/memcastle/integrations/opencode/src/index.ts"
 ```
 
+The same module works under both majors, because its default export carries both entrypoints:
+OpenCode 1 calls `server()` and OpenCode 2 calls `setup()`.
+
+| | OpenCode 1 | OpenCode 2 |
+| --- | --- | --- |
+| Supported from | 1.18.29, the first release that accepts a `{ id, server }` object | the current 2.x line, typed against `@opencode/plugin` 2.0.22 |
+| Config key | `plugin` | `plugins` |
+| Local directory | `.opencode/plugins/` (or `plugin/`) | `.opencode/plugins/` |
+| Entry | `server(input, options)` returning hooks | `setup(ctx)` registering hooks, returning a cleanup |
+| Log | OpenCode's log, through `client.app.log` | the console, because the V2 context has no log API |
+
+The two APIs are separate and nothing translates between them, so each has its own adapter over the shared behaviour
+(see [Layout](#layout)).
+The plugin packages are imported as types only, so loading it needs neither of them installed.
+OpenCode releases older than 1.18.29 are not supported.
+
 Do **not** also add `mcp.memcastle` to `opencode.json`.
 OpenCode shares one MCP connection across every session in a process, while MemCastle's memory mode belongs to a
 connection, so the plugin opens its own connection per OpenCode session
@@ -29,7 +46,9 @@ Enabling both would show the model two copies of every tool.
 
 ### Configuration
 
-Plugin options, as `["path-or-package", { ... }]` in `opencode.json`'s `plugin` list, win over the environment.
+Plugin options win over the environment.
+OpenCode 1 takes them as `["path-or-package", { ... }]` in `opencode.json`'s `plugin` list,
+and OpenCode 2 as `{ "package": "path-or-package", "options": { ... } }` in its `plugins` list.
 The environment variables are the ones the MemCastle CLI already reads.
 
 | Option | Environment | Default | Meaning |
@@ -59,7 +78,8 @@ The plugin therefore owns one connection per OpenCode `sessionID`, and the rest 
   A connection is opened on a session's first MemCastle call and never at startup, so a session that does not use
   MemCastle costs nothing, and a missing daemon does not slow OpenCode down.
 - **Closed with the session.**
-  `session.deleted` closes that session's connection, and `dispose` closes all of them.
+  `session.deleted` closes that session's connection, and `dispose` (V1) or the cleanup returned by `setup` (V2)
+  closes all of them.
   Both tell the daemon to forget the session.
 - **Independent.**
   Each session is kept alive, and replaced if the daemon forgets it, on its own.
@@ -70,7 +90,10 @@ The plugin therefore owns one connection per OpenCode `sessionID`, and the rest 
 ## Layout
 
 ```text
-src/index.ts      the plugin: hook wiring only; the one default export OpenCode loads
+src/index.ts      the one default export OpenCode loads: `{ id, server, setup }`, checked against both module types
+src/core.ts       what MemCastle does at each lifecycle point, independent of the OpenCode major
+src/v1.ts         OpenCode 1 adapter: `server()` returning hooks by string key
+src/v2.ts         OpenCode 2 adapter: `setup(ctx)` registering hooks and an event subscription
 src/settings.ts   options and environment to typed settings; the token never reaches a log
 src/daemon.ts     discovery: registry file, then configured address, verified by /api/health
 src/session.ts    one MCP session; selects the mode on every (re)connect before anything else
@@ -104,7 +127,7 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | `wake-up` | Not yet | #33 |
 | `recall` | Not yet | #36 |
 | `checkpoint` | Not yet | #34 |
-| `emergency-checkpoint` | Not yet; planned on `experimental.session.compacting` | #34 |
+| `emergency-checkpoint` | Not yet; planned on `experimental.session.compacting` (V1) and the `compaction` session hook (V2) | #34 |
 | `persistent-session` | Implemented: one connection per OpenCode session, kept alive, replaced with its mode re-selected when the daemon forgets it | #124, done |
 | `skills` | Not yet | #36 |
 | `background-mining` | Not yet | no issue yet |

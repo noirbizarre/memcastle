@@ -194,3 +194,35 @@ Neither is verified under `opencode run`, where there is no TUI, so the plugin m
    mode translator, a failure classifier and the hook wiring in `src/index.ts`.
 6. **Verify first**: confirm `experimental.session.compacting`, `client.tui.showToast` and the idle timing with a probe
    before building on them.
+
+## OpenCode 2
+
+Everything above was established under OpenCode 1.
+The plugin also loads under OpenCode 2, whose plugin API is a different package (`@opencode/plugin`) with a different
+shape: a default export `{ id, setup(ctx) }` that registers hooks on the domain that owns them.
+OpenCode's [migration guide](https://opencode.ai/v2/docs/build/plugins/migrate-v1#support-v1-and-v2-from-one-package)
+allows one default export to carry both `server()` and `setup()`, and that is what `src/index.ts` does.
+
+Evidence here is **types** only, read from `@opencode/plugin` 2.0.22 and its schema package, plus the V2 plugin docs.
+No OpenCode 2 process has driven the plugin yet, so when each hook fires is unconfirmed.
+
+| Lifecycle point | OpenCode 1 | OpenCode 2 |
+| --- | --- | --- |
+| Session ended | `event` hook, `session.deleted`, id at `event.properties.info.id` | `ctx.event.subscribe()`, `session.deleted`, id at `event.data.sessionID` |
+| Teardown | returned `dispose` hook | cleanup function returned by `setup` |
+| System prompt | `experimental.chat.system.transform` | `ctx.session.hook("context", ...)`, which runs before every agent model request |
+| Before compaction | `experimental.session.compacting` | `ctx.session.hook("compaction", ...)` |
+| Before a tool runs | `tool.execute.before` | `ctx.tool.hook("execute.before", ...)` |
+| Options | second factory argument | `ctx.options` |
+| Logging | `client.app.log` | none in the context; the plugin writes to the console |
+
+Two differences matter to the follow-up issues.
+
+1. V2's `context` hook is not limited to the main model: title generation and compaction have their own hooks
+   (`title`, `compaction`), so the V1 finding that the system transform also ran for the title model does not carry over.
+   Anything injected from `context` is still cached once per session.
+2. V1's `experimental.*` hooks have V2 destinations that are not experimental, which narrows the
+   "Pre-compaction" gap above for OpenCode 2.
+
+The plugin holds each hook as an empty stub in both majors, so these mappings are wiring, and the behaviour lands once in
+`src/core.ts`.
