@@ -1,0 +1,3 @@
+# Conformance cases compare file contents byte for byte: a checkout that rewrites line endings (Windows `autocrlf`)
+# would turn "alpha\n" into "alpha\r\n" and fail every case on that platform for a reason that is not the source's.
+tests/fixtures/sources/conformance/** -text

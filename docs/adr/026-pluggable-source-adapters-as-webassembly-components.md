@@ -114,8 +114,9 @@ a source whoever wrote it.
 - **One conformance suite, run against both kinds.**
   `tests/fixtures/sources/conformance/` holds language-neutral cases (a tree, the page size, the documents and canonical
   fields expected).
-  `source::conformance` runs them against any `SourceAdapter`: paging resumes strictly after a cursor, a foreign cursor is
-  `cursor_invalid`, revisions and normalization are stable, nothing is left after the last cursor.
+  `source::conformance` runs them against any `SourceAdapter`:
+  Paging resumes strictly after a cursor, a foreign cursor is `cursor_invalid`,
+  revisions and normalization are stable, and nothing is left after the last cursor.
   The native `directory` source and the reference WebAssembly source in `sources/directory/` pass the same cases, and
   `source test` runs them for a third party's.
 - **The reference sources live under `sources/` and are not part of the build.**
@@ -124,10 +125,12 @@ a source whoever wrote it.
   A source that ships with MemCastle's releases, without being compiled into the binary, uses exactly the package
   contract a user installs; none is bundled yet.
 - **Enforcement is tests and a lockfile check.**
-  `tests/source_isolation.rs`: only `src/mining/wasm/` names the engine; the host and the adapters never reach the store or
-  the jobs (recursively); the pipeline names no runtime; the host calls nothing that hands over ambient authority
-  (inherited environment, standard streams, arguments, a writable directory), and opens the network only inside the
-  manifest's flag.
+  `tests/source_isolation.rs`: only `src/mining/wasm/` names the engine;
+  the host and the adapters never reach the store or the jobs (recursively);
+  the pipeline names no runtime;
+  the host calls nothing that hands over ambient authority
+  (inherited environment, standard streams, arguments, a writable directory),
+  and opens the network only inside the manifest's flag.
   `tests/dependencies.rs`: no source-specific SDK or native database binding in `Cargo.lock`, and the engine is built
   without the features a source host never uses.
   `tests/auth.rs`: every `/api/source-packages` route is guarded and no MCP tool installs or changes a source.
@@ -179,8 +182,9 @@ a source whoever wrote it.
   than a Rust one, and only their standard library (plus pure packages bundled with them) is available.
   Their scaffolds are provided and documented, and checked only structurally by the suite: the toolchains are not
   installed in CI.
-- A changed WIT contract is a new contract version, and every installed source of the old one becomes `unavailable` with a
-  reason that says to rebuild it, never a mysterious failure at the first mine.
+- A changed WIT contract is a new contract version,
+  and every installed source of the old one becomes `unavailable` with a reason that says to rebuild it,
+  never a mysterious failure at the first mine.
 - Adding a built-in source is still one file under `src/mining/adapters/`, one variant in `registry::AnySource` and an
   entry in `registry::BUILTIN_NAMES`, and a section in `docs/mining-sources.md`.
   Adding any other source is a package.
