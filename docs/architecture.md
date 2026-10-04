@@ -446,7 +446,8 @@ Two fields mean "where do I read progress from" and "where do I read what it fou
 - **`Mine`** (`src/mining`) mines a *source* through the unified model of
   [ADR-023](adr/023-unified-source-model-for-mining.md): a `SourceAdapter` discovers and reads documents past the
   source's stored cursor, and one shared pipeline chunks them, files drawers idempotently and advances the cursor.
-  A directory and the Pi session history are the two adapters shipped.
+  A directory and the Pi session history are the two adapters shipped, and a user can install more as WebAssembly
+  components behind the same trait ([ADR-026](adr/026-pluggable-source-adapters-as-webassembly-components.md)).
   It stops at a bounded number of documents, recording `truncated: true` when it does, and a later job continues from
   the cursor.
   See [Mining sources](mining-sources.md).
@@ -590,6 +591,30 @@ The admin endpoint exists only after an explicit `db start`, binds loopback unle
 both given, refuses browser pages from other sites, and has no MCP tool.
 See [ADR-015](adr/015-database-admin-endpoint.md).
 
+**Mining sources are one contract with two kinds of implementation.**
+A built-in adapter is Rust in the binary; an installed source is a WebAssembly component the daemon runs in a sandbox,
+and `mining::registry` turns a provider name into either behind the same `SourceAdapter` trait, so the pipeline is
+identical for both.
+
+```mermaid
+flowchart LR
+    J["Mine job"] --> REG["mining::registry"]
+    REG --> NAT["built-in adapters<br/>directory, pi-sessions"]
+    REG --> WA["mining::wasm<br/>one sandbox per call"]
+    WA --> PKG[("installed packages<br/>sources_dir + source_package rows")]
+    NAT --> PIPE["pipeline<br/>normalize, chunk, ingest, cursor"]
+    WA --> PIPE
+    PIPE --> DB[(SurrealDB)]
+```
+
+The sandbox grants only what the package's manifest lists and the user consented to at install: directories read-only,
+named programs without a shell, named environment variables, the network all or nothing, a memory ceiling and a time
+limit.
+The source never sees the store, and the core compiles no source-specific SDK.
+Installing, enabling and removing are administrative (REST and CLI, no MCP tool),
+and the `source init`, `build`, `test` and `package` commands work without a daemon.
+See [Writing a mining source](writing-sources.md) and [ADR-026](adr/026-pluggable-source-adapters-as-webassembly-components.md).
+
 ## Non-goals for now
 
 Deliberately out of scope, and each is structurally possible without rework given the module boundaries above:
@@ -598,6 +623,10 @@ Deliberately out of scope, and each is structurally possible without rework give
   `extract` job is the stage that reads what was filed.
 - Mining sources that need credentials (Slack, GitHub, Atlassian, ...): the model stores a credential *reference* and
   never a secret, and no shipped adapter needs one yet.
+  An installed source can read a variable its manifest lists, but there is no credential store.
+- Restricting an installed source's network access by host name, a filesystem write permission for sources, a package
+  registry or signing, and official sources bundled with releases: the package contract and the `sources/` layout allow
+  each, and none is built.
 - Propagating a deletion at the source: a document that disappears is not noticed.
 - Extracting entities from a *query* to resolve its words to the graph: extraction reads drawers, and expansion starts from
   drawers already found.

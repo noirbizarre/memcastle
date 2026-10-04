@@ -104,6 +104,17 @@ pub fn default_palace_dir() -> PathBuf {
         .join("default")
 }
 
+/// The default directory for installed mining sources: `$XDG_DATA_HOME/memcastle/sources`.
+///
+/// Relative when nothing resolves, for the same reason as [`default_palace_dir`]: validation then asks for an
+/// explicit `mining.sources_dir` rather than installing into the working directory.
+#[must_use]
+pub fn default_sources_dir() -> PathBuf {
+    resolve_from_process(XdgDir::Data)
+        .unwrap_or_else(|| PathBuf::from(APP_DIR))
+        .join("sources")
+}
+
 /// The directory holding per-daemon runtime files: `$XDG_STATE_HOME/memcastle/run`.
 ///
 /// Falls back to the system temp directory when no home exists (a minimal

@@ -112,23 +112,62 @@ pub fn render_sources(
 ) -> String {
     let yes_no = |value: bool| if value { "yes" } else { "no" }.to_string();
     let providers = render_table(
-        &["SOURCE", "INCREMENTAL", "KEEPS RAW", "CREDENTIALS", "READS"],
+        &[
+            "SOURCE",
+            "STATE",
+            "INCREMENTAL",
+            "KEEPS RAW",
+            "CREDENTIALS",
+            "PERMISSIONS",
+            "READS",
+        ],
         report
             .providers
             .iter()
             .map(|provider| {
                 vec![
-                    provider.name.clone(),
+                    // A package's version is part of what it is; a built-in source is versioned with MemCastle.
+                    provider.version.as_ref().map_or_else(
+                        || provider.name.clone(),
+                        |version| format!("{} {version}", provider.name),
+                    ),
+                    provider.state.to_string(),
                     yes_no(provider.capabilities.incremental),
                     yes_no(provider.capabilities.retains_raw),
                     yes_no(provider.capabilities.needs_credentials),
+                    // Built-in sources are native code under MemCastle's own authority: nothing was granted.
+                    match provider.origin {
+                        crate::mining::SourceOrigin::Builtin => "built in".to_string(),
+                        crate::mining::SourceOrigin::Package => provider.permissions.describe(),
+                    },
                     provider.description.clone(),
                 ]
             })
             .collect(),
-        4,
+        6,
         painter,
         width,
+    );
+    // Why a source cannot run is what someone looking at "unavailable" wants next.
+    let unavailable: String = report
+        .providers
+        .iter()
+        .filter_map(|provider| {
+            provider.unavailable_reason.as_ref().map(|reason| {
+                format!(
+                    "{}\n",
+                    painter.warn(&format!("{} is unavailable: {reason}", provider.name))
+                )
+            })
+        })
+        .collect();
+    let providers = format!(
+        "{providers}{}",
+        if unavailable.is_empty() {
+            String::new()
+        } else {
+            format!("\n{}", unavailable.trim_end())
+        }
     );
     if report.sources.is_empty() {
         return format!(
@@ -160,6 +199,40 @@ pub fn render_sources(
         width,
     );
     format!("{providers}\n{mined}")
+}
+
+/// Render one source: what it is, what it can do, what it was granted and why it cannot run, if it cannot.
+#[must_use]
+pub fn render_source(provider: &crate::mining::ProviderInfo, painter: Painter) -> String {
+    let yes_no = |value: bool| if value { "yes" } else { "no" };
+    let mut lines = vec![
+        format!(
+            "{} {}",
+            painter.heading(&provider.name),
+            provider.version.as_deref().unwrap_or("(built in)")
+        ),
+        format!("  {}", provider.description),
+        format!("  state:        {}", provider.state),
+        format!(
+            "  capabilities: incremental {}, keeps raw {}, needs credentials {}",
+            yes_no(provider.capabilities.incremental),
+            yes_no(provider.capabilities.retains_raw),
+            yes_no(provider.capabilities.needs_credentials)
+        ),
+    ];
+    if provider.origin == crate::mining::SourceOrigin::Package {
+        lines.push(format!(
+            "  permissions:  {}",
+            provider.permissions.describe()
+        ));
+    }
+    if let Some(reason) = &provider.unavailable_reason {
+        lines.push(format!(
+            "  {}",
+            painter.warn(&format!("unavailable: {reason}"))
+        ));
+    }
+    lines.join("\n")
 }
 
 /// Render `wings` as a table: one row per wing, with its counts.

@@ -78,3 +78,6 @@ The history is the value.
   an exact copy in a room is not stored twice, a typo or a case variant is stored and linked with its evidence, and
   entity spelling variants converge while ambiguous names stay distinct; nothing is merged and nothing needs a model
   (amends ADR-008, ADR-023 and ADR-024)
+- [ADR-026](026-pluggable-source-adapters-as-webassembly-components.md) — mining sources are pluggable as
+  WebAssembly components behind the same adapter contract, with explicit consented permissions, a computed lifecycle,
+  a `source` command group for development and one conformance suite run against native and WebAssembly sources

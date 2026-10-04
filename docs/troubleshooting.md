@@ -289,6 +289,19 @@ its place.
 Mine it again from the beginning with `memcastle mine --source <name> --full`: unchanged documents are recognised and
 skipped, so nothing is duplicated.
 
+### `memcastle::source::*`
+
+These come from [installed mining sources](writing-sources.md).
+`consent_required` means the package asks for permissions you have not agreed to: review what the error lists, then
+install with `--yes`, or with `--consent <digest>` in a script.
+`not_enabled` means the source is installed but turned off or cannot run here: `memcastle source list` says which and why,
+and `memcastle source enable <name>` turns on a disabled one.
+A source that is `unavailable` because its component is missing or no longer matches what was installed needs the package
+installed again; one that is incompatible needs rebuilding against this MemCastle's contract.
+`failed`, `timeout` and `permission_denied` come from a running source: the message is the source's own, and a source that
+cannot read a file it expects probably lacks a `filesystem.read` permission.
+The full list is in [Writing a mining source](writing-sources.md#troubleshooting).
+
 ### Search returns nothing for a query that should match
 
 Without an [embedding provider](configuration.md#embeddings) search is lexical: it matches words in the stored text, not

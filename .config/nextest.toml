@@ -15,3 +15,12 @@ final-status-level = "slow"
 
 [profile.ci.junit]
 path = "junit.xml"
+
+# --- project-specific --------------------------------------------------------
+
+# These binaries build WebAssembly components with Cargo and compile them with Cranelift (docs/adr/026). Each test is
+# its own process, and they queue on Cargo's build-directory lock, so a test can legitimately wait for several builds
+# on a cold cache: that is not a hang.
+[[profile.default.overrides]]
+filter = "binary(source_projects) | binary(source_conformance) | binary(source_runtime)"
+slow-timeout = { period = "60s", terminate-after = 6 }

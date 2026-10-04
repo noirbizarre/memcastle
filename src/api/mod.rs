@@ -13,6 +13,7 @@ mod extract;
 mod graph;
 mod mode;
 mod palace;
+mod source_packages;
 
 use axum::Router;
 use axum::extract::{Path, State};
@@ -58,6 +59,27 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
         .route("/api/jobs/{id}/cancel", post(cancel_job))
         .route("/api/jobs/{id}/retry", post(retry_job))
         .route("/api/sources", get(list_sources))
+        // Installing, enabling and removing sources is administrative and REST-only, like the token and the database
+        // endpoint: no MCP tool, so an agent integration cannot install code (docs/adr/026). The upload route lifts
+        // axum's 2 MiB default body limit, which a component exceeds.
+        .route(
+            "/api/source-packages",
+            post(source_packages::install).layer(axum::extract::DefaultBodyLimit::max(
+                source_packages::MAX_PACKAGE_BYTES,
+            )),
+        )
+        .route(
+            "/api/source-packages/{name}",
+            get(source_packages::show).delete(source_packages::remove),
+        )
+        .route(
+            "/api/source-packages/{name}/enable",
+            post(source_packages::enable),
+        )
+        .route(
+            "/api/source-packages/{name}/disable",
+            post(source_packages::disable),
+        )
         .route("/api/shutdown", post(shutdown_now))
         // The hierarchy. Reads and creates are open to the same callers as any
         // other palace content; deletes have no MCP tool (docs/adr/018).

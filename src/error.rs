@@ -777,6 +777,164 @@ pub enum Error {
         /// Why it was rejected.
         message: String,
     },
+
+    /// A source manifest (`memcastle-source.toml`) does not parse or breaks a rule.
+    #[error("invalid source manifest: {message}")]
+    #[diagnostic(
+        code(memcastle::source::manifest_invalid),
+        help(
+            "fix `memcastle-source.toml`; docs/writing-sources.md lists every field and what it accepts"
+        )
+    )]
+    SourceManifestInvalid {
+        /// What was wrong.
+        message: String,
+    },
+
+    /// A source package is not one MemCastle can read.
+    #[error("invalid source package: {message}")]
+    #[diagnostic(
+        code(memcastle::source::package_invalid),
+        help(
+            "build a fresh package with `memcastle source package`: it holds `memcastle-source.toml` and `source.wasm`, and nothing else is read"
+        )
+    )]
+    SourcePackageInvalid {
+        /// What was wrong.
+        message: String,
+    },
+
+    /// A source cannot run on this MemCastle: its contract or version requirement is not met, or its
+    /// component does not fit the contract.
+    #[error("source `{name}` is incompatible with this MemCastle: {reason}")]
+    #[diagnostic(
+        code(memcastle::source::incompatible),
+        help(
+            "rebuild the source against this MemCastle's contract (`memcastle source init` scaffolds the current one), or install a MemCastle version it supports"
+        )
+    )]
+    SourceIncompatible {
+        /// The source.
+        name: String,
+        /// Why it cannot run.
+        reason: String,
+    },
+
+    /// No installed source has this name.
+    #[error("no installed source is named `{name}`")]
+    #[diagnostic(
+        code(memcastle::source::not_found),
+        help(
+            "`memcastle source list` shows what is installed; `memcastle source install <package>` adds a source"
+        )
+    )]
+    SourceNotFound {
+        /// The name asked for.
+        name: String,
+    },
+
+    /// The source exists but is not usable right now.
+    #[error("source `{name}` is {state}")]
+    #[diagnostic(
+        code(memcastle::source::not_enabled),
+        help(
+            "`memcastle source list` says why; `memcastle source enable <name>` enables a disabled source"
+        )
+    )]
+    SourceNotEnabled {
+        /// The source.
+        name: String,
+        /// Its state, with the reason when it is unavailable.
+        state: String,
+    },
+
+    /// Installing a source needs the user's explicit agreement to the permissions it asks for.
+    #[error("source `{name}` asks for permissions that were not agreed to: {permissions}")]
+    #[diagnostic(
+        code(memcastle::source::consent_required),
+        help(
+            "review the permissions, then install again with `--yes` (or answer the prompt); an unattended install passes `--consent {digest}`"
+        )
+    )]
+    SourceConsentRequired {
+        /// The source.
+        name: String,
+        /// The permissions, one line.
+        permissions: String,
+        /// The digest agreeing to exactly these permissions.
+        digest: String,
+    },
+
+    /// A built-in source cannot be disabled, replaced or removed.
+    #[error("`{name}` is built into MemCastle")]
+    #[diagnostic(
+        code(memcastle::source::builtin),
+        help(
+            "built-in sources are always available; install a package under another name to change behaviour"
+        )
+    )]
+    SourceBuiltin {
+        /// The built-in's name.
+        name: String,
+    },
+
+    /// A source ran and failed: it trapped, ran out of memory, or reported an error.
+    #[error("source `{name}` failed: {message}")]
+    #[diagnostic(
+        code(memcastle::source::failed),
+        help(
+            "the message is the source's own; a source that needs a file, a program or the network must declare it under `[permissions]` and be installed with that agreed to"
+        )
+    )]
+    SourceFailed {
+        /// The source.
+        name: String,
+        /// What it said.
+        message: String,
+    },
+
+    /// A source took longer than its time limit for one call.
+    #[error("source `{name}` did not answer within {secs}s")]
+    #[diagnostic(
+        code(memcastle::source::timeout),
+        help(
+            "raise `mining.source_timeout_secs` (or the source's own `[limits] timeout_secs`, up to that ceiling)"
+        )
+    )]
+    SourceTimeout {
+        /// The source.
+        name: String,
+        /// The limit that was hit, in seconds.
+        secs: u64,
+    },
+
+    /// A source asked for something its permissions do not grant.
+    #[error("source `{name}` was denied: {message}")]
+    #[diagnostic(
+        code(memcastle::source::permission_denied),
+        help(
+            "add what it needs to `[permissions]` in `memcastle-source.toml`, rebuild, and install it again so the new permissions are agreed to"
+        )
+    )]
+    SourcePermissionDenied {
+        /// The source.
+        name: String,
+        /// What was refused.
+        message: String,
+    },
+
+    /// Building a source did not produce a component.
+    #[error("building the source failed: {message}")]
+    #[diagnostic(
+        code(memcastle::source::build_failed),
+        help(
+            "run the build command shown in `memcastle-source.toml` under `[build]` yourself to see its full output"
+        )
+    )]
+    SourceBuildFailed {
+        /// What went wrong.
+        message: String,
+    },
 }
 
 /// What every interface reports about a failure: the message, and the two
@@ -1168,6 +1326,46 @@ mod tests {
                 provider: "pi-sessions".to_string(),
                 message: "not an object".to_string(),
             },
+            Error::SourceManifestInvalid {
+                message: "no name".to_string(),
+            },
+            Error::SourcePackageInvalid {
+                message: "no component".to_string(),
+            },
+            Error::SourceIncompatible {
+                name: "slack".to_string(),
+                reason: "contract 9.0".to_string(),
+            },
+            Error::SourceNotFound {
+                name: "slack".to_string(),
+            },
+            Error::SourceNotEnabled {
+                name: "slack".to_string(),
+                state: "disabled".to_string(),
+            },
+            Error::SourceConsentRequired {
+                name: "slack".to_string(),
+                permissions: "network".to_string(),
+                digest: "abc".to_string(),
+            },
+            Error::SourceBuiltin {
+                name: "directory".to_string(),
+            },
+            Error::SourceFailed {
+                name: "slack".to_string(),
+                message: "trap".to_string(),
+            },
+            Error::SourceTimeout {
+                name: "slack".to_string(),
+                secs: 30,
+            },
+            Error::SourcePermissionDenied {
+                name: "slack".to_string(),
+                message: "git".to_string(),
+            },
+            Error::SourceBuildFailed {
+                message: "no target".to_string(),
+            },
         ]
     }
 
@@ -1226,7 +1424,18 @@ mod tests {
             | Error::ExtractionNotConfigured
             | Error::ExtractionFailed { .. }
             | Error::SemanticUnavailable { .. }
-            | Error::SourceCursorInvalid { .. } => {}
+            | Error::SourceCursorInvalid { .. }
+            | Error::SourceManifestInvalid { .. }
+            | Error::SourcePackageInvalid { .. }
+            | Error::SourceIncompatible { .. }
+            | Error::SourceNotFound { .. }
+            | Error::SourceNotEnabled { .. }
+            | Error::SourceConsentRequired { .. }
+            | Error::SourceBuiltin { .. }
+            | Error::SourceFailed { .. }
+            | Error::SourceTimeout { .. }
+            | Error::SourcePermissionDenied { .. }
+            | Error::SourceBuildFailed { .. } => {}
         }
     }
 

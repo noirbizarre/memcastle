@@ -1,0 +1,27 @@
+# The reference WebAssembly source: the `directory` source, written against the MemCastle source contract.
+#
+# It exists to be read, copied and tested (docs/writing-sources.md), and to prove the same conformance cases pass for a
+# built-in adapter and a component. It is not part of MemCastle's own build: the empty `[workspace]` below keeps Cargo
+# from treating it as a member of the root package, and `memcastle source build` (or `mise run sources:check`) builds
+# it for `wasm32-wasip2`.
+
+[package]
+name = "memcastle-source-directory"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Generates the guest side of `wit/memcastle-source.wit`.
+wit-bindgen = "0.57"
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+
+[workspace]

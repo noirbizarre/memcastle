@@ -112,3 +112,109 @@ fn a_lockfile_without_surrealkv_is_reported() {
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(violations[0].contains("surrealkv"));
 }
+
+/// Application SDKs and native database bindings that a mining source might want, none of which MemCastle's core may
+/// compile (docs/adr/026): a source that needs one is a WebAssembly component that brings its own, so the core binary
+/// stays free of what only one origin needs.
+const SOURCE_SPECIFIC: &[&str] = &[
+    // Native database bindings: a local-chat-database source would reach for these.
+    "rusqlite",
+    "libsqlite3-sys",
+    "sqlx",
+    "diesel",
+    "postgres",
+    "mysql",
+    "mongodb",
+    // Version-control and forge SDKs.
+    "git2",
+    "libgit2-sys",
+    "gix",
+    "octocrab",
+    // Chat, mail and issue-tracker SDKs.
+    "slack-morphism",
+    "serenity",
+    "teloxide",
+    "imap",
+    "lettre",
+    "jira_query",
+    "notion-client",
+];
+
+/// Every reason `names` links something only one mining source would need.
+fn source_specific_violations(names: &BTreeSet<String>) -> Vec<String> {
+    SOURCE_SPECIFIC
+        .iter()
+        .filter(|forbidden| names.contains(**forbidden))
+        .map(|forbidden| {
+            format!(
+                "`{forbidden}` is a source-specific SDK or native binding; a source that needs it belongs in a \
+                 WebAssembly component, not in the core"
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn the_core_links_no_source_specific_sdk_or_native_database_binding() {
+    let violations = source_specific_violations(&package_names(&lockfile()));
+
+    assert!(
+        violations.is_empty(),
+        "MemCastle's core must build without source-specific dependencies (docs/adr/026):\n  {}",
+        violations.join("\n  ")
+    );
+}
+
+#[test]
+fn a_lockfile_with_a_source_sdk_is_reported() {
+    let names = package_names("[[package]]\nname = \"rusqlite\"\nversion = \"0.1.0\"\n");
+
+    let violations = source_specific_violations(&names);
+
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(violations[0].contains("rusqlite"));
+}
+
+#[test]
+fn the_webassembly_runtime_is_built_without_the_features_a_source_host_never_uses() {
+    // The host compiles components and runs them; a profiler, a debugger stub or a text-format parser is surface and
+    // build time a source host does not need, and `default-features = false` is what keeps them out.
+    let manifest: toml::Table =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
+            .expect("read Cargo.toml")
+            .parse()
+            .expect("Cargo.toml is TOML");
+    let dependencies = manifest["dependencies"].as_table().expect("dependencies");
+    for name in ["wasmtime", "wasmtime-wasi"] {
+        let dependency = dependencies[name]
+            .as_table()
+            .unwrap_or_else(|| panic!("`{name}` has a table form"));
+        assert_eq!(
+            dependency
+                .get("default-features")
+                .and_then(toml::Value::as_bool),
+            Some(false),
+            "`{name}` must be declared with `default-features = false`"
+        );
+    }
+    let features: Vec<&str> = dependencies["wasmtime"]["features"]
+        .as_array()
+        .expect("wasmtime lists its features")
+        .iter()
+        .filter_map(toml::Value::as_str)
+        .collect();
+    for unwanted in [
+        "profiling",
+        "debug",
+        "wat",
+        "coredump",
+        "cache",
+        "gc",
+        "threads",
+    ] {
+        assert!(
+            !features.contains(&unwanted),
+            "wasmtime must not enable `{unwanted}`"
+        );
+    }
+}

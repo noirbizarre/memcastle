@@ -34,14 +34,19 @@ pub struct Discovery {
 /// One kind of source. Implementations are stateless apart from configuration, and every method may run on any
 /// run of any job.
 ///
-/// Dispatch is static (`mining::run` matches on the provider name and calls the generic pipeline), so the async
-/// methods are plain `impl Future` returns, with `Send` spelled out because jobs run on a multi-threaded runtime.
+/// Dispatch is static (`mining::run` resolves the provider to a `registry::AnySource` and calls the generic
+/// pipeline), so the async methods are plain `impl Future` returns, with `Send` spelled out because jobs run on a
+/// multi-threaded runtime.
+///
+/// This is the one logical contract every source meets, whether it is compiled into MemCastle or is a WebAssembly
+/// component loaded at run time (docs/adr/026); the strings it returns are borrowed from the adapter rather than
+/// `'static` so that a loaded source can own its name.
 pub trait SourceAdapter: Send + Sync {
     /// The adapter's name, as users give it (`--source`) and as it is stored on the source.
-    fn provider(&self) -> &'static str;
+    fn provider(&self) -> &str;
 
     /// One line saying what the adapter reads, for `memcastle sources` and the API.
-    fn description(&self) -> &'static str;
+    fn description(&self) -> &str;
 
     /// What this adapter can do.
     fn capabilities(&self) -> SourceCapabilities;
@@ -60,7 +65,7 @@ pub trait SourceAdapter: Send + Sync {
     fn default_wing(&self, source: &SourceRef) -> String;
 
     /// The room drawers are filed under when a document does not name one.
-    fn default_room(&self) -> &'static str;
+    fn default_room(&self) -> &str;
 
     /// Candidates strictly after `cursor` (`null` is the beginning), in cursor order, at most `limit`.
     ///

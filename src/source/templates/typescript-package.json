@@ -1,0 +1,15 @@
+{
+  "name": "__NAME__",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc && jco componentize build/index.js --wit wit --world-name source --out dist/source.wasm"
+  },
+  "devDependencies": {
+    "@bytecodealliance/componentize-js": "^0.19.0",
+    "@bytecodealliance/jco": "^1.15.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

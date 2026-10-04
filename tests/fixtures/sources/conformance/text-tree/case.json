@@ -1,0 +1,27 @@
+{
+  "name": "text-tree",
+  "description": "A small tree of text files with the usual noise: hidden and dependency directories, a binary file and an empty one. Discovery pages by two.",
+  "locator": "tree",
+  "limit": 2,
+  "documents": [
+    {
+      "external_id": "notes.md",
+      "title": "notes.md",
+      "kind": "file",
+      "segments": ["# Notes\n\nThe first file.\n"]
+    },
+    {
+      "external_id": "readme.txt",
+      "title": "readme.txt",
+      "kind": "file",
+      "segments": ["plain text\n"]
+    },
+    {
+      "external_id": "src/main.rs",
+      "title": "src/main.rs",
+      "kind": "file",
+      "segments": ["fn main() {}\n"]
+    }
+  ],
+  "skipped": [".hidden/secret.txt", "build/out.txt", "image.bin", "empty.txt"]
+}

@@ -129,6 +129,7 @@ pub async fn run(config: Config) -> Result<()> {
     let backend_info = backend.describe();
     let backend_info_kind = backend_info.kind.to_string();
     let app = AppServices::new(store, Arc::clone(&scheduler))
+        .with_mining(config.mining.clone())
         .with_embeddings(embeddings)
         .with_extraction(extraction)
         .with_dedup(config.dedup.clone())

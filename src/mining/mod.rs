@@ -8,29 +8,31 @@
 //! ```
 //!
 //! - [`adapter`] is the contract a source implements; [`adapters`] holds the sources MemCastle ships
-//!   (`directory`, `pi-sessions`). Source-specific discovery and reading live there and nowhere else.
+//!   (`directory`, `pi-sessions`), and [`wasm`] runs the ones a user installs as WebAssembly components
+//!   (docs/adr/026). Source-specific discovery and reading live in those and nowhere else.
+//! - [`registry`] turns a provider name into one or the other, behind the same contract.
 //! - [`pipeline`] is the one loop every source goes through: cursor, revision check, chunking, idempotent filing,
 //!   cursor commit, checkpoint. It knows no provider by name.
 //! - [`chunk`] cuts a canonical document into drawer-sized texts.
 //!
 //! [`run`] is the seam between the job and all of that: it resolves the job's source to an adapter and hands over.
-//! Adding a source means adding an adapter and one arm in [`run`] and [`providers`]; `Scheduler::execute`'s
-//! dispatch, the wire format and the pipeline never change.
+//! Adding a source means adding an adapter and one entry in [`registry`], or installing a package;
+//! `Scheduler::execute`'s dispatch, the wire format and the pipeline never change.
 
 pub mod adapter;
 pub mod adapters;
 pub mod chunk;
 pub mod pipeline;
+pub mod registry;
+pub mod wasm;
 
-use std::path::Path;
-
-use crate::domain::{Job, MiningSource, SourceCapabilities};
-use crate::error::{Error, Result};
+use crate::config::MiningConfig;
+use crate::domain::{Job, MiningSource, Permissions, SourceCapabilities, SourceState};
+use crate::error::Result;
 use crate::jobs::{JobContext, JobOutcome};
+use crate::store::SurrealStore;
 
-use adapter::SourceAdapter;
-use adapters::directory::{self, DirectoryAdapter};
-use adapters::pi_sessions::{self, PiSessionsAdapter};
+use adapters::directory;
 
 /// What a `Mine` job needs, gathered from its [`crate::domain::JobKind`].
 pub struct MiningParams {
@@ -42,7 +44,21 @@ pub struct MiningParams {
     pub full: bool,
 }
 
-/// A source adapter the daemon ships, as `memcastle sources` and `GET /api/sources` describe it.
+/// Where a source comes from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceOrigin {
+    /// Compiled into MemCastle.
+    #[default]
+    Builtin,
+    /// An installed WebAssembly package.
+    Package,
+}
+
+/// A source adapter the daemon can mine, as `memcastle sources` and `GET /api/sources` describe it.
+///
+/// The fields after `capabilities` were added with installable sources (docs/adr/026) and default to what a built-in
+/// source is, so an older daemon's answer still reads.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProviderInfo {
     /// The name to give as `--source`.
@@ -51,29 +67,25 @@ pub struct ProviderInfo {
     pub description: String,
     /// What it can do.
     pub capabilities: SourceCapabilities,
+    /// Built in, or an installed package.
+    #[serde(default)]
+    pub origin: SourceOrigin,
+    /// The package's version; a built-in source is versioned with MemCastle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Where it is in its lifecycle.
+    #[serde(default = "enabled")]
+    pub state: SourceState,
+    /// Why it cannot run, when `state` is `unavailable`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unavailable_reason: Option<String>,
+    /// What it was granted: nothing for a built-in source, which is native code under MemCastle's own authority.
+    #[serde(default)]
+    pub permissions: Permissions,
 }
 
-/// Every provider, in the order they are listed.
-#[must_use]
-pub fn providers() -> Vec<ProviderInfo> {
-    // Capabilities and descriptions do not depend on configuration, so default-configured adapters answer.
-    let directory = DirectoryAdapter::new(0);
-    let pi = PiSessionsAdapter::new(Some(Path::new("/")));
-    vec![describe(&directory), describe(&pi)]
-}
-
-/// Whether `name` is a provider this daemon can mine.
-#[must_use]
-pub fn is_provider(name: &str) -> bool {
-    providers().iter().any(|provider| provider.name == name)
-}
-
-fn describe(adapter: &impl SourceAdapter) -> ProviderInfo {
-    ProviderInfo {
-        name: adapter.provider().to_string(),
-        description: adapter.description().to_string(),
-        capabilities: adapter.capabilities(),
-    }
+fn enabled() -> SourceState {
+    SourceState::Enabled
 }
 
 /// Mine `params.source`, checking in with `ctx` between documents so the job can be paused, resumed, or
@@ -81,7 +93,8 @@ fn describe(adapter: &impl SourceAdapter) -> ProviderInfo {
 ///
 /// # Errors
 ///
-/// Returns an error if the provider is unknown, the source cannot be reached or read, or a store write fails.
+/// Returns an error if the provider is unknown or not enabled, the source cannot be reached or read, or a store
+/// write fails.
 pub async fn run(ctx: &JobContext, job: &mut Job, params: MiningParams) -> Result<JobOutcome> {
     let MiningParams { source, wing, full } = params;
     // A directory job and a `directory` provider job are the same source: one wire form predates the other.
@@ -97,49 +110,28 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: MiningParams) -> Resul
         wing: wing.as_deref(),
         full,
     };
-    let mining = ctx.mining();
-    match provider {
-        directory::PROVIDER => {
-            pipeline::mine(
-                &DirectoryAdapter::new(mining.max_file_bytes),
-                ctx,
-                job,
-                request,
-            )
-            .await
-        }
-        pi_sessions::PROVIDER => {
-            pipeline::mine(
-                &PiSessionsAdapter::new(mining.pi_sessions_dir.as_deref()),
-                ctx,
-                job,
-                request,
-            )
-            .await
-        }
-        other => Err(Error::invalid_input(
-            "provider",
-            format!(
-                "unknown source `{other}`; known sources: {}",
-                providers()
-                    .iter()
-                    .map(|provider| provider.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        )),
-    }
+    let adapter = registry::resolve(ctx.store(), ctx.mining(), provider).await?;
+    pipeline::mine(&adapter, ctx, job, request).await
+}
+
+/// Every source this daemon can mine, built in and installed.
+///
+/// # Errors
+///
+/// A store error when the installed sources cannot be read.
+pub async fn providers(store: &SurrealStore, mining: &MiningConfig) -> Result<Vec<ProviderInfo>> {
+    registry::providers(store, mining).await
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::time::{Duration, SystemTime};
 
     use super::*;
-    use crate::config::MiningConfig;
     use crate::domain::{Drawer, JobEvent, JobKind, Priority, SourceKind};
+    use crate::error::Error;
     use crate::jobs::JobControl;
-    use crate::store::SurrealStore;
     use serde_json::json;
 
     fn directory_job(dir: &Path, requested_by: &str) -> Job {
@@ -917,10 +909,12 @@ mod tests {
 
     #[test]
     fn every_shipped_provider_is_listed_with_its_capabilities() {
-        let names: Vec<_> = providers().into_iter().map(|p| p.name).collect();
+        let names: Vec<_> = registry::builtin_providers()
+            .into_iter()
+            .map(|p| p.name)
+            .collect();
         assert_eq!(names, ["directory", "pi-sessions"]);
-        assert!(is_provider("pi-sessions") && !is_provider("nope"));
-        let pi = providers()
+        let pi = registry::builtin_providers()
             .into_iter()
             .find(|p| p.name == "pi-sessions")
             .unwrap();
