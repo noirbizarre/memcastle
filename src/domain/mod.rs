@@ -11,6 +11,7 @@ pub mod auth;
 mod checkpoint;
 mod drawer;
 mod entity;
+mod extraction;
 mod ids;
 mod job;
 mod memory_mode;
@@ -22,7 +23,11 @@ mod source;
 
 pub use checkpoint::{CheckpointDestination, CheckpointItem, CheckpointPayload, FactMutation};
 pub use drawer::{Drawer, Origin, Provenance, Source, SourceKind, content_hash, sha256_hex};
-pub use entity::{Entity, NewRelationship, Relationship, normalize_label, require_label};
+pub use entity::{
+    Entity, EntityKind, FactProvenance, Mention, NewRelationship, Predicate, Relationship,
+    normalize_label, require_label,
+};
+pub use extraction::{ExtractedEntity, ExtractedGraph, ExtractedRelation, Limits, MAX_NAME_CHARS};
 pub use ids::{DrawerId, EntityId, JobId, PalaceId, RelationshipId, RoomId, SourceId, WingId};
 pub(crate) use job::default_dry_run;
 pub use job::{

@@ -8,6 +8,7 @@
 
 mod auth;
 mod db_endpoint;
+mod graph;
 mod palace;
 
 use std::path::PathBuf;
@@ -23,6 +24,7 @@ use crate::domain::{
 };
 use crate::embed::Embeddings;
 use crate::error::{Error, Result};
+use crate::extract::Extraction;
 use crate::jobs::Scheduler;
 use crate::search::{RankingMode, SearchHit, SearchQuery};
 use crate::store::SurrealStore;
@@ -275,6 +277,9 @@ pub struct AppServices {
     /// Produces query vectors for semantic search; disabled unless an
     /// `[embeddings]` provider is configured.
     embeddings: Embeddings,
+    /// Whether entity extraction is configured, so a job that could only fail
+    /// is refused up front; disabled unless an `[extraction]` provider is.
+    extraction: Extraction,
 }
 
 impl AppServices {
@@ -289,7 +294,15 @@ impl AppServices {
             auth: Arc::new(AuthPolicy::default()),
             db_endpoint: Arc::new(DbEndpoint::default()),
             embeddings: Embeddings::disabled(),
+            extraction: Extraction::disabled(),
         }
+    }
+
+    /// Tell the services whether entity extraction is configured.
+    #[must_use]
+    pub fn with_extraction(mut self, extraction: Extraction) -> Self {
+        self.extraction = extraction;
+        self
     }
 
     /// Give the services an embedding provider for query vectors.
@@ -893,6 +906,37 @@ impl AppServices {
         }
         self.scheduler
             .submit(JobKind::Embed { wing }, Priority::Background, requested_by)
+            .await
+    }
+
+    /// Submit a job that reads mined drawers and adds the entities and
+    /// relationships they name to the knowledge graph.
+    ///
+    /// A write (it creates graph records), and refused up front when no
+    /// provider is configured, like [`Self::submit_embed`]. Idempotent in
+    /// effect: drawers already read are skipped.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ModeForbidden`] unless `mode` permits writes,
+    /// [`Error::ExtractionNotConfigured`] when no provider is configured, or a
+    /// store error.
+    pub async fn submit_extract(
+        &self,
+        wing: Option<String>,
+        requested_by: &str,
+        mode: MemoryMode,
+    ) -> Result<Job> {
+        Self::require_write(mode, "extract")?;
+        if !self.extraction.is_configured() {
+            return Err(Error::ExtractionNotConfigured);
+        }
+        self.scheduler
+            .submit(
+                JobKind::Extract { wing },
+                Priority::Background,
+                requested_by,
+            )
             .await
     }
 

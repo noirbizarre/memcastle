@@ -132,3 +132,40 @@ fn the_pipeline_is_the_only_writer_of_source_records() {
         }
     }
 }
+
+/// `path`'s code before its `#[cfg(test)]` module: what ships, not what the tests do to set up.
+fn shipped_code(path: &str) -> String {
+    let source = code(path);
+    match source.find("#[cfg(test)]") {
+        Some(end) => source[..end].to_string(),
+        None => source,
+    }
+}
+
+#[test]
+fn extraction_names_no_source_and_never_writes_what_it_reads() {
+    // Extraction consumes what the unified Source model filed (docs/adr/024). It must not learn what any one
+    // provider is, must not write a source's bookkeeping, and must never create, replace or delete a drawer: derived
+    // information adds graph records beside canonical memory, it does not rewrite it.
+    for file in rust_files("src/extract") {
+        let source = shipped_code(&file);
+        for forbidden in PROVIDER_NAMES.iter().chain(
+            [
+                "adapters::",
+                "save_source_cursor",
+                "save_source_document",
+                "get_or_create_source",
+                "create_drawer",
+                "supersede_drawer",
+                "delete_drawer",
+                "set_drawer_embedding",
+            ]
+            .iter(),
+        ) {
+            assert!(
+                !source.contains(forbidden),
+                "{file} contains `{forbidden}`; extraction must not name a source or write a drawer"
+            );
+        }
+    }
+}

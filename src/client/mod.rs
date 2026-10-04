@@ -457,6 +457,20 @@ impl DaemonClient {
         .await
     }
 
+    /// Submit an entity extraction sweep — see `AppServices::submit_extract`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
+    pub async fn submit_extract(&self, wing: Option<String>) -> Result<Job> {
+        self.send(
+            self.http
+                .post(format!("{}/api/jobs", self.base_url))
+                .json(&json!({ "type": "extract", "wing": wing, "requested_by": CHANNEL })),
+        )
+        .await
+    }
+
     /// Submit a repair job — see `AppServices::submit_repair` and
     /// `memcastle::repair`'s module doc.
     ///

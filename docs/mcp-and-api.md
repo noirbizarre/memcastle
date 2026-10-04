@@ -106,10 +106,10 @@ that would be unsafe (`memcastle::db::unsafe_bind`), `404` for an unknown job, w
 under the request (run it again), a database admin endpoint that is already
 open or cannot bind its address (`memcastle::db::bind_failed`), a drawer name already held by other content,
 a wing or room delete while a job that writes to the palace is pending, or superseding a drawer that was already
-superseded (`memcastle::palace::drawer_superseded`), `502` when the embedding provider fails
-(`memcastle::embed::failed`), and `500` for a server failure.
+superseded (`memcastle::palace::drawer_superseded`), `502` when the embedding or extraction provider fails
+(`memcastle::embed::failed`, `memcastle::extract::failed`), and `500` for a server failure.
 A search that needs a vector it cannot get (`memcastle::search::semantic_unavailable`) and a request that needs an embedding
-provider when none is configured (`memcastle::embed::not_configured`) are `400`s.
+provider when none is configured (`memcastle::embed::not_configured`, `memcastle::extract::not_configured`) are `400`s.
 
 | Route | Purpose | Parameters |
 |---|---|---|
@@ -145,6 +145,9 @@ provider when none is configured (`memcastle::embed::not_configured`) are `400`s
 | `POST /api/drawers/{id}/supersede` | End a drawer's validity now, with a replacement when `content` is given: `{superseded, replacement}`. | JSON body: `content?`, `tags?`, `requested_by?` |
 | `PUT /api/drawers/{id}/embedding` | Attach a vector you computed to a drawer. | JSON body: `embedding` (768 numbers) |
 | `POST /api/drawers/{id}/mentions` | Record that a drawer mentions an entity, for graph expansion: `201` when linked, `200` when it already was. | JSON body: `name`, `kind` |
+| `GET /api/entities` | List entities of the [knowledge graph](#the-knowledge-graph), by name. | query string: `name` (contains, any case), `kind`, `limit` (default 50, at most 200) |
+| `GET /api/entities/{id}/relationships` | The relationships touching an entity, with provenance and validity. | query string: `include_expired` |
+| `GET /api/entities/{id}/mentions` | The drawers that mention an entity, with the provenance of each link. | none |
 | `POST /api/auth/token` | Generate a token, replacing any previous one: `{token, algorithm, version, created_at}`. | none |
 | `DELETE /api/auth/token` | Revoke the generated token: `{"revoked": true}`. | none |
 | `GET /api/db` | Whether the [database admin endpoint](database-access.md) is listening, and where. | none |
@@ -198,7 +201,8 @@ With `expand`, drawers that share an entity with a hit (or sit one currently val
 hits, best first, up to `limit` more.
 Each carries a `graph` signal and `via`, the entities that connect it.
 Expansion never reorders or replaces a direct hit.
-Link drawers to entities with `POST /api/drawers/{id}/mentions` or `memcastle drawer mention`.
+Link drawers to entities with `POST /api/drawers/{id}/mentions` or `memcastle drawer mention`,
+or let the [`extract` job](#the-knowledge-graph) do it for mined content.
 
 **Results.**
 Every hit is the stored drawer, verbatim, plus these fields:
@@ -283,6 +287,41 @@ A `POST` asking for another `bind`, `port` or origin than the open endpoint has 
 `memcastle::db::already_running`; a `port` of `0` means "any free port" and so never conflicts.
 [Database access](database-access.md) describes the workflow and the security model.
 
+### The knowledge graph
+
+Entities and the relationships between them are derived from drawers, never the other way round.
+Three things write them: a checkpoint's `fact`, `POST /api/drawers/{id}/mentions`,
+and the `extract` job, which reads every mined drawer it has not read and adds what the text names.
+`extract` is queued after a mining job completes and at startup, and `memcastle extract` or
+`POST /api/jobs {"type": "extract", "wing": "docs"}` runs one by hand.
+It needs an [`[extraction]` provider](configuration.md#extraction) and is a `400` with
+`memcastle::extract::not_configured` without one; it is a write, so a read-only session is refused.
+A provider that fails is a `502` with `memcastle::extract::failed` on the job, and the drawers it did not reach are read
+next time.
+There is no MCP tool for it, as there is none for embedding.
+
+The three `GET /api/entities` routes read the graph.
+A relationship says what it relates and when it holds, and where an extractor derived it, what from:
+
+```json
+{
+  "id": "…", "from": "…", "to": "…", "predicate": "works_on", "confidence": 0.6,
+  "valid_from": "2026-07-14T14:27:12Z", "valid_to": null,
+  "provenance": {
+    "drawer": "…", "extractor": "heuristic", "job_id": "…", "extracted_at": "…",
+    "origin": {"source": "…", "provider": "directory", "document": "team.md", "chunk": 0, "revision": "…"}
+  }
+}
+```
+
+`provenance` is absent on a fact somebody asserted directly.
+A fact stops being current (`valid_to` is set) when the drawer it was read from is superseded, and `include_expired`
+returns that history too.
+Extracted facts use a closed vocabulary: kinds `person`, `organization`, `project`, `tool`, `place`, `concept` and `other`;
+predicates `works_on`, `member_of`, `depends_on`, `uses`, `owns`, `part_of`, `located_in` and `related_to`.
+An unknown entity is a `404` with `memcastle::graph::entity_not_found`.
+The reasoning is in [ADR-024](adr/024-entity-extraction-as-an-enrich-job.md).
+
 ### Submitting jobs
 
 `POST /api/jobs` takes a body tagged by `type`:
@@ -292,6 +331,7 @@ A `POST` asking for another `bind`, `port` or origin than the open endpoint has 
 | `mine` | `path` (absolute directory) or `provider` (a [source](mining-sources.md)) with `locator?`, then `wing?` and `full?` |
 | `checkpoint` | `payload` (see [above](#checkpoint-payload)), `emergency?` |
 | `audit` | `scope?` |
+| `extract` | `wing?`, see [the knowledge graph](#the-knowledge-graph) |
 | `repair` | `dry_run?` (default `true`), `based_on_job?` |
 | `demo` | `steps` |
 

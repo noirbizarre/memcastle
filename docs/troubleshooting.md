@@ -315,6 +315,22 @@ A checkpoint item's `fact` named a relationship the palace does not hold (`relat
 or gave a blank entity kind or predicate (`empty_label`).
 Correct the item and submit it again.
 
+### `memcastle::extract::not_configured` and `memcastle::extract::failed`
+
+`not_configured`: an `extract` job was asked for and the daemon has no `[extraction]` provider.
+Set `provider` to `heuristic`, `command` or `http`, see [Extraction](configuration.md#extraction), and restart the daemon.
+Without one, nothing is extracted and mining is unaffected.
+
+`failed`: the provider is configured but the call did not work, and the message says how.
+For a `command`, the program's exit status and stderr are in it; for `http`, the endpoint's status and answer.
+The job fails and the drawers it did not reach are read by the next sweep, so retry it with `memcastle job retry` once the
+provider is back.
+
+### `memcastle::graph::entity_not_found`
+
+A graph read named an entity the palace does not hold.
+List entities with `GET /api/entities` to find the id you mean.
+
 ### `memcastle::client::request_failed`
 
 A request reached the daemon, or tried to, and failed in transport:

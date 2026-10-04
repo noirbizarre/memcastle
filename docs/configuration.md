@@ -104,6 +104,18 @@ provider = "none"          # "none", "command" or "http"
 timeout_secs = 30
 batch_size = 16
 
+# Where entities and relationships are extracted from mined text. Off by default; see "Extraction".
+[extraction]
+provider = "none"          # "none", "heuristic", "command" or "http"
+# command = ["/usr/local/bin/extract"]
+# url = "http://localhost:11434/v1"
+# model = "llama3.1"
+timeout_secs = 120
+batch_size = 8
+max_entities = 32          # kept from one drawer
+max_relations = 64
+min_confidence = 0.3       # relationships below this are dropped
+
 # How mining cuts and bounds what it reads; see "Mining sources".
 [mining]
 chunk_chars = 6000          # characters per drawer; a longer document becomes several drawers
@@ -169,6 +181,16 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `embeddings.timeout_secs` (1 to 3600) | `MEMCASTLE_EMBEDDINGS_TIMEOUT_SECS` | `30` |
 | `embeddings.batch_size` (1 to 1024) | none | `16` |
 | `embeddings.command` (a list) | none | none |
+| `extraction.provider` (`none`, `heuristic`, `command` or `http`) | `MEMCASTLE_EXTRACTION_PROVIDER` | `none` |
+| `extraction.url` (an `http://` or `https://` URL) | `MEMCASTLE_EXTRACTION_URL` | none |
+| `extraction.model` | `MEMCASTLE_EXTRACTION_MODEL` | none |
+| `extraction.api_key` | `MEMCASTLE_EXTRACTION_API_KEY` | none |
+| `extraction.timeout_secs` (1 to 3600) | `MEMCASTLE_EXTRACTION_TIMEOUT_SECS` | `120` |
+| `extraction.batch_size` (1 to 256) | `MEMCASTLE_EXTRACTION_BATCH_SIZE` | `8` |
+| `extraction.min_confidence` (0 to 1) | `MEMCASTLE_EXTRACTION_MIN_CONFIDENCE` | `0.3` |
+| `extraction.max_entities` (1 to 1000) | none | `32` |
+| `extraction.max_relations` (1 to 10000) | none | `64` |
+| `extraction.command` (a list) | none | none |
 | `mining.chunk_chars` (200 to 100000) | `MEMCASTLE_MINING_CHUNK_CHARS` | `6000` |
 | `mining.max_file_bytes` (1 to 67108864) | `MEMCASTLE_MINING_MAX_FILE_BYTES` | `2097152` |
 | `mining.max_documents` (1 to 1000000) | `MEMCASTLE_MINING_MAX_DOCUMENTS` | `2000` |
@@ -183,7 +205,8 @@ but a token in the config file with leading or trailing whitespace is refused at
 because a client's token is trimmed too and the two could never match.
 See [Authentication](authentication.md).
 
-`embeddings.api_key` is a secret too: it is never logged, printed or serialised, and an invalid value is never echoed.
+`embeddings.api_key` and `extraction.api_key` are secrets too: they are never logged, printed or serialised,
+and an invalid value is never echoed.
 
 Some variables are read by the command line rather than the config file:
 
@@ -310,6 +333,104 @@ A hosted one takes `MEMCASTLE_EMBEDDINGS_API_KEY`, sent as a bearer token; prefe
   while an explicit `semantic` or `hybrid` search fails with `memcastle::embed::failed`.
 - You can skip the provider altogether and send vectors yourself, see
   [Searching](mcp-and-api.md#searching).
+
+## Extraction
+
+The knowledge graph links entities (people, projects, tools, ...) to each other and to the drawers that mention them,
+and graph-aware search follows those links.
+The `[extraction]` section says how MemCastle finds them in mined text.
+Nothing is extracted by default, because two of the providers send mined text somewhere else:
+choose one on purpose.
+Extraction is *derived* data: it adds entities, links and relationships beside the drawers and never rewrites,
+supersedes or deletes one.
+See [ADR-024](adr/024-entity-extraction-as-an-enrich-job.md).
+
+| `provider` | What reads the text | Leaves the process? |
+|---|---|---|
+| `none` | nothing | no |
+| `heuristic` | a small built-in extractor | no |
+| `command` | a program you run | whatever it does |
+| `http` | an OpenAI-compatible chat endpoint | yes, to that endpoint |
+
+### The `heuristic` extractor
+
+```toml
+[extraction]
+provider = "heuristic"
+```
+
+Deterministic, with nothing to configure and no model.
+It finds runs of capitalised words (`Ada Lovelace`), `@handles` and `` `code spans` ``, and relates two of them when the
+words between them in one sentence are a known phrase (`works on`, `is a member of`, `depends on`, `uses`, `owns`,
+`is part of`, `is based in`, ...).
+It never guesses: two names that merely share a sentence are not related, and a sentence it does not recognise yields
+entities and no relationship.
+For more than that, use a model.
+
+### The `command` extractor
+
+```toml
+[extraction]
+provider = "command"
+command = ["/usr/local/bin/extract"]
+model = "my-model"      # passed to the program, optional
+```
+
+MemCastle runs the program, without a shell, once per batch, writes one JSON object to its standard input
+and reads one from its standard output:
+
+```json
+{"model": "my-model",
+ "vocabulary": {"kinds": ["person", "…"], "predicates": ["works_on", "…"]},
+ "texts": ["first text", "second text"]}
+{"extractions": [
+  {"entities": [{"name": "Ada", "kind": "person"}, {"name": "MemCastle", "kind": "project"}],
+   "relations": [{"subject": "Ada", "predicate": "works_on", "object": "MemCastle", "confidence": 0.9}]},
+  {"entities": [], "relations": []}]}
+```
+
+One extraction per text, in order, and exit `0`.
+A non-zero exit, output that is not that JSON, or no answer within `timeout_secs` fails the call, and the program is killed.
+The program owns the model and any credential, and the daemon's own `MEMCASTLE_*` variables are removed from its environment.
+
+### The `http` extractor
+
+```toml
+[extraction]
+provider = "http"
+url = "http://localhost:11434/v1"
+model = "llama3.1"
+```
+
+MemCastle posts to `{url}/chat/completions` in the OpenAI format, one request per drawer, telling the model the
+vocabulary and asking for JSON.
+A hosted endpoint takes `MEMCASTLE_EXTRACTION_API_KEY`, sent as a bearer token.
+An endpoint that cannot be reached or answers with an error fails the job.
+A reply that is not the JSON asked for is read as "nothing found" and logged, so one odd answer cannot block the drawers
+behind it.
+
+### What is kept
+
+Whatever a provider says is read into a closed vocabulary, so the graph does not fill with synonyms.
+Entity kinds are `person`, `organization`, `project`, `tool`, `place`, `concept` and `other`;
+predicates are `works_on`, `member_of`, `depends_on`, `uses`, `owns`, `part_of`, `located_in` and `related_to`.
+Anything else becomes `other` or `related_to`.
+A relationship needs both ends among the entities of the same answer, and is dropped when it points at itself,
+has no sensible confidence or falls below `min_confidence`.
+`max_entities` and `max_relations` bound what one drawer contributes.
+
+### How extraction happens
+
+- The daemon extracts in the background.
+  After a mining job completes, and once at startup, it queues a low-priority `extract` job,
+  coalesced like the embedding sweep.
+  `memcastle extract` queues one by hand.
+- Only mined drawers are read (they carry a source origin), and only while they are current.
+  A drawer is read once: changing the provider later does not re-read what was already read.
+- A drawer's first 8,000 characters are sent, whatever it holds.
+- Every fact records the drawer, source document, job and extractor it came from, and holds from the document's own
+  date when the source has one.
+  When a re-mine replaces a drawer, the facts it supported stop being current and the new drawer is read.
 
 ## The database admin endpoint
 

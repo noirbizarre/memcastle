@@ -49,6 +49,7 @@ use embedded_schema_gen::embedded_schema;
 mod auth;
 mod drawers;
 mod entities;
+mod extraction;
 mod graph;
 mod jobs;
 mod migration_state;

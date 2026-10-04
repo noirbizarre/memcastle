@@ -82,8 +82,11 @@ An invariant nothing checks is a comment, and it will be violated.
    `src/mining/adapters/`, and the pipeline, the chunker and the domain model know no source by name and read no file.
    An adapter never touches the store or the jobs, and only the pipeline writes a source's cursor and document records,
    after the drawers they describe (see `docs/adr/023-unified-source-model-for-mining.md`).
+   Entity extraction is the stage after: it reads drawers, names no source, and only adds graph records, never writing a
+   drawer (see `docs/adr/024-entity-extraction-as-an-enrich-job.md`).
    Enforced by `tests/source_isolation.rs`, which fails on a provider name or file access in `pipeline.rs`, `chunk.rs`
-   or `adapter.rs`, on an adapter reaching `store` or `jobs`, and on any other module calling the source writers.
+   or `adapter.rs`, on an adapter reaching `store` or `jobs`, on any other module calling the source writers,
+   and on `src/extract` naming a source or calling a drawer writer.
 
 ## Layout
 
@@ -107,6 +110,7 @@ src/
 ├── repair/     the repair job handler (narrow, dry-run-first fixes)
 ├── search/     the retrieval contract and ranking policy (lexical, semantic, hybrid, temporal, graph expansion)
 ├── embed/      embedding providers (command, OpenAI-compatible HTTP) behind one trait, and the `Embed` job handler
+├── extract/    entity extraction providers (heuristic, command, OpenAI-compatible HTTP) behind one trait, and the `Extract` job handler
 ├── app/        application services — the one layer mcp/api call into (the CLI reaches it over HTTP, via `client/`)
 ├── server/     the daemon composition root + lifecycle (registry file)
 ├── mcp/        MCP tool surface, over HTTP

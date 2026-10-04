@@ -10,6 +10,7 @@ mod auth;
 mod db;
 mod error;
 mod extract;
+mod graph;
 mod mode;
 mod palace;
 
@@ -100,6 +101,14 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
             "/api/drawers/{id}/mentions",
             post(palace::link_drawer_entity),
         )
+        // The knowledge graph, read-only: entities, what they relate to and which
+        // drawers mention them, each with provenance and validity.
+        .route("/api/entities", get(graph::list_entities))
+        .route(
+            "/api/entities/{id}/relationships",
+            get(graph::entity_relationships),
+        )
+        .route("/api/entities/{id}/mentions", get(graph::entity_mentions))
         // Administrative, and deliberately REST-only: there is no MCP tool for
         // these, so an agent integration cannot mint or revoke credentials.
         .route(
@@ -394,6 +403,13 @@ async fn submit_job(
             state
                 .app
                 .submit_embed(wing, &body.requested_by, mode)
+                .await?
+        }
+        JobKind::Extract { wing } => {
+            // Gated as a write inside `submit_extract`: it creates graph records.
+            state
+                .app
+                .submit_extract(wing, &body.requested_by, mode)
                 .await?
         }
         JobKind::Repair {

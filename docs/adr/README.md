@@ -71,3 +71,6 @@ The history is the value.
 - [ADR-023](023-unified-source-model-for-mining.md) — mining goes through one source model in three stages (acquire,
   normalize, chunk and ingest), with idempotent ingestion and a cursor MemCastle keeps per source; re-mining no longer
   duplicates
+- [ADR-024](024-entity-extraction-as-an-enrich-job.md) — entity extraction is an enrich job that only adds graph
+  records, with provenance on every edge and a closed vocabulary for extracted facts, from a built-in heuristic or
+  an external provider

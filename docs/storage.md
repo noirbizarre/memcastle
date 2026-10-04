@@ -72,9 +72,13 @@ transaction: the hierarchy is never left with children whose parent is gone, whi
 as orphans.
 Counts shown for wings and rooms are computed when asked, never stored.
 
-Entities and relationships form a knowledge-graph layer that a checkpoint item's `fact` can write to.
-A `mentions` edge links a drawer to an entity it talks about.
-Nothing extracts entities from mined content yet, so those links are made explicitly.
+Entities and relationships form a knowledge-graph layer.
+A checkpoint item's `fact` can write to it, and so can the `extract` job, which reads mined drawers.
+A `mentions` edge links a drawer to an entity it talks about, and both it and `relates_to` carry an optional `provenance`
+that names the drawer, job and extractor an extracted fact came from.
+A `drawer_extraction` row marks a drawer the job has read, beside the drawer rather than on it, so extraction never writes
+a drawer.
+See [Extraction](configuration.md#extraction).
 
 Everything retrieval uses lives in the same database as the drawers: a BM25 full-text index, an HNSW vector index over
 `embedding`, and the graph edges.

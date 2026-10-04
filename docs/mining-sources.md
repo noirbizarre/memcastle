@@ -33,7 +33,19 @@ Everything from "chunk" on, and the loop itself, is the same for every source.
 | read | adapter | Acquires one document as the source provides it. No model, no agent. |
 | normalize | adapter | Expresses it in MemCastle's terms: title, room, name, text segments. Pure. |
 | chunk and file | MemCastle | Cuts it into drawer-sized chunks, skips what is unchanged, supersedes what changed. |
-| enrich | not yet | Entity extraction and summaries read what was filed; they never rewrite it (#40). |
+| enrich | the `extract` job | Reads what was filed and adds entities and relationships to the knowledge graph; it never rewrites a drawer. |
+
+### Entities and relationships
+
+Mining files drawers and stops.
+When an [extraction provider](configuration.md#extraction) is configured, the daemon then queues an `extract` job that reads
+the drawers mining filed and adds the entities and relationships they name to the knowledge graph.
+It is a separate job on purpose: the pipeline above does not know it exists, no adapter takes part, and a slow or failing
+model cannot hold up a mining cursor.
+Each fact records the source, document, chunk and revision it was read from, so it can be traced to the drawer that is its
+evidence and stops being current when that drawer is replaced.
+Any source that mines through the model above is covered, because extraction reads drawers, not sources.
+See [ADR-024](adr/024-entity-extraction-as-an-enrich-job.md).
 
 ### Identity, cursor and documents
 

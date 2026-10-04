@@ -170,8 +170,9 @@ impl AppServices {
     /// the entity if needed, so graph-aware search can reach this drawer from
     /// others that share it.
     ///
-    /// The hook a future extractor (#40) calls and a person or integration can
-    /// use today. Idempotent. The drawer is never changed: the link is
+    /// What a person or integration can use to say what a drawer is about (the
+    /// extraction job links through the store directly, with provenance).
+    /// Idempotent. The drawer is never changed: the link is
     /// derived data beside it. A write, so refused unless `mode` permits.
     ///
     /// # Errors
@@ -617,7 +618,11 @@ fn writes_to_palace(kind: &JobKind) -> bool {
         JobKind::Repair { dry_run, .. } => !dry_run,
         // An embedding sweep only fills a field of drawers that exist; it never
         // creates or removes one, so a wing deleted under it is not resurrected.
-        JobKind::Demo { .. } | JobKind::Audit { .. } | JobKind::Embed { .. } => false,
+        // Extraction only adds graph records beside drawers that exist, for the same reason.
+        JobKind::Demo { .. }
+        | JobKind::Audit { .. }
+        | JobKind::Embed { .. }
+        | JobKind::Extract { .. } => false,
     }
 }
 
