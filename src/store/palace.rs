@@ -202,7 +202,8 @@ impl SurrealStore {
     pub async fn delete_room(&self, room: RoomId) -> Result<Deleted> {
         let drawers = self.count_room_drawers(room).await?;
         super::retrying_on_conflict(|| async {
-            self.db
+            let response = self
+                .db
                 .query(
                     // One transaction: a failure between the two statements
                     // would otherwise leave a room's drawers orphaned.
@@ -212,9 +213,11 @@ impl SurrealStore {
                      COMMIT TRANSACTION;",
                 )
                 .bind(("room", room.to_string()))
-                .await?
-                // `.await` alone only reports transport failures.
-                .check()?;
+                .await?;
+            // `.await` alone only reports transport failures. `checked`, not
+            // `.check()`: a conflicted transaction's first error is
+            // `NotExecuted`, which would hide the conflict from the retry.
+            super::checked(response)?;
             Ok(())
         })
         .await?;
@@ -232,7 +235,8 @@ impl SurrealStore {
         let ids: Vec<String> = rooms.iter().map(|room| room.id.to_string()).collect();
         let drawers: u64 = self.drawer_counts_by_room(Some(ids)).await?.values().sum();
         super::retrying_on_conflict(|| async {
-            self.db
+            let response = self
+                .db
                 .query(
                     // Children first, in one transaction, so the hierarchy is
                     // never observable with a parent gone and children left.
@@ -244,8 +248,9 @@ impl SurrealStore {
                      COMMIT TRANSACTION;",
                 )
                 .bind(("wing", wing.to_string()))
-                .await?
-                .check()?;
+                .await?;
+            // `checked`: see `delete_room`.
+            super::checked(response)?;
             Ok(())
         })
         .await?;
