@@ -34,7 +34,7 @@ test("the plugin loads with no daemon running, because it connects lazily rather
   const { input, logs } = fakeInput()
   const hooks = await plugin.server(input)
   expect(Object.keys(hooks)).toEqual(
-    expect.arrayContaining(["event", "experimental.chat.system.transform", "experimental.session.compacting", "dispose"]),
+    expect.arrayContaining(["config", "event", "experimental.chat.system.transform", "experimental.session.compacting", "dispose"]),
   )
   expect(logs.map((entry) => entry.level)).toEqual(["info"])
   await hooks.dispose?.()

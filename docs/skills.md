@@ -100,6 +100,11 @@ since the layout is the standard one and nothing needs to be built.
 A client with a MemCastle integration may load the skills for you.
 Under [`integrations/`](https://github.com/noirbizarre/memcastle/tree/main/integrations) an integration reads them
 from `skills/` and never carries its own copy of the text.
+Pi appends `search-before-answer` to the system prompt on every turn.
+OpenCode lists the skills through its own `skill` tool, from `skills/` where they are, and re-states
+`search-before-answer` in the system prompt of every request.
+Both read the same `forceMemoryRecall.level` setting (`off`, `sometimes` or `always`), which is the client's policy and
+never MemCastle's.
 
 ## Versions
 

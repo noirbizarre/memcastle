@@ -39,7 +39,8 @@ async function coreWith(
   const logs: { level: Level; message: string }[] = []
   const calls: { tool: string; args: Record<string, unknown> }[] = []
   const core = (await createCore(
-    options,
+    // These tests are about wake-up, so the search-before-answer reminder (tested in recall.test.ts) is switched off.
+    { forceMemoryRecall: { level: "off" }, ...options },
     async (level, message) => void logs.push({ level, message }),
     {},
     directory,
@@ -238,6 +239,8 @@ function pointAtDaemon(env: Record<string, string> = {}) {
     MEMCASTLE_PALACE_PATH: daemon.palacePath,
     HOME: daemon.clientEnv.HOME,
     XDG_STATE_HOME: daemon.clientEnv.XDG_STATE_HOME,
+    // These tests are about wake-up, so the search-before-answer reminder (tested in recall.test.ts) is switched off.
+    MEMCASTLE_FORCE_MEMORY_RECALL: "off",
     ...env,
   })
 }
@@ -321,6 +324,7 @@ function v2Context() {
     },
     session: { hook: async (name: string, callback: (input: unknown) => void) => (callbacks.set(name, callback), { dispose: async () => undefined }) },
     tool: { hook: async () => ({ dispose: async () => undefined }) },
+    skill: { transform: async () => ({ dispose: async () => undefined }) },
   } as unknown as Plugin.Context
   return {
     ctx,

@@ -6,6 +6,7 @@
 
 import type { Plugin } from "@opencode/plugin"
 import { createCore, type Level } from "./core.ts"
+import { sharedSkills } from "./skills.ts"
 
 const consoleLog = async (level: Level, message: string, extra?: Record<string, unknown>) => {
   // `extra` is already redacted by `describeSettings`; an empty object adds nothing but noise.
@@ -65,6 +66,22 @@ export const setup = async (ctx: Plugin.Context): Promise<(() => Promise<void>) 
       if (!controller.signal.aborted) await consoleLog("warn", `event stream ended: ${String(error)}`)
     }
   })()
+
+  // The shared skills, registered with OpenCode's own skill mechanism and read from the repository where they live.
+  // A skill the user already installed under the same name wins, so a copy in `.agents/skills` is never shadowed.
+  const skills = await sharedSkills(core.skillsDir).catch(async (error) => {
+    await consoleLog("warn", `the shared skills could not be read, so none is registered: ${String(error)}`)
+    return []
+  })
+  try {
+    await ctx.skill.transform((editor) => {
+      // `Skill.Info` brands its strings, which a plain string from a file cannot satisfy without this cast.
+      for (const skill of skills) if (!editor.get(skill.id)) editor.add(skill as unknown as Parameters<typeof editor.add>[0])
+    })
+  } catch (error) {
+    // Skills are a convenience on top of the injected reminder: a host that refuses them must not stop the plugin.
+    await consoleLog("warn", `the shared skills could not be registered: ${String(error)}`)
+  }
 
   // `context` runs before every agent model request, which is where V1's system transform ran (#33, #36).
   await ctx.session.hook("context", (input) =>

@@ -128,7 +128,9 @@ Client responsibility: the search-before-answer instruction (`skills/search-befo
 each turn if the client drops system context.
 
 Daemon-side (tested): stored text comes back byte for byte, including whitespace and non-ASCII text.
-Client-side (to test): a question about past work triggers a search before the answer.
+Client-side (tested in Pi and OpenCode): the instruction reaches the model on every turn, read from the shared skill and
+never copied, at the level `forceMemoryRecall.level` names (`off`, `sometimes` or `always`).
+Whether the model then searches is the model's behaviour and is not tested.
 
 ### Checkpoint
 
@@ -195,7 +197,10 @@ A skill never overrides a mode: in `off` it must not be loaded if it would carry
 The shipped skills carry instructions only and no palace content, and each one that calls a gated tool says to stop when
 the mode refuses it.
 
-Client-side (to test): the integration reads its instructions from `skills/` and does not duplicate them.
+Client-side (tested in Pi and OpenCode): the integration reads its instructions from `skills/` and does not duplicate
+them.
+Pi appends `search-before-answer` to the system prompt, and OpenCode also lists the skills through its own skill
+mechanism.
 Nothing is tested against a daemon, and the matrix records that with a `null` daemon test.
 What is tested is the skills themselves: `tests/skills.rs` checks every tool, command and route a skill names against
 this release (see [ADR-020](adr/020-skills-are-versioned-with-the-repository.md)).

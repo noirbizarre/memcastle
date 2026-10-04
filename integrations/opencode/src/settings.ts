@@ -7,6 +7,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { type ModeLabel, toWireMode } from "./modes.ts"
 import { DEFAULT_KEEP_ALIVE_MS } from "./session.ts"
+import { type RecallSettings, resolveForceMemoryRecall } from "./recall-core.ts"
 import { type WakeUpSettings, resolveWakeUp } from "./wake-up-core.ts"
 
 export interface Settings {
@@ -32,6 +33,11 @@ export interface Settings {
    * (`sync` or `async`) is a different thing that must not be confused with it.
    */
   wakeUp: WakeUpSettings
+  /**
+   * How strongly to tell the model to search before it answers (`off`, `sometimes`, `always`). A client policy only:
+   * MemCastle never forces a search, and a session whose memory mode is `off` gets no instruction at all.
+   */
+  forceMemoryRecall: RecallSettings
 }
 
 type Env = Readonly<Record<string, string | undefined>>
@@ -79,6 +85,7 @@ export function resolveSettings(options: Record<string, unknown> | undefined, en
     // Unlike the timeout, zero is meaningful here (no pings), so only a missing or invalid value falls back.
     keepAliveMs: keepAlive(opts.keepAliveMs),
     wakeUp: resolveWakeUp(opts.wakeUp, env),
+    forceMemoryRecall: resolveForceMemoryRecall(opts.forceMemoryRecall, env),
   }
 }
 
