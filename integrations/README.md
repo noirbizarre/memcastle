@@ -82,6 +82,8 @@ native tooling, nothing more.
 
 The Pi and OpenCode packages are scaffolds: their connection, mode, discovery and failure foundations work and are
 tested, and their lifecycle hooks are empty.
+The persistent MCP session is complete in both: one connection for the whole session, kept alive, and replaced with its
+mode re-selected if the daemon forgets it.
 Tracked as GitHub issues under the
 "Phase 2 — Pi integration", "Phase 3 — OpenCode integration", and
 "Phase 4 — Claude Code integration" milestones.

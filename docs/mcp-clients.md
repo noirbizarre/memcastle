@@ -111,6 +111,17 @@ See [Memory modes](memory-modes.md).
 A client can raise its mode again, and authentication identifies no individual client,
 so this coordinates cooperating clients rather than restricting untrusted ones.
 
+### Session lifetime
+
+A session lives while the client uses it.
+The daemon forgets one after five minutes without any request, when the daemon restarts, or when the client sends
+`DELETE` with its `mcp-session-id`.
+A request on a forgotten session gets HTTP 404 `Session not found`.
+A client that sees it must `initialize` again, and the new session starts as `full`,
+so a client that restricted its mode calls `memcastle_set_mode` again before anything else.
+A client that wants to stay connected can send an MCP `ping` more often than every five minutes.
+The Pi and OpenCode integrations do all of this for you.
+
 ## Sharing one palace between clients
 
 Point every client at the same URL.
