@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted, settles the toolchain question that [ADR-019](019-shared-integration-contract.md) left to the first adapter
+Accepted, settles the toolchain question that [ADR-019](019-shared-integration-contract.md) left to the first adapter.
+Amended by [ADR-027](027-cross-integration-tests-live-in-a-common-package.md):
+tests that need two integrations live in a test-only `integrations/common` package.
+Production code is still per package
 
 ## Context
 

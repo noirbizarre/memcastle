@@ -88,10 +88,31 @@ The daemon rejects every read and write with `memcastle::app::mode_forbidden`, b
 memory it fetched earlier, or from loading a skill that carries it.
 A disabled session must behave as if MemCastle does not exist, and context isolation is the client's job.
 
+- **`full`:** every capability runs.
+- **`read-only`:** wake-up, the search reminder and recall run, and no write is attempted.
+  The client skips the interval review, the manual checkpoint and the emergency checkpoint up front
+  and says why, with the way out, as information and not as a fault.
+  It does not send the write and handle the refusal, because the daemon would refuse it only after a rejected call and,
+  for a review, after a paid model call whose result must be discarded.
+- **`off`:** the client does not connect.
+  It makes no request at all, not even a health check, injects nothing into the model's context, registers no skill,
+  tool or hook that carries MemCastle material, and any command that remains says only that MemCastle is not active.
+  The daemon's refusals are the backstop, not the mechanism.
+- **A mode that cannot be parsed** fails closed: the user is told, and the client behaves as `off`.
+- **Out of scope:** a copy of a MemCastle skill the user installed by hand, or the host's own MCP entry for MemCastle,
+  is loaded by the host and not by the integration.
+  An `off` integration registers nothing rather than staying active to guard a hook, so the documentation tells the user
+  to remove those copies when a project must be free of MemCastle.
+
 Daemon-side (tested): three sessions in three modes share one daemon and each reads back its own mode,
 every wire value outcome in the fixture holds for every gated tool, and a refused mode leaves the session unchanged.
-Client-side (to test): a session in `off` receives no MemCastle-derived context from any source,
-and a session in `read-only` never submits a write.
+Client-side (tested): `integrations/common/test/off-isolation.test.ts` replays `off-isolation.json` against each
+integration, driving every path that could put MemCastle material in front of the model in `off`
+(which must surface nothing and make no request) and in `full` (which must surface something, so the driver is not vacuous);
+`integrations/common/test/mixed-modes.test.ts` runs Pi and OpenCode sessions in all three modes against one daemon
+and checks, from the requests each made, that a `full` session's checkpoint lands while an `off` session beside it does
+nothing and a `read-only` session never calls a write tool.
+A new integration adds its drivers and an actor to those two files ([ADR-027](adr/027-cross-integration-tests-live-in-a-common-package.md)).
 
 ### Wake-up
 
@@ -306,6 +327,7 @@ The fixtures are strict JSON in `tests/fixtures/integration/`, so any language c
 | `checkpoint-payloads.json` | Valid payloads with a token to recall them by, and invalid ones with the code they are refused with |
 | `checkpoint-classifications.json` | Model replies a client's review may meet, with the items each must become or the refusal it must get |
 | `failure-classes.json` | The failure classes, how each is detected, and the code and status |
+| `off-isolation.json` | A marker drawer to seed, and every path by which an integration could show an `off` session MemCastle material |
 
 In `modes.json`, an argument written as `{{mine_dir}}` stands for an existing absolute directory the test creates.
 
