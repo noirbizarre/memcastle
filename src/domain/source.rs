@@ -49,7 +49,7 @@ pub enum CredentialRef {
 /// documents belong to; [`SourceRef::id`] is therefore derived from these three fields and nothing else.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceRef {
-    /// The adapter's name (`directory`, `pi-sessions`, ...).
+    /// The adapter's name (`directory`, `pi`, ...).
     pub provider: String,
     /// The account on the provider, when it has accounts (a Slack workspace, a GitHub login). `None` for local
     /// sources.

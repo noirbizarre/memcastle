@@ -6,6 +6,7 @@ that implements `wit/memcastle-source.wit`, and the conformance cases it is test
 | Directory | Provider | What it is |
 |---|---|---|
 | `directory/` | `directory-wasm` | The built-in `directory` source, written as a Rust component. The worked example. |
+| `pi/` | `pi` | The Pi coding agent's session history. The official Pi source: the core has no Pi-specific code. |
 
 They are maintained as examples and as the second implementation the conformance cases are run against, so that the
 built-in and the WebAssembly contract cannot drift apart.

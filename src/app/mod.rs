@@ -1825,8 +1825,8 @@ mod tests {
         let job = app
             .submit_mine(
                 MiningSource::Provider {
-                    provider: "pi-sessions".into(),
-                    locator: None,
+                    provider: "directory".into(),
+                    locator: Some("/tmp/anything".into()),
                 },
                 None,
                 true,
@@ -1853,7 +1853,7 @@ mod tests {
         match error {
             Error::InvalidInput { field, message } => {
                 assert_eq!(field, "source");
-                assert!(message.contains("pi-sessions"), "{message}");
+                assert!(message.contains("directory"), "{message}");
             }
             other => panic!("expected InvalidInput, got {other:?}"),
         }

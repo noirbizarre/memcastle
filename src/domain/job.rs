@@ -107,7 +107,7 @@ pub enum MiningSource {
     },
     /// Mine through a named source adapter.
     Provider {
-        /// The adapter's name (`pi-sessions`, ...); see `crate::mining::providers`.
+        /// The adapter's name (`pi`, ...); see `crate::mining::providers`.
         provider: String,
         /// The part of the provider to read; `None` takes the adapter's default
         /// (the Pi sessions directory, say).
@@ -915,7 +915,7 @@ mod tests {
     fn a_provider_mine_job_is_flat_on_the_wire_and_round_trips() {
         let kind = JobKind::Mine {
             source: MiningSource::Provider {
-                provider: "pi-sessions".into(),
+                provider: "pi".into(),
                 locator: None,
             },
             wing: None,
@@ -925,7 +925,7 @@ mod tests {
         assert_eq!(
             json,
             serde_json::json!({
-                "type": "mine", "provider": "pi-sessions", "locator": null, "wing": null, "full": true
+                "type": "mine", "provider": "pi", "locator": null, "wing": null, "full": true
             })
         );
         let back: JobKind = serde_json::from_value(json).unwrap();
@@ -935,14 +935,14 @@ mod tests {
                 source: MiningSource::Provider { ref provider, locator: None },
                 full: true,
                 ..
-            } if provider == "pi-sessions"
+            } if provider == "pi"
         ));
     }
 
     #[test]
     fn a_body_naming_a_path_is_a_directory_job_even_if_it_also_names_a_provider() {
         // `Directory` is tried first, so the legacy shape can never be reinterpreted by a later variant.
-        let body = serde_json::json!({"type": "mine", "path": "/x", "provider": "pi-sessions"});
+        let body = serde_json::json!({"type": "mine", "path": "/x", "provider": "pi"});
         let kind: JobKind = serde_json::from_value(body).unwrap();
         assert!(matches!(
             kind,

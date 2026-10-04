@@ -62,8 +62,8 @@ Piped (`memcastle job list | jq`), it is JSON, where a completed job has `"statu
 `{"documents": 2, "created": 2, "unchanged": 0, "truncated": false, ...}`.
 Without `--wing`, memories are filed under a wing named after the directory.
 Mining remembers what it has read, so running it again files only what changed.
-It can also read other sources, such as your Pi session history: `memcastle mine --source pi-sessions`,
-see [Mining sources](mining-sources.md).
+It can also read other sources, such as your Pi session history
+(`memcastle mine --source pi`, once you have installed that source), see [Mining sources](mining-sources.md).
 [What mining reads](storage.md#what-mining-reads) says which files are skipped.
 
 You can also write memories directly.

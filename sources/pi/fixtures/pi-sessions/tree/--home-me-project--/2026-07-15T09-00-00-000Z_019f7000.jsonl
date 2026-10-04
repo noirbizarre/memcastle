@@ -1,0 +1,3 @@
+{"type":"session","version":3,"id":"019f7000-0000-7000-8000-000000000001","timestamp":"2026-07-15T09:00:00.000Z","cwd":"/home/me/project"}
+{"type":"message","id":"b1","parentId":null,"timestamp":"2026-07-15T09:00:05.000Z","message":{"role":"user","content":"Did the rotation work?"}}
+{"type":"message","id":"b2","parentId":"b1","timestamp":"2026-07-15T09:00:10.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Yes, the new key is live."}]}}

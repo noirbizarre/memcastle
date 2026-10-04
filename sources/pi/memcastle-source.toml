@@ -1,0 +1,37 @@
+# What this source is, what it needs, and how it is built. Every key is documented in docs/writing-sources.md.
+
+[source]
+name = "pi"
+version = "0.1.0"
+description = "Pi coding-agent session history (JSONL files under ~/.pi/agent/sessions), one document per session"
+
+[compatibility]
+# The contract (wit/memcastle-source.wit) this component was built against, and the MemCastle versions it runs on.
+contract = "0.1"
+memcastle = ">=0.2"
+
+[capabilities]
+incremental = true
+# Pi's session files are rotated and deleted by the user; the transcript is worth keeping once it has been read.
+retains_raw = true
+needs_credentials = false
+
+# Nothing is granted that is not listed. A component sees no environment unless it is listed: `HOME` is only used to
+# name `~/.pi/agent/sessions` when no locator is given.
+[permissions]
+env = ["HOME"]
+
+# This source reads the directory it is asked to mine (the `locator`) and Pi's own session directory, which is where it
+# looks when no locator is given. It never opens anything else under `~/.pi`, in particular not Pi's credentials file.
+# No network, no programs, and no file is ever written.
+[permissions.filesystem]
+read = ["locator", "~/.pi/agent/sessions"]
+
+[build]
+# `--target-dir` pins the output where `output` says it is, whatever CARGO_TARGET_DIR the builder has set.
+command = ["cargo", "build", "--release", "--target", "wasm32-wasip2", "--target-dir", "target"]
+output = "target/wasm32-wasip2/release/memcastle_source_pi.wasm"
+
+[test]
+# The cases this source is held to: a tree of Pi sessions, in the layout Pi writes them.
+fixtures = "fixtures"

@@ -48,7 +48,7 @@ pub struct Source {
 pub struct Origin {
     /// The source the document was acquired from.
     pub source: super::SourceId,
-    /// The adapter that acquired it (`directory`, `pi-sessions`, ...).
+    /// The adapter that acquired it (`directory`, `pi`, ...).
     pub provider: String,
     /// The document's identity within the source (a relative path, a session file, a message id).
     pub document: String,

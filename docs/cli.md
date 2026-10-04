@@ -207,12 +207,13 @@ memcastle mine --source <NAME> [--locator <WHERE>] [--wing <WING>] [--full]
 ```
 
 Submits a job that reads a source into drawers: a directory (one drawer per file, or several for a long one), or a named
-source such as `pi-sessions`, the Pi coding agent's session history.
+source such as `pi`, the Pi coding agent's session history (an installed source: see
+[Mining sources](mining-sources.md#pi)).
 Mining is incremental and idempotent: the daemon remembers where each source's last run stopped,
 so mining it again reads only what changed and files nothing twice.
 `--wing` defaults to the directory's name, or to the source's own default.
 `--full` reads the source again from the beginning; unchanged documents are still skipped, so nothing is duplicated.
-`--locator` names where within a source to read, when it needs more than its default; for `pi-sessions` it is a sessions
+`--locator` names where within a source to read, when it needs more than its default; for `pi` it is a sessions
 directory, and it must be an absolute path.
 The command returns the job immediately; follow it with `memcastle job show <id>`.
 See [Mining sources](mining-sources.md) for the model,

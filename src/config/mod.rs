@@ -471,9 +471,6 @@ pub struct MiningConfig {
     /// How many documents one job ingests. A source with more is mined across runs: the cursor continues where the
     /// last one stopped, and the job's result says `truncated`.
     pub max_documents: usize,
-    /// Where the `pi-sessions` source looks for Pi session files when no locator is given. Unset means
-    /// `~/.pi/agent/sessions`.
-    pub pi_sessions_dir: Option<PathBuf>,
     /// Where installed WebAssembly sources live (docs/adr/026). Unset means `$XDG_DATA_HOME/memcastle/sources`.
     pub sources_dir: Option<PathBuf>,
     /// The most linear memory, in MiB, one call into a WebAssembly source may use. A source's own `[limits]` can ask
@@ -500,7 +497,6 @@ impl Default for MiningConfig {
             chunk_chars: DEFAULT_MINING_CHUNK_CHARS,
             max_file_bytes: DEFAULT_MINING_MAX_FILE_BYTES,
             max_documents: DEFAULT_MINING_MAX_DOCUMENTS,
-            pi_sessions_dir: None,
             sources_dir: None,
             source_memory_mib: DEFAULT_MINING_SOURCE_MEMORY_MIB,
             source_timeout_secs: DEFAULT_MINING_SOURCE_TIMEOUT_SECS,
@@ -866,9 +862,6 @@ impl Config {
         if let Some(n) = lookup("MEMCASTLE_MINING_MAX_DOCUMENTS") {
             self.mining.max_documents = parse_override("MEMCASTLE_MINING_MAX_DOCUMENTS", &n)?;
         }
-        if let Some(dir) = lookup("MEMCASTLE_MINING_PI_SESSIONS_DIR") {
-            self.mining.pi_sessions_dir = Some(PathBuf::from(dir));
-        }
         if let Some(dir) = lookup("MEMCASTLE_MINING_SOURCES_DIR") {
             self.mining.sources_dir = Some(PathBuf::from(dir));
         }
@@ -1141,17 +1134,6 @@ impl Config {
             ));
         }
         // Relative to whatever directory the daemon started in, like `palace.path` and `assets.dir`.
-        if let Some(dir) = mining
-            .pi_sessions_dir
-            .as_ref()
-            .filter(|dir| !dir.is_absolute())
-        {
-            return Err(Error::config(format!(
-                "mining.pi_sessions_dir {:?} is not an absolute path; set an absolute one or remove it \
-                 to use ~/.pi/agent/sessions",
-                dir.display().to_string()
-            )));
-        }
         if let Some(dir) = mining.sources_dir.as_ref().filter(|dir| !dir.is_absolute()) {
             return Err(Error::config(format!(
                 "mining.sources_dir {:?} is not an absolute path; set an absolute one or remove it \
@@ -1809,16 +1791,11 @@ mod tests {
                 ("MEMCASTLE_MINING_CHUNK_CHARS", "2000"),
                 ("MEMCASTLE_MINING_MAX_FILE_BYTES", "4096"),
                 ("MEMCASTLE_MINING_MAX_DOCUMENTS", "7"),
-                ("MEMCASTLE_MINING_PI_SESSIONS_DIR", "/pi/sessions"),
             ]))
             .unwrap();
         assert_eq!(config.mining.chunk_chars, 2000);
         assert_eq!(config.mining.max_file_bytes, 4096);
         assert_eq!(config.mining.max_documents, 7);
-        assert_eq!(
-            config.mining.pi_sessions_dir,
-            Some(PathBuf::from("/pi/sessions"))
-        );
     }
 
     #[test]
@@ -1841,10 +1818,6 @@ mod tests {
             ),
             (|c| c.mining.max_documents = 0, "mining.max_documents"),
             (|c| c.mining.max_file_bytes = 0, "mining.max_file_bytes"),
-            (
-                |c| c.mining.pi_sessions_dir = Some(PathBuf::from("relative")),
-                "mining.pi_sessions_dir",
-            ),
             (
                 |c| c.mining.sources_dir = Some(PathBuf::from("relative")),
                 "mining.sources_dir",

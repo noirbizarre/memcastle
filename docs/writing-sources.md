@@ -6,7 +6,7 @@ MemCastle does everything else: chunking, deduplication, drawers, the cursor and
 ([Mining sources](mining-sources.md) describes that pipeline).
 
 There are two kinds of source behind one contract.
-A **built-in** source is Rust compiled into MemCastle (`directory`, `pi-sessions`).
+A **built-in** source is Rust compiled into MemCastle (`directory`).
 An **installed** source is a WebAssembly component the user installs, written in any language that produces one.
 Both implement the same adapter contract and are held to the same conformance cases,
 so the pipeline cannot tell them apart ([ADR-026](adr/026-pluggable-source-adapters-as-webassembly-components.md)).
@@ -238,7 +238,9 @@ that lacks the files reports the source `unavailable`.
 
 `sources/` holds maintained reference sources, one directory each, with the same package layout as any other.
 `sources/directory/` is the built-in `directory` source as a Rust component, and is the worked example to read.
-A source that ships with MemCastle's releases, without being compiled into the binary, would be built from here and use
+`sources/pi/` is the Pi coding agent's session history, the first official source that is not a built-in: it reads a
+real, evolving format, keeps raw documents and asks for two permissions (`docs/mining-sources.md#pi`).
+A source that ships with MemCastle's releases, without being compiled into the binary, is built from here and uses
 exactly the package contract a user installs.
 
 ## Testing your source in CI

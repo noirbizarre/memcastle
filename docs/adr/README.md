@@ -81,3 +81,6 @@ The history is the value.
 - [ADR-026](026-pluggable-source-adapters-as-webassembly-components.md) — mining sources are pluggable as
   WebAssembly components behind the same adapter contract, with explicit consented permissions, a computed lifecycle,
   a `source` command group for development and one conformance suite run against native and WebAssembly sources
+- [ADR-027](027-pi-history-is-an-installed-webassembly-source.md) — Pi's conversation history is an installed WebAssembly
+  source built from `sources/pi/`, and the core has no Pi-specific code; the native `pi-sessions` adapter is removed
+  (supersedes part of ADR-023 and ADR-026)

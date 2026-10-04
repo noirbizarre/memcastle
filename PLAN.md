@@ -79,7 +79,7 @@ phase makes it a thin MemCastle adapter instead of a fork. Depends on Phase 1.
 | [#23](https://github.com/noirbizarre/memcastle/issues/23) | Port automatic + manual conversation checkpointing |
 | [#24](https://github.com/noirbizarre/memcastle/issues/24) | Port emergency checkpoint before context compaction |
 | [#25](https://github.com/noirbizarre/memcastle/issues/25) | Author and inject the search-before-answer skill |
-| [#26](https://github.com/noirbizarre/memcastle/issues/26) | Port daily background mining trigger |
+| [#26](https://github.com/noirbizarre/memcastle/issues/26) | Port daily background mining trigger (scheduling only: acquisition is the `pi` source, #161) |
 | [#27](https://github.com/noirbizarre/memcastle/issues/27) | Implement explicit memory modes (full/read-only/disabled) |
 | [#28](https://github.com/noirbizarre/memcastle/issues/28) | Port palace-audit-equivalent manual command (scoped down) |
 | [#29](https://github.com/noirbizarre/memcastle/issues/29) | Persistent MCP connection for the session |
@@ -129,7 +129,7 @@ have a coherent working path.
 | # | Title |
 |---|---|
 | [#85](https://github.com/noirbizarre/memcastle/issues/85) | Introduce the unified Source model for mining (done, [ADR-023](docs/adr/023-unified-source-model-for-mining.md)) |
-| [#39](https://github.com/noirbizarre/memcastle/issues/39) | Expand mining source adapters beyond the filesystem (done: `pi-sessions`, shared chunker; builds on #85) |
+| [#39](https://github.com/noirbizarre/memcastle/issues/39) | Expand mining source adapters beyond the filesystem (done: shared chunker; builds on #85; Pi history is now the `pi` source, #161, [ADR-027](docs/adr/027-pi-history-is-an-installed-webassembly-source.md)) |
 | [#40](https://github.com/noirbizarre/memcastle/issues/40) | Wire real entity/relationship extraction into mining (done: the `Extract` job, [ADR-024](docs/adr/024-entity-extraction-as-an-enrich-job.md); builds on #85) |
 | [#41](https://github.com/noirbizarre/memcastle/issues/41) | Expand audit/repair coverage (data-driven) |
 | [#42](https://github.com/noirbizarre/memcastle/issues/42) | Richer retrieval: semantic/vector search, temporal + graph-aware ranking |
