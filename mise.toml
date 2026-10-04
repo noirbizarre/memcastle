@@ -298,7 +298,9 @@ set -euo pipefail
 for manifest in sources/*/memcastle-source.toml; do
   source="$(dirname "$manifest")"
   echo "==> $source"
-  ./target/debug/memcastle source test "$source"
+  # A source that wraps a program ships a stand-in for it in `fixtures/bin` (sources/opencode), which its cases need
+  # first on the PATH because the real program needs data no fixture can carry.
+  PATH="$PWD/$source/fixtures/bin:$PATH" ./target/debug/memcastle source test "$source"
 done
 """
 
@@ -310,5 +312,6 @@ depends = ["build"]
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
-./target/debug/memcastle source test "sources/${usage_name?}"
+# The stand-in for a wrapped program, when the source ships one (see `sources:check`).
+PATH="$PWD/sources/${usage_name?}/fixtures/bin:$PATH" ./target/debug/memcastle source test "sources/${usage_name?}"
 """

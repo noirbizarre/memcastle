@@ -1,0 +1,38 @@
+# What this source is, what it needs and how it is built. Every key is documented in docs/writing-sources.md.
+
+[source]
+name = "opencode"
+version = "0.1.0"
+description = "OpenCode coding-agent session history, acquired through the opencode CLI, one document per session"
+
+[compatibility]
+# The contract (wit/memcastle-source.wit) this component was built against, and the MemCastle versions it runs on.
+contract = "0.1"
+memcastle = ">=0.2"
+
+[capabilities]
+incremental = true
+# OpenCode's database is the user's to prune and compact; the transcript is worth keeping once it has been read.
+retains_raw = true
+needs_credentials = false
+
+# Nothing is granted that is not listed. The one program is OpenCode itself, run by exact name and without a shell; it
+# is a native process with the daemon's own file access, which is why installing asks for consent. The child sees only
+# `PATH` and `HOME` (always passed) and the variable below, which OpenCode reads to find its data directory when the
+# user has moved it.
+[permissions]
+process = ["opencode"]
+env = ["XDG_DATA_HOME"]
+
+# No `[permissions.filesystem]`: this source reads no file and writes none, and has no network. OpenCode's database is
+# opened by OpenCode, never by this component.
+
+[build]
+# `--target-dir` pins the output where `output` says it is, whatever CARGO_TARGET_DIR the builder has set.
+command = ["cargo", "build", "--release", "--target", "wasm32-wasip2", "--target-dir", "target"]
+output = "target/wasm32-wasip2/release/memcastle_source_opencode.wasm"
+
+[test]
+# The cases this source is held to. They run against a stand-in `opencode` in `fixtures/bin`, which must be first on the
+# PATH (`mise run sources:test -- opencode` arranges that): the real CLI needs a database no fixture can ship.
+fixtures = "fixtures"
