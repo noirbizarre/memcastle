@@ -160,7 +160,7 @@ lexical otherwise.
 Lexical matching returns drawers containing every word of the query and, if there are none, drawers containing any of them.
 `--limit` defaults to 10 and is capped at 200.
 `--wing` restricts results to a wing, `--room` to a room directly, `--tag` (repeatable) to drawers carrying every tag,
-and `--source-kind` to `file`, `manual` or `other`.
+and `--source-kind` to `file`, `manual`, `transcript` or `other`.
 Only memory valid now is searched unless `--as-of` names an instant (RFC 3339, such as `2026-01-31T12:00:00Z`) or
 `--include-historical` adds superseded memory.
 `--expand` appends drawers related to the hits through the knowledge graph.
@@ -202,13 +202,31 @@ MemCastle stores and returns the agent identity exactly as given, so use one con
 ### `mine`
 
 ```sh
-memcastle mine <PATH> [--wing <WING>]
+memcastle mine <PATH> [--wing <WING>] [--full]
+memcastle mine --source <NAME> [--locator <WHERE>] [--wing <WING>] [--full]
 ```
 
-Submits a job that reads a directory into drawers, one per file.
-`--wing` defaults to the directory's name.
+Submits a job that reads a source into drawers: a directory (one drawer per file, or several for a long one), or a named
+source such as `pi-sessions`, the Pi coding agent's session history.
+Mining is incremental and idempotent: the daemon remembers where each source's last run stopped,
+so mining it again reads only what changed and files nothing twice.
+`--wing` defaults to the directory's name, or to the source's own default.
+`--full` reads the source again from the beginning; unchanged documents are still skipped, so nothing is duplicated.
+`--locator` names where within a source to read, when it needs more than its default; for `pi-sessions` it is a sessions
+directory, and it must be an absolute path.
 The command returns the job immediately; follow it with `memcastle job show <id>`.
-See [Storage and data](storage.md#what-mining-reads) for which files are read.
+See [Mining sources](mining-sources.md) for the model,
+and [Storage and data](storage.md#what-mining-reads) for which files a directory mine reads.
+
+### `sources`
+
+```sh
+memcastle sources
+```
+
+Lists the sources the daemon can mine and, for each one that has been mined, how many documents it holds, when it last
+ran and which job did.
+In a terminal this is two tables; piped, it is JSON with `providers` and `sources`.
 
 ### `checkpoint`
 

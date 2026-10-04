@@ -201,12 +201,15 @@ this release (see [ADR-020](adr/020-skills-are-versioned-with-the-repository.md)
 
 ### Background mining
 
-Operation: `memcastle_mine` with an absolute `path` and optionally `wing`.
+Operation: `memcastle_mine` with an absolute `path` and optionally `wing`, or with a `source` such as `pi-sessions`.
 
 Mining is a Background (0) job, so it never delays a checkpoint, and a relative path is refused with
 `memcastle::input::invalid`.
-The daemon has no scheduler and does not deduplicate: asking twice is two jobs.
-"Once a day" and "never twice for one event" are therefore the client's to keep.
+The daemon has no scheduler and does not deduplicate *requests*: asking twice is two jobs.
+What it does deduplicate is the work: a source remembers where it stopped and which version of each document it filed,
+so the second job finds nothing new to file.
+"Once a day" and "never twice for one event" are therefore the client's to keep, and an integration never needs to read
+a source itself: it only decides when to ask.
 
 Client responsibility: trigger it from the client's own mechanism, where one exists.
 Where the client has no suitable timer or event, the gap is documented and a manual trigger

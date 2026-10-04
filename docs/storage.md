@@ -61,7 +61,8 @@ Where a write ends up:
 
 | Written by | Wing | Room |
 |---|---|---|
-| `mine` | the `--wing` you give, or the directory's name | `files` |
+| `mine` of a directory | the `--wing` you give, or the directory's name | `files` |
+| `mine --source pi-sessions` | the `--wing` you give, or `pi` | the session's working directory name, or `sessions` |
 | `diary write` | the wing you give | `diary` |
 | `checkpoint` item | the item's `wing`, or `preferences`, `projects`, `diary` or `general` by destination | `diary` for diary items, `entries` otherwise |
 
@@ -90,19 +91,27 @@ stays in the database and is found by an `--as-of` search.
 
 ### What mining reads
 
-`memcastle mine <dir>` creates one drawer per file, in name order, with these rules:
+`memcastle mine <dir>` reads the text files under a directory, and `memcastle mine --source <name>` reads another source;
+see [Mining sources](mining-sources.md) for the model and each source's rules.
+For a directory:
 
 - It skips directories named `.git`, `target`, `node_modules`, `.venv`, `venv`, `dist`, `build` and `.cache`, at any depth,
   along with any other directory whose name starts with `.` and any symlink.
-- It skips files larger than 256 KiB, empty files, and files that are not valid UTF-8.
-- It stops at 2000 files, and says so: the job's progress message names the limit and its result records
-  `"truncated": true`.
+- It skips files larger than 2 MiB (`mining.max_file_bytes`), empty files, and files that are not valid UTF-8.
+- A file that fits in one chunk (6000 characters by default, `mining.chunk_chars`) is one drawer, verbatim;
+  a longer one is cut into several, and only the first carries the name.
+- It stops at 2000 documents (`mining.max_documents`), and says so: the job's progress message says to run it again and
+  its result records `"truncated": true`.
+  The next job continues where this one stopped.
 
-Each mining job files its own drawers, so mining the same directory twice stores its files twice.
-Only the first copy of a file keeps its name: the name is unique within the room, so the later copies are unnamed
-and are reached by their UUID.
-A job that is paused or interrupted and then resumed does not: it continues where it stopped
-and never stores a file twice.
+Mining is idempotent.
+The palace remembers each mined source, where its last run stopped, and which version of each document it filed, in the
+`source` and `source_document` tables.
+Mining the same directory again files nothing for a file that has not changed, and an edited file supersedes its drawer:
+the old text stays as history and the drawer name moves to the new one.
+Drawers filed before this existed are not tracked, so the first mine afterwards files them once more and the earlier copy
+keeps the name.
+A job that is paused or interrupted and then resumed continues where it stopped and never stores a file twice.
 
 ## Embedded and remote stores
 

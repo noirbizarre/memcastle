@@ -19,6 +19,9 @@ Two kinds of change are tracked separately:
 | 1 | `diary-provenance` | Rewrites legacy diary drawers so `provenance.requested_by` names the channel (`unknown` when it was never recorded) rather than the agent. |
 | 2 | `canonical-timestamps` | Rewrites optional timestamps into one canonical form so they compare correctly. |
 
+Adding the `source` and `source_document` tables ([Mining sources](mining-sources.md)) needed no data migration:
+they are schema, created empty by the next start, and nothing existing is reshaped.
+
 A fresh palace starts at version 0 and is brought to the latest version on its first start.
 Data migrations never delete canonical memory, and released migrations are never edited:
 a mistake in one is fixed by a new migration.

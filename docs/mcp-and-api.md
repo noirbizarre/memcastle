@@ -25,7 +25,7 @@ A failure comes back as an MCP error result carrying the [error body](#errors) b
 | `memcastle_diary_write` | `agent_identity`, `wing`, `content` | Write a diary entry. |
 | `memcastle_diary_read` | `agent_identity`, `wing`, `limit?` | Read an agent's newest diary entries. |
 | `memcastle_checkpoint` | `payload`, `emergency?` | Submit a durable checkpoint job. |
-| `memcastle_mine` | `path`, `wing?` | Submit a job that mines a directory. |
+| `memcastle_mine` | `path` or `source`, `locator?`, `full?`, `wing?` | Submit a job that mines a directory, or a [source](mining-sources.md) such as `pi-sessions`. |
 | `memcastle_audit` | `scope?` | Submit a read-only consistency audit job. |
 | `memcastle_repair` | `dry_run?`, `based_on_job?` | Submit a repair job; a dry run unless `dry_run` is `false`. |
 | `memcastle_job_list` | `status?` | List jobs, newest first. |
@@ -40,6 +40,8 @@ Defaults are the same as the CLI's: `limit` is 10 for `memcastle_search` and `me
 `memcastle_wake_up` defaults to 10 items and 8192 bytes.
 `memcastle_mine` (and a `mine` job over `POST /api/jobs`) needs an absolute `path`,
 because the daemon does not share your shell's working directory.
+Give exactly one of `path` and `source`: a source is mined incrementally from where its last run stopped,
+and `full` reads it again from the beginning.
 Mining, checkpoint, audit and repair return the submitted job immediately;
 poll it with `memcastle_job_get` to see its progress and result.
 
@@ -169,7 +171,7 @@ Only the query is required, so a plain `?q=word` means what it always did.
 | `ranking` | `auto` (the default), `lexical`, `semantic` or `hybrid`. |
 | `wing`, `room` | Restrict to a wing or room by name. `recall` ignores `room`. |
 | `tags` | Drawers carrying every one of these tags: a list over MCP, comma-separated in a query string (`tags=a,b`). |
-| `source_kind` | `file`, `manual` or `other`. |
+| `source_kind` | `file`, `manual`, `transcript` or `other`. |
 | `as_of` | An RFC 3339 instant, such as `2026-01-31T12:00:00Z`: search the memory that was valid then. |
 | `include_historical` | Also return memory that has been superseded. Cannot be combined with `as_of`. |
 | `expand` | Append drawers related to the hits through the knowledge graph. |
@@ -287,7 +289,7 @@ A `POST` asking for another `bind`, `port` or origin than the open endpoint has 
 
 | `type` | Other fields |
 |---|---|
-| `mine` | `path` (absolute directory), `wing?` |
+| `mine` | `path` (absolute directory) or `provider` (a [source](mining-sources.md)) with `locator?`, then `wing?` and `full?` |
 | `checkpoint` | `payload` (see [above](#checkpoint-payload)), `emergency?` |
 | `audit` | `scope?` |
 | `repair` | `dry_run?` (default `true`), `based_on_job?` |
@@ -298,6 +300,26 @@ curl -s -X POST http://127.0.0.1:8420/api/jobs \
   -H 'Content-Type: application/json' \
   -d '{"type": "mine", "path": "/home/alice/project", "wing": "project"}'
 ```
+
+```sh
+curl -s -X POST http://127.0.0.1:8420/api/jobs \
+  -H 'Content-Type: application/json' \
+  -d '{"type": "mine", "provider": "pi-sessions"}'
+```
+
+An unknown `provider` is a `400` that names the known ones.
+`GET /api/sources` lists the providers and the sources that have been mined:
+
+```json
+{
+  "providers": [{"name": "pi-sessions", "description": "...", "capabilities": {"incremental": true, "retains_raw": true, "needs_credentials": false}}],
+  "sources": [{"id": "...", "provider": "pi-sessions", "account": null, "locator": "/home/alice/.pi/agent/sessions",
+               "cursor": {"mtime_ns": 1784039240000000000, "key": "..."}, "last_job": "...", "last_run_at": "...", "documents": 12}]
+}
+```
+
+It is a read, so a `disabled` session is refused, and it is guarded like every route but the health check.
+There is no MCP tool for it, and none for credentials.
 
 The `demo` job kind is REST and CLI only; it is not offered over MCP.
 

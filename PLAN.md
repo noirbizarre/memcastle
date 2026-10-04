@@ -128,10 +128,14 @@ have a coherent working path.
 
 | # | Title |
 |---|---|
-| [#39](https://github.com/noirbizarre/memcastle/issues/39) | Expand mining source adapters beyond the filesystem |
+| [#85](https://github.com/noirbizarre/memcastle/issues/85) | Introduce the unified Source model for mining (done, [ADR-023](docs/adr/023-unified-source-model-for-mining.md)) |
+| [#39](https://github.com/noirbizarre/memcastle/issues/39) | Expand mining source adapters beyond the filesystem (done: `pi-sessions`, shared chunker; builds on #85) |
 | [#40](https://github.com/noirbizarre/memcastle/issues/40) | Wire real entity/relationship extraction into mining |
 | [#41](https://github.com/noirbizarre/memcastle/issues/41) | Expand audit/repair coverage (data-driven) |
 | [#42](https://github.com/noirbizarre/memcastle/issues/42) | Richer retrieval: semantic/vector search, temporal + graph-aware ranking |
+
+The concrete platform and agent-history adapters (Slack #86, ChatGPT #87, Claude #88, Codex #89, OpenCode #90,
+GitHub #91, Atlassian #92) are implemented on the #85 model, one file each under `src/mining/adapters/`.
 
 ## Principles
 

@@ -289,6 +289,8 @@ flowchart LR
 - **Diary writes** are a direct, synchronous call rather than a job, see
   [ADR-003](adr/003-checkpoint-as-a-durable-job.md) for why checkpoint differs.
 - **Mining and checkpoint** are durable jobs, resumable after a pause or a crash.
+  Mining is also **source-driven**: it acquires data from a source itself, with no agent writing and no model involved,
+  see [Mining sources](mining-sources.md).
 - `AppServices::recall` is `search` under a recall-oriented name, never paraphrasing or truncating a `Drawer.content`.
   It exists as a name to hang future recall-specific ranking off, not to duplicate logic today.
   MemCastle does not enforce a search-before-answer protocol; that discipline belongs to an integration or skill
@@ -390,8 +392,10 @@ That is safe: an audit only reads, and a repair recomputes the live orphan set.
 **Resuming is replay-safe.**
 A handler writes an item's records first and saves the checkpoint after,
 so a crash between the two makes the resumed attempt redo that item.
-Mining and checkpoint therefore derive each drawer's id (and each new fact edge's id) from the job id and item index
-and skip a record that already exists, so the replay lands on the same record instead of storing a second copy.
+Checkpoint therefore derives each drawer's id (and each new fact edge's id) from the job id and item index
+and skips a record that already exists, so the replay lands on the same record instead of storing a second copy.
+Mining derives a chunk's drawer id from the job, the source, the document, the chunk and its hash, and commits drawers,
+then the document record, then the source's cursor, so a replay finds what it wrote and the cursor never runs ahead.
 See [ADR-008](adr/008-replay-safe-job-resume.md).
 
 **Crash recovery** (`Scheduler::recover`, run once at daemon startup):
@@ -412,15 +416,21 @@ before the API answers, and `Job::apply` clears them when the job leaves `Runnin
 and one paused comes back `Paused`; neither runs again, and neither spends attempt budget.
 
 **`checkpoint` versus `result`.** `Job.checkpoint` is handler-defined *resume* state
-(for mining and checkpoint, `{"next_index": n}`), present on every job kind and defaulting to `{}`.
+(for checkpoint, `{"next_index": n}`; for mining, the run's cursor and counts, `{"cursor": ..., "stats": {...}}`),
+present on every job kind and defaulting to `{}`.
 `Job.result` is separate: the once-set output of a job whose point is to produce a report.
 Most kinds never set it; `Mine`, `Audit` and `Repair` do on completion.
 Two fields mean "where do I read progress from" and "where do I read what it found" never share one ambiguous field.
 
 ### Job kinds
 
-- **`Mine`** (`src/mining`) files one drawer per file of a directory, in name order,
-  and stops at a bounded number of files, recording `truncated: true` when it does.
+- **`Mine`** (`src/mining`) mines a *source* through the unified model of
+  [ADR-023](adr/023-unified-source-model-for-mining.md): a `SourceAdapter` discovers and reads documents past the
+  source's stored cursor, and one shared pipeline chunks them, files drawers idempotently and advances the cursor.
+  A directory and the Pi session history are the two adapters shipped.
+  It stops at a bounded number of documents, recording `truncated: true` when it does, and a later job continues from
+  the cursor.
+  See [Mining sources](mining-sources.md).
 - **`Checkpoint`** (`src/checkpoint`) persists an already-classified batch of items as durable drawers.
   Classification into destination buckets happens client-side, in the calling integration; MemCastle has no LLM client.
   It mirrors `mining::run`: per-item cooperative pause and cancel, checkpointing `{"next_index": n}` after each item.
@@ -557,7 +567,11 @@ See [ADR-015](adr/015-database-admin-endpoint.md).
 
 Deliberately out of scope, and each is structurally possible without rework given the module boundaries above:
 
-- Chunking: a mined file is one drawer and one vector, embedded from its first 8,000 characters.
+- Semantic processing of mined documents (summaries, entity extraction, #40): mining stops at filing drawers, and the
+  source model leaves a stage for it that reads what was filed.
+- Mining sources that need credentials (Slack, GitHub, Atlassian, ...): the model stores a credential *reference* and
+  never a secret, and no shipped adapter needs one yet.
+- Propagating a deletion at the source: a document that disappears is not noticed.
 - Extracting entities from text to resolve a query's words to the graph (#40): expansion starts from drawers already found.
 - Entity and relationship extraction wired into mining (the schema exists; nothing populates it).
 - A stdio MCP bridge for clients that cannot speak HTTP.

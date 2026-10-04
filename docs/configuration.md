@@ -104,6 +104,13 @@ provider = "none"          # "none", "command" or "http"
 timeout_secs = 30
 batch_size = 16
 
+# How mining cuts and bounds what it reads; see "Mining sources".
+[mining]
+chunk_chars = 6000          # characters per drawer; a longer document becomes several drawers
+max_file_bytes = 2097152    # directory mining skips files larger than this
+max_documents = 2000        # documents one job files; the next job continues from the cursor
+# pi_sessions_dir = "/home/alice/.pi/agent/sessions"
+
 # Only to serve assets from somewhere other than the installed or embedded ones.
 [assets]
 dir = "/home/alice/src/memcastle-web/dist"
@@ -162,6 +169,10 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `embeddings.timeout_secs` (1 to 3600) | `MEMCASTLE_EMBEDDINGS_TIMEOUT_SECS` | `30` |
 | `embeddings.batch_size` (1 to 1024) | none | `16` |
 | `embeddings.command` (a list) | none | none |
+| `mining.chunk_chars` (200 to 100000) | `MEMCASTLE_MINING_CHUNK_CHARS` | `6000` |
+| `mining.max_file_bytes` (1 to 67108864) | `MEMCASTLE_MINING_MAX_FILE_BYTES` | `2097152` |
+| `mining.max_documents` (1 to 1000000) | `MEMCASTLE_MINING_MAX_DOCUMENTS` | `2000` |
+| `mining.pi_sessions_dir` (an absolute path) | `MEMCASTLE_MINING_PI_SESSIONS_DIR` | `~/.pi/agent/sessions` |
 | `store.sync` (`every`, `never` or an interval over 100ms) | `MEMCASTLE_STORE_SYNC` | `every` |
 | `store.mode` and remote settings | none | `embedded` |
 

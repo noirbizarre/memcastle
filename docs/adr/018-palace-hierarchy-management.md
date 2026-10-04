@@ -96,3 +96,10 @@ And mining, checkpoint and diary files into wings and rooms by name, creating th
 - A wing created before the name rules may contain `/` and is reachable only by UUID.
 - Re-mined files beyond the first copy have no name.
 - An agent cannot manage the hierarchy, and an operator who wants it to must use the REST API directly.
+
+## Amendment (2026-10-04)
+
+The last consequence above, "re-mined files beyond the first copy have no name", no longer holds for new mining.
+A re-mine is idempotent under [ADR-023](023-unified-source-model-for-mining.md): an unchanged file files nothing, and an
+edited one supersedes its drawer, whose name moves to the replacement.
+Only documents mined before that ADR can still leave an unnamed copy, the first time they are mined again.
