@@ -157,7 +157,7 @@ compiles `wasmtime` and Cranelift from scratch and takes several minutes longer.
 | Tests, Linux (basic, 1114 tests) | 57 s | 170 to 240 s | 5 to 6 min |
 | Tests, macOS (basic) | 86 s | 157 s | about 5.5 min |
 | Tests, Windows (basic) | 120 s | 359 s | about 10.5 min |
-| WebAssembly tests, Linux (25 tests) | 59 s | 49 s | 2.5 min |
+| WebAssembly tests, Linux (25 tests) | 60 s | 31 s | 2.3 min |
 | Source, one leg per `sources/<name>/` | 10 s | seconds | about 1 min |
 
 The 25 WebAssembly tests run in under a minute in CI, and their job finishes well before the basic Linux one.
@@ -180,7 +180,8 @@ The helpers in `tests/common/wasm.rs` keep that to one small crate per build:
   the two slowest tests in the suite.
 
 Locally this took the WebAssembly suite from about 225 s to 95 s on a cold target directory and from about 92 s to 38 s
-on a warm one.
+on a warm one; in CI, on a warm cache, the tests went from 49 s to 31 s and the slowest from 25 s to 14 s.
+What is left of the job is compiling the instrumented test binaries.
 
 ## The architecture guard
 
