@@ -1,7 +1,7 @@
 # Pi history source
 
 The conversation history of the [Pi](https://github.com/badlogic/pi-mono) coding agent, as a MemCastle mining source:
-a WebAssembly component built from `src/lib.rs`, one document per session file (docs/adr/027).
+a WebAssembly component built from `src/lib.rs`, one document per session file (docs/adr/028).
 
 It is acquisition only.
 MemCastle owns normalisation into drawers, chunking, deduplication, provenance, the cursor, idempotency and the durable

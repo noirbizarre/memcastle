@@ -81,7 +81,7 @@ Verdicts: **clean** (a native hook does exactly this), **partial** (it can be do
 | Background mining | No scheduler hook; a timer in the plugin closure, or a stamp checked on `session.created` | `memcastle_mine` | partial |
 | Session mode | No native concept; chosen by the plugin | `memcastle_set_mode` | partial |
 | Failure reporting | `client.tui.showToast`, `client.app.log` | error bodies, `Job.error` | clean |
-| Skills and `off` mode | `tool.execute.before` can refuse the `skill` tool | none | partial |
+| Skills and `off` mode | `tool.execute.before` could refuse the `skill` tool, but the plugin stays inert in `off` | none | not used |
 
 ### Session start, to `wake_up`
 
@@ -174,9 +174,15 @@ variable, and a change mid-session goes through a custom tool or slash command.
 A disabled session must see no MemCastle-derived context from any source, and a skill that carries it counts.
 The shared skills carry no palace content, but the contract still forbids loading one into an `off` session.
 `tool.definition` has no `sessionID`, so it cannot hide the `skill` tool from one session.
-`tool.execute.before` does have it, and throwing there refuses the call, so the plugin can refuse to load any MemCastle
+`tool.execute.before` does have it, and throwing there refuses the call, so a plugin could refuse to load any MemCastle
 skill when the session's mode is `off`.
 This is **partial**: the skill still appears in the tool's listing, and only loading it is refused.
+
+**Decision (#35): the plugin stays inert in `off` and does not install that guard.**
+An `off` plugin registers nothing, so the shared skills the plugin itself offers never reach the session,
+and the guard would only matter for a copy the user installed by hand, which is the user's to remove.
+Keeping the plugin active in `off`, with a hook that can never fire for MemCastle's own content, would add a way for
+the integration to act in a session that is meant to have none.
 
 ### Failure reporting
 
@@ -190,7 +196,7 @@ Neither is verified under `opencode run`, where there is no TUI, so the plugin m
 | --- | --- | --- | --- |
 | Interval checkpoints | A timer or per-turn-count hook | Count `session.idle` events, or the manual checkpoint tool | A checkpoint can lag a long single run |
 | Pre-compaction | A stable (non-`experimental`) hook | Use `experimental.session.compacting`; else `memcastle checkpoint --emergency` | Context may be lost without a last checkpoint if the hook changes |
-| Hiding skills per session | A per-session tool or skill filter | Refuse loading in `tool.execute.before` | An `off` session still sees that the skill exists |
+| Hiding skills per session | A per-session tool or skill filter | None needed: an `off` plugin registers no skills; a copy installed by hand is out of scope | A skill the user installed under `.agents/skills` still loads |
 | Per-session mode over native MCP | One connection per session in the built-in client | A plugin-owned connection per `sessionID` | Tool names differ from the plain-MCP setup |
 | TUI-only toasts | A TUI under `opencode run` or `serve` | Structured log through `client.app.log` | The failure is in the log, not on screen |
 

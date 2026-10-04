@@ -129,7 +129,7 @@ have a coherent working path.
 | # | Title |
 |---|---|
 | [#85](https://github.com/noirbizarre/memcastle/issues/85) | Introduce the unified Source model for mining (done, [ADR-023](docs/adr/023-unified-source-model-for-mining.md)) |
-| [#39](https://github.com/noirbizarre/memcastle/issues/39) | Expand mining source adapters beyond the filesystem (done: shared chunker; builds on #85; Pi history is now the `pi` source, #161, [ADR-027](docs/adr/027-pi-history-is-an-installed-webassembly-source.md)) |
+| [#39](https://github.com/noirbizarre/memcastle/issues/39) | Expand mining source adapters beyond the filesystem (done: shared chunker; builds on #85; Pi history is now the `pi` source, #161, [ADR-028](docs/adr/028-pi-history-is-an-installed-webassembly-source.md)) |
 | [#40](https://github.com/noirbizarre/memcastle/issues/40) | Wire real entity/relationship extraction into mining (done: the `Extract` job, [ADR-024](docs/adr/024-entity-extraction-as-an-enrich-job.md); builds on #85) |
 | [#41](https://github.com/noirbizarre/memcastle/issues/41) | Expand audit/repair coverage (data-driven) |
 | [#42](https://github.com/noirbizarre/memcastle/issues/42) | Richer retrieval: semantic/vector search, temporal + graph-aware ranking |

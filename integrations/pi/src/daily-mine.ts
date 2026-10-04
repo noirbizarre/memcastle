@@ -3,7 +3,7 @@
 // Not implemented yet: tracked as #26. The shape is fixed so the extension can register it already.
 //
 // When it is, it only decides *when*: it submits `memcastle_mine` with `{ source: "pi" }` and nothing else. Reading Pi's
-// session files is the `pi` mining source's job (`sources/pi/`, docs/adr/027), done by the daemon, so this file never
+// session files is the `pi` mining source's job (`sources/pi/`, docs/adr/028), done by the daemon, so this file never
 // opens a session and never names where they live.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"

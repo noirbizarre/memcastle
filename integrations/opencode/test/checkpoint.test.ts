@@ -275,6 +275,16 @@ test("the tool in a read-only session is refused by the client before any model 
   expect(asked).toEqual([])
 })
 
+test("the tool in a read-only session never submits the model's own payload either, so no write is attempted", async () => {
+  const { checkpoints, calls } = setup({ mode: "read-only" })
+  const failure = await checkpoints
+    .checkpoint("ses_1", { payload: { items: [{ destination: "general", content: "x" }] }, emergency: true })
+    .catch((error: unknown) => error)
+  expect((failure as MemCastleFailure).failureClass).toBe("mode_rejected")
+  expect((failure as MemCastleFailure).toUserMessage()).toContain("MEMCASTLE_MODE=full")
+  expect(calls).toEqual([])
+})
+
 test("forgetting a session stops its review and ends its report", async () => {
   let seen: AbortSignal | undefined
   const { host, asked } = fakeHost((signal) => ((seen = signal), new Promise<string>(() => undefined)))

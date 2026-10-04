@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "description": "What an integration must keep out of a session whose memory mode is `off`. `marker` is a drawer seeded into the palace, whose `token` must reach the model of a `full` or `read-only` session through wake-up, and of no `off` session through any path in `paths`. Each path is one way an integration could hand MemCastle-derived material to the model; `applies_to` names the integrations that have it. Every integration test replays this file, and fails when a path is added here and not driven there.",
+  "marker": {
+    "token": "offisolationmarkertoken",
+    "payload": {
+      "items": [
+        {
+          "destination": "project",
+          "wing": "off-isolation",
+          "name": "decisions/isolation",
+          "content": "offisolationmarkertoken the palace remembers this, and an off session must never hear it",
+          "tags": [],
+          "source": { "kind": "manual", "uri": null, "agent": "conformance-agent" },
+          "fact": null
+        }
+      ]
+    }
+  },
+  "off_rules": {
+    "daemon_calls": 0,
+    "description": "An off session makes no HTTP or MCP request at all: not a health check, not a handshake, not a rejected call. The daemon would refuse the reads, but a client that already knows the mode must not ask."
+  },
+  "paths": [
+    {
+      "id": "wake-up-injection",
+      "applies_to": ["pi", "opencode"],
+      "description": "The wake-up briefing added to the model's context at the first (Pi) or every (OpenCode) model request."
+    },
+    {
+      "id": "wake-up-command",
+      "applies_to": ["pi"],
+      "description": "A command that prints the briefing. It must say MemCastle is not active, and quote nothing."
+    },
+    {
+      "id": "search-before-answer",
+      "applies_to": ["pi", "opencode"],
+      "description": "The instruction to search first, added to the system prompt. It names MemCastle tools the session does not have."
+    },
+    {
+      "id": "interval-checkpoint",
+      "applies_to": ["pi", "opencode"],
+      "description": "The review every N exchanges, which asks a model about the conversation and writes to MemCastle."
+    },
+    {
+      "id": "manual-checkpoint",
+      "applies_to": ["pi", "opencode"],
+      "description": "The on-demand checkpoint: Pi's slash command, OpenCode's tool."
+    },
+    {
+      "id": "emergency-checkpoint",
+      "applies_to": ["opencode"],
+      "description": "The last checkpoint before the host summarises the conversation."
+    },
+    {
+      "id": "native-skills",
+      "applies_to": ["opencode"],
+      "description": "The shared skills offered to the host's own skill mechanism."
+    },
+    {
+      "id": "model-facing-tools",
+      "applies_to": ["opencode"],
+      "description": "Any tool or slash command the integration registers with the host for the model or the user to call."
+    }
+  ]
+}

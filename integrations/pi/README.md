@@ -53,6 +53,42 @@ A mode the extension cannot parse **fails closed**: it tells the user why and do
 typo as `full`.
 An `off` session opens no connection at all.
 
+### Memory modes
+
+`MEMCASTLE_MODE` is chosen once, when the Pi session starts, and holds for the whole session.
+The extension translates the label to the daemon's wire value (`off` is `disabled`, `read-only` is `read_only`) and
+selects it on the session's MCP connection before any other call, again after every reconnect.
+Other Pi sessions, in this process or another, are other MCP sessions and keep their own mode.
+
+| | `full` | `read-only` | `off` |
+| --- | --- | --- | --- |
+| Connection | opened | opened | **none** |
+| Wake-up | injected | injected | nothing |
+| Search-before-answer reminder | added to the system prompt | added | nothing |
+| Interval review | runs | skipped, no model call | nothing |
+| `/memcastle-checkpoint` | reviews and saves | says the session is read-only, no model call, no write | says MemCastle is not active |
+| `/memcastle-wake-up` | shows the briefing | shows the briefing | says MemCastle is not active |
+
+- **`read-only` skips writes instead of attempting them.**
+  The daemon would refuse them with `memcastle::app::mode_forbidden`, but only after a review had paid for a model call
+  whose result must be thrown away, and a rejected call is noise a client that knows its own mode has no reason to make.
+  The command reports the refusal as information, with the way out (`MEMCASTLE_MODE=full`), not as a failure.
+- **`off` is not "refused", it is absent.**
+  No manager exists, so there is no connection, no health check, no notification and no message in the model's context.
+  The commands still exist and answer `MemCastle is not active in this session.`, which is the reason for the silence
+  and carries nothing from the palace.
+  `integrations/common/test/off-isolation.test.ts` proves this on the wire against a real daemon holding a marker drawer:
+  no request is made and no marker reaches the user or the model, through every path listed in
+  `tests/fixtures/integration/off-isolation.json`.
+- **A skill copied by hand is out of reach.**
+  The extension loads skills from `skills/` itself and loads none in `off`.
+  A copy a user installed under `.agents/skills`, or a separate MCP entry for MemCastle in Pi's own configuration,
+  is Pi's to load, and an integration that registered nothing cannot stop it.
+  Remove those copies when a project must be free of MemCastle.
+- **A mode that cannot be parsed fails closed:** the user is told, and the extension does nothing.
+- **Mixed sessions:** `integrations/common/test/mixed-modes.test.ts` runs Pi and OpenCode sessions in `full`,
+  `read-only` and `off` against one daemon and checks each against the requests it made.
+
 ### Wake-up
 
 At the start of a new session the extension asks MemCastle for `memcastle_wake_up` and puts the answer in front of the
@@ -227,7 +263,7 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 
 | Capability | Status | Where it lands |
 | --- | --- | --- |
-| `session-mode` | Foundation: label translation, mode selected on connect, `off` opens nothing | #27 |
+| `session-mode` | Implemented: label translation, mode selected on every connect, `read-only` never attempts a write, `off` opens nothing and injects nothing, proved on the wire against a real daemon | #27, done |
 | `wake-up` | Implemented: fetched at session start, injected as a message before the first (`sync`) or first-ready (`async`) response, never blocks on a down daemon | #22, done |
 | `recall` | Implemented: the shared `search-before-answer` skill is appended to the system prompt every turn, at the `forceMemoryRecall` level | #25, done |
 | `checkpoint` | Implemented: an interval review by Pi's own model and `/memcastle-checkpoint`, both submitting a classified payload and reporting a failed job with how to retry it | #23, done |

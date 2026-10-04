@@ -1,4 +1,4 @@
-# ADR-027: Pi history is an installed WebAssembly source, and the core has no Pi-specific code
+# ADR-028: Pi history is an installed WebAssembly source, and the core has no Pi-specific code
 
 ## Status
 

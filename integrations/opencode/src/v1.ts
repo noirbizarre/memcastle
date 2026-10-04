@@ -143,7 +143,6 @@ export const server: Plugin = async ({ client, directory }, options) => {
     "experimental.chat.system.transform": (input, output) =>
       core.systemTransform(input.sessionID, (text) => output.system.push(text)),
     "experimental.session.compacting": (input) => core.compacting(input.sessionID),
-    "tool.execute.before": () => core.toolBefore(),
     dispose: () => core.dispose(),
   }
   const tool = await checkpointTool(core, (message) => log("warn", message))

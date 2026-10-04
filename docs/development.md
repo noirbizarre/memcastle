@@ -112,6 +112,10 @@ Every path, environment variable, flag and the precedence between them is in [Co
     each starts a real `memcastle serve`, finds it through its registry file and replays the same fixtures through
     the integration's own client.
     Run them with `mise run integrations:check`, see [ADR-022](adr/022-integrations-are-bun-packages-tested-against-a-real-daemon.md).
+  - `integrations/common/test/` — what needs two integrations at once: sessions in every memory mode against one
+    daemon, and the proof, from the requests on the wire, that an `off` session receives nothing.
+    It is test-only and imports the integrations' sources, see
+    [ADR-027](adr/027-cross-integration-tests-live-in-a-common-package.md).
   - `tests/wasm_conformance.rs` — the same conformance cases run against the built-in `directory` source and against the
     reference WebAssembly source built from `sources/directory/` (in-process, WebAssembly suite).
   - `tests/wasm_pi.rs` — the Pi history source (`sources/pi/`) built and run as a component: what it files and leaves out,

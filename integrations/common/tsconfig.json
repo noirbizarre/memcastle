@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": [
+      "ES2022"
+    ],
+    "types": [
+      "bun"
+    ],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@opencode-ai/plugin": [
+        "../opencode/node_modules/@opencode-ai/plugin/dist/index.d.ts"
+      ],
+      "@earendil-works/pi-coding-agent": [
+        "../pi/node_modules/@earendil-works/pi-coding-agent"
+      ]
+    }
+  },
+  "include": [
+    "test"
+  ]
+}

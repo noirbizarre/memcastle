@@ -48,12 +48,16 @@ integrations/
   pi/            TypeScript/bun — the primary V1 integration (Phase 2); scaffolded
   opencode/      TypeScript/bun — an OpenCode plugin (Phase 3); scaffolded
   claude-code/   MCP + skills only, pragmatic/best-effort (Phase 4); planned
+  common/        test-only: the tests that need two integrations side by side, and the harness they share
 ```
 
 Each TypeScript package is self-contained, with its own `package.json`, lockfile and tests, and carries its own copy of
 the small client it needs.
 `mise run integrations:check` typechecks and tests every one of them against a real daemon;
 see [ADR-022](../docs/adr/022-integrations-are-bun-packages-tested-against-a-real-daemon.md).
+`common/` is the one exception to "nothing shared": it holds no production code, only tests that import the other
+packages' sources, such as mixed-mode sessions and the proof that an `off` session receives nothing
+([ADR-027](../docs/adr/027-cross-integration-tests-live-in-a-common-package.md)).
 
 Each ecosystem uses its own native language/runtime and packaging conventions —
 this is not forced into Rust, and there is no shared plugin runtime or package
@@ -64,8 +68,8 @@ integration ecosystem from this one repository.
 
 An integration never keeps its own copy of agent instructions: it loads them from [`skills/`](../skills/README.md),
 which is also installable on its own (see [Agent skills](../docs/skills.md)).
-What stays here is the lifecycle: when to load a skill, when to call MemCastle, and refusing to load one into a session
-whose memory mode is off.
+What stays here is the lifecycle: when to load a skill, when to call MemCastle, and loading none into a session whose
+memory mode is off.
 
 ## Per-ecosystem findings
 
@@ -84,6 +88,8 @@ The Pi and OpenCode packages are scaffolds: their connection, mode, discovery an
 tested, and wake-up on session start (#22, #33) and search-before-answer with the shared skills (#25, #36) are
 implemented in both; checkpointing is implemented in both, with interval and manual saves in Pi (#23) and interval, manual and emergency
 saves in OpenCode (#34); their other lifecycle hooks are empty.
+Explicit memory modes (`full`, `read-only`, `off`) are complete in both (#27, #35): `read-only` never attempts a write
+and `off` registers nothing, proved on the wire in `common/`.
 The persistent MCP session is complete in both: one connection for the whole session, kept alive, and replaced with its
 mode re-selected if the daemon forgets it.
 Tracked as GitHub issues under the
