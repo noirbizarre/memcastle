@@ -6106,9 +6106,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkit"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f92cc8be77fa7d4b6f17905d3d67e8e7fd6178a469059797ad3457fb7c482650"
+checksum = "cc22565a099729ee85d165c588d6e6a9ab0f24539d03c613d56e87a4592d5e08"
 dependencies = [
  "anyhow",
  "hex",
@@ -6131,9 +6131,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkit-macros"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c601bfe2c7e39c06037abde1c3f1bec8734907121faff153f19342c3c58891a"
+checksum = "80c6b20c4d71739fa9988f0ac758673ab2dca2356ec0ffd1c0e6d9673254862a"
 dependencies = [
  "proc-macro2",
  "quote",
