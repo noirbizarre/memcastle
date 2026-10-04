@@ -108,7 +108,8 @@ and inject the result as established fact.
 The highlights are not filtered by `agent_identity`, only by wing.
 
 Daemon-side (tested): the diary and the highlights come back, and the budget holds.
-Client-side (to test): the injected context is present on the first turn when the client waits for it,
+Client-side (tested in Pi and OpenCode): the injected context is present on the first turn when the client waits for it,
+an asynchronous client never makes a turn wait,
 and the client does not block the session when the daemon is unavailable.
 
 ### Recall and search before answering

@@ -7,7 +7,7 @@ admin endpoint (AGENTS.md invariant 8, enforced by the `integrations-http-only` 
 
 **Status: scaffold.**
 The connection, memory-mode, discovery and failure foundations are real and tested against a real daemon.
-The lifecycle hooks are wired but empty, and each names the issue that fills it in.
+Wake-up is implemented; the other lifecycle hooks are wired but empty, and each names the issue that fills it in.
 See [`docs/research.md`](docs/research.md) for how OpenCode's mechanisms map to MemCastle operations, and why.
 
 ## Use it
@@ -61,10 +61,51 @@ The environment variables are the ones the MemCastle CLI already reads.
 | `agentIdentity` | none | `opencode` | Stored with diary and wake-up calls |
 | `timeoutMs` | none | `5000` | How long to wait for the daemon |
 | `keepAliveMs` | none | `120000` | Ping interval that keeps an idle connection open; `0` turns it off |
+| `wakeUp.enabled` | `MEMCASTLE_WAKE_UP` | `true` | Whether a session start fetches and injects the wake-up |
+| `wakeUp.mode` | `MEMCASTLE_WAKE_UP_MODE` | `async` | `sync` makes the first response wait for it; `async` never makes a response wait |
+| `wakeUp.source` | `MEMCASTLE_WAKE_UP_SOURCE` | `project` | The wing to ask about: `user`, `project`, `custom` or `none` |
+| `wakeUp.wing` | `MEMCASTLE_WAKE_UP_WING` | none | The wing for `custom` |
 
 The daemon is found through its registry file, then the configured address, and each candidate is checked with
 `GET /api/health` because the file is only a hint.
 A mode the plugin cannot parse **fails closed**: it logs why and does nothing, rather than treating a typo as `full`.
+
+### Wake-up
+
+At the start of a session the plugin asks MemCastle for `memcastle_wake_up` and adds the answer to the system prompt as
+established context: the agent's latest diary entry and the most recent highlights earlier sessions checkpointed,
+quoted verbatim.
+The request starts on `session.created`, which arrives before the first message, so the daemon has a head start.
+The settings have the same shape as the [Pi extension's](../pi/README.md#wake-up), which is what keeps the two
+agents behaving alike, and `wakeUp.mode` is not `mode`: the first is when the briefing arrives, the second is what a
+session may do to memory.
+
+- **`sync`** makes the first response wait for the wake-up, for at most `timeoutMs`.
+  After that wait a slow daemon is not waited for again; a later response picks the briefing up when it arrives.
+- **`async`**, the default, never makes a response wait.
+  The briefing goes into the first request that finds it already in, so on a healthy daemon that is usually the first.
+- **`source`** picks the wing, because the daemon only knows a wing name or no wing.
+  `user` is the `preferences` wing, which is where checkpoints file a preference by default.
+  `project` is the session's directory name made acceptable as a wing name, which is the wing mining a directory creates.
+  `custom` is `wakeUp.wing`, and falls back to `project` when no wing is set.
+  `none` asks about no wing: the diary is skipped, and highlights come from every wing.
+  A wing needs a diary written under the same `agentIdentity` (default `opencode`) for a diary entry to appear.
+  Highlights are not filtered by identity.
+- **Added to every request.**
+  OpenCode rebuilds the system prompt for each model request, so unlike a message in a transcript the briefing is added
+  again each time.
+  What is fetched once per session is the answer, so the daemon is not asked again.
+  OpenCode 1 also runs the system transform for the title model, which therefore sees the briefing too.
+- **Subagents are left out.**
+  A session with a parent gets no briefing and no connection of its own, because the parent already has it.
+- **A resumed session wakes up too.**
+  It never fires `session.created`, so its first request starts the fetch, in the directory OpenCode was started in.
+- **Empty is normal.**
+  A new palace, or a wing with nothing in it, injects nothing and says nothing.
+- **A down daemon never blocks the session.**
+  The failure is logged once as a warning, with the daemon's `help`, and the session carries on without it.
+  An `off` session registers no hooks, so nothing is injected.
+- A mistyped wake-up value falls back to its default rather than breaking the session, because wake-up only reads.
 
 ### Connection lifecycle
 
@@ -98,6 +139,7 @@ src/settings.ts   options and environment to typed settings; the token never rea
 src/daemon.ts     discovery: registry file, then configured address, verified by /api/health
 src/session.ts    one MCP session; selects the mode on every (re)connect before anything else
 src/registry.ts   one session per OpenCode sessionID, connected lazily
+src/wake-up-core.ts  wake-up without a host: settings, wing, rendering, the in-flight request (the same file as Pi's)
 src/modes.ts      client labels (full, read-only, off) to wire values (full, read_only, disabled)
 src/failures.ts   the five failure classes, each with the daemon's `help`
 test/             bun tests against a real `memcastle serve`; they read tests/fixtures/integration/ directly
@@ -124,7 +166,7 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | Capability | Status | Where it lands |
 | --- | --- | --- |
 | `session-mode` | Foundation: label translation, per-session connection, mode selected on connect | #35 |
-| `wake-up` | Not yet | #33 |
+| `wake-up` | Implemented: fetched on `session.created`, added to the system prompt of the first (`sync`) or first-ready (`async`) request, never blocks on a down daemon | #33, done |
 | `recall` | Not yet | #36 |
 | `checkpoint` | Not yet | #34 |
 | `emergency-checkpoint` | Not yet; planned on `experimental.session.compacting` (V1) and the `compaction` session hook (V2) | #34 |

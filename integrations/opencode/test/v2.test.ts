@@ -5,12 +5,15 @@ import plugin from "../src/index.ts"
 /** A V2 context that records what the plugin registers and lets the test push events into its subscription. */
 function fakeContext(options: Record<string, unknown> = {}) {
   const hooks: { domain: string; name: string }[] = []
+  // The callbacks too, so a test can fire a hook the way OpenCode does.
+  const callbacks = new Map<string, (input: unknown) => Promise<void> | void>()
   const queue: unknown[] = []
   let wake: (() => void) | undefined
   let signal: AbortSignal | undefined
   const registration = async () => ({ dispose: async () => undefined })
   const ctx = {
     options,
+    location: { directory: "/work/started-here" },
     event: {
       subscribe: async function* (opts?: { signal?: AbortSignal }) {
         signal = opts?.signal
@@ -20,12 +23,18 @@ function fakeContext(options: Record<string, unknown> = {}) {
         }
       },
     },
-    session: { hook: async (name: string) => (hooks.push({ domain: "session", name }), registration()) },
+    session: {
+      hook: async (name: string, callback: (input: unknown) => Promise<void> | void) => (
+        hooks.push({ domain: "session", name }), callbacks.set(name, callback), registration()
+      ),
+    },
     tool: { hook: async (name: string) => (hooks.push({ domain: "tool", name }), registration()) },
   } as unknown as Plugin.Context
   return {
     ctx,
     hooks,
+    /** Run the registered session hook `name`, as OpenCode does before a model request. */
+    runHook: async (name: string, input: unknown) => void (await callbacks.get(name)?.(input)),
     push: (event: unknown) => (queue.push(event), wake?.()),
     aborted: () => signal?.aborted === true,
   }

@@ -7,6 +7,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { type ModeLabel, toWireMode } from "./modes.ts"
 import { DEFAULT_KEEP_ALIVE_MS } from "./session.ts"
+import { type WakeUpSettings, resolveWakeUp } from "./wake-up-core.ts"
 
 export interface Settings {
   /** An explicit `http://host:port`, which skips discovery. */
@@ -26,6 +27,11 @@ export interface Settings {
   timeoutMs: number
   /** How often an open connection is pinged so the daemon does not drop it as idle; `0` turns that off. */
   keepAliveMs: number
+  /**
+   * Wake-up on session start. Nested because `mode` above is the memory mode, and wake-up's own `mode`
+   * (`sync` or `async`) is a different thing that must not be confused with it.
+   */
+  wakeUp: WakeUpSettings
 }
 
 type Env = Readonly<Record<string, string | undefined>>
@@ -72,6 +78,7 @@ export function resolveSettings(options: Record<string, unknown> | undefined, en
     timeoutMs: Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 5000,
     // Unlike the timeout, zero is meaningful here (no pings), so only a missing or invalid value falls back.
     keepAliveMs: keepAlive(opts.keepAliveMs),
+    wakeUp: resolveWakeUp(opts.wakeUp, env),
   }
 }
 
