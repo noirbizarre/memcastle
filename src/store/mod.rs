@@ -57,6 +57,7 @@ mod migration_state;
 mod palace;
 mod resolution;
 mod retrieval;
+mod source_packages;
 mod sources;
 mod timestamps;
 mod wings;

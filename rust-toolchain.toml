@@ -10,3 +10,6 @@
 [toolchain]
 channel = "stable"
 components = ["rustfmt", "clippy"]
+# The reference WASM source under `sources/` (docs/writing-sources.md) builds for this target, and so does
+# `memcastle source build` for the Rust template.
+targets = ["wasm32-wasip2"]

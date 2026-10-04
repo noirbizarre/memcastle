@@ -133,6 +133,12 @@ pub enum Command {
     /// List the sources the daemon can mine and the ones it has mined, with
     /// where each one's last run stopped.
     Sources,
+    /// Develop, package and install mining sources: WebAssembly components
+    /// that read an origin (a chat export, an issue tracker, an agent's
+    /// session files) and hand MemCastle documents to file. `init`, `build`,
+    /// `test` and `package` are local and need no daemon.
+    #[command(subcommand)]
+    Source(SourceCommand),
     /// Submit a checkpoint job: persist an already-classified batch of
     /// memory writes.
     Checkpoint(CheckpointArgs),
@@ -210,6 +216,121 @@ pub enum DaemonCommand {
 pub struct CompletionsArgs {
     /// The shell to generate completions for.
     pub shell: clap_complete::Shell,
+}
+
+/// `memcastle source` subcommands: the lifecycle of a mining source, from a new project to an installed package.
+#[derive(Debug, Subcommand)]
+pub enum SourceCommand {
+    /// Create a new source project that builds, passes the conformance cases
+    /// and can be packaged straight away. Local: needs no daemon.
+    Init(SourceInitArgs),
+    /// Build the project in the current directory (or `PATH`) into a
+    /// WebAssembly component, with the command its `memcastle-source.toml`
+    /// names under `[build]`. Local: needs no daemon.
+    Build(SourceBuildArgs),
+    /// Build the project, then run its conformance cases against the
+    /// component in the same sandbox the daemon uses. Local: needs no daemon.
+    Test(SourceTestArgs),
+    /// Build the project, then write the distributable package: a tar.gz
+    /// holding the manifest and the component. Local: needs no daemon.
+    Package(SourcePackageArgs),
+    /// Install a source package into the running daemon. A package that asks
+    /// for permissions is installed only after you agree to exactly those.
+    Install(SourceInstallArgs),
+    /// List the sources the daemon can mine, built in and installed, with
+    /// their state and the permissions each was given.
+    List,
+    /// Show one source: its capabilities, state and permissions.
+    Show(SourceNameArgs),
+    /// Allow an installed source to be mined.
+    Enable(SourceNameArgs),
+    /// Stop an installed source from being mined, keeping it installed.
+    Disable(SourceNameArgs),
+    /// Remove an installed source and its files. What it mined stays in the
+    /// palace.
+    Remove(SourceRemoveArgs),
+}
+
+/// Arguments for `memcastle source init`.
+#[derive(Debug, Args)]
+pub struct SourceInitArgs {
+    /// The source's name: lowercase letters, digits and `-`. It becomes the
+    /// directory created, and the name given as `--source` when mining.
+    pub name: String,
+    /// The language and toolchain to start from.
+    #[arg(long, value_enum, default_value = "rust")]
+    pub template: memcastle::source::scaffold::Template,
+    /// Create the project here instead of in the current directory.
+    #[arg(long, value_name = "DIR")]
+    pub parent: Option<PathBuf>,
+}
+
+/// Arguments for `memcastle source build`.
+#[derive(Debug, Args)]
+pub struct SourceBuildArgs {
+    /// The project's directory.
+    #[arg(default_value = ".")]
+    pub path: PathBuf,
+}
+
+/// Arguments for `memcastle source test`.
+#[derive(Debug, Args)]
+pub struct SourceTestArgs {
+    /// The project's directory.
+    #[arg(default_value = ".")]
+    pub path: PathBuf,
+    /// Test the component already built instead of building it first.
+    #[arg(long)]
+    pub no_build: bool,
+}
+
+/// Arguments for `memcastle source package`.
+#[derive(Debug, Args)]
+pub struct SourcePackageArgs {
+    /// The project's directory.
+    #[arg(default_value = ".")]
+    pub path: PathBuf,
+    /// Package the component already built instead of building it first.
+    #[arg(long)]
+    pub no_build: bool,
+    /// Write the package here instead of `dist/<name>-<version>.tar.gz`.
+    #[arg(long, short, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+/// Arguments for `memcastle source install`.
+#[derive(Debug, Args)]
+pub struct SourceInstallArgs {
+    /// The package to install, as written by `memcastle source package`.
+    pub package: PathBuf,
+    /// Enable the source once it is installed.
+    #[arg(long)]
+    pub enable: bool,
+    /// Agree to the permissions the package asks for without being asked.
+    /// Without this (or `--consent`) a script is refused rather than
+    /// consenting on your behalf.
+    #[arg(short, long)]
+    pub yes: bool,
+    /// The consent digest shown for this package's permissions, for an
+    /// unattended install that reviewed them beforehand.
+    #[arg(long, value_name = "DIGEST", conflicts_with = "yes")]
+    pub consent: Option<String>,
+}
+
+/// A source named on the command line.
+#[derive(Debug, Args)]
+pub struct SourceNameArgs {
+    /// The source's name, as `memcastle source list` shows it.
+    pub name: String,
+}
+
+/// Arguments for `memcastle source remove`.
+#[derive(Debug, Args)]
+pub struct SourceRemoveArgs {
+    /// The source's name, as `memcastle source list` shows it.
+    pub name: String,
+    #[command(flatten)]
+    pub confirm: ConfirmArgs,
 }
 
 /// The `--yes` flag shared by every command that asks before it acts.
@@ -908,7 +1029,7 @@ mod tests {
         // `--help` is the one way to ask: `help` only duplicated it.
         assert!(Cli::try_parse_from(["memcastle", "help"]).is_err());
         for group in [
-            "job", "diary", "auth", "db", "daemon", "wing", "room", "drawer",
+            "job", "diary", "auth", "db", "daemon", "wing", "room", "drawer", "source",
         ] {
             assert!(
                 Cli::try_parse_from(["memcastle", group, "help"]).is_err(),

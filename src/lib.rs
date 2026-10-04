@@ -45,6 +45,7 @@ pub mod mining;
 pub mod repair;
 pub mod search;
 pub mod server;
+pub mod source;
 pub mod store;
 pub mod term;
 

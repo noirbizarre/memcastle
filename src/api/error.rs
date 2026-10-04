@@ -23,7 +23,8 @@ impl IntoResponse for ApiError {
             | Error::EntityNotFound { .. }
             | Error::WingNotFound { .. }
             | Error::RoomNotFound { .. }
-            | Error::DrawerNotFound { .. } => StatusCode::NOT_FOUND,
+            | Error::DrawerNotFound { .. }
+            | Error::SourceNotFound { .. } => StatusCode::NOT_FOUND,
             Error::InvalidJobTransition { .. }
             | Error::InvalidPalacePath { .. }
             | Error::InvalidInput { .. }
@@ -32,6 +33,12 @@ impl IntoResponse for ApiError {
             | Error::EmptyLabel { .. }
             // The caller asked for a ranking this daemon cannot serve right now.
             | Error::SemanticUnavailable { .. }
+            // A package, manifest or consent the caller supplied is theirs to fix.
+            | Error::SourceManifestInvalid { .. }
+            | Error::SourcePackageInvalid { .. }
+            | Error::SourceIncompatible { .. }
+            | Error::SourceConsentRequired { .. }
+            | Error::SourceBuiltin { .. }
             | Error::EmbeddingsNotConfigured
             | Error::ExtractionNotConfigured => StatusCode::BAD_REQUEST,
             // The embedding provider is an upstream, not the caller and not us.
@@ -57,6 +64,8 @@ impl IntoResponse for ApiError {
             | Error::DbEndpointBind { .. }
             | Error::DrawerNameTaken { .. }
             | Error::DrawerSuperseded { .. }
+            // The source exists, but its state (disabled, unavailable) conflicts with the request.
+            | Error::SourceNotEnabled { .. }
             | Error::PalaceBusy { .. } => StatusCode::CONFLICT,
             // The caller asked for something the daemon will not do (an unsafe
             // bind, or an endpoint for a database it does not embed): theirs to fix.

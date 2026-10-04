@@ -141,6 +141,12 @@ async fn every_other_route_is_guarded_including_ones_that_do_not_exist() {
         (Method::POST, "/api/jobs/x/retry"),
         // The mining sources: what was mined and where each run stopped.
         (Method::GET, "/api/sources"),
+        // Installing, enabling and removing sources decides what code the daemon runs: every method is guarded.
+        (Method::POST, "/api/source-packages"),
+        (Method::GET, "/api/source-packages/x"),
+        (Method::DELETE, "/api/source-packages/x"),
+        (Method::POST, "/api/source-packages/x/enable"),
+        (Method::POST, "/api/source-packages/x/disable"),
         (Method::POST, "/api/shutdown"),
         (Method::POST, "/api/auth/token"),
         (Method::DELETE, "/api/auth/token"),
@@ -344,6 +350,32 @@ async fn mcp_offers_no_way_to_open_the_database_console() {
         assert!(
             !forbidden.iter().any(|word| name.contains(word)),
             "`{name}` looks like database access, which must never be an MCP tool"
+        );
+    }
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn mcp_offers_no_way_to_install_or_change_a_mining_source() {
+    let daemon = TestDaemon::start().await;
+
+    let names = tool_names(&daemon, None).await;
+
+    // Installing a source decides what code the daemon runs and what that code may read (`docs/adr/026`): like
+    // credentials and the database console, it is REST and CLI only, so an agent cannot widen its own reach.
+    let forbidden = [
+        "install",
+        "package",
+        "enable",
+        "disable",
+        "uninstall",
+        "permission",
+        "consent",
+    ];
+    for name in &names {
+        assert!(
+            !forbidden.iter().any(|word| name.contains(word)),
+            "`{name}` looks like source management, which must never be an MCP tool"
         );
     }
     daemon.shutdown().await;

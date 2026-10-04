@@ -224,9 +224,54 @@ and [Storage and data](storage.md#what-mining-reads) for which files a directory
 memcastle sources
 ```
 
-Lists the sources the daemon can mine and, for each one that has been mined, how many documents it holds, when it last
-ran and which job did.
+Lists the sources the daemon can mine, built in and installed, with each one's state and the permissions an installed
+one was given, and, for each one that has been mined, how many documents it holds, when it last ran and which job did.
 In a terminal this is two tables; piped, it is JSON with `providers` and `sources`.
+`memcastle source list` is the same command.
+
+### `source`
+
+```sh
+memcastle source init <NAME> [--template rust|typescript|python|cli] [--parent <DIR>]
+memcastle source build [<PATH>]
+memcastle source test [<PATH>] [--no-build]
+memcastle source package [<PATH>] [--no-build] [--output <FILE>]
+
+memcastle source install <PACKAGE> [--enable] [--yes | --consent <DIGEST>]
+memcastle source list
+memcastle source show <NAME>
+memcastle source enable <NAME>
+memcastle source disable <NAME>
+memcastle source remove <NAME> [--yes]
+```
+
+Develop, package and install mining sources: WebAssembly components that read an origin and hand MemCastle documents to
+file.
+[Writing a mining source](writing-sources.md) is the guide; this is the reference.
+
+The first four are **local**: they work on a project directory, need no daemon, no palace and no configuration file.
+`init` creates `<NAME>` (in the current directory, or in `--parent`) from a template and refuses to write into a
+directory that is not empty.
+The default template is `rust`; `cli` wraps a command-line program, and `typescript` and `python` need their own
+toolchains (see the guide).
+`build` runs the command in the manifest's `[build]` section and checks that the result is a component;
+the component is placed in `dist/source.wasm`.
+`test` builds, then runs the manifest's conformance cases against the component in the same sandbox the daemon uses,
+printing `PASS` or `FAIL` for each and exiting non-zero when one fails.
+`package` builds, then writes `dist/<name>-<version>.tar.gz`, or `--output`, and prints the component's digest and
+the permissions it asks for.
+`--no-build` uses the component already in `dist/`.
+
+The rest talk to the daemon.
+`install` reads a package and shows the permissions it asks for before installing it: in a terminal it asks, and without
+one it refuses unless `--yes` agrees to them or `--consent` carries the digest of the permissions you reviewed, so a script
+never consents on your behalf.
+A package that asks for nothing is installed without asking.
+`--enable` turns the source on once installed; otherwise it is `installed` and `memcastle source enable <NAME>` is needed
+before it can be mined.
+Installing a name that is already installed replaces it and keeps its state.
+`disable` keeps the files and `remove` deletes them; what a source mined stays in the palace.
+These are administrative and have no `--mode`, and no MCP tool exists for any of them.
 
 ### `checkpoint`
 

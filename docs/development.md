@@ -75,7 +75,9 @@ Every path, environment variable, flag and the precedence between them is in [Co
     the log, the database or any file (subprocess).
   - `tests/config_assets.rs` — the assets override is honoured and checked, and a standalone binary starts with no assets
     (subprocess).
-  - `tests/dependencies.rs` — the lockfile never pulls a second storage engine into the binary (ADR-001).
+  - `tests/dependencies.rs` — the lockfile never pulls a second storage engine into the binary (ADR-001), nor a
+    source-specific SDK or native database binding (ADR-026), and the WebAssembly runtime stays built without the
+    features a source host never uses.
   - `tests/config_bind.rs` — the listener itself: bind address and port precedence, and real bind failures
     (subprocess).
   - `tests/config_paths.rs` — the XDG config, data and state locations, resolved through the real binary
@@ -98,6 +100,15 @@ Every path, environment variable, flag and the precedence between them is in [Co
     each starts a real `memcastle serve`, finds it through its registry file and replays the same fixtures through
     the integration's own client.
     Run them with `mise run integrations:check`, see [ADR-022](adr/022-integrations-are-bun-packages-tested-against-a-real-daemon.md).
+  - `tests/source_conformance.rs` — the same conformance cases run against the built-in `directory` source and against the
+    reference WebAssembly source built from `sources/directory/`, and the guide's list of cases and diagnostic codes
+    against what ships (in-process).
+  - `tests/source_runtime.rs` — installable sources against a real daemon: consent, the lifecycle, mining through the
+    shared pipeline, and refusing a component altered on disk (in-process).
+  - `tests/source_projects.rs` — `memcastle source init`, `build`, `test` and `package` for real, the sandbox
+    (a source cannot read outside its grant, see the environment, outrun its time limit or exceed its memory, or run an
+    unlisted program) and installing through the CLI.
+    It builds components with Cargo for `wasm32-wasip2` into one shared directory (subprocess).
   - `tests/skills.rs` — the shared [agent skills](skills.md): every skill is discoverable, and every tool, CLI command
     and REST route it names exists in this release (in-process daemon, plus the real binary's help).
 
@@ -141,6 +152,15 @@ Those are `tests/db_endpoint.rs`, the `/api/db` entries in `tests/auth.rs` and a
 that starts it.
 `surrealdb-core` and `surrealdb-rpc` are pinned to the exact `surrealdb` version: they are SurrealDB internal API,
 so bump all three together.
+
+Invariant 9 (source-specific code stays out of the pipeline) and invariant 10 (a source package has no ambient authority)
+have no hook, because what they forbid is not something a grep over the whole tree can recognise.
+`tests/source_isolation.rs` reads the source text instead: the pipeline, the chunker and the adapter contract name no
+provider, no file access and no WebAssembly runtime; adapters, the WebAssembly host and `src/source/` never reach the store
+or the jobs (at any depth); only `src/mining/wasm/` names the engine; and the host calls nothing that hands a guest the
+daemon's environment, standard streams, arguments or a writable directory.
+Building the reference WebAssembly sources needs the `wasm32-wasip2` target (`rustup target add wasm32-wasip2`, which
+`rust-toolchain.toml` requests); `mise run sources:check` builds and tests every source under `sources/`.
 
 Two more hooks guard the remaining invariants.
 `job-status-only-via-apply` fails on any `.status =` assignment outside `src/domain/job.rs`,

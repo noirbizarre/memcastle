@@ -128,6 +128,10 @@ chunk_chars = 6000          # characters per drawer; a longer document becomes s
 max_file_bytes = 2097152    # directory mining skips files larger than this
 max_documents = 2000        # documents one job files; the next job continues from the cursor
 # pi_sessions_dir = "/home/alice/.pi/agent/sessions"
+# Installed WebAssembly sources (see "Writing a mining source"): where they live, and what each call may use.
+# sources_dir = "/home/alice/.local/share/memcastle/sources"
+source_memory_mib = 256     # the most memory one call into an installed source may use
+source_timeout_secs = 60    # the longest one call may run; a source's own limits can only lower these
 
 # Only to serve assets from somewhere other than the installed or embedded ones.
 [assets]
@@ -204,6 +208,9 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `mining.max_file_bytes` (1 to 67108864) | `MEMCASTLE_MINING_MAX_FILE_BYTES` | `2097152` |
 | `mining.max_documents` (1 to 1000000) | `MEMCASTLE_MINING_MAX_DOCUMENTS` | `2000` |
 | `mining.pi_sessions_dir` (an absolute path) | `MEMCASTLE_MINING_PI_SESSIONS_DIR` | `~/.pi/agent/sessions` |
+| `mining.sources_dir` (an absolute path) | `MEMCASTLE_MINING_SOURCES_DIR` | `$XDG_DATA_HOME/memcastle/sources` |
+| `mining.source_memory_mib` (16 to 4096) | `MEMCASTLE_MINING_SOURCE_MEMORY_MIB` | `256` |
+| `mining.source_timeout_secs` (1 to 3600) | `MEMCASTLE_MINING_SOURCE_TIMEOUT_SECS` | `60` |
 | `store.sync` (`every`, `never` or an interval over 100ms) | `MEMCASTLE_STORE_SYNC` | `every` |
 | `store.mode` and remote settings | none | `embedded` |
 

@@ -21,6 +21,25 @@ fn code(path: &str) -> String {
         .join("\n")
 }
 
+/// Every `.rs` file under `dir`, at any depth.
+fn rust_files_recursive(dir: &str) -> Vec<String> {
+    fn walk(root: &Path, relative: &str, out: &mut Vec<String>) {
+        for entry in std::fs::read_dir(root.join(relative)).unwrap().flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let path = format!("{relative}/{name}");
+            if entry.path().is_dir() {
+                walk(root, &path, out);
+            } else if name.ends_with(".rs") {
+                out.push(path);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(&root(), dir, &mut files);
+    files.sort();
+    files
+}
+
 /// Every `.rs` file directly under `dir`.
 fn rust_files(dir: &str) -> Vec<String> {
     let mut files: Vec<String> = std::fs::read_dir(root().join(dir))
@@ -58,6 +77,10 @@ fn the_pipeline_and_the_chunker_name_no_provider_and_read_no_files() {
                 "adapters::",
                 "File::open",
                 "read_dir",
+                // Nor does it know that some sources are WebAssembly: a source is a source, whichever it is.
+                "wasmtime",
+                "WasmAdapter",
+                "registry::",
             ]
             .iter(),
         ) {
@@ -83,7 +106,12 @@ fn the_source_model_in_the_domain_does_no_io() {
 
 #[test]
 fn adapters_never_reach_storage_or_the_job_machinery() {
-    for file in rust_files("src/mining/adapters") {
+    // The WebAssembly host is an adapter too: it runs a source, and a source must never reach the store, however it
+    // is implemented. Recursive, so a nested module cannot hide from the check.
+    let files = rust_files_recursive("src/mining/adapters")
+        .into_iter()
+        .chain(rust_files_recursive("src/mining/wasm"));
+    for file in files {
         let source = code(&file);
         for forbidden in [
             "crate::store",
@@ -218,4 +246,82 @@ fn the_matching_policy_is_pure_domain_code() {
             );
         }
     }
+}
+
+#[test]
+fn only_the_webassembly_host_names_the_runtime() {
+    // One module owns the engine, so swapping or sandboxing it again is one place, and nothing else can start
+    // running guest code with authority of its own.
+    for file in rust_files_recursive("src") {
+        if file.starts_with("src/mining/wasm/") {
+            continue;
+        }
+        let source = shipped_code(&file);
+        for forbidden in ["wasmtime", "wasmtime_wasi"] {
+            assert!(
+                !source.contains(forbidden),
+                "{file} mentions `{forbidden}`: only src/mining/wasm/ may run WebAssembly (AGENTS.md invariant 9)"
+            );
+        }
+    }
+}
+
+#[test]
+fn source_tooling_never_reaches_storage_or_the_job_machinery() {
+    // `memcastle source init|build|test|package` run without a daemon (AGENTS.md invariant 1): the module behind
+    // them must not be able to open a palace.
+    for file in rust_files_recursive("src/source") {
+        let source = shipped_code(&file);
+        for forbidden in [
+            "crate::store",
+            "crate::jobs",
+            "SurrealStore",
+            "JobContext",
+            "surrealdb",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{file} mentions `{forbidden}`: source tooling is local and touches neither the store nor the jobs"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_webassembly_host_grants_nothing_beyond_what_a_manifest_lists() {
+    // No ambient authority (AGENTS.md invariant 10): every capability a guest has is built from the manifest's
+    // permissions in `host::state`, so the calls that would hand over the daemon's own environment, standard
+    // streams, arguments or a writable directory must not exist at all.
+    let host = shipped_code("src/mining/wasm/host.rs");
+    for forbidden in [
+        "inherit_env",
+        "inherit_stdio",
+        "inherit_stdin",
+        "inherit_stdout",
+        "inherit_stderr",
+        "inherit_args",
+        "DirPerms::all",
+        "FilePerms::all",
+        "DirPerms::MUTATE",
+        "FilePerms::WRITE",
+        "allow_blocking_current_thread",
+    ] {
+        assert!(
+            !host.contains(forbidden),
+            "src/mining/wasm/host.rs mentions `{forbidden}`: a source gets only what its manifest lists"
+        );
+    }
+    // The one network switch is behind the manifest's own flag.
+    let lines: Vec<&str> = host.lines().collect();
+    let switches: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.contains("inherit_network"))
+        .map(|(index, _)| index)
+        .collect();
+    assert_eq!(switches.len(), 1, "exactly one place may open the network");
+    assert!(
+        lines[switches[0].saturating_sub(1)].contains("permissions.network"),
+        "the network is opened only inside `if permissions.network`"
+    );
 }

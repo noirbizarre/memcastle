@@ -455,6 +455,10 @@ pub const DEFAULT_MINING_CHUNK_CHARS: usize = 6_000;
 pub const DEFAULT_MINING_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 /// The default number of documents one mining run ingests before stopping to be run again.
 pub const DEFAULT_MINING_MAX_DOCUMENTS: usize = 2_000;
+/// The default ceiling on a WebAssembly source's linear memory, in MiB.
+pub const DEFAULT_MINING_SOURCE_MEMORY_MIB: u32 = 256;
+/// The default ceiling on one call into a WebAssembly source, in seconds.
+pub const DEFAULT_MINING_SOURCE_TIMEOUT_SECS: u64 = 60;
 
 /// Mining settings (`[mining]`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -470,6 +474,24 @@ pub struct MiningConfig {
     /// Where the `pi-sessions` source looks for Pi session files when no locator is given. Unset means
     /// `~/.pi/agent/sessions`.
     pub pi_sessions_dir: Option<PathBuf>,
+    /// Where installed WebAssembly sources live (docs/adr/026). Unset means `$XDG_DATA_HOME/memcastle/sources`.
+    pub sources_dir: Option<PathBuf>,
+    /// The most linear memory, in MiB, one call into a WebAssembly source may use. A source's own `[limits]` can ask
+    /// for less, never more.
+    pub source_memory_mib: u32,
+    /// The longest, in seconds, one call into a WebAssembly source may run. A source's own `[limits]` can ask for
+    /// less, never more.
+    pub source_timeout_secs: u64,
+}
+
+impl MiningConfig {
+    /// The directory installed sources live in: the configured one, or the default under the XDG data directory.
+    #[must_use]
+    pub fn sources_dir(&self) -> PathBuf {
+        self.sources_dir
+            .clone()
+            .unwrap_or_else(paths::default_sources_dir)
+    }
 }
 
 impl Default for MiningConfig {
@@ -479,6 +501,9 @@ impl Default for MiningConfig {
             max_file_bytes: DEFAULT_MINING_MAX_FILE_BYTES,
             max_documents: DEFAULT_MINING_MAX_DOCUMENTS,
             pi_sessions_dir: None,
+            sources_dir: None,
+            source_memory_mib: DEFAULT_MINING_SOURCE_MEMORY_MIB,
+            source_timeout_secs: DEFAULT_MINING_SOURCE_TIMEOUT_SECS,
         }
     }
 }
@@ -844,6 +869,17 @@ impl Config {
         if let Some(dir) = lookup("MEMCASTLE_MINING_PI_SESSIONS_DIR") {
             self.mining.pi_sessions_dir = Some(PathBuf::from(dir));
         }
+        if let Some(dir) = lookup("MEMCASTLE_MINING_SOURCES_DIR") {
+            self.mining.sources_dir = Some(PathBuf::from(dir));
+        }
+        if let Some(n) = lookup("MEMCASTLE_MINING_SOURCE_MEMORY_MIB") {
+            self.mining.source_memory_mib =
+                parse_override("MEMCASTLE_MINING_SOURCE_MEMORY_MIB", &n)?;
+        }
+        if let Some(n) = lookup("MEMCASTLE_MINING_SOURCE_TIMEOUT_SECS") {
+            self.mining.source_timeout_secs =
+                parse_override("MEMCASTLE_MINING_SOURCE_TIMEOUT_SECS", &n)?;
+        }
         // Same reasoning as the auth token below: a secret, so no
         // `parse_override`, whose error would echo the value.
         if let Some(key) = lookup("MEMCASTLE_EMBEDDINGS_API_KEY") {
@@ -1115,6 +1151,23 @@ impl Config {
                  to use ~/.pi/agent/sessions",
                 dir.display().to_string()
             )));
+        }
+        if let Some(dir) = mining.sources_dir.as_ref().filter(|dir| !dir.is_absolute()) {
+            return Err(Error::config(format!(
+                "mining.sources_dir {:?} is not an absolute path; set an absolute one or remove it \
+                 to use the default under the XDG data directory",
+                dir.display().to_string()
+            )));
+        }
+        if !(16..=4096).contains(&mining.source_memory_mib) {
+            return Err(Error::config(
+                "mining.source_memory_mib (or MEMCASTLE_MINING_SOURCE_MEMORY_MIB) must be between 16 and 4096",
+            ));
+        }
+        if !(1..=3600).contains(&mining.source_timeout_secs) {
+            return Err(Error::config(
+                "mining.source_timeout_secs (or MEMCASTLE_MINING_SOURCE_TIMEOUT_SECS) must be between 1 and 3600",
+            ));
         }
         Ok(())
     }
@@ -1792,6 +1845,18 @@ mod tests {
                 |c| c.mining.pi_sessions_dir = Some(PathBuf::from("relative")),
                 "mining.pi_sessions_dir",
             ),
+            (
+                |c| c.mining.sources_dir = Some(PathBuf::from("relative")),
+                "mining.sources_dir",
+            ),
+            (
+                |c| c.mining.source_memory_mib = 1,
+                "mining.source_memory_mib",
+            ),
+            (
+                |c| c.mining.source_timeout_secs = 0,
+                "mining.source_timeout_secs",
+            ),
         ] {
             let mut config = Config::default();
             config.palace.path = std::env::temp_dir();
@@ -2107,5 +2172,42 @@ mod tests {
         config.extraction.api_key = Some(Secret::new("sk-very-secret"));
         assert!(!format!("{config:?}").contains("sk-very-secret"));
         assert!(!toml::to_string(&config).unwrap().contains("sk-very-secret"));
+    }
+
+    #[test]
+    fn installed_source_settings_come_from_the_file_then_the_environment() {
+        let mut config: Config = toml::from_str("[mining]\nsource_timeout_secs = 5").unwrap();
+        assert_eq!(config.mining.source_timeout_secs, 5);
+        assert_eq!(
+            config.mining.source_memory_mib,
+            DEFAULT_MINING_SOURCE_MEMORY_MIB
+        );
+
+        config
+            .apply_overrides_from(env(&[
+                ("MEMCASTLE_MINING_SOURCES_DIR", "/srv/sources"),
+                ("MEMCASTLE_MINING_SOURCE_MEMORY_MIB", "128"),
+                ("MEMCASTLE_MINING_SOURCE_TIMEOUT_SECS", "9"),
+            ]))
+            .unwrap();
+
+        assert_eq!(config.mining.sources_dir(), PathBuf::from("/srv/sources"));
+        assert_eq!(config.mining.source_memory_mib, 128);
+        assert_eq!(config.mining.source_timeout_secs, 9);
+        // Unset, the directory is the default under the XDG data directory.
+        assert!(MiningConfig::default().sources_dir().ends_with("sources"));
+    }
+
+    #[test]
+    fn a_malformed_source_variable_is_named_in_the_error() {
+        for name in [
+            "MEMCASTLE_MINING_SOURCE_MEMORY_MIB",
+            "MEMCASTLE_MINING_SOURCE_TIMEOUT_SECS",
+        ] {
+            let err = Config::default()
+                .apply_overrides_from(env(&[(name, "lots")]))
+                .unwrap_err();
+            assert!(err.to_string().contains(name), "{err}");
+        }
     }
 }

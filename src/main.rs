@@ -21,8 +21,8 @@ mod cli;
 use cli::{
     AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, CompletionsArgs, DaemonCommand,
     DbCommand, DiaryCommand, DrawerCommand, EmbedArgs, ExtractArgs, JobCommand, MigrateArgs,
-    MineArgs, RecallArgs, RepairArgs, RoomCommand, SearchArgs, ServeArgs, StatusArgs, WakeUpArgs,
-    WingCommand,
+    MineArgs, RecallArgs, RepairArgs, RoomCommand, SearchArgs, ServeArgs, SourceCommand,
+    StatusArgs, WakeUpArgs, WingCommand,
 };
 use memcastle::app::{DbEndpointRequest, DbEndpointStatus, WakeUpBudget};
 use memcastle::client::{DaemonClient, StatusView};
@@ -74,6 +74,23 @@ async fn async_main() -> ExitCode {
     }
     let verbose = args.verbose > 0 || std::env::var_os("RUST_BACKTRACE").is_some();
     install_miette_hook(verbose);
+    // Also before the configuration: developing a source (`init`, `build`, `test`, `package`) works on a project
+    // directory, needs no daemon and no palace, and a broken config must not get in its way.
+    if let Command::Source(
+        command @ (SourceCommand::Init(_)
+        | SourceCommand::Build(_)
+        | SourceCommand::Test(_)
+        | SourceCommand::Package(_)),
+    ) = &args.command
+    {
+        return match cmd_source_local(command).await {
+            Ok(code) => code,
+            Err(error) => {
+                eprintln!("{:?}", miette::Report::new(error));
+                ExitCode::FAILURE
+            }
+        };
+    }
 
     // Config is loaded before tracing so `logging.level` can drive the
     // filter. A config that fails to load still gets a working logger (at
@@ -201,6 +218,7 @@ async fn run_command(
         Command::WakeUp(args) => cmd_wake_up(&config, mode, args).await,
         Command::Mine(args) => cmd_mine(&config, mode, args).await,
         Command::Sources => cmd_sources(&config, mode).await,
+        Command::Source(command) => cmd_source(&config, mode, command).await,
         Command::Checkpoint(args) => cmd_checkpoint(&config, mode, args).await,
         Command::Audit(args) => cmd_audit(&config, mode, args).await,
         Command::Embed(args) => cmd_embed(&config, mode, args).await,
@@ -570,6 +588,189 @@ async fn cmd_sources(config: &Config, mode: Option<MemoryMode>) -> Result<()> {
         |painter, width| memcastle::client::table::render_sources(&report, painter, width),
         &report,
     )
+}
+
+/// `memcastle source init|build|test|package`: working on a source project, entirely on this machine.
+///
+/// No daemon and no configuration: these operate on a project directory and touch neither the store nor the jobs,
+/// which is what lets someone build a source before they have a palace (AGENTS.md, invariant 1).
+async fn cmd_source_local(command: &SourceCommand) -> Result<ExitCode> {
+    use memcastle::source::build::Project;
+    match command {
+        SourceCommand::Init(args) => {
+            let parent = match &args.parent {
+                Some(parent) => parent.clone(),
+                None => std::env::current_dir().map_err(|source| Error::io(".", source))?,
+            };
+            let (dir, files) =
+                memcastle::source::scaffold::init(&parent, &args.name, args.template)?;
+            let paint = Painter::for_stdout();
+            println!(
+                "{} {} ({} template)",
+                paint.ok("Created"),
+                dir.display(),
+                args.template.name()
+            );
+            for file in files {
+                println!("  {file}");
+            }
+            println!(
+                "\nNext: cd {} && memcastle source build && memcastle source test",
+                dir.display()
+            );
+            Ok(ExitCode::SUCCESS)
+        }
+        SourceCommand::Build(args) => {
+            let project = Project::open(&args.path)?;
+            let component = project.build()?;
+            println!(
+                "{} {}",
+                Painter::for_stdout().ok("Built"),
+                component.display()
+            );
+            Ok(ExitCode::SUCCESS)
+        }
+        SourceCommand::Test(args) => {
+            let project = Project::open(&args.path)?;
+            if !args.no_build {
+                project.build()?;
+            }
+            let report = project
+                .test(&memcastle::config::MiningConfig::default())
+                .await?;
+            let paint = Painter::for_stdout();
+            for case in &report.cases {
+                if case.failures.is_empty() {
+                    println!("{} {}", paint.ok("PASS"), case.name);
+                } else {
+                    println!("{} {}", paint.error("FAIL"), case.name);
+                    for failure in &case.failures {
+                        println!("     {failure}");
+                    }
+                }
+            }
+            Ok(if report.passed() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
+        SourceCommand::Package(args) => {
+            let project = Project::open(&args.path)?;
+            if !args.no_build {
+                project.build()?;
+            }
+            let (archive, package) = project.package(args.output.as_deref())?;
+            println!(
+                "{} {}",
+                Painter::for_stdout().ok("Packaged"),
+                archive.display()
+            );
+            println!("  component sha256 {}", package.digest);
+            println!(
+                "  permissions      {}",
+                package.manifest.permissions.describe()
+            );
+            Ok(ExitCode::SUCCESS)
+        }
+        // Reached only through `async_main`'s check, which sends the daemon-side commands elsewhere.
+        _ => Ok(ExitCode::SUCCESS),
+    }
+}
+
+/// `memcastle source install|list|show|enable|disable|remove`: the daemon's installed sources, over HTTP like every
+/// other command.
+///
+/// No `--mode` for the changes: a memory mode is a session's privilege over memory, and installing a source is an
+/// administrative operation on what the daemon may run, like the token.
+async fn cmd_source(
+    config: &Config,
+    mode: Option<MemoryMode>,
+    command: SourceCommand,
+) -> Result<()> {
+    match command {
+        SourceCommand::List => cmd_sources(config, mode).await,
+        SourceCommand::Show(args) => {
+            let source = client(config, mode).show_source(&args.name).await?;
+            print_for_terminal_or_json(
+                |painter, _| memcastle::client::table::render_source(&source, painter),
+                &source,
+            )
+        }
+        SourceCommand::Install(args) => {
+            let archive = std::fs::read(&args.package)
+                .map_err(|source| Error::io(args.package.display().to_string(), source))?;
+            // Read here only to show what is being agreed to; the daemon reads it again and trusts none of this.
+            let package = memcastle::source::package::inspect(&archive)?;
+            let name = &package.manifest.source.name;
+            let permissions = package.manifest.permissions.normalized();
+            let digest = permissions.consent_digest(name);
+            let consent = if permissions.is_empty() {
+                None
+            } else if let Some(given) = args.consent {
+                Some(given)
+            } else if args.yes {
+                Some(digest)
+            } else if term::is_interactive() {
+                eprintln!(
+                    "{} {} {} asks to: {}",
+                    Painter::for_stderr().warn("Source"),
+                    name,
+                    package.manifest.source.version,
+                    permissions.describe()
+                );
+                term::confirm(
+                    "Install it with these permissions?",
+                    "installing the source",
+                    false,
+                )?;
+                Some(digest)
+            } else {
+                // A script is never asked, and never consents on its own behalf: the daemon refuses, and its error
+                // says to pass `--yes` or `--consent`.
+                None
+            };
+            let installed = client(config, None)
+                .install_source(archive, consent.as_deref(), args.enable)
+                .await?;
+            print_for_terminal_or_json(
+                |painter, _| memcastle::client::table::render_source(&installed.source, painter),
+                &installed,
+            )
+        }
+        SourceCommand::Enable(args) => {
+            let source = client(config, None)
+                .set_source_enabled(&args.name, true)
+                .await?;
+            print_for_terminal_or_json(
+                |painter, _| memcastle::client::table::render_source(&source, painter),
+                &source,
+            )
+        }
+        SourceCommand::Disable(args) => {
+            let source = client(config, None)
+                .set_source_enabled(&args.name, false)
+                .await?;
+            print_for_terminal_or_json(
+                |painter, _| memcastle::client::table::render_source(&source, painter),
+                &source,
+            )
+        }
+        SourceCommand::Remove(args) => {
+            term::confirm(
+                &format!("Remove the source `{}` and its files?", args.name),
+                "removing the source",
+                args.confirm.yes,
+            )?;
+            client(config, None).remove_source(&args.name).await?;
+            print_json(&serde_json::json!({ "removed": args.name }))
+        }
+        // Handled before the configuration is loaded (see `async_main`).
+        SourceCommand::Init(_)
+        | SourceCommand::Build(_)
+        | SourceCommand::Test(_)
+        | SourceCommand::Package(_) => Ok(()),
+    }
 }
 
 async fn cmd_checkpoint(

@@ -10,6 +10,7 @@ mod auth;
 mod db_endpoint;
 mod graph;
 mod palace;
+mod source_packages;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,6 +19,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::config::DedupConfig;
+use crate::config::MiningConfig;
 use crate::domain::{
     CheckpointDestination, CheckpointPayload, Drawer, DrawerId, FactMutation, Job, JobId, JobKind,
     JobStatus, MemoryMode, MiningSource, NameKind, Priority, Provenance, Source, SourceKind,
@@ -35,6 +37,7 @@ pub use db_endpoint::{DbEndpoint, DbEndpointRequest, DbEndpointStatus};
 pub use palace::{
     Created, DEFAULT_LIST_LIMIT, DrawerReplacement, EntityLink, Superseded, WingDetail,
 };
+pub use source_packages::InstalledSource;
 
 /// A point-in-time summary of daemon health, for `GET /api/status`,
 /// `memcastle status`, and the `memcastle_status` MCP tool alike.
@@ -283,6 +286,8 @@ pub struct AppServices {
     extraction: Extraction,
     /// The `[dedup]` settings, for the writes the services make themselves (diary, drawer create, mentions).
     dedup: DedupConfig,
+    /// The `[mining]` settings, for where installed sources live and the limits they run under.
+    mining: MiningConfig,
 }
 
 impl AppServices {
@@ -299,6 +304,7 @@ impl AppServices {
             embeddings: Embeddings::disabled(),
             extraction: Extraction::disabled(),
             dedup: DedupConfig::default(),
+            mining: MiningConfig::default(),
         }
     }
 
@@ -306,6 +312,13 @@ impl AppServices {
     #[must_use]
     pub fn with_dedup(mut self, dedup: DedupConfig) -> Self {
         self.dedup = dedup;
+        self
+    }
+
+    /// Give the services the `[mining]` settings: where installed sources live and the limits they run under.
+    #[must_use]
+    pub fn with_mining(mut self, mining: MiningConfig) -> Self {
+        self.mining = mining;
         self
     }
 
@@ -576,7 +589,7 @@ impl AppServices {
         mode: MemoryMode,
     ) -> Result<Job> {
         Self::require_write(mode, "mine")?;
-        let source = Self::checked_mining_source(source)?;
+        let source = self.checked_mining_source(source).await?;
         // Up front, like the path: a bad wing name is a 400 at submission,
         // not a job that fails once it starts. A wing derived from the
         // directory name is left alone, since the caller did not choose it.
@@ -594,7 +607,7 @@ impl AppServices {
 
     /// Validate a mining source at submission, and give the `directory`
     /// provider its one canonical form.
-    fn checked_mining_source(source: MiningSource) -> Result<MiningSource> {
+    async fn checked_mining_source(&self, source: MiningSource) -> Result<MiningSource> {
         let path = match source {
             MiningSource::Directory { path } => path,
             MiningSource::Provider { provider, locator } if provider == "directory" => {
@@ -607,17 +620,10 @@ impl AppServices {
                 PathBuf::from(locator)
             }
             MiningSource::Provider { provider, locator } => {
-                if !crate::mining::is_provider(&provider) {
-                    let known = crate::mining::providers()
-                        .into_iter()
-                        .map(|provider| provider.name)
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    return Err(Error::invalid_input(
-                        "source",
-                        format!("unknown source `{provider}`; known sources: {known}"),
-                    ));
-                }
+                // Unknown, disabled and unavailable sources are refused here, as a 4xx at the request, rather
+                // than as a job that fails once it starts.
+                crate::mining::registry::ensure_minable(&self.store, &self.mining, &provider)
+                    .await?;
                 return Ok(MiningSource::Provider { provider, locator });
             }
         };
@@ -665,7 +671,7 @@ impl AppServices {
             });
         }
         Ok(SourcesReport {
-            providers: crate::mining::providers(),
+            providers: crate::mining::providers(&self.store, &self.mining).await?,
             sources,
         })
     }

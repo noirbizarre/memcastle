@@ -1,0 +1,15 @@
+# Reference sources
+
+One directory per source, each a complete source package (docs/writing-sources.md): a `memcastle-source.toml`, the code
+that implements `wit/memcastle-source.wit`, and the conformance cases it is tested with.
+
+| Directory | Provider | What it is |
+|---|---|---|
+| `directory/` | `directory-wasm` | The built-in `directory` source, written as a Rust component. The worked example. |
+
+They are maintained as examples and as the second implementation the conformance cases are run against, so that the
+built-in and the WebAssembly contract cannot drift apart.
+A source here is built with `memcastle source build` and tested with `memcastle source test`;
+`mise run sources:check` builds and tests them all.
+They are not compiled into MemCastle, and a source that ships with MemCastle's releases uses exactly the same package
+contract as one a user installs.

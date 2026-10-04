@@ -100,6 +100,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
+          # `tests/source_conformance.rs` builds the reference WASM source under `sources/`.
+          targets: wasm32-wasip2
       - uses: Swatinem/rust-cache@v2
 
       # mold is Linux-only (it doesn't support the Windows/macOS linkers),

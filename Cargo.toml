@@ -176,6 +176,21 @@ dirs = "7.0.0"
 sha2 = "0.11.0"
 dashmap = "6.2.1"
 
+# The source runtime (docs/adr/026): third-party mining sources are WebAssembly Components run in-process, behind the
+# `SourceAdapter` contract. Only `mining::wasm` may name these crates (`tests/source_isolation.rs`). Pinned to 41,
+# the newest line whose MSRV is this crate's (42 needs Rust 1.91); a newer line is a deliberate MSRV bump.
+# `default-features = false` drops the profiler, GC, coredump, debug and cache stacks a source host never uses; what is
+# left is the Cranelift compiler, the component model, and async support (which WASI preview 2 requires).
+wasmtime = { version = "41.0.4", default-features = false, features = ["runtime", "cranelift", "component-model", "async", "std"] }
+# WASI preview 2 is what a `wasm32-wasip2` component imports. Nothing is granted by default: `mining::wasm` builds each
+# context from the manifest's permissions alone.
+wasmtime-wasi = { version = "41.0.4", default-features = false, features = ["p2"] }
+# Source manifests state which MemCastle versions they run on (`[compatibility] memcastle = ">=0.3, <0.4"`).
+semver = "1"
+# A source package is a gzip-compressed tarball: `memcastle source package` writes it, `source install` reads it.
+tar = { version = "0.4", default-features = false }
+flate2 = "1"
+
 # Authentication (see docs/adr/014): `subtle` for constant-time digest
 # comparison, `getrandom` for OS-sourced token entropy. Both were already
 # in the lockfile transitively, so this adds no new supply-chain surface.
@@ -190,9 +205,6 @@ insta = { version = "1", features = ["filters"] }
 # Only `tests/concurrency.rs` needs this (`join_all` over many simulated
 # clients) — not a real dependency, so it stays out of `[dependencies]`.
 futures = "0.3.34"
-# Only `tests/skills.rs` needs this: it parses each skill's `memcastle-version` range and checks the crate satisfies it.
-# Already in the lockfile through other dependencies, so it adds no new package.
-semver = "1"
 
 # The integration tests spawn the `memcastle` binary as a subprocess and need
 # tokio's `process` for that; the daemon itself never does.
@@ -235,6 +247,30 @@ libc = "0.2.189"
 # workflow. Line tables alone still give RUST_BACKTRACE=full's file:line
 # backtraces.
 debug = "line-tables-only"
+
+# Compiling a source's component with Cranelift is the one heavy thing a debug build of the test suite does, and an
+# unoptimised Cranelift makes it take tens of seconds. Optimising just these crates costs a one-time build and makes
+# every source test (and `memcastle source test`) fast. `cargo test` inherits these from `dev`.
+[profile.dev.package.cranelift-codegen]
+opt-level = 2
+[profile.dev.package.cranelift-frontend]
+opt-level = 2
+[profile.dev.package.cranelift-entity]
+opt-level = 2
+[profile.dev.package.cranelift-bforest]
+opt-level = 2
+[profile.dev.package.cranelift-bitset]
+opt-level = 2
+[profile.dev.package.cranelift-control]
+opt-level = 2
+[profile.dev.package.regalloc2]
+opt-level = 2
+[profile.dev.package.wasmtime-internal-cranelift]
+opt-level = 2
+[profile.dev.package.wasmtime-environ]
+opt-level = 2
+[profile.dev.package.wasmparser]
+opt-level = 2
 
 [profile.test]
 # cargo test/nextest use this profile, not dev — mirror the same

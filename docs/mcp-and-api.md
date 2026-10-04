@@ -157,6 +157,11 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `POST /api/entities/{id}/aliases` | Record another spelling of an entity, so later sightings converge on it. | JSON body: `alias` |
 | `POST /api/auth/token` | Generate a token, replacing any previous one: `{token, algorithm, version, created_at}`. | none |
 | `DELETE /api/auth/token` | Revoke the generated token: `{"revoked": true}`. | none |
+| `POST /api/source-packages` | Install a [source package](writing-sources.md): the body is the `.tar.gz` itself. Answers `{source, replaced}`. | query string: `consent` (the digest of the permissions agreed to), `enable` |
+| `GET /api/source-packages/{name}` | One source, built in or installed: capabilities, state, permissions. | none |
+| `POST /api/source-packages/{name}/enable` | Allow an installed source to be mined. Idempotent. | none |
+| `POST /api/source-packages/{name}/disable` | Stop an installed source from being mined. Idempotent. | none |
+| `DELETE /api/source-packages/{name}` | Remove an installed source and its files: `{"removed": name}`. | none |
 | `GET /api/db` | Whether the [database admin endpoint](database-access.md) is listening, and where. | none |
 | `POST /api/db` | Open the database admin endpoint, or report it when it is already open. | JSON body, all optional: `bind`, `port`, `allow_remote`, `allowed_origins` |
 | `DELETE /api/db` | Close the database admin endpoint. Succeeds when it was not open. | none |
@@ -280,6 +285,21 @@ The token in the response to `POST /api/auth/token` is the only time it is ever 
 Neither route has an MCP tool: MCP exposes memory capabilities and never credential management.
 The status report's `auth_enabled` says whether the daemon requires a token, and never includes one.
 
+### Installing sources
+
+The `/api/source-packages` routes install, inspect, enable, disable and remove [mining sources](writing-sources.md):
+WebAssembly components that run in the daemon, in a sandbox, with only the permissions their manifest lists.
+They are guarded by [authentication](authentication.md) like every other route, accept a body up to 64 MiB,
+and have no MCP tool: an agent must not be able to install code or widen its own reach
+([ADR-026](adr/026-pluggable-source-adapters-as-webassembly-components.md)).
+They are not gated by a memory mode, which guards access to memory; `GET .../{name}` is a read, like `GET /api/sources`.
+A package that asks for permissions is refused with `memcastle::source::consent_required` (a `400`) unless `consent`
+carries the digest of exactly those permissions, which the refusal's `help` names.
+A built-in source cannot be disabled or removed (`memcastle::source::builtin`, `400`); an unknown name is a `404`
+(`memcastle::source::not_found`); enabling a source that is `unavailable`, or mining one that is not enabled, is a `409`
+(`memcastle::source::not_enabled`).
+`POST /api/jobs` refuses a `mine` for such a source the same way, at submission.
+
 ### The database admin endpoint
 
 The three `/api/db` routes open and close a separate listener that speaks SurrealDB's own protocol, so SurrealDB Studio
@@ -367,14 +387,17 @@ An unknown `provider` is a `400` that names the known ones.
 
 ```json
 {
-  "providers": [{"name": "pi-sessions", "description": "...", "capabilities": {"incremental": true, "retains_raw": true, "needs_credentials": false}}],
+  "providers": [{"name": "pi-sessions", "description": "...", "capabilities": {"incremental": true, "retains_raw": true, "needs_credentials": false},
+                 "origin": "builtin", "state": "enabled", "permissions": {...}}],
   "sources": [{"id": "...", "provider": "pi-sessions", "account": null, "locator": "/home/alice/.pi/agent/sessions",
                "cursor": {"mtime_ns": 1784039240000000000, "key": "..."}, "last_job": "...", "last_run_at": "...", "documents": 12}]
 }
 ```
 
+A provider's `origin` is `builtin` or `package`; an installed one also has a `version`, and a `state` of `installed`,
+`enabled`, `disabled` or `unavailable` (with an `unavailable_reason`).
 It is a read, so a `disabled` session is refused, and it is guarded like every route but the health check.
-There is no MCP tool for it, and none for credentials.
+There is no MCP tool for it, and none for credentials or for installing sources.
 
 The `demo` job kind is REST and CLI only; it is not offered over MCP.
 

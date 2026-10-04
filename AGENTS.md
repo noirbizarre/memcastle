@@ -24,7 +24,9 @@ An invariant nothing checks is a comment, and it will be violated.
    every subcommand except `serve`/`migrate` only calls `client::DaemonClient`, never `store` or `jobs`
    directly (`completions` calls neither: it prints a script locally).
    (`daemon start` and `daemon restart` also manage the daemon *process* — they read the registry file
-   via `server::lifecycle` and spawn `serve` detached — but touch neither `store` nor `jobs`.)
+   via `server::lifecycle` and spawn `serve` detached — but touch neither `store` nor `jobs`.
+   `source init`, `build`, `test` and `package` work on a project directory with no daemon at all, through `crate::source`,
+   which `tests/source_isolation.rs` holds to touching neither `store` nor `jobs`.)
    `migrate` is a second, narrow exception alongside `serve`: it connects to storage directly (via
    `crate::migrate::run`/`status`, the same runner `serve` calls on every startup) because migration must work
    without, and before, a daemon exists — see `docs/adr/004-versioned-database-migrations.md`.
@@ -82,6 +84,9 @@ An invariant nothing checks is a comment, and it will be violated.
    `src/mining/adapters/`, and the pipeline, the chunker and the domain model know no source by name and read no file.
    An adapter never touches the store or the jobs, and only the pipeline writes a source's cursor and document records,
    after the drawers they describe (see `docs/adr/023-unified-source-model-for-mining.md`).
+   A source is built in or an installed WebAssembly component (`src/mining/wasm/`, the only module that names the
+   runtime), behind the same contract, and the pipeline cannot tell which
+   (see `docs/adr/026-pluggable-source-adapters-as-webassembly-components.md`).
    Entity extraction is the stage after: it reads drawers, names no source, and only adds graph records, never writing a
    drawer (see `docs/adr/024-entity-extraction-as-an-enrich-job.md`).
    Enforced by `tests/source_isolation.rs`, which fails on a provider name or file access in `pipeline.rs`, `chunk.rs`
@@ -90,6 +95,23 @@ An invariant nothing checks is a comment, and it will be violated.
    Deduplication is called by the pipeline for every chunk it stores, so `src/dedup` obeys the same rule: it names no
    source, reads no file and writes no source record, and the matching policy in `domain/fingerprint.rs` and
    `domain/resolution.rs` stays pure (see `docs/adr/025-memory-deduplication-and-entity-resolution.md`).
+   The host, the adapters and `src/source/` reaching `store` or `jobs`, and any module but `src/mining/wasm/` naming the
+   runtime, fail the same test.
+
+10. **An installed source has no ambient authority, and installing one is administrative** —
+    a WebAssembly source starts with no filesystem, environment, network or programs, and the host grants exactly what its
+    manifest lists and the user consented to at install (a digest of the name and the permissions), read-only for files,
+    with a memory ceiling and a time limit.
+    Its component is checked against the digest recorded at install on every load, and `unavailable` is computed,
+    never stored.
+    Install, enable, disable and remove are REST and CLI only, with no MCP tool, so an agent cannot install code or widen
+    its own reach (see `docs/adr/026-pluggable-source-adapters-as-webassembly-components.md`).
+    Enforced by `tests/source_isolation.rs` (the host calls nothing that inherits the environment, standard streams,
+    arguments or a writable directory, and opens the network only inside the manifest's flag),
+    by `tests/source_projects.rs` (a real source cannot read outside its grant, see the environment, outrun its time
+    limit or memory, or run an unlisted program),
+    by `tests/source_runtime.rs` (no install without the exact consent, an altered component is never run)
+    and by `tests/auth.rs` (every `/api/source-packages` route is guarded, no MCP tool installs or changes a source).
 
 ## Layout
 
@@ -107,7 +129,9 @@ src/
 ├── assets/     runtime asset resolution (override, installed, embedded); never user data, never the network
 ├── dbadmin/    the database admin endpoint: SurrealDB's WebSocket protocol over the daemon's own handle
 ├── jobs/       the scheduler: claiming, dispatch, cooperative pause/cancel, crash recovery
-├── mining/     the mining job handler: the source adapter contract, the shared pipeline and chunker, and one adapter per source
+├── mining/     the mining job handler: the source adapter contract, the shared pipeline and chunker, the built-in adapters,
+│               the registry that names them, and the WebAssembly host that runs installed sources (`wasm/`)
+├── source/     source packages: manifest, archive, scaffolding, build, and the conformance runner (no store, no jobs)
 ├── checkpoint/ the checkpoint job handler (durable, resumable memory writes)
 ├── audit/      the audit job handler (read-only consistency report)
 ├── repair/     the repair job handler (narrow, dry-run-first fixes)
@@ -121,6 +145,8 @@ src/
 ├── api/        the REST API (health/status/jobs/search/recall/wake-up/diary/wings/rooms/drawers/auth-token/db/shutdown)
 └── client/     the CLI's HTTP client for a running daemon, and the human renderings of its answers (status, tables)
 
+wit/            the source contract (`memcastle:source`), the one definition components and the host are built from
+sources/        reference WebAssembly sources, one package per directory, built and tested but not compiled into MemCastle
 integrations/   per-agent lifecycle adapters (Pi, OpenCode, ...), in each agent's own language, over MCP and HTTP only
 skills/         reusable agent instructions shared by every integration; `tests/skills.rs` holds them to the
                 tools, commands and routes they name (docs/skills.md)

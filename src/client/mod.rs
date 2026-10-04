@@ -428,6 +428,76 @@ impl DaemonClient {
             .await
     }
 
+    /// Install a source package (the archive's bytes). `consent` is the digest of the permissions the user agreed to.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable, or the daemon's refusal (a package that is not
+    /// valid, consent that is missing).
+    pub async fn install_source(
+        &self,
+        archive: Vec<u8>,
+        consent: Option<&str>,
+        enable: bool,
+    ) -> Result<crate::app::InstalledSource> {
+        let mut request = self
+            .http
+            .post(format!("{}/api/source-packages", self.base_url))
+            .header(reqwest::header::CONTENT_TYPE, "application/gzip")
+            .query(&[("enable", enable.to_string())])
+            .body(archive);
+        if let Some(consent) = consent {
+            request = request.query(&[("consent", consent)]);
+        }
+        self.send(request).await
+    }
+
+    /// One source, built in or installed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable, or [`Error::SourceNotFound`]'s body.
+    pub async fn show_source(&self, name: &str) -> Result<crate::mining::ProviderInfo> {
+        self.send(
+            self.http
+                .get(format!("{}/api/source-packages/{name}", self.base_url)),
+        )
+        .await
+    }
+
+    /// Turn an installed source on or off.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable, or the daemon's refusal.
+    pub async fn set_source_enabled(
+        &self,
+        name: &str,
+        enabled: bool,
+    ) -> Result<crate::mining::ProviderInfo> {
+        let action = if enabled { "enable" } else { "disable" };
+        self.send(self.http.post(format!(
+            "{}/api/source-packages/{name}/{action}",
+            self.base_url
+        )))
+        .await
+    }
+
+    /// Remove an installed source.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable, or the daemon's refusal.
+    pub async fn remove_source(&self, name: &str) -> Result<()> {
+        let _: serde_json::Value = self
+            .send(
+                self.http
+                    .delete(format!("{}/api/source-packages/{name}", self.base_url)),
+            )
+            .await?;
+        Ok(())
+    }
+
     /// Submit a read-only palace consistency audit — see
     /// `AppServices::submit_audit`.
     ///

@@ -156,3 +156,12 @@ identity.
 Mining still stores every chunk (two identical files are two records), and the pipeline now also asks `dedup::link` what
 each stored chunk resembles in its room, recording a `similar_to` edge and counting `similar` in the job's result.
 The pipeline learns nothing about sources from it, and `tests/source_isolation.rs` holds the module to that.
+
+## Amendment (2026-10-04, installed sources)
+
+The adapter contract this ADR defines now has a second kind of implementation: a WebAssembly component installed by the
+user, behind the same trait ([ADR-026](026-pluggable-source-adapters-as-webassembly-components.md)).
+That ADR also adds the registry of installed sources that this one left for later.
+The consequence above is narrowed accordingly: adding a *built-in* provider is a file, a variant in `mining::registry`
+and a docs section, while any other provider is a package.
+The pipeline, the chunker and the wire shape of a job did not change.

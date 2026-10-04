@@ -111,8 +111,8 @@ memcastle mine --source pi-sessions --locator /backups/pi/sessions
 memcastle mine --source pi-sessions --full
 ```
 
-`memcastle sources` (`GET /api/sources`) lists the adapters, then each source that has been mined with its document
-count, last job and last run.
+`memcastle sources` (`GET /api/sources`) lists the adapters (built in and installed, with their state), then each source
+that has been mined with its document count, last job and last run.
 Over HTTP, a source job is `{"type": "mine", "provider": "pi-sessions", "locator": "...", "full": false}` on
 `POST /api/jobs`, and over MCP `memcastle_mine` takes `source`, `locator` and `full` beside `path` and `wing`.
 Mining is a write, so a [read-only or disabled session](memory-modes.md) cannot start it.
@@ -161,9 +161,19 @@ The reader follows Pi's session format version 3 and opens nothing else under Pi
 credentials file.
 The raw session file is kept next to the drawers, because Pi's sessions are the user's to rotate away.
 
-## Writing an adapter
+## Writing a source
 
-An adapter implements `mining::adapter::SourceAdapter`, one file under `src/mining/adapters/`:
+There are two ways to add a source.
+
+- **A package** is a WebAssembly component the user installs, in any language that produces one.
+  This is the extension model: the core compiles no source-specific code, and a source can be written, shipped and
+  updated without a MemCastle release.
+  [Writing a mining source](writing-sources.md) is the guide (the contract, the manifest, permissions, lifecycle,
+  conformance, packaging), and `memcastle source init` scaffolds one.
+- **A built-in adapter** is Rust compiled into MemCastle, for the few sources that are simpler or faster native.
+
+Both implement the same contract, and a source cannot tell which kind it is.
+The contract is `mining::adapter::SourceAdapter`, one file under `src/mining/adapters/` for a built-in:
 
 | Method | Contract |
 |---|---|
@@ -174,9 +184,11 @@ An adapter implements `mining::adapter::SourceAdapter`, one file under `src/mini
 | `read(source, candidate)` | One `RawDocument` with a **revision** that changes exactly when the content does, or `None` to skip. |
 | `normalize(raw)` | A `CanonicalDocument`. Pure: no I/O, so it is testable from fixtures. |
 
-Then add an arm to `mining::run` and an entry to `mining::providers`.
+A built-in adapter also needs a variant in `mining::registry::AnySource`, its name in `registry::BUILTIN_NAMES` (which
+keeps an installed package from shadowing it), and a section on this page.
 What an adapter must not do, and a test (`tests/source_isolation.rs`) enforces: touch the store or the job machinery, which
-the pipeline owns; and what the pipeline must not do: name a provider or read a file.
+the pipeline owns; and what the pipeline must not do: name a provider, name the WebAssembly runtime, or read a file.
+The same conformance cases (`tests/fixtures/sources/conformance/`) run against built-in and installed sources.
 A cursor is the adapter's own JSON object, opaque to MemCastle.
 An adapter whose cursor does not parse returns `memcastle::mining::cursor_invalid`, whose help says to mine with `--full`.
 

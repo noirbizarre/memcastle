@@ -241,6 +241,7 @@ description = "Run the architecture guard hooks over the whole tree"
 # The same hooks CI runs through `prek run --all-files`, minus the ones that
 # duplicate other tasks (fmt, clippy, typos, markdownlint, actionlint). These
 # enforce AGENTS.md invariants 1, 2, 4, 5 and 8, which nothing else in `check` covers.
+# Invariants 9 and 10 are enforced by tests (`tests/source_isolation.rs`), not hooks: see docs/development.md.
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
@@ -267,5 +268,20 @@ for manifest in integrations/*/package.json; do
   echo "==> $package"
   # --frozen-lockfile: a lockfile that disagrees with package.json is a failure here, not a silent rewrite.
   (cd "$package" && bun install --frozen-lockfile && bun run typecheck && bun run test)
+done
+"""
+
+[tasks."sources:check"]
+description = "Build and conformance-test every reference WebAssembly source under sources/"
+# `memcastle source build` is what a source author runs, so this is also the proof that it works on the reference
+# sources. It needs the `wasm32-wasip2` target, which rust-toolchain.toml requests.
+depends = ["build"]
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+for manifest in sources/*/memcastle-source.toml; do
+  source="$(dirname "$manifest")"
+  echo "==> $source"
+  ./target/debug/memcastle source test "$source"
 done
 """

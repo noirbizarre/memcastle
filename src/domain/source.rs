@@ -74,7 +74,9 @@ impl SourceRef {
 }
 
 /// What an adapter can do, so the core and the user know what to expect of it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+// A manifest may state only what is true of the source; the rest is the conservative `false`.
+#[serde(default)]
 pub struct SourceCapabilities {
     /// Whether the cursor narrows discovery to what changed (otherwise every run re-reads everything and relies on
     /// revisions to skip what is unchanged).
