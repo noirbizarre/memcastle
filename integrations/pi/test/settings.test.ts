@@ -41,3 +41,16 @@ test("the keep-alive interval defaults to a value inside the daemon's idle limit
   expect(resolveSettings({ keepAliveMs: -5 }, {}).keepAliveMs).toBe(120_000)
   expect(resolveSettings({ keepAliveMs: "soon" }, {}).keepAliveMs).toBe(120_000)
 })
+
+test("wake-up settings are resolved with the rest, and kept apart from the memory mode", () => {
+  const settings = resolveSettings({ mode: "read-only", wakeUp: { mode: "sync", source: "user" } }, {})
+  expect(settings.mode).toBe("read-only")
+  expect(settings.wakeUp).toMatchObject({ enabled: true, mode: "sync", source: "user" })
+})
+
+test("wake-up reads its own environment variables and does not mistake MEMCASTLE_MODE for its mode", () => {
+  const settings = resolveSettings(undefined, { MEMCASTLE_MODE: "read-only", MEMCASTLE_WAKE_UP_MODE: "sync" })
+  expect(settings.mode).toBe("read-only")
+  expect(settings.wakeUp.mode).toBe("sync")
+  expect(resolveSettings(undefined, {}).wakeUp).toEqual({ enabled: true, mode: "async", source: "project", wing: null })
+})

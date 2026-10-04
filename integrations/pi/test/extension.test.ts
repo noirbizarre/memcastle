@@ -4,7 +4,7 @@ import memcastle from "../src/extension.ts"
 
 type Handler = (event: unknown, ctx: ExtensionContext) => unknown
 
-/** The only part of Pi the extension touches in the foundation: `on`, and `ui.notify`. */
+/** The only parts of Pi the extension touches: `on`, `registerCommand`, and `ui.notify`. */
 function fakePi() {
   const handlers = new Map<string, Handler[]>()
   const notes: { message: string; level: string }[] = []
@@ -13,8 +13,10 @@ function fakePi() {
       handlers.set(event, [...(handlers.get(event) ?? []), handler])
       return () => undefined
     },
+    // Wake-up registers a command at load; this test only needs it to be accepted.
+    registerCommand: () => undefined,
   } as unknown as ExtensionAPI
-  const ctx = { ui: { notify: (message: string, level: string) => notes.push({ message, level }) } } as unknown as ExtensionContext
+  const ctx = { cwd: "/work/memcastle", ui: { notify: (message: string, level: string) => notes.push({ message, level }) } } as unknown as ExtensionContext
   const fire = async (event: string, payload: object = {}) => {
     for (const handler of handlers.get(event) ?? []) await handler({ type: event, ...payload }, ctx)
   }
@@ -39,7 +41,7 @@ test("loading the extension only registers handlers: nothing is opened until a s
   process.env.MEMCASTLE_MODE = "readonly" // would be reported if the factory read settings
   const { pi, handlers, notes } = fakePi()
   memcastle(pi)
-  expect([...handlers.keys()].sort()).toEqual(["session_shutdown", "session_start"])
+  expect([...handlers.keys()].sort()).toEqual(["before_agent_start", "session_shutdown", "session_start"])
   expect(notes).toEqual([])
 })
 
