@@ -221,8 +221,8 @@ so staying inside the request is a rule here and not a courtesy.
 - **Two strikes, then ask.**
   If the same approach fails twice (a tool, a flag, a workaround), stop and ask rather than building a third one.
 - **Estimate before anything heavy.**
-  Describe the cost first, and wait for a yes, for anything expected to take more than about ten minutes or to saturate the
-  CPU: instrumented builds, repeated full-suite runs, many WebAssembly builds.
+  Describe the cost first, and wait for a yes, for anything expected to take more than about ten minutes or to saturate
+  the CPU: instrumented builds, repeated full-suite runs, many WebAssembly builds.
 - **Do not promise before knowing.**
   Do not call work easy or small until its size is known.
   When it turns out larger than said, report the real size and offer to stop.
