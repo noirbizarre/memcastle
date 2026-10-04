@@ -1,0 +1,15 @@
+{
+  "name": "memcastle-integrations-common",
+  "private": true,
+  "description": "Tests that need two MemCastle integrations side by side, and the daemon harness they share",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test --timeout 60000"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^7.0.2"
+  }
+}

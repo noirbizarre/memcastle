@@ -271,8 +271,14 @@ run = """
 #!/usr/bin/env bash
 set -euo pipefail
 export MEMCASTLE_BIN="$PWD/target/debug/memcastle"
+packages=()
 for manifest in integrations/*/package.json; do
   package="$(dirname "$manifest")"
+  [ "$package" = integrations/common ] || packages+=("$package")
+done
+# `common` runs the integrations' own sources side by side (ADR-027), so it needs their dependencies installed first.
+packages+=(integrations/common)
+for package in "${packages[@]}"; do
   echo "==> $package"
   # --frozen-lockfile: a lockfile that disagrees with package.json is a failure here, not a silent rewrite.
   (cd "$package" && bun install --frozen-lockfile && bun run typecheck && bun run test)

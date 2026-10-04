@@ -81,3 +81,6 @@ The history is the value.
 - [ADR-026](026-pluggable-source-adapters-as-webassembly-components.md) — mining sources are pluggable as
   WebAssembly components behind the same adapter contract, with explicit consented permissions, a computed lifecycle,
   a `source` command group for development and one conformance suite run against native and WebAssembly sources
+- [ADR-027](027-cross-integration-tests-live-in-a-common-package.md) — tests that need two integrations live in a
+  test-only `integrations/common` package that imports their sources, and production code stays per package
+  (amends ADR-022)

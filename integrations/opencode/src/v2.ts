@@ -154,7 +154,6 @@ export const setup = async (ctx: Plugin.Context): Promise<(() => Promise<void>) 
   // V2's counterpart of V1's `experimental.session.compacting`: the transcript is about to be summarised (#34).
   // The hook already holds the messages, so the emergency review reads them from here and not back from the session.
   await ctx.session.hook("compaction", (input) => core.compacting(input.sessionID, v2Turns(input.messages)))
-  await ctx.tool.hook("execute.before", () => core.toolBefore())
 
   // The checkpoint tool and its slash command. A host that refuses them loses only these: everything above still works.
   try {

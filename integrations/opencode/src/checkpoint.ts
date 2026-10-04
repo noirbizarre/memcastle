@@ -171,9 +171,20 @@ export function createCheckpoints(options: {
           "The plugin submits what the reviewer replies with.",
         )
       }
+      // Refused here, for a payload the model wrote as for a review the plugin would run: a `read-only` session never
+      // attempts a write. The daemon would refuse it too, but only after a rejected call a client that already knows the
+      // mode has no reason to make, and a review would first have paid for a model call whose result is thrown away.
+      if (settings.mode !== "full") {
+        throw new MemCastleFailure(
+          "mode_rejected",
+          `This session is ${settings.mode}, so it cannot write a checkpoint.`,
+          "memcastle::app::mode_forbidden",
+          "Start the session with MEMCASTLE_MODE=full to checkpoint.",
+        )
+      }
       const state = stateOf(sessionId)
       if (args.payload !== undefined) {
-        // The model classified it itself, so the plugin only checks it and submits it. The daemon enforces the memory mode.
+        // The model classified it itself, so the plugin only checks it and submits it.
         const payload = validatePayload(args.payload, settings.agentIdentity, "Fix the payload and call the tool again.")
         if (payload.items.length === 0) return describeOutcome({ kind: "nothing", reason: "nothing worth keeping" })
         const job = await submitCheckpoint(sessions.session(sessionId), payload, {

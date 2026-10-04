@@ -198,11 +198,51 @@ agree on what a checkpoint is and which failures they report.
   daemon that is down says how to start it.
   Through the tool the failure is thrown, so OpenCode marks the call failed with that text.
 - A `read-only` session never reviews on its own and the tool says why it saved nothing; an `off` session registers no
-  hooks.
+  hooks (see [Memory modes](#memory-modes)).
 - The review never emits a fact mutation, because that needs ids no MCP tool hands out: `fact` is always `null`.
 - A mistyped checkpoint value falls back to its default rather than breaking the session.
 
 OpenCode 2 evidence is types only, as for the rest of the OpenCode 2 mapping in [the research](docs/research.md#opencode-2).
+
+### Memory modes
+
+OpenCode has no per-session settings, so the mode comes from where OpenCode keeps configuration:
+the plugin option `mode` in `opencode.json` (a project's own `opencode.json` makes it a per-workspace choice),
+or `MEMCASTLE_MODE`, with the option winning.
+It is read once, when the plugin loads, and applies to every OpenCode session in that process.
+Each session still has its own MCP connection, with the daemon-side mode selected on it before any other call and again
+after every reconnect, so two OpenCode processes, or an OpenCode process and a Pi session, keep different modes against
+one daemon without affecting each other.
+The label is translated to the daemon's wire value (`off` is `disabled`, `read-only` is `read_only`).
+
+| | `full` | `read-only` | `off` |
+| --- | --- | --- | --- |
+| Connection | one per session, lazily | one per session, lazily | **none** |
+| Wake-up | added to every request's system prompt | added | nothing |
+| Search-before-answer reminder | added to every request | added | nothing |
+| Native skills | registered | registered | nothing |
+| Interval review, emergency checkpoint | run | skipped, no model call | nothing |
+| `memcastle_checkpoint` tool and `/memcastle-checkpoint` | review or save | refuse, with the way out; no write is sent, even for a payload the model wrote | not registered |
+
+- **`read-only` skips writes instead of attempting them.**
+  The daemon would refuse them with `memcastle::app::mode_forbidden`, but only after a rejected call, and after a review
+  had paid for a model call whose result must be thrown away.
+  The tool throws a failure of class `mode_rejected` that says to start with `MEMCASTLE_MODE=full`.
+- **`off` is absent, not refused.**
+  `createCore` returns nothing, so V1 returns no hooks and V2 registers none: there is no connection, no health check,
+  no system transform, no compaction hook, no skills path, no tool and no command.
+  `integrations/common/test/off-isolation.test.ts` proves it on the wire against a real daemon holding a marker drawer:
+  no request is made and no marker reaches the model, through every path listed in
+  `tests/fixtures/integration/off-isolation.json`.
+- **A skill copied by hand is out of reach.**
+  The plugin registers the shared skills itself and registers none in `off`.
+  Refusing a skill's load from `tool.execute.before` would need the plugin to stay active in `off` just to guard a hook,
+  and would only be partial, because the skill still appears in the `skill` tool's listing.
+  A copy a user installed under `.agents/skills`, or `mcp.memcastle` in `opencode.json`, is OpenCode's to load,
+  so remove those when a project must be free of MemCastle.
+- **A mode that cannot be parsed fails closed:** the plugin logs why and does nothing.
+- **Mixed sessions:** `integrations/common/test/mixed-modes.test.ts` runs OpenCode and Pi sessions in `full`,
+  `read-only` and `off` against one daemon and checks each against the requests it made.
 
 ### Connection lifecycle
 
@@ -267,7 +307,7 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 
 | Capability | Status | Where it lands |
 | --- | --- | --- |
-| `session-mode` | Foundation: label translation, per-session connection, mode selected on connect | #35 |
+| `session-mode` | Implemented: label translation, per-session connection with the mode selected on every connect, `read-only` never attempts a write, `off` registers nothing, proved on the wire against a real daemon | #35, done |
 | `wake-up` | Implemented: fetched on `session.created`, added to the system prompt of the first (`sync`) or first-ready (`async`) request, never blocks on a down daemon | #33, done |
 | `recall` | Implemented: the shared `search-before-answer` skill is added to the system prompt of every request, at the `forceMemoryRecall` level | #36, done |
 | `checkpoint` | Implemented, partly: a review every N `session.idle` events, `/memcastle-checkpoint` and the `memcastle_checkpoint` tool, all submitting a classified payload; a long single run can lag the interval | #34, done |
