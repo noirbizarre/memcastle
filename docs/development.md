@@ -58,7 +58,9 @@ Every path, environment variable, flag and the precedence between them is in [Co
   `tests/persistence.rs`, because SurrealKV's file lock is not released within one process).
 - **Two suites.** A test binary that builds or runs a WebAssembly component is named `tests/wasm_*.rs`,
   and that prefix is the whole definition of the WebAssembly suite: `.config/nextest.toml` selects it with
-  `binary(/^wasm_/)`, so a new `wasm_` file joins it with no configuration.
+  `binary(/^wasm_/)`, and `mise run test:wasm` and CI's `wasm` job pass the same prefix to Cargo as `--test 'wasm_*'`,
+  so that the other test binaries are not compiled for nothing.
+  A new `wasm_` file therefore joins the suite with no configuration.
   Everything else is the basic suite, which is what `mise run test` and the `default` and `ci` nextest profiles run;
   the `wasm` and `ci-wasm` profiles run the other one.
   The basic suite runs in CI on Linux, macOS and Windows and needs no WebAssembly target.

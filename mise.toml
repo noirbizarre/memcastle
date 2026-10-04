@@ -257,8 +257,10 @@ prek run --all-files integrations-http-only
 description = "Run the WebAssembly suite: every tests/wasm_*.rs binary (slow, needs the wasm32-wasip2 target)"
 # `raw_args` so nextest selectors reach it, like `test`. The `wasm` profile selects the `wasm_` binaries
 # (.config/nextest.toml); `test` excludes them, which is what keeps the everyday loop fast.
+# `--test 'wasm_*'` is the same prefix as a Cargo glob, and it keeps Cargo from compiling and linking the other thirty
+# test binaries (about 600 MB each) just for nextest to skip them.
 raw_args = true
-run = "cargo nextest run --profile wasm"
+run = "cargo nextest run --profile wasm --test 'wasm_*'"
 
 [tasks."integrations:check"]
 description = "Typecheck and test every package under integrations/ against a real daemon"

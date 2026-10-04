@@ -190,9 +190,12 @@ jobs:
 
       # If instrumenting breaks the `wasm32-wasip2` builds (`can't find crate for profiler_builtins` has been seen
       # locally), run this step with plain `cargo nextest run --profile ci-wasm` and drop the coverage steps.
+      # `--test 'wasm_*'` is the `wasm_` prefix as a Cargo glob: without it every other test binary is compiled and
+      # linked, instrumented, only for the profile's filter to skip it. Cargo still builds the `memcastle` binary these
+      # tests start.
       - name: Run tests (with coverage)
         run: |
-          cargo llvm-cov nextest --profile ci-wasm
+          cargo llvm-cov nextest --profile ci-wasm --test 'wasm_*'
           cargo llvm-cov report --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
