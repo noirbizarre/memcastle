@@ -197,6 +197,36 @@ Never bump a version or push a tag by hand:
 and `.github/ship.yml` is the contract between them.
 See CONTRIBUTING.md.
 
+## Scope and cost
+
+Doing what was asked is the job, and widening it costs the user time, money and a busy machine,
+so staying inside the request is a rule here and not a courtesy.
+
+- **Stay inside the request.**
+  "Add tests for these two files" means those two files, not "close the coverage gap".
+  When a request can be read broadly, do the narrow reading, say what was left, and ask before widening.
+- **A broad task is fine when it is asked for.**
+  If the user states it explicitly ("raise coverage across the patch", "get this module to 100%", "speed up the tests"),
+  that is a focused task and the broad reading is the right one.
+  State the plan and a rough time estimate first, then do it.
+- **Let CI measure what CI measures.**
+  Coverage comes from the Codecov comment on the pull request, which arrives minutes after a push and costs the machine
+  nothing.
+  Do not run `cargo llvm-cov` over the whole suite locally: it rebuilds the dependency tree instrumented, writes thousands
+  of profile files and takes tens of minutes of every core.
+  Run it only when the user asks for a coverage session.
+- **Run what you touched.**
+  While iterating, run the tests of the module or binary you changed (`mise run test -- <filter>`).
+  Run the full suite once, before pushing.
+- **Two strikes, then ask.**
+  If the same approach fails twice (a tool, a flag, a workaround), stop and ask rather than building a third one.
+- **Estimate before anything heavy.**
+  Describe the cost first, and wait for a yes, for anything expected to take more than about ten minutes or to saturate
+  the CPU: instrumented builds, repeated full-suite runs, many WebAssembly builds.
+- **Do not promise before knowing.**
+  Do not call work easy or small until its size is known.
+  When it turns out larger than said, report the real size and offer to stop.
+
 ## Before you push
 
 ```sh
