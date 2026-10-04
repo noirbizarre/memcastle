@@ -1323,7 +1323,7 @@ mod tests {
                 ranking: "hybrid".to_string(),
             },
             Error::SourceCursorInvalid {
-                provider: "pi-sessions".to_string(),
+                provider: "directory".to_string(),
                 message: "not an object".to_string(),
             },
             Error::SourceManifestInvalid {

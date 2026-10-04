@@ -146,7 +146,8 @@ src/
 └── client/     the CLI's HTTP client for a running daemon, and the human renderings of its answers (status, tables)
 
 wit/            the source contract (`memcastle:source`), the one definition components and the host are built from
-sources/        reference WebAssembly sources, one package per directory, built and tested but not compiled into MemCastle
+sources/        official and reference WebAssembly sources (`directory`, `pi`), one package per directory, built and
+                tested but not compiled into MemCastle
 integrations/   per-agent lifecycle adapters (Pi, OpenCode, ...), in each agent's own language, over MCP and HTTP only
 skills/         reusable agent instructions shared by every integration; `tests/skills.rs` holds them to the
                 tools, commands and routes they name (docs/skills.md)

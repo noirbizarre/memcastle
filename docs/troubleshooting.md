@@ -278,7 +278,7 @@ skipped), `skipped` (not readable) and whether the run was `truncated` at the do
 A source that was mined before remembers where it stopped, so a second `mine` that reports `"documents": 0` has nothing
 new to read; `memcastle mine --full` reads it from the beginning.
 Skipped directories, large files and non-UTF-8 files are listed in [What mining reads](storage.md#what-mining-reads).
-The path given to `mine`, and the sessions directory of `pi-sessions`, are read by the daemon, so they must exist on the
+The path given to `mine`, and the sessions directory of `pi`, are read by the daemon, so they must exist on the
 daemon's machine.
 Over MCP and REST it must be absolute; the CLI makes it absolute for you.
 

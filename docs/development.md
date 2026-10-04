@@ -118,6 +118,9 @@ Every path, environment variable, flag and the precedence between them is in [Co
     [ADR-027](adr/027-cross-integration-tests-live-in-a-common-package.md).
   - `tests/wasm_conformance.rs` — the same conformance cases run against the built-in `directory` source and against the
     reference WebAssembly source built from `sources/directory/` (in-process, WebAssembly suite).
+  - `tests/wasm_pi.rs` — the Pi history source (`sources/pi/`) built and run as a component: what it files and leaves out,
+    discovery and the credentials file it must never open, provenance, and an install, mine and re-mine against a real
+    daemon (in-process, WebAssembly suite).
   - `tests/source_docs.rs` — the guide's list of conformance cases and of diagnostic codes against what ships
     (no build, basic suite).
   - `tests/wasm_runtime.rs` — installable sources against a real daemon: consent, the lifecycle, mining through the

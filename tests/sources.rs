@@ -2,8 +2,9 @@
 //! read incrementally and mined with no agent and no model involved, through the same unified contract
 //! (docs/adr/023) every source goes through.
 //!
-//! The fixture is a Pi session file; the daemon reads it from disk itself, which is the point of source-driven
-//! mining.
+//! The source is the built-in `directory` provider named explicitly, which is the form every other source takes
+//! on the wire. What is specific to one source (Pi's history, `sources/pi`) is tested with that source, in
+//! `tests/wasm_pi.rs`; what is tested here is what the daemon does for any source.
 
 mod common;
 
@@ -15,15 +16,14 @@ use memcastle::domain::{Job, JobStatus};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 
-const SESSION: &str = include_str!("fixtures/sources/pi/session.jsonl");
+const NOTE: &str =
+    "How do I rotate the signing keys?\nRun the rotation script with the new key id.\n";
 const MODE_HEADER: &str = "X-MemCastle-Mode";
 
-/// Write a Pi session file under `root`, with a modification time `seconds` after the epoch so the cursor
-/// ordering never depends on how fast the test runs.
-fn write_session(root: &Path, content: &str, seconds: u64) {
-    let dir = root.join("--home-me-project--");
-    std::fs::create_dir_all(&dir).unwrap();
-    let file = dir.join("2026-07-14T14-27-12-546Z_019f6106.jsonl");
+/// Write a note under `root`, with a modification time `seconds` after the epoch so the cursor ordering never depends
+/// on how fast the test runs.
+fn write_note(root: &Path, content: &str, seconds: u64) {
+    let file = root.join("notes.txt");
     std::fs::write(&file, content).unwrap();
     std::fs::File::options()
         .write(true)
@@ -42,13 +42,13 @@ async fn submit(client: &reqwest::Client, base: &str, body: Value) -> reqwest::R
         .expect("request")
 }
 
-/// Mine the Pi sessions under `root` and wait for the job to complete.
-async fn mine_pi(client: &reqwest::Client, base: &str, root: &Path, full: bool) -> Job {
+/// Mine the `directory` source at `root`, by name, and wait for the job to complete.
+async fn mine_source(client: &reqwest::Client, base: &str, root: &Path, full: bool) -> Job {
     let response = submit(
         client,
         base,
         json!({
-            "type": "mine", "provider": "pi-sessions", "locator": root, "full": full, "requested_by": "test",
+            "type": "mine", "provider": "directory", "locator": root, "full": full, "requested_by": "test",
         }),
     )
     .await;
@@ -81,58 +81,50 @@ async fn sources(client: &reqwest::Client, base: &str) -> Value {
 }
 
 #[tokio::test]
-async fn a_pi_session_is_discovered_read_and_mined_then_found_by_search_as_a_transcript() {
+async fn a_named_source_is_discovered_read_and_mined_then_found_by_search_with_its_provenance() {
     let daemon = TestDaemon::start().await;
     let client = reqwest::Client::new();
     let root = tempfile::tempdir().unwrap();
-    write_session(root.path(), SESSION, 1_000);
+    write_note(root.path(), NOTE, 1_000);
 
-    let job = mine_pi(&client, &daemon.base_url, root.path(), false).await;
+    let job = mine_source(&client, &daemon.base_url, root.path(), false).await;
 
     assert_eq!(job.result.as_ref().unwrap()["created"], 1);
     let hits = search(
         &client,
         &daemon.base_url,
-        &[("q", "rotate signing keys"), ("source_kind", "transcript")],
+        &[("q", "rotate signing keys"), ("source_kind", "file")],
     )
     .await;
     assert_eq!(hits.len(), 1, "{hits:?}");
-    assert_eq!(hits[0]["source"]["kind"], "transcript");
-    assert_eq!(hits[0]["source"]["origin"]["provider"], "pi-sessions");
-    assert!(
-        search(&client, &daemon.base_url, &[("q", "SECRET-TOOL-OUTPUT")])
-            .await
-            .is_empty(),
-        "tool results are not filed"
-    );
+    assert_eq!(hits[0]["source"]["kind"], "file");
+    assert_eq!(hits[0]["source"]["origin"]["provider"], "directory");
+    assert_eq!(hits[0]["source"]["origin"]["document"], "notes.txt");
     daemon.shutdown().await;
 }
 
 #[tokio::test]
-async fn mining_a_source_again_reads_nothing_and_a_grown_session_adds_only_its_new_tail() {
+async fn mining_a_source_again_reads_nothing_and_a_grown_document_adds_only_its_new_tail() {
     let daemon = TestDaemon::start().await;
     let client = reqwest::Client::new();
     let root = tempfile::tempdir().unwrap();
-    write_session(root.path(), SESSION, 1_000);
-    mine_pi(&client, &daemon.base_url, root.path(), false).await;
+    write_note(root.path(), NOTE, 1_000);
+    mine_source(&client, &daemon.base_url, root.path(), false).await;
 
-    let second = mine_pi(&client, &daemon.base_url, root.path(), false).await;
+    let second = mine_source(&client, &daemon.base_url, root.path(), false).await;
     assert_eq!(
         second.result.as_ref().unwrap()["documents"],
         0,
-        "the cursor is past the session"
+        "the cursor is past the document"
     );
 
-    let grown = format!(
-        "{SESSION}{}\n",
-        r#"{"type":"message","timestamp":"2026-07-14T15:00:00Z","message":{"role":"user","content":"what about certificate revocation?"}}"#
-    );
-    write_session(root.path(), &grown, 2_000);
-    let third = mine_pi(&client, &daemon.base_url, root.path(), false).await;
+    let grown = format!("{NOTE}what about certificate revocation?\n");
+    write_note(root.path(), &grown, 2_000);
+    let third = mine_source(&client, &daemon.base_url, root.path(), false).await;
     let summary = third.result.as_ref().unwrap();
     assert_eq!(
         summary["documents"], 1,
-        "only the session that grew is read"
+        "only the document that grew is read"
     );
     assert_eq!(
         summary["superseded"], 1,
@@ -160,7 +152,7 @@ async fn the_sources_listing_shows_where_each_run_stopped_and_how_many_documents
     let daemon = TestDaemon::start().await;
     let client = reqwest::Client::new();
     let root = tempfile::tempdir().unwrap();
-    write_session(root.path(), SESSION, 1_000);
+    write_note(root.path(), NOTE, 1_000);
 
     let before = sources(&client, &daemon.base_url).await;
     let names: Vec<_> = before["providers"]
@@ -169,18 +161,17 @@ async fn the_sources_listing_shows_where_each_run_stopped_and_how_many_documents
         .iter()
         .map(|p| p["name"].clone())
         .collect();
-    assert_eq!(names, [json!("directory"), json!("pi-sessions")]);
+    assert_eq!(names, [json!("directory")]);
     assert!(before["sources"].as_array().unwrap().is_empty());
 
-    let job = mine_pi(&client, &daemon.base_url, root.path(), false).await;
+    let job = mine_source(&client, &daemon.base_url, root.path(), false).await;
 
     let after = sources(&client, &daemon.base_url).await;
     let source = &after["sources"][0];
-    assert_eq!(source["provider"], "pi-sessions");
+    assert_eq!(source["provider"], "directory");
     assert_eq!(source["documents"], 1);
     assert_eq!(source["last_job"], json!(job.id));
     assert_eq!(source["cursor"]["mtime_ns"], 1_000_000_000_000i64);
-    assert!(after.to_string().contains("pi-sessions"));
     daemon.shutdown().await;
 }
 
@@ -233,21 +224,21 @@ async fn an_unknown_source_is_refused_at_submission_naming_the_known_ones() {
     let body: Value = response.json().await.unwrap();
     assert_eq!(body["code"], "memcastle::input::invalid");
     assert!(
-        body["error"].as_str().unwrap().contains("pi-sessions"),
+        body["error"].as_str().unwrap().contains("directory"),
         "{body}"
     );
     daemon.shutdown().await;
 }
 
 #[tokio::test]
-async fn a_sessions_directory_that_does_not_exist_fails_the_job_instead_of_completing_empty() {
+async fn a_locator_that_does_not_exist_fails_the_job_instead_of_completing_empty() {
     let daemon = TestDaemon::start().await;
     let client = reqwest::Client::new();
     let response = submit(
         &client,
         &daemon.base_url,
         json!({
-            "type": "mine", "provider": "pi-sessions", "locator": "/nonexistent/pi/sessions", "requested_by": "test",
+            "type": "mine", "provider": "directory", "locator": "/nonexistent/source/root", "requested_by": "test",
         }),
     )
     .await;
@@ -262,8 +253,8 @@ async fn mining_a_source_is_a_write_and_listing_sources_is_a_read() {
     let daemon = TestDaemon::start().await;
     let client = reqwest::Client::new();
     let root = tempfile::tempdir().unwrap();
-    write_session(root.path(), SESSION, 1_000);
-    let body = json!({"type": "mine", "provider": "pi-sessions", "locator": root.path(), "requested_by": "test"});
+    write_note(root.path(), NOTE, 1_000);
+    let body = json!({"type": "mine", "provider": "directory", "locator": root.path(), "requested_by": "test"});
 
     let refused = client
         .post(format!("{}/api/jobs", daemon.base_url))

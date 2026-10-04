@@ -777,7 +777,7 @@ async fn the_cli_installs_a_package_that_asks_for_nothing_unasked_and_one_that_a
         .iter()
         .map(|p| p["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, ["directory", "pi-sessions", "lifecycle"]);
+    assert_eq!(names, ["directory", "lifecycle"]);
 
     let missing = memcastle_for(&daemon)
         .args(["source", "show", "nope"])

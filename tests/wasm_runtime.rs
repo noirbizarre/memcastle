@@ -317,7 +317,7 @@ async fn enabling_and_disabling_are_idempotent_and_removal_deletes_the_files_but
 #[tokio::test(flavor = "multi_thread")]
 async fn a_built_in_source_cannot_be_disabled_or_removed() {
     let fixture = Fixture::start().await;
-    for name in ["directory", "pi-sessions"] {
+    for name in ["directory"] {
         let disabled = fixture
             .post(&format!("/api/source-packages/{name}/disable"))
             .await;

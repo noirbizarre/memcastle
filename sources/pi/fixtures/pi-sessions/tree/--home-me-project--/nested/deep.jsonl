@@ -1,0 +1,2 @@
+{"type":"session","version":3,"id":"deep","timestamp":"2026-07-17T08:00:00.000Z","cwd":"/home/me/project"}
+{"type":"message","id":"d1","parentId":null,"timestamp":"2026-07-17T08:00:01.000Z","message":{"role":"user","content":"never found: Pi does not nest sessions"}}

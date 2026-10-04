@@ -229,7 +229,9 @@ this release (see [ADR-020](adr/020-skills-are-versioned-with-the-repository.md)
 
 ### Background mining
 
-Operation: `memcastle_mine` with an absolute `path` and optionally `wing`, or with a `source` such as `pi-sessions`.
+Operation: `memcastle_mine` with an absolute `path` and optionally `wing`,
+or with a `source` such as `pi` (an installed source: acquisition stays in the source, the integration only decides when
+to ask).
 
 Mining is a Background (0) job, so it never delays a checkpoint, and a relative path is refused with
 `memcastle::input::invalid`.

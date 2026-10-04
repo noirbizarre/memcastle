@@ -322,10 +322,10 @@ fn default_diary_limit() -> u32 {
 struct MineArgs {
     /// The absolute path to a directory to mine. Give this, or `source`.
     path: Option<String>,
-    /// A source adapter to mine instead of a directory, e.g. `pi-sessions` (Pi coding-agent session history).
+    /// A source adapter to mine instead of a directory, e.g. `pi` (Pi coding-agent session history, once installed).
     /// `GET /api/sources` lists them.
     source: Option<String>,
-    /// Where within `source` to read, when it needs more than its default (for `pi-sessions`, a sessions directory).
+    /// Where within `source` to read, when it needs more than its default (for `pi`, a directory of Pi sessions).
     locator: Option<String>,
     /// Read the source again from the beginning instead of continuing from where the last run stopped. Unchanged
     /// documents are still skipped, so nothing is duplicated.

@@ -84,3 +84,6 @@ The history is the value.
 - [ADR-027](027-cross-integration-tests-live-in-a-common-package.md) — tests that need two integrations live in a
   test-only `integrations/common` package that imports their sources, and production code stays per package
   (amends ADR-022)
+- [ADR-028](028-pi-history-is-an-installed-webassembly-source.md) — Pi's conversation history is an installed WebAssembly
+  source built from `sources/pi/`, and the core has no Pi-specific code; the native `pi-sessions` adapter is removed
+  (supersedes part of ADR-023 and ADR-026)

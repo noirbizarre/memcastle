@@ -1,7 +1,7 @@
 //! Which sources exist, and how a provider name becomes an adapter.
 //!
 //! There are two kinds of source behind the one [`SourceAdapter`] contract (docs/adr/026): the adapters compiled
-//! into MemCastle (`directory`, `pi-sessions`), and the packages a user installed, each a WebAssembly component. A
+//! into MemCastle (`directory`), and the packages a user installed, each a WebAssembly component. A
 //! provider name is looked up here and nowhere else; the pipeline is handed an [`AnySource`] and cannot tell which
 //! kind it got.
 //!
@@ -22,13 +22,12 @@ use crate::store::SurrealStore;
 
 use super::adapter::{Discovery, SourceAdapter};
 use super::adapters::directory::{self, DirectoryAdapter};
-use super::adapters::pi_sessions::{self, PiSessionsAdapter};
 use super::wasm::WasmAdapter;
 use super::{ProviderInfo, SourceOrigin};
 
 /// The names an installed source may not take: they are the built-in adapters', and a package called `directory`
 /// would otherwise silently replace what `memcastle mine <path>` means.
-pub const BUILTIN_NAMES: [&str; 2] = [directory::PROVIDER, pi_sessions::PROVIDER];
+pub const BUILTIN_NAMES: [&str; 1] = [directory::PROVIDER];
 
 /// A source, whichever kind it is.
 ///
@@ -37,8 +36,6 @@ pub const BUILTIN_NAMES: [&str; 2] = [directory::PROVIDER, pi_sessions::PROVIDER
 pub enum AnySource {
     /// The `directory` adapter.
     Directory(DirectoryAdapter),
-    /// The `pi-sessions` adapter.
-    PiSessions(PiSessionsAdapter),
     /// An installed WebAssembly source.
     Wasm(WasmAdapter),
 }
@@ -47,7 +44,6 @@ impl SourceAdapter for AnySource {
     fn provider(&self) -> &str {
         match self {
             Self::Directory(a) => a.provider(),
-            Self::PiSessions(a) => a.provider(),
             Self::Wasm(a) => a.provider(),
         }
     }
@@ -55,7 +51,6 @@ impl SourceAdapter for AnySource {
     fn description(&self) -> &str {
         match self {
             Self::Directory(a) => a.description(),
-            Self::PiSessions(a) => a.description(),
             Self::Wasm(a) => a.description(),
         }
     }
@@ -63,7 +58,6 @@ impl SourceAdapter for AnySource {
     fn capabilities(&self) -> SourceCapabilities {
         match self {
             Self::Directory(a) => a.capabilities(),
-            Self::PiSessions(a) => a.capabilities(),
             Self::Wasm(a) => a.capabilities(),
         }
     }
@@ -71,7 +65,6 @@ impl SourceAdapter for AnySource {
     fn identify(&self, locator: Option<&str>) -> Result<SourceRef> {
         match self {
             Self::Directory(a) => a.identify(locator),
-            Self::PiSessions(a) => a.identify(locator),
             Self::Wasm(a) => a.identify(locator),
         }
     }
@@ -79,7 +72,6 @@ impl SourceAdapter for AnySource {
     fn default_wing(&self, source: &SourceRef) -> String {
         match self {
             Self::Directory(a) => a.default_wing(source),
-            Self::PiSessions(a) => a.default_wing(source),
             Self::Wasm(a) => a.default_wing(source),
         }
     }
@@ -87,7 +79,6 @@ impl SourceAdapter for AnySource {
     fn default_room(&self) -> &str {
         match self {
             Self::Directory(a) => a.default_room(),
-            Self::PiSessions(a) => a.default_room(),
             Self::Wasm(a) => a.default_room(),
         }
     }
@@ -100,7 +91,6 @@ impl SourceAdapter for AnySource {
     ) -> Result<Discovery> {
         match self {
             Self::Directory(a) => a.discover(source, cursor, limit).await,
-            Self::PiSessions(a) => a.discover(source, cursor, limit).await,
             Self::Wasm(a) => a.discover(source, cursor, limit).await,
         }
     }
@@ -112,7 +102,6 @@ impl SourceAdapter for AnySource {
     ) -> Result<Option<RawDocument>> {
         match self {
             Self::Directory(a) => a.read(source, candidate).await,
-            Self::PiSessions(a) => a.read(source, candidate).await,
             Self::Wasm(a) => a.read(source, candidate).await,
         }
     }
@@ -120,7 +109,6 @@ impl SourceAdapter for AnySource {
     fn normalize(&self, raw: &RawDocument) -> Result<crate::domain::CanonicalDocument> {
         match self {
             Self::Directory(a) => a.normalize(raw),
-            Self::PiSessions(a) => a.normalize(raw),
             Self::Wasm(a) => a.normalize(raw),
         }
     }
@@ -144,8 +132,7 @@ fn describe(adapter: &impl SourceAdapter) -> ProviderInfo {
 pub fn builtin_providers() -> Vec<ProviderInfo> {
     // Capabilities and descriptions do not depend on configuration, so default-configured adapters answer.
     let directory = DirectoryAdapter::new(0);
-    let pi = PiSessionsAdapter::new(Some(Path::new("/")));
-    vec![describe(&directory), describe(&pi)]
+    vec![describe(&directory)]
 }
 
 /// Why an installed source cannot run here, or `None` when it can.
@@ -258,7 +245,9 @@ async fn unknown(store: &SurrealStore, mining: &MiningConfig, provider: &str) ->
         .unwrap_or_else(|_| BUILTIN_NAMES.join(", "));
     Error::invalid_input(
         "source",
-        format!("unknown source `{provider}`; known sources: {known}"),
+        format!(
+            "unknown source `{provider}`; known sources: {known} (install one with `memcastle source install <package>`)"
+        ),
     )
 }
 
@@ -276,9 +265,6 @@ pub async fn resolve(
     match provider {
         directory::PROVIDER => Ok(AnySource::Directory(DirectoryAdapter::new(
             mining.max_file_bytes,
-        ))),
-        pi_sessions::PROVIDER => Ok(AnySource::PiSessions(PiSessionsAdapter::new(
-            mining.pi_sessions_dir.as_deref(),
         ))),
         other => {
             let Some(record) = store.get_source_package(other).await? else {
@@ -394,13 +380,8 @@ mod tests {
     #[test]
     fn a_built_in_source_answers_for_its_name_description_and_default_room_like_the_adapter_does() {
         let directory = AnySource::Directory(DirectoryAdapter::new(1));
-        let pi = AnySource::PiSessions(PiSessionsAdapter::new(Some(Path::new("/"))));
         assert_eq!(directory.provider(), "directory");
         assert!(!directory.description().is_empty());
         assert_eq!(directory.default_room(), "files");
-        assert_eq!(pi.provider(), "pi-sessions");
-        assert!(!pi.description().is_empty());
-        assert!(!pi.default_room().is_empty());
-        assert!(pi.capabilities().retains_raw);
     }
 }

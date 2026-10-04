@@ -234,7 +234,7 @@ src/search-before-answer.ts   injects that skill into the system prompt at every
 src/checkpoint-core.ts        checkpointing without a host: settings, the review, the payload, submission (the same file as OpenCode's)
 src/checkpoint-agent.ts       the interval review: counts `agent_end`, reads Pi's transcript, asks Pi's model
 src/checkpoint-tool.ts        `/memcastle-checkpoint`: the manual save; the pre-compaction one (#24) is not here yet
-src/daily-mine.ts             background mining on the extension's own schedule (#26), empty
+src/daily-mine.ts             background mining on the extension's own schedule (#26, scheduling only), empty
 test/                         bun tests against a real `memcastle serve`; they read tests/fixtures/integration/
 ```
 

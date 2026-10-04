@@ -25,7 +25,7 @@ A failure comes back as an MCP error result carrying the [error body](#errors) b
 | `memcastle_diary_write` | `agent_identity`, `wing`, `content` | Write a diary entry. |
 | `memcastle_diary_read` | `agent_identity`, `wing`, `limit?` | Read an agent's newest diary entries. |
 | `memcastle_checkpoint` | `payload`, `emergency?` | Submit a durable checkpoint job. |
-| `memcastle_mine` | `path` or `source`, `locator?`, `full?`, `wing?` | Submit a job that mines a directory, or a [source](mining-sources.md) such as `pi-sessions`. |
+| `memcastle_mine` | `path` or `source`, `locator?`, `full?`, `wing?` | Submit a job that mines a directory, or a [source](mining-sources.md) such as `pi`. |
 | `memcastle_audit` | `scope?` | Submit a read-only consistency audit job. |
 | `memcastle_repair` | `dry_run?`, `based_on_job?` | Submit a repair job; a dry run unless `dry_run` is `false`. |
 | `memcastle_job_list` | `status?` | List jobs, newest first. |
@@ -379,7 +379,7 @@ curl -s -X POST http://127.0.0.1:8420/api/jobs \
 ```sh
 curl -s -X POST http://127.0.0.1:8420/api/jobs \
   -H 'Content-Type: application/json' \
-  -d '{"type": "mine", "provider": "pi-sessions"}'
+  -d '{"type": "mine", "provider": "pi"}'
 ```
 
 An unknown `provider` is a `400` that names the known ones.
@@ -387,9 +387,9 @@ An unknown `provider` is a `400` that names the known ones.
 
 ```json
 {
-  "providers": [{"name": "pi-sessions", "description": "...", "capabilities": {"incremental": true, "retains_raw": true, "needs_credentials": false},
-                 "origin": "builtin", "state": "enabled", "permissions": {...}}],
-  "sources": [{"id": "...", "provider": "pi-sessions", "account": null, "locator": "/home/alice/.pi/agent/sessions",
+  "providers": [{"name": "pi", "description": "...", "capabilities": {"incremental": true, "retains_raw": true, "needs_credentials": false},
+                 "origin": "package", "version": "0.1.0", "state": "enabled", "permissions": {...}}],
+  "sources": [{"id": "...", "provider": "pi", "account": null, "locator": "/home/alice/.pi/agent/sessions",
                "cursor": {"mtime_ns": 1784039240000000000, "key": "..."}, "last_job": "...", "last_run_at": "...", "documents": 12}]
 }
 ```

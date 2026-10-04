@@ -106,25 +106,29 @@ next job continues from the cursor.
 ```sh
 memcastle sources                        # what can be mined, and what has been
 memcastle mine ~/project                 # a directory
-memcastle mine --source pi-sessions      # Pi session history, from its default location
-memcastle mine --source pi-sessions --locator /backups/pi/sessions
-memcastle mine --source pi-sessions --full
+memcastle mine --source pi               # Pi session history, from its default location (once installed, below)
+memcastle mine --source pi --locator /backups/pi/sessions
+memcastle mine --source pi --full
 ```
 
 `memcastle sources` (`GET /api/sources`) lists the adapters (built in and installed, with their state), then each source
 that has been mined with its document count, last job and last run.
-Over HTTP, a source job is `{"type": "mine", "provider": "pi-sessions", "locator": "...", "full": false}` on
+Over HTTP, a source job is `{"type": "mine", "provider": "pi", "locator": "...", "full": false}` on
 `POST /api/jobs`, and over MCP `memcastle_mine` takes `source`, `locator` and `full` beside `path` and `wing`.
 Mining is a write, so a [read-only or disabled session](memory-modes.md) cannot start it.
 The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unchanged`, `skipped`, `similar` and `truncated`.
 
 ## The sources MemCastle ships
 
-| Source | Reads | Cursor | Keeps raw | Credentials |
-|---|---|---|---|---|
-| `directory` | the text files under a directory | modification time | no | no |
-| `pi-sessions` | Pi coding-agent session history | modification time | yes | no |
+| Source | Kind | Reads | Cursor | Keeps raw | Credentials |
+|---|---|---|---|---|---|
+| `directory` | built in | the text files under a directory | modification time | no | no |
+| `pi` | package, `sources/pi/` | Pi coding-agent session history | modification time | yes | no |
 
+Only `directory` is compiled into MemCastle.
+`pi` is an installed [WebAssembly source](writing-sources.md), built from `sources/pi/` in the repository:
+no Pi-specific code is part of the core, and it runs under the same sandbox and the same pipeline as any source a user
+writes.
 Both cursors are a modification-time watermark: files are ordered by modification time, then by path, and the cursor is
 the last one done.
 A file that appears with an old modification time (restored from a backup, copied with its times preserved) is behind the
@@ -140,16 +144,35 @@ One document per file, identified by its path under the mined root, filed in the
 - It skips empty files, files larger than `mining.max_file_bytes` (2 MiB by default) and files that are not valid UTF-8.
 - `source.kind` is `file` and `source.uri` is the file's absolute path.
 
-### `pi-sessions`
+### `pi`
 
 The conversation history of the [Pi](https://github.com/badlogic/pi-mono) coding agent, read straight from its session
-files: `~/.pi/agent/sessions/<working directory>/<session>.jsonl`, or the folder named by `--locator` or
-`mining.pi_sessions_dir`.
+files: `~/.pi/agent/sessions/<working directory>/<session>.jsonl`, or the folder named by `--locator`.
 It works on sessions of any age and with no Pi process running.
+This is how Pi's *history* gets into MemCastle; the live integration (`integrations/pi/`) is a separate thing that talks
+to the daemon over MCP and decides *when* to ask for mining, and never reads these files itself.
 
-Each session is one document, filed in the wing `pi` (or the one you give), in a room named after the session's working
-directory, and named by its file, so it can be addressed as `pi/<project>/<session file>`.
+Until the official sources are packaged with MemCastle's releases, build and install it from a checkout of the repository:
+
+```sh
+memcastle source package sources/pi        # builds the component, writes sources/pi/dist/pi-0.1.0.tar.gz
+memcastle source install sources/pi/dist/pi-0.1.0.tar.gz --enable
+memcastle mine --source pi
+```
+
+Installing lists what the source asks for and needs your consent to exactly that:
+read-only access to the folder it is asked to mine and to `~/.pi/agent/sessions`, and the one environment variable `HOME`
+(to find that folder when no `--locator` is given).
+It asks for no network, runs no program, writes no file and needs no credentials.
+`memcastle source test sources/pi` runs its conformance cases, and CI does the same on every change.
+
+Each session is one document, identified by its path under the sessions folder (`<working directory>/<session file>`),
+filed in the wing `pi` (or the one you give), in a room named after the session's working directory, and named by its
+file, so it can be addressed as `pi/<project>/<session file>`.
 Drawers have `source.kind` `transcript` and the tags `transcript` and `pi`.
+Provenance is the session itself: `source.uri` is the session file's path, the document's metadata carries the session
+id, working directory and format version from its header, and the document's time is when the session started (the
+header's timestamp), not when its file was last written.
 
 What is filed: a header (session id and working directory), then each user and assistant message as text with the time it
 was written.
@@ -157,9 +180,12 @@ Tool calls are kept as one-line markers (`[tool call: read]`) and shell commands
 What is deliberately left out: model reasoning, tool results (large, and usually file contents that can be mined as files)
 and everything that is not a conversation message.
 A line that is not JSON or an entry type the reader does not know is skipped, not an error.
-The reader follows Pi's session format version 3 and opens nothing else under Pi's directory, in particular not its
-credentials file.
+The reader follows Pi's session format version 3 and only lists `*.jsonl` files, directly in the sessions folder or one
+folder down, so it never opens anything else under Pi's directory, in particular not its credentials file, and it does not
+follow symlinks.
 The raw session file is kept next to the drawers, because Pi's sessions are the user's to rotate away.
+Mining is incremental and idempotent: a session that has not changed is not read again, and one that grew files only its
+new tail.
 
 ## Writing a source
 

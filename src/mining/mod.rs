@@ -8,7 +8,7 @@
 //! ```
 //!
 //! - [`adapter`] is the contract a source implements; [`adapters`] holds the sources MemCastle ships
-//!   (`directory`, `pi-sessions`), and [`wasm`] runs the ones a user installs as WebAssembly components
+//!   (`directory`), and [`wasm`] runs the ones a user installs as WebAssembly components
 //!   (docs/adr/026). Source-specific discovery and reading live in those and nowhere else.
 //! - [`registry`] turns a provider name into one or the other, behind the same contract.
 //! - [`pipeline`] is the one loop every source goes through: cursor, revision check, chunking, idempotent filing,
@@ -729,7 +729,7 @@ mod tests {
             .unwrap_err();
         let message = error.to_string();
         assert!(
-            message.contains("carrier-pigeon") && message.contains("pi-sessions"),
+            message.contains("carrier-pigeon") && message.contains("directory"),
             "{message}"
         );
     }
@@ -746,125 +746,230 @@ mod tests {
         );
     }
 
-    fn pi_job(root: &Path, full: bool) -> Job {
+    /// One growing transcript held in memory, from a source that keeps its raw documents.
+    ///
+    /// What the pipeline does for such a source (a transcript kind, its own room and drawer name, the raw kept next to
+    /// the drawers, a grown document re-filed by its tail) is the pipeline's, so it is tested here with no real
+    /// provider involved: Pi's history is an installed component (`sources/pi`), tested in `tests/wasm_pi.rs`.
+    struct Transcript {
+        body: std::sync::Mutex<String>,
+    }
+
+    impl Transcript {
+        fn new(body: &str) -> Self {
+            Self {
+                body: std::sync::Mutex::new(body.to_string()),
+            }
+        }
+
+        fn grow(&self, more: &str) {
+            self.body.lock().unwrap().push_str(more);
+        }
+
+        fn body(&self) -> String {
+            self.body.lock().unwrap().clone()
+        }
+    }
+
+    impl crate::mining::adapter::SourceAdapter for Transcript {
+        fn provider(&self) -> &str {
+            "transcript"
+        }
+
+        fn description(&self) -> &str {
+            "one growing transcript, for tests"
+        }
+
+        fn capabilities(&self) -> crate::domain::SourceCapabilities {
+            crate::domain::SourceCapabilities {
+                incremental: true,
+                retains_raw: true,
+                needs_credentials: false,
+            }
+        }
+
+        fn identify(&self, _locator: Option<&str>) -> Result<crate::domain::SourceRef> {
+            Ok(crate::domain::SourceRef {
+                provider: "transcript".into(),
+                account: None,
+                locator: "memory".into(),
+            })
+        }
+
+        fn default_wing(&self, _source: &crate::domain::SourceRef) -> String {
+            "chat".into()
+        }
+
+        fn default_room(&self) -> &str {
+            "sessions"
+        }
+
+        async fn discover(
+            &self,
+            _source: &crate::domain::SourceRef,
+            cursor: &crate::domain::Cursor,
+            _limit: usize,
+        ) -> Result<adapter::Discovery> {
+            // The cursor is `{length}`, how much has been seen, so a transcript that grew is found again and one that did not is not.
+            let length = self.body().len();
+            let done =
+                cursor.get("length").and_then(serde_json::Value::as_u64) == Some(length as u64);
+            Ok(adapter::Discovery {
+                candidates: if done {
+                    vec![]
+                } else {
+                    vec![crate::domain::Candidate {
+                        external_id: "project/s.jsonl".into(),
+                        cursor_after: json!({ "length": length }),
+                        handle: String::new(),
+                    }]
+                },
+                exhausted: true,
+            })
+        }
+
+        async fn read(
+            &self,
+            _source: &crate::domain::SourceRef,
+            candidate: &crate::domain::Candidate,
+        ) -> Result<Option<crate::domain::RawDocument>> {
+            let body = self.body();
+            Ok(Some(crate::domain::RawDocument {
+                external_id: candidate.external_id.clone(),
+                revision: crate::domain::RawDocument::revision_of(&body),
+                body,
+                metadata: json!({}),
+                occurred_at: None,
+            }))
+        }
+
+        fn normalize(
+            &self,
+            raw: &crate::domain::RawDocument,
+        ) -> Result<crate::domain::CanonicalDocument> {
+            Ok(crate::domain::CanonicalDocument {
+                title: Some("a transcript".into()),
+                room: Some("project".into()),
+                name: Some("s".into()),
+                kind: SourceKind::Transcript,
+                uri: None,
+                tags: vec!["transcript".into()],
+                // One segment per line, so a line appended is a segment appended and the earlier ones do not move.
+                segments: raw
+                    .body
+                    .lines()
+                    .map(|line| crate::domain::Segment {
+                        text: format!("{line}\n\n"),
+                    })
+                    .collect(),
+            })
+        }
+    }
+
+    async fn mine_transcript(
+        store: &SurrealStore,
+        transcript: &Transcript,
+        mining: MiningConfig,
+    ) -> Job {
         let mut job = Job::new(
             JobKind::Mine {
                 source: MiningSource::Provider {
-                    provider: "pi-sessions".into(),
-                    locator: Some(root.display().to_string()),
+                    provider: "transcript".into(),
+                    locator: None,
                 },
                 wing: None,
-                full,
+                full: false,
             },
             Priority::Background,
             "test",
         );
         job.apply(JobEvent::Claim).unwrap();
+        let ctx = JobContext::new(job.id, JobControl::default(), store.clone()).with_mining(mining);
+        let request = pipeline::Request {
+            locator: None,
+            wing: None,
+            full: false,
+        };
+        assert_eq!(
+            pipeline::mine(transcript, &ctx, &mut job, request)
+                .await
+                .unwrap(),
+            JobOutcome::Completed
+        );
         job
     }
 
-    const PI_FIXTURE: &str = include_str!("../../tests/fixtures/sources/pi/session.jsonl");
-
     #[tokio::test]
-    async fn pi_sessions_are_discovered_read_and_mined_with_no_agent_involved() {
+    async fn a_transcript_is_filed_under_the_room_and_name_its_source_gives_with_no_agent_involved()
+    {
         let store = SurrealStore::connect_memory_for_tests().await;
-        let root = tempfile::tempdir().unwrap();
-        write(
-            root.path(),
-            "--home-me-project--/2026-07-14T14-27-12-546Z_019f6106.jsonl",
-            PI_FIXTURE,
-        );
+        let transcript = Transcript::new("how do I rotate the keys?");
 
-        let mut job = pi_job(root.path(), false);
-        run_job(&store, &mut job, MiningConfig::default())
-            .await
-            .unwrap();
+        let job = mine_transcript(&store, &transcript, MiningConfig::default()).await;
 
-        assert_eq!(result(&job)["provider"], "pi-sessions");
+        assert_eq!(result(&job)["provider"], "transcript");
         let filed = drawers(&store).await;
         assert_eq!(filed.len(), 1);
-        let drawer = &filed[0];
-        assert_eq!(drawer.source.kind, SourceKind::Transcript);
-        assert_eq!(drawer.source.agent, None);
-        assert!(drawer.content.contains("How do I rotate the signing keys?"));
-        assert!(!drawer.content.contains("SECRET-TOOL-OUTPUT"));
+        assert_eq!(filed[0].source.kind, SourceKind::Transcript);
+        assert_eq!(filed[0].source.agent, None);
         let wing = store
-            .get_wing("pi")
+            .get_wing("chat")
             .await
             .unwrap()
-            .expect("default wing is `pi`");
+            .expect("the source's default wing");
         let room = store
             .get_room(wing.id, "project")
             .await
             .unwrap()
-            .expect("room is the working directory");
+            .expect("the room the document named");
         assert!(
             store
-                .get_drawer_by_name(room.id, "2026-07-14T14-27-12-546Z_019f6106")
+                .get_drawer_by_name(room.id, "s")
                 .await
                 .unwrap()
                 .is_some()
         );
-        let documents = store.list_sources().await.unwrap();
-        assert_eq!(
-            store.count_source_documents(documents[0].id).await.unwrap(),
-            1
-        );
     }
 
     #[tokio::test]
-    async fn the_raw_session_is_kept_next_to_the_drawers_cut_from_it() {
+    async fn the_raw_document_of_a_source_that_retains_it_is_kept_next_to_the_drawers_cut_from_it()
+    {
         let store = SurrealStore::connect_memory_for_tests().await;
-        let root = tempfile::tempdir().unwrap();
-        write(root.path(), "p/s.jsonl", PI_FIXTURE);
-        let mut job = pi_job(root.path(), false);
-        run_job(&store, &mut job, MiningConfig::default())
-            .await
-            .unwrap();
+        let transcript = Transcript::new("how do I rotate the keys?");
+        mine_transcript(&store, &transcript, MiningConfig::default()).await;
 
         let source = store.list_sources().await.unwrap().remove(0);
         let document = store
-            .get_source_document(source.id, "p/s.jsonl")
+            .get_source_document(source.id, "project/s.jsonl")
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(document.raw.as_deref(), Some(PI_FIXTURE));
+        assert_eq!(document.raw.as_deref(), Some(transcript.body().as_str()));
         assert_eq!(document.chunks.len(), 1);
     }
 
     #[tokio::test]
-    async fn a_session_that_grew_adds_only_what_is_new_on_the_next_run() {
+    async fn a_document_that_grew_adds_only_what_is_new_on_the_next_run() {
         let store = SurrealStore::connect_memory_for_tests().await;
-        let root = tempfile::tempdir().unwrap();
-        // Enough messages to span several chunks, so the untouched ones are visibly untouched.
-        let mut body = String::from(r#"{"type":"session","version":3,"id":"s","cwd":"/work/app"}"#);
-        body.push('\n');
+        // Enough lines to span several chunks, so the untouched ones are visibly untouched.
+        let mut body = String::new();
         for i in 0..30 {
             body.push_str(&format!(
-                r#"{{"type":"message","timestamp":"2026-07-14T10:00:{i:02}Z","message":{{"role":"user","content":"message number {i} with some padding text to take up room"}}}}"#
+                "message number {i} with some padding text to take up room\n"
             ));
-            body.push('\n');
         }
-        write(root.path(), "p/s.jsonl", &body);
-        touch(root.path(), "p/s.jsonl", 1_000);
+        let transcript = Transcript::new(&body);
         let mining = || MiningConfig {
             chunk_chars: 500,
             ..MiningConfig::default()
         };
 
-        let mut first = pi_job(root.path(), false);
-        run_job(&store, &mut first, mining()).await.unwrap();
+        mine_transcript(&store, &transcript, mining()).await;
         let chunk_count = drawers(&store).await.len();
         assert!(chunk_count > 2);
 
-        let grown = format!(
-            "{body}{}\n",
-            r#"{"type":"message","timestamp":"2026-07-14T11:00:00Z","message":{"role":"user","content":"a brand new question"}}"#
-        );
-        write(root.path(), "p/s.jsonl", &grown);
-        touch(root.path(), "p/s.jsonl", 2_000);
-        let mut second = pi_job(root.path(), false);
-        run_job(&store, &mut second, mining()).await.unwrap();
+        transcript.grow("a brand new question\n");
+        let second = mine_transcript(&store, &transcript, mining()).await;
 
         assert_eq!(result(&second)["documents"], 1);
         assert!(
@@ -881,8 +986,7 @@ mod tests {
                 .any(|d| d.content.contains("a brand new question"))
         );
 
-        let mut third = pi_job(root.path(), false);
-        run_job(&store, &mut third, mining()).await.unwrap();
+        let third = mine_transcript(&store, &transcript, mining()).await;
         assert_eq!(
             result(&third)["documents"],
             0,
@@ -913,15 +1017,12 @@ mod tests {
             .into_iter()
             .map(|p| p.name)
             .collect();
-        assert_eq!(names, ["directory", "pi-sessions"]);
-        let pi = registry::builtin_providers()
-            .into_iter()
-            .find(|p| p.name == "pi-sessions")
-            .unwrap();
+        assert_eq!(names, ["directory"]);
+        let directory = registry::builtin_providers().remove(0);
         assert!(
-            pi.capabilities.incremental
-                && pi.capabilities.retains_raw
-                && !pi.capabilities.needs_credentials
+            directory.capabilities.incremental
+                && !directory.capabilities.retains_raw
+                && !directory.capabilities.needs_credentials
         );
     }
 

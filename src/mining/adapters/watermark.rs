@@ -188,9 +188,9 @@ mod tests {
     #[test]
     fn null_is_the_beginning_and_a_foreign_cursor_is_refused_by_name() {
         assert!(Watermark::parse("p", &Cursor::Null).unwrap().is_none());
-        let err = Watermark::parse("pi-sessions", &serde_json::json!({"offset": 3})).unwrap_err();
+        let err = Watermark::parse("directory", &serde_json::json!({"offset": 3})).unwrap_err();
         assert!(
-            matches!(err, Error::SourceCursorInvalid { ref provider, .. } if provider == "pi-sessions")
+            matches!(err, Error::SourceCursorInvalid { ref provider, .. } if provider == "directory")
         );
     }
 }

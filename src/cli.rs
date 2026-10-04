@@ -473,11 +473,11 @@ pub struct MineArgs {
     #[arg(required_unless_present = "source", conflicts_with = "source")]
     pub path: Option<PathBuf>,
     /// A source adapter to mine instead of a directory, such as
-    /// `pi-sessions`. `memcastle sources` lists them.
+    /// `pi` (Pi's session history, once installed). `memcastle sources` lists them.
     #[arg(long)]
     pub source: Option<String>,
     /// Where within `--source` to read, when it needs more than its default
-    /// (for `pi-sessions`, an absolute path to a sessions directory).
+    /// (for `pi`, an absolute path to a directory of Pi sessions).
     #[arg(long, requires = "source")]
     pub locator: Option<String>,
     /// Read the source again from the beginning instead of continuing from
