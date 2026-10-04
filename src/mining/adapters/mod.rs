@@ -8,4 +8,5 @@
 //! and `mining::providers`, and a section in `docs/mining-sources.md`.
 
 pub mod directory;
+mod project_file;
 mod watermark;

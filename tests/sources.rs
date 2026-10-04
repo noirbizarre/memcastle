@@ -209,6 +209,81 @@ async fn a_directory_job_in_its_original_wire_shape_still_works_and_is_now_idemp
 }
 
 #[tokio::test]
+async fn a_directory_inside_a_project_is_mined_into_the_wing_the_project_file_declares() {
+    let daemon = TestDaemon::start().await;
+    let client = reqwest::Client::new();
+    // A `.git` marker makes the temp directory its own project root, so no project file above it can apply.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".config")).unwrap();
+    std::fs::write(
+        dir.path().join(".config/memcastle.toml"),
+        "[memcastle]\nwing = \"declared-by-the-project\"\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("note.txt"), "a note about the project file").unwrap();
+
+    // No wing is given: the project file decides it.
+    let response = submit(
+        &client,
+        &daemon.base_url,
+        json!({"type": "mine", "path": dir.path(), "requested_by": "test"}),
+    )
+    .await;
+    let job: Job = response.json().await.unwrap();
+    wait_for_job_status(&client, &daemon.base_url, job.id, JobStatus::Completed).await;
+    // A hit carries a room id, not a wing name, so the wing is checked by filtering on it.
+    let query = "note about the project file";
+    let declared = search(
+        &client,
+        &daemon.base_url,
+        &[("q", query), ("wing", "declared-by-the-project")],
+    )
+    .await;
+    assert_eq!(declared.len(), 1, "{declared:?}");
+    let by_dirname = search(&client, &daemon.base_url, &[("q", query)]).await;
+    assert_eq!(by_dirname.len(), 1, "one drawer, in the declared wing only");
+
+    // An explicit wing still wins over the file.
+    let other = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(other.path().join(".git")).unwrap();
+    std::fs::create_dir_all(other.path().join(".config")).unwrap();
+    std::fs::write(
+        other.path().join(".config/memcastle.toml"),
+        "[memcastle]\nwing = \"ignored\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        other.path().join("note.txt"),
+        "an explicit wing beats the file",
+    )
+    .unwrap();
+    let response = submit(
+        &client,
+        &daemon.base_url,
+        json!({"type": "mine", "path": other.path(), "wing": "explicit", "requested_by": "test"}),
+    )
+    .await;
+    let job: Job = response.json().await.unwrap();
+    wait_for_job_status(&client, &daemon.base_url, job.id, JobStatus::Completed).await;
+    let explicit = search(
+        &client,
+        &daemon.base_url,
+        &[("q", "explicit wing beats the file"), ("wing", "explicit")],
+    )
+    .await;
+    assert_eq!(explicit.len(), 1, "{explicit:?}");
+    let ignored = search(
+        &client,
+        &daemon.base_url,
+        &[("q", "explicit wing beats the file"), ("wing", "ignored")],
+    )
+    .await;
+    assert!(ignored.is_empty(), "{ignored:?}");
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
 async fn an_unknown_source_is_refused_at_submission_naming_the_known_ones() {
     let daemon = TestDaemon::start().await;
     let client = reqwest::Client::new();
