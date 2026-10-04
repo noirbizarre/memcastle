@@ -1,0 +1,39 @@
+{
+  "info": {
+    "id": "ses_alpha",
+    "slug": "quiet-river",
+    "projectID": "prj_one",
+    "directory": "/home/me/project",
+    "title": "Rotate the signing keys",
+    "version": "1.18.34",
+    "time": { "created": 1784039220000, "updated": 1784039280000 }
+  },
+  "messages": [
+    {
+      "info": { "id": "msg_a1", "sessionID": "ses_alpha", "role": "user", "time": { "created": 1784039240000 } },
+      "parts": [
+        { "id": "prt_a1", "type": "text", "text": "How do I rotate the signing keys?" },
+        { "id": "prt_a2", "type": "text", "text": "SYNTHETIC-INJECTED-TEXT", "synthetic": true }
+      ]
+    },
+    {
+      "info": { "id": "msg_a2", "sessionID": "ses_alpha", "role": "assistant", "time": { "created": 1784039250000 } },
+      "parts": [
+        { "id": "prt_a3", "type": "step-start" },
+        { "id": "prt_a4", "type": "reasoning", "text": "SECRET-REASONING" },
+        { "id": "prt_a5", "type": "text", "text": "Let me look at the script first." },
+        {
+          "id": "prt_a6", "type": "tool", "callID": "call_1", "tool": "read",
+          "state": { "status": "completed", "input": {}, "output": "SECRET-TOOL-OUTPUT", "title": "scripts/rotate.sh", "time": { "start": 1784039251000, "end": 1784039252000 } }
+        },
+        { "id": "prt_a7", "type": "step-finish", "reason": "tool-calls" }
+      ]
+    },
+    {
+      "info": { "id": "msg_a3", "sessionID": "ses_alpha", "role": "assistant", "time": { "created": 1784039260000 } },
+      "parts": [
+        { "id": "prt_a8", "type": "text", "text": "Run the rotation script with the new key id." }
+      ]
+    }
+  ]
+}

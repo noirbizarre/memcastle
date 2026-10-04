@@ -1,0 +1,46 @@
+{
+  "name": "opencode-history",
+  "description": "Four OpenCode sessions in two working directories, with the usual noise: reasoning, a tool output, text OpenCode injected, an attached file, a compaction summary, an unknown part type, messages listed out of order, a session nobody wrote in, and a notice printed before an export. Two sessions share a modification time, and discovery pages by two.",
+  "locator": "tree",
+  "limit": 2,
+  "documents": [
+    {
+      "external_id": "ses_alpha",
+      "title": "Rotate the signing keys",
+      "kind": "transcript",
+      "tags": ["transcript", "opencode"],
+      "room": "project",
+      "segments": [
+        "# OpenCode session ses_alpha\nworking directory: /home/me/project\n\n",
+        "### user · 2026-07-14T14:27:20.000Z\nHow do I rotate the signing keys?\n\n",
+        "### assistant · 2026-07-14T14:27:30.000Z\nLet me look at the script first.\n[tool: read] scripts/rotate.sh\n\n",
+        "### assistant · 2026-07-14T14:27:40.000Z\nRun the rotation script with the new key id.\n\n"
+      ]
+    },
+    {
+      "external_id": "ses_bravo",
+      "title": "Repository state",
+      "kind": "transcript",
+      "tags": ["transcript", "opencode"],
+      "room": "notes",
+      "segments": [
+        "# OpenCode session ses_bravo\nworking directory: /home/me/notes\n\n",
+        "### user · 2026-07-16T10:00:03.000Z\n[file: TODO.md]\nSummarize the repository state.\n\n",
+        "### assistant · 2026-07-16T10:00:09.000Z\n[tool: bash]\n[tool: bash] git status\n\n"
+      ]
+    },
+    {
+      "external_id": "ses_delta",
+      "title": "Which of the two layouts should I use?",
+      "kind": "transcript",
+      "tags": ["transcript", "opencode"],
+      "room": "project",
+      "segments": [
+        "# OpenCode session ses_delta\nworking directory: /home/me/project/\n\n",
+        "### user · 2026-07-17T07:58:20.000Z\nWhich of the two layouts should I use?\nThe flat one or the nested one?\n\n",
+        "### assistant · 2026-07-17T07:59:10.000Z\nBoth are fine.\n\n"
+      ]
+    }
+  ],
+  "skipped": ["ses_charlie"]
+}

@@ -109,6 +109,7 @@ memcastle mine ~/project                 # a directory
 memcastle mine --source pi               # Pi session history, from its default location (once installed, below)
 memcastle mine --source pi --locator /backups/pi/sessions
 memcastle mine --source pi --full
+memcastle mine --source opencode         # OpenCode session history, through the `opencode` command (once installed)
 ```
 
 `memcastle sources` (`GET /api/sources`) lists the adapters (built in and installed, with their state), then each source
@@ -124,13 +125,15 @@ The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unc
 |---|---|---|---|---|---|
 | `directory` | built in | the text files under a directory | modification time | no | no |
 | `pi` | package, `sources/pi/` | Pi coding-agent session history | modification time | yes | no |
+| `opencode` | package, `sources/opencode/` | OpenCode coding-agent session history | `time_updated` of the session | yes | no |
 
 Only `directory` is compiled into MemCastle.
-`pi` is an installed [WebAssembly source](writing-sources.md), built from `sources/pi/` in the repository:
-no Pi-specific code is part of the core, and it runs under the same sandbox and the same pipeline as any source a user
-writes.
-Both cursors are a modification-time watermark: files are ordered by modification time, then by path, and the cursor is
-the last one done.
+`pi` and `opencode` are installed [WebAssembly sources](writing-sources.md), built from `sources/pi/` and
+`sources/opencode/` in the repository:
+no Pi or OpenCode code is part of the core, and they run under the same sandbox and the same pipeline as any source a
+user writes.
+`directory` and `pi` have a modification-time watermark as their cursor:
+files are ordered by modification time, then by path, and the cursor is the last one done.
 A file that appears with an old modification time (restored from a backup, copied with its times preserved) is behind the
 watermark and is picked up by `--full`.
 
@@ -175,8 +178,8 @@ Provenance is the session itself: `source.uri` is the session file's path, the d
 id, working directory and format version from its header, and the document's time is when the session started (the
 header's timestamp), not when its file was last written.
 
-What is filed: a header (session id and working directory), then each user and assistant message as text with the time it
-was written.
+What is filed: a header (session id and working directory), then each user and assistant message as text with the time
+it was written.
 Tool calls are kept as one-line markers (`[tool call: read]`) and shell commands the user ran as `[bash: ...]`.
 What is deliberately left out: model reasoning, tool results (large, and usually file contents that can be mined as files)
 and everything that is not a conversation message.
@@ -187,6 +190,73 @@ follow symlinks.
 The raw session file is kept next to the drawers, because Pi's sessions are the user's to rotate away.
 Mining is incremental and idempotent: a session that has not changed is not read again, and one that grew files only its
 new tail.
+
+### `opencode`
+
+The conversation history of the [OpenCode](https://opencode.ai) coding agent, acquired by asking OpenCode for it.
+OpenCode keeps every session in one SQLite database that it writes while it runs, so this source does not open that
+file: it runs the `opencode` command, which owns the database, and turns its answers into documents.
+It works on sessions of any age and with no OpenCode session running, calls no model and replays nothing.
+This is how OpenCode's *history* gets into MemCastle; the live integration (`integrations/opencode/`) is a separate
+thing that talks to the daemon over MCP and decides *when* to ask for mining.
+
+It needs OpenCode 1.2 or later (the version that moved history into the database) installed so that `opencode` is on the
+daemon's `PATH`; it was written against 1.18.
+Build and install it from a checkout of the repository, as for `pi`:
+
+```sh
+memcastle source package sources/opencode  # builds the component, writes sources/opencode/dist/opencode-0.1.0.tar.gz
+memcastle source install sources/opencode/dist/opencode-0.1.0.tar.gz --enable
+memcastle mine --source opencode
+```
+
+Installing lists what the source asks for and needs your consent to exactly that:
+running the program `opencode`, and the environment variable `XDG_DATA_HOME` (OpenCode reads it to find its data when you have moved it; `PATH` and `HOME` are
+always passed to a program).
+It asks for no file access, no network, and needs no credentials.
+A program is a wider grant than a file: `opencode` runs with the daemon's own authority over the machine,
+and the sandbox only decides *which program*, not what that program does.
+That is the reason the grant is one named program, with no shell, and the reason installing asks you to agree to it.
+`memcastle source test sources/opencode` runs its conformance cases against a stand-in `opencode` that
+`sources/opencode/fixtures/bin/` ships, which has to be first on the `PATH` (`mise run sources:test -- opencode` does
+that), and CI does the same on every change.
+
+Each session is one document, identified by its OpenCode session id (`ses_...`), filed in the wing `opencode`
+(or the one you give), in a room named after the session's working directory, and named by its id,
+so it can be addressed as `opencode/<project>/<session id>`.
+Drawers have `source.kind` `transcript` and the tags `transcript` and `opencode`.
+Provenance is the session itself: `source.uri` is `opencode://session/<id>`, the document's metadata carries the session
+id, project id, working directory, title and OpenCode version, and the document's time is when the session was created.
+
+What is filed: a header (session id and working directory), then each user and assistant message as text with the time it
+was written.
+Tool calls are kept as one-line markers (`[tool: read] scripts/rotate.sh`) and attached files as their names
+(`[file: TODO.md]`).
+What is deliberately left out: model reasoning, tool outputs (large, and usually file contents that can be mined as
+files), patches and snapshots, text OpenCode injected itself (parts it marks `synthetic` or `ignored`), the summaries it
+writes when it compacts a session, and file contents.
+A part type the reader does not know is skipped, not an error.
+
+Mining is incremental and idempotent.
+Discovery asks `opencode db` for the sessions whose `time_updated` is past the cursor, in order, so a session OpenCode
+has written to since is read again and one that has not is not.
+A session that grew files only its new tail, and renaming a session changes none of what is already filed.
+A session with no messages is skipped, and is read again when it gets some.
+`--locator` is only a name for the history being mined; without one, the source is identified by the database path
+`opencode db path` prints, so a moved `XDG_DATA_HOME` is a different source with a cursor of its own.
+
+Limits to know about:
+
+- **One query depends on OpenCode's internals.**
+  `opencode session list` cannot ask for only what changed, so discovery reads the `id` and `time_updated` columns of
+  OpenCode's `session` table through `opencode db`.
+  If a future OpenCode renames them, the job fails with OpenCode's own message and nothing is filed wrongly.
+- **A session whose export exceeds 16 MiB is skipped.**
+  A program's output is capped at that size for every source, and a session that large is usually one whose tool outputs
+  dominate; it is not an error, so it does not stop the sessions after it.
+- **Each command takes a few seconds on a large database**, and a job's calls are limited to 60 seconds each
+  (`mining.source_timeout_secs`).
+- **The legacy JSON history** that OpenCode wrote before 1.2 under `storage/` is not read.
 
 ## Writing a source
 

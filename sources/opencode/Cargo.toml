@@ -1,0 +1,25 @@
+# The OpenCode history source: the conversation history of the OpenCode coding agent, as a WebAssembly component.
+#
+# It is not part of MemCastle's own build: the empty `[workspace]` below keeps Cargo from treating it as a member of the
+# root package, and `memcastle source build` (or `mise run sources:test -- opencode`) builds it for `wasm32-wasip2`.
+
+[package]
+name = "memcastle-source-opencode"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Generates the guest side of `wit/memcastle-source.wit`.
+wit-bindgen = "0.57"
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+
+[workspace]

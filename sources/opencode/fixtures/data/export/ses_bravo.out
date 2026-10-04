@@ -1,0 +1,33 @@
+{
+  "info": {
+    "id": "ses_bravo",
+    "projectID": "prj_two",
+    "directory": "/home/me/notes",
+    "title": "Repository state",
+    "version": "1.18.34",
+    "time": { "created": 1784196000000, "updated": 1784196060000 }
+  },
+  "messages": [
+    {
+      "info": { "id": "msg_b1", "sessionID": "ses_bravo", "role": "user", "time": { "created": 1784196003000 } },
+      "parts": [
+        { "id": "prt_b1", "type": "file", "mime": "text/plain", "filename": "TODO.md", "url": "data:text/plain;base64,U0VDUkVULUZJTEUtQk9EWQ==" },
+        { "id": "prt_b2", "type": "text", "text": "Summarize the repository state." }
+      ]
+    },
+    {
+      "info": { "id": "msg_b2", "sessionID": "ses_bravo", "role": "assistant", "time": { "created": 1784196009000 } },
+      "parts": [
+        { "id": "prt_b3", "type": "tool", "callID": "call_2", "tool": "bash", "state": { "status": "pending", "input": {}, "raw": "" } },
+        { "id": "prt_b4", "type": "tool", "callID": "call_3", "tool": "bash", "state": { "status": "completed", "input": {}, "output": "SECRET-GIT-OUTPUT", "title": "git status\nsecond line", "time": { "start": 1, "end": 2 } } },
+        { "id": "prt_b5", "type": "patch", "hash": "abc", "files": ["x"] }
+      ]
+    },
+    {
+      "info": { "id": "msg_b3", "sessionID": "ses_bravo", "role": "assistant", "summary": true, "time": { "created": 1784196050000 } },
+      "parts": [
+        { "id": "prt_b6", "type": "text", "text": "SUMMARY-OF-EARLIER-TURNS" }
+      ]
+    }
+  ]
+}

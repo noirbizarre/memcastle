@@ -134,8 +134,10 @@ have a coherent working path.
 | [#41](https://github.com/noirbizarre/memcastle/issues/41) | Expand audit/repair coverage (data-driven) |
 | [#42](https://github.com/noirbizarre/memcastle/issues/42) | Richer retrieval: semantic/vector search, temporal + graph-aware ranking |
 
-The concrete platform and agent-history adapters (Slack #86, ChatGPT #87, Claude #88, Codex #89, OpenCode #90,
-GitHub #91, Atlassian #92) are implemented on the #85 model, one file each under `src/mining/adapters/`.
+The concrete platform and agent-history adapters (Slack #86, ChatGPT #87, Claude #88, Codex #89, GitHub #91,
+Atlassian #92) are implemented on the #85 model, one file each under `src/mining/adapters/`.
+OpenCode history (#90) is the `opencode` source, a WebAssembly component built from `sources/opencode/`
+([ADR-030](docs/adr/030-opencode-history-is-an-installed-webassembly-source.md)), like Pi's.
 
 ## Principles
 

@@ -191,3 +191,5 @@ a source whoever wrote it.
 - Official sources (OpenCode, Claude, ...) can be built from `sources/` and bundled with releases without touching the
   core binary.
   None is bundled by this change.
+  OpenCode's is built from `sources/opencode/` and is a candidate for bundling
+  ([ADR-030](030-opencode-history-is-an-installed-webassembly-source.md)).

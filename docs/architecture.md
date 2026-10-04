@@ -446,8 +446,8 @@ Two fields mean "where do I read progress from" and "where do I read what it fou
 - **`Mine`** (`src/mining`) mines a *source* through the unified model of
   [ADR-023](adr/023-unified-source-model-for-mining.md): a `SourceAdapter` discovers and reads documents past the
   source's stored cursor, and one shared pipeline chunks them, files drawers idempotently and advances the cursor.
-  A directory is the one built-in adapter, and sources such as the Pi session history (`sources/pi`) are installed as
-  WebAssembly components behind the same trait ([ADR-026](adr/026-pluggable-source-adapters-as-webassembly-components.md)).
+  A directory is the one built-in adapter, and sources such as the Pi and OpenCode session histories
+  (`sources/pi`, `sources/opencode`) are installed as WebAssembly components behind the same trait ([ADR-026](adr/026-pluggable-source-adapters-as-webassembly-components.md)).
   It stops at a bounded number of documents, recording `truncated: true` when it does, and a later job continues from
   the cursor.
   See [Mining sources](mining-sources.md).

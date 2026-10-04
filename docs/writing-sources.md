@@ -240,6 +240,8 @@ that lacks the files reports the source `unavailable`.
 `sources/directory/` is the built-in `directory` source as a Rust component, and is the worked example to read.
 `sources/pi/` is the Pi coding agent's session history, the first official source that is not a built-in: it reads a
 real, evolving format, keeps raw documents and asks for two permissions (`docs/mining-sources.md#pi`).
+`sources/opencode/` is the OpenCode coding agent's session history, and the worked example of a source that wraps a
+program through `run-process` and is tested against a stand-in for it (`docs/mining-sources.md#opencode`).
 A source that ships with MemCastle's releases, without being compiled into the binary, is built from here and uses
 exactly the package contract a user installs.
 

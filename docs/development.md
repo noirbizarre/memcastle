@@ -135,6 +135,10 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `tests/wasm_pi.rs` — the Pi history source (`sources/pi/`) built and run as a component: what it files and leaves out,
     discovery and the credentials file it must never open, provenance, and an install, mine and re-mine against a real
     daemon (in-process, WebAssembly suite).
+  - `tests/wasm_opencode.rs` — the OpenCode history source (`sources/opencode/`) built and run as a component against a
+    stand-in `opencode` command: what it files and leaves out, the discovery cursor and the query it never lets a
+    cursor change, provenance, a machine without OpenCode, and an install, mine, re-mine and grow against a real daemon
+    (in-process, WebAssembly suite, Unix only).
   - `tests/source_docs.rs` — the guide's list of conformance cases and of diagnostic codes against what ships
     (no build, basic suite).
   - `tests/wasm_runtime.rs` — installable sources against a real daemon: consent, the lifecycle, mining through the

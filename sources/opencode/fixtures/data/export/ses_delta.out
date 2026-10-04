@@ -1,0 +1,25 @@
+Performing one time database migration, may take a few minutes...
+{
+  "info": {
+    "id": "ses_delta",
+    "projectID": "prj_one",
+    "directory": "/home/me/project/",
+    "title": "",
+    "time": { "created": 1784275100000, "updated": 1784275200000 }
+  },
+  "messages": [
+    {
+      "info": { "id": "msg_d2", "sessionID": "ses_delta", "role": "assistant", "time": { "created": 1784275150000 } },
+      "parts": [
+        { "id": "prt_d2", "type": "text", "text": "Both are fine." },
+        { "id": "prt_d3", "type": "hologram", "payload": "unknown part types are skipped" }
+      ]
+    },
+    {
+      "info": { "id": "msg_d1", "sessionID": "ses_delta", "role": "user", "time": { "created": 1784275100000 } },
+      "parts": [
+        { "id": "prt_d1", "type": "text", "text": "Which of the two layouts should I use?\nThe flat one or the nested one?" }
+      ]
+    }
+  ]
+}

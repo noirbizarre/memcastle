@@ -1,0 +1,62 @@
+#!/bin/sh
+# A stand-in for the `opencode` command, so the source's conformance cases run on a machine with no OpenCode and no
+# database. It answers the three invocations the source makes (`db path`, `db --format json <query>` and
+# `export <session>`) from ../data, found relative to this file because the host clears the child's environment.
+#
+# The discovery query is not evaluated as SQL: the two values and the limit the source writes into it are read back out
+# of its text, which is also what makes this fail loudly if the source changes its query without this being updated.
+# A file `../data/fail`, when present, makes every call fail, to exercise the source's error messages.
+
+here=$(cd "$(dirname "$0")" && pwd)
+data="$here/../data"
+
+if [ -e "$data/fail" ]; then
+  echo "database is locked" >&2
+  exit 3
+fi
+
+case "$1" in
+  db)
+    shift
+    if [ "$1" = path ]; then
+      echo "/fixture/opencode/opencode.db"
+      exit 0
+    fi
+    query=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --format) shift 2 ;;
+        *) query="$1"; shift ;;
+      esac
+    done
+    t=$(printf '%s' "$query" | sed -n 's/.*time_updated > \(-\{0,1\}[0-9]\{1,\}\) OR.*/\1/p')
+    id=$(printf '%s' "$query" | sed -n "s/.*AND id > '\([A-Za-z0-9_]*\)').*/\1/p")
+    n=$(printf '%s' "$query" | sed -n 's/.*LIMIT \([0-9]\{1,\}\)$/\1/p')
+    if [ -z "$t" ] || [ -z "$n" ]; then
+      echo "fake opencode: cannot read this query: $query" >&2
+      exit 1
+    fi
+    tab=$(printf '\t')
+    sort -t "$tab" -k2,2n -k1,1 "$data/sessions.tsv" | awk -F '\t' -v t="$t" -v id="$id" -v n="$n" '
+      BEGIN { printf "[" }
+      ($2 + 0 > t + 0 || ($2 + 0 == t + 0 && $1 > id)) && shown < n {
+        printf "%s\n  {\n    \"id\": \"%s\",\n    \"time_updated\": %s\n  }", (shown ? "," : ""), $1, $2
+        shown++
+      }
+      END { print "\n]" }
+    '
+    ;;
+  export)
+    file="$data/export/$2.out"
+    echo "Exporting session: $2" >&2
+    if [ ! -f "$file" ]; then
+      echo "Session not found: $2" >&2
+      exit 1
+    fi
+    cat "$file"
+    ;;
+  *)
+    echo "fake opencode: unsupported command: $*" >&2
+    exit 2
+    ;;
+esac
