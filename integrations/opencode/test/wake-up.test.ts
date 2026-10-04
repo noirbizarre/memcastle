@@ -323,7 +323,8 @@ function v2Context() {
       },
     },
     session: { hook: async (name: string, callback: (input: unknown) => void) => (callbacks.set(name, callback), { dispose: async () => undefined }) },
-    tool: { hook: async () => ({ dispose: async () => undefined }) },
+    tool: { hook: async () => ({ dispose: async () => undefined }), transform: async () => ({ dispose: async () => undefined }) },
+    command: { transform: async () => ({ dispose: async () => undefined }) },
     skill: { transform: async () => ({ dispose: async () => undefined }) },
   } as unknown as Plugin.Context
   return {

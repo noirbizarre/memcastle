@@ -82,7 +82,8 @@ native tooling, nothing more.
 
 The Pi and OpenCode packages are scaffolds: their connection, mode, discovery and failure foundations work and are
 tested, and wake-up on session start (#22, #33) and search-before-answer with the shared skills (#25, #36) are
-implemented in both; their other lifecycle hooks are empty.
+implemented in both; checkpointing is implemented in both, with interval and manual saves in Pi (#23) and interval, manual and emergency
+saves in OpenCode (#34); their other lifecycle hooks are empty.
 The persistent MCP session is complete in both: one connection for the whole session, kept alive, and replaced with its
 mode re-selected if the daemon forgets it.
 Tracked as GitHub issues under the

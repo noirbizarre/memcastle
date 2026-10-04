@@ -116,6 +116,13 @@ and ask a child session to classify it.
 This costs a model call that the user pays for, and it must never recurse into the same plugin's hooks.
 A manual checkpoint is a plugin custom tool the model calls, or a configured slash command.
 
+Implemented in #34 as decided below: turns are counted on `session.idle`, a child session classifies, and the manual path
+is a plugin tool plus a slash command.
+The classification request carries the shared `checkpoint-instructions` skill, and the child session is claimed before it
+can run so that none of the plugin's own hooks act on it.
+The idle timing, like the compaction hook, was driven here only by fakes of the SDK's shapes: a probe against a running
+OpenCode is still owed (see "Verify first" below).
+
 ### Before compaction, to an emergency checkpoint
 
 `experimental.session.compacting` is the one hook that fires before context is lost, and it carries the `sessionID`.

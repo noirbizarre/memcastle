@@ -7,7 +7,8 @@ admin endpoint (AGENTS.md invariant 8, enforced by the `integrations-http-only` 
 
 **Status: scaffold.**
 The connection, memory-mode, discovery and failure foundations are real and tested against a real daemon.
-Wake-up is implemented; the other lifecycle hooks are wired but empty, and each names the issue that fills it in.
+Wake-up, the shared skills and checkpointing (interval, manual and emergency) are implemented; the other lifecycle
+hooks are wired but empty, and each names the issue that fills it in.
 See [`docs/research.md`](docs/research.md) for how OpenCode's mechanisms map to MemCastle operations, and why.
 
 ## Use it
@@ -35,7 +36,9 @@ OpenCode 1 calls `server()` and OpenCode 2 calls `setup()`.
 
 The two APIs are separate and nothing translates between them, so each has its own adapter over the shared behaviour
 (see [Layout](#layout)).
-The plugin packages are imported as types only, so loading it needs neither of them installed.
+The plugin packages are imported as types only, except for one case: OpenCode 1's `tool` helper, which the checkpoint tool
+needs and which is imported when the plugin loads.
+A host that does not ship `@opencode-ai/plugin` still loads the plugin, loses only that tool, and the log says so.
 OpenCode releases older than 1.18.29 are not supported.
 
 Do **not** also add `mcp.memcastle` to `opencode.json`.
@@ -66,6 +69,10 @@ The environment variables are the ones the MemCastle CLI already reads.
 | `wakeUp.source` | `MEMCASTLE_WAKE_UP_SOURCE` | `project` | The wing to ask about: `user`, `project`, `custom` or `none` |
 | `wakeUp.wing` | `MEMCASTLE_WAKE_UP_WING` | none | The wing for `custom` |
 | `forceMemoryRecall.level` | `MEMCASTLE_FORCE_MEMORY_RECALL` | `sometimes` | `off`, `sometimes` or `always`: how hard to push the model to search first |
+| `checkpoint.enabled` | `MEMCASTLE_CHECKPOINT` | `true` | Whether the interval review runs; the tool, the command and the emergency checkpoint work either way |
+| `checkpoint.interval` | `MEMCASTLE_CHECKPOINT_INTERVAL` | `10` | How many exchanges (idle events) separate two interval reviews |
+| `checkpoint.mode` | `MEMCASTLE_CHECKPOINT_MODE` | `silent` | `silent` reviews in the background; `blocking` makes the idle hook wait and logs the result |
+| `checkpoint.model` | `MEMCASTLE_CHECKPOINT_MODEL` | none | `provider/id` of the model that reviews the conversation; none means the session's own |
 
 The daemon is found through its registry file, then the configured address, and each candidate is checked with
 `GET /api/health` because the file is only a hint.
@@ -135,6 +142,68 @@ Two things happen, and both read the files where they are:
 - An `off` session registers no hooks, so nothing is injected and nothing is listed.
 - An unreadable skill file is logged once as a warning and requests carry on without the reminder.
 
+### Checkpointing
+
+Three things save a conversation to MemCastle, and all of them classify client-side: the daemon stores what it is handed
+and decides nothing.
+The reviewing model is given the shared [`checkpoint-instructions`](../../skills/checkpoint-instructions/SKILL.md) skill,
+read from `skills/` and never copied, and replies with items each tagged `preference`, `project`, `diary` or `general`.
+The plugin validates the reply, stamps each item with `source.agent` (the `agentIdentity`, default `opencode`), and
+submits it with `memcastle_checkpoint`.
+The code is [the Pi extension's](../pi/README.md#checkpointing) `checkpoint-core.ts`, the same file, so the two agents
+agree on what a checkpoint is and which failures they report.
+
+- **Interval.**
+  OpenCode has no timer or per-turn hook, so the plugin counts `session.idle` events, which fire when the agent finishes
+  a run, and reviews every `checkpoint.interval` of them.
+  This is **partial**: a long single run is one exchange, so a checkpoint can lag it.
+  Each review reads only what the last one did not, and a review that fails before the daemon has the items is retried
+  over the same exchanges.
+- **Manual.**
+  The plugin registers the `memcastle_checkpoint` tool, which the shared skills name, and `/memcastle-checkpoint [hint]`.
+  The tool with no `payload` reviews the session's conversation itself, using `note` as the user's own words; with a
+  `payload` of items the model classified, it validates them and saves exactly those.
+  OpenCode 1 commands are prompt templates, so the command asks the model to call the tool and repeat its answer;
+  OpenCode 2's command runs the review itself and shows the answer in the session.
+  A command you defined with the same name is not replaced.
+  The tool is why the plugin has to be loaded without `mcp.memcastle`: the model must see one `memcastle_checkpoint`.
+- **Emergency.**
+  Before OpenCode summarises a session, the plugin reviews what has not been kept and submits it with `emergency: true`,
+  which is a Critical job that is claimed before anything else queued.
+  It does not wait for the job, and it waits for the review at most 30 seconds, so a slow model never holds up the
+  compaction, and a failure is logged and never stops it.
+  OpenCode 1's hook, `experimental.session.compacting`, is experimental and can change without notice:
+  if it does, run `memcastle checkpoint --emergency` by hand, and the context is otherwise lost without a last checkpoint.
+  OpenCode 2's `compaction` hook is not experimental, and hands the plugin the messages, so nothing is read back.
+  `checkpoint.enabled` does not turn this off, because it is context that is about to be lost.
+
+- **The reviewer is not a conversation.**
+  OpenCode 1's review asks its question in a child session, which the plugin claims before it can run, so none of its
+  hooks (counting, wake-up, the reminder, compaction) ever acts on it; it is deleted afterwards, and the checkpoint tool
+  is switched off in it and refuses it, so a reviewer cannot save without being validated.
+  OpenCode 2 uses a one-off `generate.text` request with no session.
+  Subagent sessions are never reviewed: their parent holds the conversation.
+- **The reviewing model** is `checkpoint.model` as `provider/id`.
+  Without it, OpenCode 1 uses the model of the session's last user message, and OpenCode 2 uses its default model,
+  because `generate.text` takes none from a session.
+  The review is a model call the user pays for, so a cheaper model is a reasonable choice.
+- **`silent`, the default,** never makes anything wait: the review runs in the background and only a failure is logged.
+  **`blocking`** makes the idle hook wait for the review and logs what was saved.
+  There is no agent to hold up at idle, and OpenCode's toasts are not wired yet (#126), so unlike Pi nothing is shown
+  on screen; failures and results go to the OpenCode log, where every other failure of this plugin goes.
+- **Nothing worth keeping is a result, not an error.**
+  Nothing is submitted, because the daemon refuses an empty payload.
+- **A failure says what to do.**
+  A failed job carries the daemon's reason and `memcastle_job_retry`, an unusable reply says nothing was saved, and a
+  daemon that is down says how to start it.
+  Through the tool the failure is thrown, so OpenCode marks the call failed with that text.
+- A `read-only` session never reviews on its own and the tool says why it saved nothing; an `off` session registers no
+  hooks.
+- The review never emits a fact mutation, because that needs ids no MCP tool hands out: `fact` is always `null`.
+- A mistyped checkpoint value falls back to its default rather than breaking the session.
+
+OpenCode 2 evidence is types only, as for the rest of the OpenCode 2 mapping in [the research](docs/research.md#opencode-2).
+
 ### Connection lifecycle
 
 This differs from the [Pi adapter](../pi/README.md#connection-lifecycle), which holds a single connection.
@@ -170,6 +239,8 @@ src/registry.ts   one session per OpenCode sessionID, connected lazily
 src/recall-core.ts   search-before-answer without a host: the level and the text to inject (the same file as Pi's)
 src/skill-text.ts    reads a shared skill from `skills/` and strips its frontmatter (the same file as Pi's)
 src/skills.ts        the shared skills as OpenCode registers them: a `skills.paths` entry (V1), a skill list (V2)
+src/checkpoint-core.ts  checkpointing without a host: settings, the review, the payload, submission (the same file as Pi's)
+src/checkpoint.ts    checkpoints per OpenCode session: interval counting, emergency before compaction, the tool, the command
 src/wake-up-core.ts  wake-up without a host: settings, wing, rendering, the in-flight request (the same file as Pi's)
 src/modes.ts      client labels (full, read-only, off) to wire values (full, read_only, disabled)
 src/failures.ts   the five failure classes, each with the daemon's `help`
@@ -199,17 +270,19 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | `session-mode` | Foundation: label translation, per-session connection, mode selected on connect | #35 |
 | `wake-up` | Implemented: fetched on `session.created`, added to the system prompt of the first (`sync`) or first-ready (`async`) request, never blocks on a down daemon | #33, done |
 | `recall` | Implemented: the shared `search-before-answer` skill is added to the system prompt of every request, at the `forceMemoryRecall` level | #36, done |
-| `checkpoint` | Not yet | #34 |
-| `emergency-checkpoint` | Not yet; planned on `experimental.session.compacting` (V1) and the `compaction` session hook (V2) | #34 |
+| `checkpoint` | Implemented, partly: a review every N `session.idle` events, `/memcastle-checkpoint` and the `memcastle_checkpoint` tool, all submitting a classified payload; a long single run can lag the interval | #34, done |
+| `emergency-checkpoint` | Implemented: a review submitted with `emergency: true` on `experimental.session.compacting` (V1, experimental) and the `compaction` session hook (V2) | #34, done |
 | `persistent-session` | Implemented: one connection per OpenCode session, kept alive, replaced with its mode re-selected when the daemon forgets it | #124, done |
-| `skills` | Implemented: `search-before-answer` and `checkpoint-instructions` are discovered natively from `skills/`, never copied | #36, done |
+| `skills` | Implemented: `search-before-answer` and `checkpoint-instructions` are discovered natively from `skills/`, never copied, and `checkpoint-instructions` also instructs the reviewing model | #36, #34, done |
 | `background-mining` | Not yet | no issue yet |
 | `failure-reporting` | Foundation: the five classes with `help`; user-facing toasts are not wired | later |
 | `audit-repair` | Not yet | no issue yet |
 
 ### Gaps
 
-None are declared yet.
+None are declared.
+The interval checkpoint is partial and the V1 pre-compaction hook is experimental, as described under
+[Checkpointing](#checkpointing), but both are implemented, so neither is a gap.
 Only `emergency-checkpoint`, `background-mining` and `audit-repair` may be gaps, each recorded as three lines:
 **Missing**, **Fallback** and **Effect**.
 The [research](docs/research.md#gaps-and-risks) lists where OpenCode is likely to need one, so that a gap is documented
