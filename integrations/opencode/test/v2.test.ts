@@ -29,6 +29,8 @@ function fakeContext(options: Record<string, unknown> = {}) {
       ),
     },
     tool: { hook: async (name: string) => (hooks.push({ domain: "tool", name }), registration()) },
+    // The shared skills are registered with OpenCode's own skill mechanism (recall.test.ts holds that to the files).
+    skill: { transform: async () => registration() },
   } as unknown as Plugin.Context
   return {
     ctx,

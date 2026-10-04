@@ -97,7 +97,12 @@ Verdicts: **clean** (a native hook does exactly this), **partial** (it can be do
 
 OpenCode scans `~/.agents/skills`, so the shared `skills/search-before-answer` skill reaches it with no copy.
 OpenCode's `skill` tool lists skills by name and description and loads one on demand, so the model decides when to load it.
-If that proves too weak, the system transform can append the one-line reminder each turn, as the contract page allows.
+That is weaker than a habit, so the system transform also appends the skill's body on every request, as the contract
+page allows.
+Checked against OpenCode 1.18.34: a `config` hook that adds the repository's `skills/` to `skills.paths` makes
+`opencode debug skill` list every shared skill with the repository file as its location, so no copy in `~/.agents/skills`
+is needed.
+OpenCode 2 has no config hook, and registers the same skills with `ctx.skill.transform`.
 
 ### Checkpoint, to `checkpoint`
 
@@ -185,7 +190,9 @@ Neither is verified under `opencode run`, where there is no TUI, so the plugin m
 ## Decisions for the follow-up issues
 
 1. **Wake-up (#33)**: start on `session.created`, inject from the system transform, cache the answer per `sessionID`.
-2. **Recall (#36)**: load the shared skill from `~/.agents/skills`; add the system-transform reminder only if needed.
+2. **Recall (#36)**: expose the repository's `skills/` to OpenCode's own skill mechanism (`skills.paths` in V1,
+   `ctx.skill.transform` in V2), and add the system-transform reminder, which is cheap and does not depend on the model
+   choosing to load the skill.
 3. **Checkpoint (#34)**: count turns on `session.idle`, classify through a child session, submit with a plugin tool for the
    manual path, and hook `experimental.session.compacting` for the emergency row.
 4. **Memory mode (#35)**: one plugin-owned MCP connection per `sessionID`, mode selected right after `initialize`

@@ -4,11 +4,18 @@
 // but the same lifecycle points. Keeping the behaviour here, and only the wiring in `v1.ts` and `v2.ts`, means a
 // follow-up issue (#33-#36) fills a stub in once and both majors get it.
 
+import { resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { MemCastleFailure } from "./failures.ts"
 import { InvalidModeError } from "./modes.ts"
+import { recallInstruction } from "./recall-core.ts"
 import { SessionRegistry } from "./registry.ts"
 import { describeSettings, resolveSettings } from "./settings.ts"
+import { SKILLS_DIR, readSkill } from "./skill-text.ts"
 import { PendingWakeUp, fetchWakeUp, wingFor } from "./wake-up-core.ts"
+
+/** The shared skill whose body is re-stated in every request's system prompt (#36). */
+export const SEARCH_BEFORE_ANSWER = "search-before-answer"
 
 export type Level = "debug" | "info" | "warn" | "error"
 
@@ -18,6 +25,11 @@ export type Log = (level: Level, message: string, extra?: Record<string, unknown
 export interface Core {
   readonly sessions: SessionRegistry
   /**
+   * The repository's `skills/` directory, as an absolute path, for OpenCode's native skill discovery. Skills are
+   * loaded from there and never copied, so `search-before-answer` and `checkpoint-instructions` stay the one text.
+   */
+  readonly skillsDir: string
+  /**
    * An OpenCode session began in `directory`: start fetching its wake-up, so the daemon has a head start on the
    * first model request. A session with a `parentID` is a subagent's and gets no briefing of its own.
    */
@@ -26,7 +38,8 @@ export interface Core {
   sessionDeleted(sessionId: string): Promise<void>
   /**
    * A model request is being built: add the session's wake-up to its system prompt through `inject` (#33), and the
-   * search-before-answer reminder (#36). `sessionId` is optional because OpenCode 1 types it that way.
+   * search-before-answer reminder (#36), which does not depend on the wake-up. `sessionId` is optional because
+   * OpenCode 1 types it that way.
    */
   systemTransform(sessionId: string | undefined, inject: (text: string) => void): Promise<void>
   /** Submit an emergency checkpoint just before OpenCode summarises and loses the transcript (#34). */
@@ -108,8 +121,39 @@ export async function createCore(
     )
   }
 
+  const injectWakeUp = guarded("system.transform", async (sessionId: string | undefined, inject: (text: string) => void) => {
+    if (!settings.wakeUp.enabled || sessionId === undefined || children.has(sessionId)) return
+    // A resumed session began before this plugin loaded and never fired `session.created`, so it starts here.
+    startWakeUp(sessionId, directory)
+    const briefing = await wakeUps.get(sessionId)?.available(settings.wakeUp.mode, settings.timeoutMs)
+    if (briefing) inject(briefing)
+  })
+
+  // A skill that cannot be read is reported once, not on every request: the checkout is not coming back mid-session.
+  let recallReported = false
+  const injectRecall = async (sessionId: string | undefined, inject: (text: string) => void): Promise<void> => {
+    // A subagent works on one delegated task and the parent session already carries the reminder.
+    if (settings.forceMemoryRecall.level === "off" || (sessionId !== undefined && children.has(sessionId))) return
+    let text: string | null
+    try {
+      text = recallInstruction(settings.forceMemoryRecall, await readSkill(SEARCH_BEFORE_ANSWER))
+    } catch (error) {
+      if (recallReported) return
+      recallReported = true
+      await report(
+        "system.transform",
+        `could not read the ${SEARCH_BEFORE_ANSWER} skill, so requests carry no reminder to search first: ${String(error)}`,
+      )
+      return
+    }
+    // Outside the try: a host callback that throws is not an unreadable skill, and must not be reported as one.
+    if (text !== null) inject(text)
+  }
+
   return {
     sessions,
+    // Without the URL's trailing slash, so the same directory a user configured by hand compares equal.
+    skillsDir: resolve(fileURLToPath(SKILLS_DIR)),
     sessionCreated: guarded("session.created", async (sessionId: string, sessionDirectory: string, parentId?: string) => {
       if (parentId !== undefined) children.add(sessionId)
       else startWakeUp(sessionId, sessionDirectory)
@@ -121,13 +165,11 @@ export async function createCore(
     }),
     // OpenCode rebuilds the system prompt for every model request (the title model's included), so unlike a message
     // in a transcript the briefing must be added again each time. What is fetched once per session is the answer.
-    systemTransform: guarded("system.transform", async (sessionId: string | undefined, inject: (text: string) => void) => {
-      if (!settings.wakeUp.enabled || sessionId === undefined || children.has(sessionId)) return
-      // A resumed session began before this plugin loaded and never fired `session.created`, so it starts here.
-      startWakeUp(sessionId, directory)
-      const briefing = await wakeUps.get(sessionId)?.available(settings.wakeUp.mode, settings.timeoutMs)
-      if (briefing) inject(briefing)
-    }),
+    // The reminder is a separate step so that a disabled, slow or failing wake-up never costs the session its reminder.
+    systemTransform: async (sessionId: string | undefined, inject: (text: string) => void) => {
+      await injectWakeUp(sessionId, inject)
+      await injectRecall(sessionId, inject)
+    },
     // `experimental.*` (V1) can change without notice; the contract allows documenting a gap if it does.
     compacting: guarded("session.compacting", async () => undefined),
     toolBefore: guarded("tool.execute.before", async () => undefined),

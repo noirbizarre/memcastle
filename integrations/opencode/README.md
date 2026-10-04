@@ -65,6 +65,7 @@ The environment variables are the ones the MemCastle CLI already reads.
 | `wakeUp.mode` | `MEMCASTLE_WAKE_UP_MODE` | `async` | `sync` makes the first response wait for it; `async` never makes a response wait |
 | `wakeUp.source` | `MEMCASTLE_WAKE_UP_SOURCE` | `project` | The wing to ask about: `user`, `project`, `custom` or `none` |
 | `wakeUp.wing` | `MEMCASTLE_WAKE_UP_WING` | none | The wing for `custom` |
+| `forceMemoryRecall.level` | `MEMCASTLE_FORCE_MEMORY_RECALL` | `sometimes` | `off`, `sometimes` or `always`: how hard to push the model to search first |
 
 The daemon is found through its registry file, then the configured address, and each candidate is checked with
 `GET /api/health` because the file is only a hint.
@@ -107,6 +108,33 @@ session may do to memory.
   An `off` session registers no hooks, so nothing is injected.
 - A mistyped wake-up value falls back to its default rather than breaking the session, because wake-up only reads.
 
+### Shared skills
+
+The plugin reuses the repository's [`skills/`](../../skills/README.md) and keeps no copy of them.
+Two things happen, and both read the files where they are:
+
+- **Native discovery.**
+  The plugin makes `skills/` visible to OpenCode's own `skill` tool, so `search-before-answer` and
+  `checkpoint-instructions` are listed and loaded on demand like any other skill.
+  OpenCode 1 gets it from the `config` hook, which adds the directory to `skills.paths`.
+  OpenCode 2 gets it from `ctx.skill.transform`, which adds each skill with its path and body.
+  A skill of the same name the user already installed, say under `.agents/skills`, is never shadowed.
+  The whole directory is exposed, which is the same as copying it into a client location as
+  [the skills page](../../docs/skills.md) describes, so `wake-up`, `diary` and `memcastle-setup` are listed too.
+- **A reminder on every request.**
+  A skill that is only listed is loaded when the model decides to, which is weaker than a habit.
+  So the body of `search-before-answer` is also added to the system prompt of every request, as Pi does, at the level
+  `forceMemoryRecall.level` says.
+  `sometimes` adds the skill as written, `always` adds one line saying to search before every answer, and `off` adds
+  nothing.
+  The settings have the same names and meaning as the [Pi extension's](../pi/README.md#search-before-answering), so the
+  two agents use the same MemCastle operations (`memcastle_search`, then `memcastle_recall`) with the same semantics.
+  The reminder does not depend on the wake-up, so a disabled or failing wake-up never removes it.
+  A subagent's request is left alone, like its wake-up.
+  OpenCode 1 also runs the system transform for the title model, which therefore sees the reminder too.
+- An `off` session registers no hooks, so nothing is injected and nothing is listed.
+- An unreadable skill file is logged once as a warning and requests carry on without the reminder.
+
 ### Connection lifecycle
 
 This differs from the [Pi adapter](../pi/README.md#connection-lifecycle), which holds a single connection.
@@ -139,6 +167,9 @@ src/settings.ts   options and environment to typed settings; the token never rea
 src/daemon.ts     discovery: registry file, then configured address, verified by /api/health
 src/session.ts    one MCP session; selects the mode on every (re)connect before anything else
 src/registry.ts   one session per OpenCode sessionID, connected lazily
+src/recall-core.ts   search-before-answer without a host: the level and the text to inject (the same file as Pi's)
+src/skill-text.ts    reads a shared skill from `skills/` and strips its frontmatter (the same file as Pi's)
+src/skills.ts        the shared skills as OpenCode registers them: a `skills.paths` entry (V1), a skill list (V2)
 src/wake-up-core.ts  wake-up without a host: settings, wing, rendering, the in-flight request (the same file as Pi's)
 src/modes.ts      client labels (full, read-only, off) to wire values (full, read_only, disabled)
 src/failures.ts   the five failure classes, each with the daemon's `help`
@@ -167,11 +198,11 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | --- | --- | --- |
 | `session-mode` | Foundation: label translation, per-session connection, mode selected on connect | #35 |
 | `wake-up` | Implemented: fetched on `session.created`, added to the system prompt of the first (`sync`) or first-ready (`async`) request, never blocks on a down daemon | #33, done |
-| `recall` | Not yet | #36 |
+| `recall` | Implemented: the shared `search-before-answer` skill is added to the system prompt of every request, at the `forceMemoryRecall` level | #36, done |
 | `checkpoint` | Not yet | #34 |
 | `emergency-checkpoint` | Not yet; planned on `experimental.session.compacting` (V1) and the `compaction` session hook (V2) | #34 |
 | `persistent-session` | Implemented: one connection per OpenCode session, kept alive, replaced with its mode re-selected when the daemon forgets it | #124, done |
-| `skills` | Not yet | #36 |
+| `skills` | Implemented: `search-before-answer` and `checkpoint-instructions` are discovered natively from `skills/`, never copied | #36, done |
 | `background-mining` | Not yet | no issue yet |
 | `failure-reporting` | Foundation: the five classes with `help`; user-facing toasts are not wired | later |
 | `audit-repair` | Not yet | no issue yet |

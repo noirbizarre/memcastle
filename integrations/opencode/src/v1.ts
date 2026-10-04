@@ -4,6 +4,7 @@
 
 import type { Hooks, Plugin } from "@opencode-ai/plugin"
 import { createCore } from "./core.ts"
+import { addSkillsPath } from "./skills.ts"
 
 export const server: Plugin = async ({ client, directory }, options) => {
   // Logging goes through OpenCode so it lands in its log, and it must never be the reason a hook fails.
@@ -18,6 +19,8 @@ export const server: Plugin = async ({ client, directory }, options) => {
   if (!core) return {}
 
   const hooks: Hooks = {
+    // Makes the shared skills visible to OpenCode's own `skill` tool, read from the repository where they live.
+    config: async (config) => addSkillsPath(config, core.skillsDir),
     event: async ({ event }) => {
       // session.created starts the wake-up fetch, which is what gives it a head start on the first request.
       // session.idle -> count turns for checkpoints (#34).
