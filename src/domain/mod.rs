@@ -18,11 +18,12 @@ mod palace;
 mod path;
 mod search;
 mod secret;
+mod source;
 
 pub use checkpoint::{CheckpointDestination, CheckpointItem, CheckpointPayload, FactMutation};
-pub use drawer::{Drawer, Provenance, Source, SourceKind, content_hash, sha256_hex};
+pub use drawer::{Drawer, Origin, Provenance, Source, SourceKind, content_hash, sha256_hex};
 pub use entity::{Entity, NewRelationship, Relationship, normalize_label, require_label};
-pub use ids::{DrawerId, EntityId, JobId, PalaceId, RelationshipId, RoomId, WingId};
+pub use ids::{DrawerId, EntityId, JobId, PalaceId, RelationshipId, RoomId, SourceId, WingId};
 pub(crate) use job::default_dry_run;
 pub use job::{
     InvalidPriority, Job, JobEvent, JobKind, JobProgress, JobStatus, MiningSource, Priority,
@@ -33,6 +34,10 @@ pub use search::{
     EMBEDDING_DIMENSION, RankingMode, SearchFilter, SearchHit, SearchQuery, Signals, Temporal,
 };
 pub use secret::Secret;
+pub use source::{
+    Candidate, CanonicalDocument, ChunkRef, CredentialRef, Cursor, RawDocument, Segment,
+    SourceCapabilities, SourceDocumentRecord, SourceRecord, SourceRef,
+};
 
 /// The channels a write can come through, recorded as `Job::requested_by` and
 /// `provenance.requested_by`. Named once so a spelling drift between the

@@ -27,7 +27,7 @@ use crate::app::{
 };
 use crate::config::Secret;
 use crate::domain::channel::CLI as CHANNEL;
-use crate::domain::{CheckpointPayload, Drawer, Job, JobId, JobStatus, MemoryMode};
+use crate::domain::{CheckpointPayload, Drawer, Job, JobId, JobStatus, MemoryMode, MiningSource};
 use crate::error::{Error, Result};
 use crate::search::{SearchHit, SearchQuery};
 use crate::server::lifecycle;
@@ -389,18 +389,43 @@ impl DaemonClient {
         .await
     }
 
-    /// Submit a mining job.
+    /// Submit a mining job for a directory or a source adapter.
     ///
     /// # Errors
     ///
     /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
-    pub async fn submit_mine(&self, path: std::path::PathBuf, wing: Option<String>) -> Result<Job> {
+    pub async fn submit_mine(
+        &self,
+        source: MiningSource,
+        wing: Option<String>,
+        full: bool,
+    ) -> Result<Job> {
+        // `MiningSource` serialises flat (`path`, or `provider` and `locator`), which is the wire shape the daemon
+        // reads; `full` is left off when false so a plain mine sends exactly what it always did.
+        let mut body = serde_json::to_value(&source)
+            .map_err(|source| Error::serialization("a mining request", source))?;
+        body["type"] = json!("mine");
+        body["wing"] = json!(wing);
+        body["requested_by"] = json!(CHANNEL);
+        if full {
+            body["full"] = json!(true);
+        }
         self.send(
-            self.http.post(format!("{}/api/jobs", self.base_url)).json(
-                &json!({ "type": "mine", "path": path, "wing": wing, "requested_by": CHANNEL }),
-            ),
+            self.http
+                .post(format!("{}/api/jobs", self.base_url))
+                .json(&body),
         )
         .await
+    }
+
+    /// The sources the daemon can mine and the ones it has mined.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
+    pub async fn list_sources(&self) -> Result<crate::app::SourcesReport> {
+        self.send(self.http.get(format!("{}/api/sources", self.base_url)))
+            .await
     }
 
     /// Submit a read-only palace consistency audit — see

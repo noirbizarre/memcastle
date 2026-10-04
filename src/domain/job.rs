@@ -81,27 +81,38 @@ impl std::str::FromStr for JobStatus {
     }
 }
 
-/// Where a mining job reads its source material from — the seam Phase 5
-/// slots a non-filesystem reader (e.g. a Pi/OpenCode session-transcript
-/// reader) behind. `JobKind::Mine`'s shape (`source`, `wing`) never changes
-/// when a variant is added here, so neither `Scheduler::execute`'s dispatch nor
-/// the wire format's `"type": "mine"` tag needs to change either — adding a
-/// source kind means adding a variant here and a matching arm in
-/// `mining::run`, nothing more.
+/// Where a mining job reads its source material from: the directory form that
+/// predates the unified source model, or any registered source adapter
+/// ([`crate::mining`]'s provider list) by name.
+///
+/// `JobKind::Mine`'s shape (`source`, `wing`, `full`) never changes when an
+/// adapter is added: a new adapter is a new provider name, not a new variant,
+/// so neither `Scheduler::execute`'s dispatch nor the wire format's
+/// `"type": "mine"` tag needs to change.
 ///
 /// `#[serde(untagged)]`, combined with `#[serde(flatten)]` on the field that
-/// holds this in `JobKind::Mine`, is what keeps the on-the-wire shape
-/// exactly `{"type": "mine", "path": ..., "wing": ...}` — the same JSON
-/// every existing caller (CLI, MCP, HTTP, the persistence/server
-/// integration tests) already sends, with zero migration needed for the one
-/// source kind that exists today.
+/// holds this in `JobKind::Mine`, is what keeps the on-the-wire shape of a
+/// directory job exactly `{"type": "mine", "path": ..., "wing": ...}` — the
+/// same JSON every existing caller (CLI, MCP, HTTP, jobs already on disk)
+/// sends. A provider job is `{"type": "mine", "provider": ..., "locator": ...}`.
+/// `Directory` stays first: a body carrying `path` is always a directory job.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MiningSource {
-    /// Walk a directory on disk, one drawer per file — today's only source.
+    /// Walk a directory on disk (the `directory` adapter), kept as its own
+    /// variant for the wire shape described above.
     Directory {
         /// The directory to walk.
         path: PathBuf,
+    },
+    /// Mine through a named source adapter.
+    Provider {
+        /// The adapter's name (`pi-sessions`, ...); see `crate::mining::providers`.
+        provider: String,
+        /// The part of the provider to read; `None` takes the adapter's default
+        /// (the Pi sessions directory, say).
+        #[serde(default)]
+        locator: Option<String>,
     },
 }
 
@@ -129,6 +140,11 @@ pub enum JobKind {
         source: MiningSource,
         /// The wing to file mined drawers under (defaults to the directory name).
         wing: Option<String>,
+        /// Ignore the source's stored cursor and re-read everything from the
+        /// beginning. Unchanged documents are still skipped, so this costs
+        /// reading, not duplicates. Absent from the wire when `false`.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        full: bool,
     },
     /// Persist an already-classified batch of checkpoint items — durable,
     /// resumable writes only; classification into destination buckets
@@ -834,6 +850,7 @@ mod tests {
                 path: "/tmp/fixture".into(),
             },
             wing: Some("docs".to_string()),
+            full: false,
         };
 
         // `MiningSource` must stay invisible on the wire: existing callers
@@ -852,8 +869,66 @@ mod tests {
             round_tripped,
             JobKind::Mine {
                 source: MiningSource::Directory { .. },
-                wing: Some(ref w)
+                wing: Some(ref w),
+                full: false,
             } if w == "docs"
+        ));
+    }
+
+    #[test]
+    fn a_mine_job_stored_before_the_full_flag_existed_still_deserializes_as_incremental() {
+        // Jobs already on disk have no `full` key: they must not fail to load, and must not turn into full re-reads.
+        let stored = serde_json::json!({"type": "mine", "path": "/tmp/fixture", "wing": null});
+        let kind: JobKind = serde_json::from_value(stored).unwrap();
+        assert!(matches!(
+            kind,
+            JobKind::Mine {
+                source: MiningSource::Directory { .. },
+                full: false,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_provider_mine_job_is_flat_on_the_wire_and_round_trips() {
+        let kind = JobKind::Mine {
+            source: MiningSource::Provider {
+                provider: "pi-sessions".into(),
+                locator: None,
+            },
+            wing: None,
+            full: true,
+        };
+        let json = serde_json::to_value(&kind).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "mine", "provider": "pi-sessions", "locator": null, "wing": null, "full": true
+            })
+        );
+        let back: JobKind = serde_json::from_value(json).unwrap();
+        assert!(matches!(
+            back,
+            JobKind::Mine {
+                source: MiningSource::Provider { ref provider, locator: None },
+                full: true,
+                ..
+            } if provider == "pi-sessions"
+        ));
+    }
+
+    #[test]
+    fn a_body_naming_a_path_is_a_directory_job_even_if_it_also_names_a_provider() {
+        // `Directory` is tried first, so the legacy shape can never be reinterpreted by a later variant.
+        let body = serde_json::json!({"type": "mine", "path": "/x", "provider": "pi-sessions"});
+        let kind: JobKind = serde_json::from_value(body).unwrap();
+        assert!(matches!(
+            kind,
+            JobKind::Mine {
+                source: MiningSource::Directory { .. },
+                ..
+            }
         ));
     }
 

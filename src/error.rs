@@ -728,6 +728,21 @@ pub enum Error {
         /// The requested ranking (`semantic` or `hybrid`).
         ranking: String,
     },
+
+    /// A source's stored cursor is not one its adapter can continue from.
+    #[error("the stored cursor of the `{provider}` source cannot be continued from: {message}")]
+    #[diagnostic(
+        code(memcastle::mining::cursor_invalid),
+        help(
+            "mine it again from the beginning (`memcastle mine --source <provider> --full`): unchanged documents are skipped, so nothing is duplicated"
+        )
+    )]
+    SourceCursorInvalid {
+        /// The adapter whose cursor was rejected.
+        provider: String,
+        /// Why it was rejected.
+        message: String,
+    },
 }
 
 /// What every interface reports about a failure: the message, and the two
@@ -1108,6 +1123,10 @@ mod tests {
             Error::SemanticUnavailable {
                 ranking: "hybrid".to_string(),
             },
+            Error::SourceCursorInvalid {
+                provider: "pi-sessions".to_string(),
+                message: "not an object".to_string(),
+            },
         ]
     }
 
@@ -1162,7 +1181,8 @@ mod tests {
             | Error::EmbeddingDimension { .. }
             | Error::EmbeddingsNotConfigured
             | Error::EmbeddingFailed { .. }
-            | Error::SemanticUnavailable { .. } => {}
+            | Error::SemanticUnavailable { .. }
+            | Error::SourceCursorInvalid { .. } => {}
         }
     }
 

@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
+use crate::config::MiningConfig;
 use crate::domain::{Job, JobId, JobProgress};
 use crate::embed::Embeddings;
 use crate::error::Result;
@@ -78,6 +79,8 @@ pub struct JobContext {
     /// The embedding provider, for the handlers that derive vectors. Disabled
     /// unless the scheduler was given one.
     embeddings: Embeddings,
+    /// Mining limits (`[mining]`): chunk size, file size, documents per run.
+    mining: MiningConfig,
 }
 
 impl JobContext {
@@ -90,7 +93,21 @@ impl JobContext {
             store,
             lease_owner: None,
             embeddings: Embeddings::disabled(),
+            mining: MiningConfig::default(),
         }
+    }
+
+    /// Give this context the daemon's mining settings.
+    #[must_use]
+    pub fn with_mining(mut self, mining: MiningConfig) -> Self {
+        self.mining = mining;
+        self
+    }
+
+    /// The mining settings, for the mining handler.
+    #[must_use]
+    pub fn mining(&self) -> &MiningConfig {
+        &self.mining
     }
 
     /// Give this context the daemon's embedding provider.

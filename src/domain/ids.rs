@@ -132,6 +132,11 @@ define_id!(
     /// Identifies a [`Relationship`](super::Relationship).
     RelationshipId
 );
+define_id!(
+    /// Identifies a mining source (see [`SourceRef`](super::SourceRef)); derived from what the
+    /// source *is*, never random, so two jobs mining the same place agree on it.
+    SourceId
+);
 
 #[cfg(test)]
 mod tests {

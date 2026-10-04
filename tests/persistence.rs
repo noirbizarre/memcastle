@@ -87,6 +87,75 @@ async fn drawers_survive_a_daemon_restart_against_the_same_palace() {
 }
 
 #[tokio::test]
+async fn a_sources_cursor_survives_a_daemon_restart_so_the_next_mine_reads_nothing_again() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let palace = dir.path().join("palace");
+    let fixture = dir.path().join("fixture");
+    std::fs::create_dir_all(&fixture).expect("create fixture dir");
+    std::fs::write(fixture.join("note.txt"), "a note mined once").expect("write fixture file");
+
+    let bin = cargo_bin("memcastle");
+    let client = reqwest::Client::new();
+    let mine = |base: String| {
+        let client = client.clone();
+        let fixture = fixture.clone();
+        async move {
+            let job: memcastle::domain::Job = client
+                .post(format!("{base}/api/jobs"))
+                .json(&serde_json::json!({
+                    "type": "mine", "path": fixture, "wing": null, "requested_by": "test",
+                }))
+                .send()
+                .await
+                .expect("submit mine job")
+                .error_for_status()
+                .expect("mine job accepted")
+                .json()
+                .await
+                .expect("job json");
+            common::wait_for_job_status(
+                &client,
+                &base,
+                job.id,
+                memcastle::domain::JobStatus::Completed,
+            )
+            .await
+        }
+    };
+
+    {
+        let (mut child, info) = spawn_daemon_and_wait(&bin, &palace).await;
+        let first = mine(format!("http://{}", info.bind_addr)).await;
+        assert_eq!(first.result.expect("summary")["created"], 1);
+        stop_daemon(&bin, &palace, &mut child).await;
+    }
+
+    {
+        let (mut child, info) = spawn_daemon_and_wait(&bin, &palace).await;
+        let base = format!("http://{}", info.bind_addr);
+        let second = mine(base.clone()).await;
+        let summary = second.result.expect("summary");
+        assert_eq!(
+            summary["documents"], 0,
+            "the cursor was stored, so nothing is read again"
+        );
+        assert_eq!(summary["created"], 0);
+
+        let report: serde_json::Value = client
+            .get(format!("{base}/api/sources"))
+            .send()
+            .await
+            .expect("sources request")
+            .json()
+            .await
+            .expect("sources json");
+        assert_eq!(report["sources"][0]["documents"], 1);
+        assert!(report["sources"][0]["cursor"]["mtime_ns"].is_i64());
+        stop_daemon(&bin, &palace, &mut child).await;
+    }
+}
+
+#[tokio::test]
 async fn checkpoint_drawers_survive_a_daemon_restart_against_the_same_palace() {
     let dir = tempfile::tempdir().expect("tempdir");
     let palace = dir.path().join("palace");

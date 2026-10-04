@@ -14,7 +14,9 @@ pub enum SourceKind {
     File,
     /// Written directly through an MCP tool call or the HTTP API.
     Manual,
-    /// Reserved for future ingest modes (conversation transcripts, etc).
+    /// Mined from a conversation transcript (an agent's session history).
+    Transcript,
+    /// Reserved for future ingest modes (chat messages, issues, pages, ...).
     #[serde(other)]
     Other,
 }
@@ -32,6 +34,41 @@ pub struct Source {
     /// channel a write arrived through is [`Provenance::requested_by`]'s job,
     /// not this field's.
     pub agent: Option<String>,
+    /// Which mining source, document and chunk this drawer was cut from.
+    /// `None` for anything not mined through a source (manual writes, checkpoint items) and for drawers mined
+    /// before the unified source model existed; absent from the stored object in both cases, so
+    /// rows and wire shapes written earlier are unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<Origin>,
+}
+
+/// Where inside a mining source a drawer came from: enough to find the source document again, and to tell
+/// which version of it the drawer was cut from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Origin {
+    /// The source the document was acquired from.
+    pub source: super::SourceId,
+    /// The adapter that acquired it (`directory`, `pi-sessions`, ...).
+    pub provider: String,
+    /// The document's identity within the source (a relative path, a session file, a message id).
+    pub document: String,
+    /// Zero-based position of this chunk within the document.
+    pub chunk: u32,
+    /// The document revision this chunk was cut from, so a later revision can be told apart.
+    pub revision: String,
+}
+
+impl Source {
+    /// A source with no mining origin: the shape every writer that is not a mining source uses.
+    #[must_use]
+    pub fn new(kind: SourceKind, uri: Option<String>, agent: Option<String>) -> Self {
+        Self {
+            kind,
+            uri,
+            agent,
+            origin: None,
+        }
+    }
 }
 
 /// Bookkeeping for *why* a drawer exists, distinct from *what* it contains.
@@ -166,6 +203,7 @@ mod tests {
                 kind: SourceKind::Manual,
                 uri: None,
                 agent: None,
+                origin: None,
             },
             vec![],
             Provenance {

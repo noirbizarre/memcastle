@@ -3,7 +3,7 @@
 //! Load order: hardcoded defaults -> optional TOML file -> `MEMCASTLE_*`
 //! environment overrides -> command-line [`Overrides`] -> [`Config::validate`].
 //! Deliberately hand-rolled rather than pulled in from a config-framework
-//! crate — there are nine sections of settings, and a framework's abstraction
+//! crate — there are ten sections of settings, and a framework's abstraction
 //! cost would outweigh what it saves here.
 //!
 //! Default file locations follow the Unix XDG convention on Linux and macOS
@@ -311,6 +311,41 @@ impl Default for EmbeddingsConfig {
     }
 }
 
+/// The default chunk size, in characters. Under the 8,000 characters the embedding sweep reads of a drawer
+/// (docs/adr/021), so a chunk is embedded whole.
+pub const DEFAULT_MINING_CHUNK_CHARS: usize = 6_000;
+/// The default largest file a directory mine reads, in bytes. Chunking is what makes a large file mineable.
+pub const DEFAULT_MINING_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+/// The default number of documents one mining run ingests before stopping to be run again.
+pub const DEFAULT_MINING_MAX_DOCUMENTS: usize = 2_000;
+
+/// Mining settings (`[mining]`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MiningConfig {
+    /// How many characters one drawer holds at most; a longer document is cut into several drawers.
+    pub chunk_chars: usize,
+    /// Files larger than this many bytes are skipped by directory mining.
+    pub max_file_bytes: u64,
+    /// How many documents one job ingests. A source with more is mined across runs: the cursor continues where the
+    /// last one stopped, and the job's result says `truncated`.
+    pub max_documents: usize,
+    /// Where the `pi-sessions` source looks for Pi session files when no locator is given. Unset means
+    /// `~/.pi/agent/sessions`.
+    pub pi_sessions_dir: Option<PathBuf>,
+}
+
+impl Default for MiningConfig {
+    fn default() -> Self {
+        Self {
+            chunk_chars: DEFAULT_MINING_CHUNK_CHARS,
+            max_file_bytes: DEFAULT_MINING_MAX_FILE_BYTES,
+            max_documents: DEFAULT_MINING_MAX_DOCUMENTS,
+            pi_sessions_dir: None,
+        }
+    }
+}
+
 /// Parse a bind *interface* (`--bind`, `MEMCASTLE_BIND`).
 ///
 /// # Errors
@@ -474,6 +509,9 @@ pub struct Config {
     /// Embedding provider settings.
     #[serde(default)]
     pub embeddings: EmbeddingsConfig,
+    /// Mining settings.
+    #[serde(default)]
+    pub mining: MiningConfig,
 }
 
 impl Config {
@@ -620,6 +658,18 @@ impl Config {
         }
         if let Some(n) = lookup("MEMCASTLE_EMBEDDINGS_TIMEOUT_SECS") {
             self.embeddings.timeout_secs = parse_override("MEMCASTLE_EMBEDDINGS_TIMEOUT_SECS", &n)?;
+        }
+        if let Some(n) = lookup("MEMCASTLE_MINING_CHUNK_CHARS") {
+            self.mining.chunk_chars = parse_override("MEMCASTLE_MINING_CHUNK_CHARS", &n)?;
+        }
+        if let Some(n) = lookup("MEMCASTLE_MINING_MAX_FILE_BYTES") {
+            self.mining.max_file_bytes = parse_override("MEMCASTLE_MINING_MAX_FILE_BYTES", &n)?;
+        }
+        if let Some(n) = lookup("MEMCASTLE_MINING_MAX_DOCUMENTS") {
+            self.mining.max_documents = parse_override("MEMCASTLE_MINING_MAX_DOCUMENTS", &n)?;
+        }
+        if let Some(dir) = lookup("MEMCASTLE_MINING_PI_SESSIONS_DIR") {
+            self.mining.pi_sessions_dir = Some(PathBuf::from(dir));
         }
         // Same reasoning as the auth token below: a secret, so no
         // `parse_override`, whose error would echo the value.
@@ -774,6 +824,41 @@ impl Config {
             )));
         }
         self.validate_embeddings()?;
+        self.validate_mining()?;
+        Ok(())
+    }
+
+    /// The `[mining]` invariants. The bounds keep a typo from producing either thousands of one-character drawers
+    /// or one drawer too large to embed or read.
+    fn validate_mining(&self) -> Result<()> {
+        let mining = &self.mining;
+        if !(200..=100_000).contains(&mining.chunk_chars) {
+            return Err(Error::config(
+                "mining.chunk_chars (or MEMCASTLE_MINING_CHUNK_CHARS) must be between 200 and 100000",
+            ));
+        }
+        if !(1..=64 * 1024 * 1024).contains(&mining.max_file_bytes) {
+            return Err(Error::config(
+                "mining.max_file_bytes (or MEMCASTLE_MINING_MAX_FILE_BYTES) must be between 1 and 67108864",
+            ));
+        }
+        if !(1..=1_000_000).contains(&mining.max_documents) {
+            return Err(Error::config(
+                "mining.max_documents (or MEMCASTLE_MINING_MAX_DOCUMENTS) must be between 1 and 1000000",
+            ));
+        }
+        // Relative to whatever directory the daemon started in, like `palace.path` and `assets.dir`.
+        if let Some(dir) = mining
+            .pi_sessions_dir
+            .as_ref()
+            .filter(|dir| !dir.is_absolute())
+        {
+            return Err(Error::config(format!(
+                "mining.pi_sessions_dir {:?} is not an absolute path; set an absolute one or remove it \
+                 to use ~/.pi/agent/sessions",
+                dir.display().to_string()
+            )));
+        }
         Ok(())
     }
 
@@ -1399,6 +1484,62 @@ mod tests {
             let err = Config::default()
                 .apply_overrides_from(env(&[(name, value)]))
                 .unwrap_err();
+            assert!(err.to_string().contains(name), "{err}");
+        }
+    }
+
+    #[test]
+    fn mining_settings_come_from_the_file_then_the_environment() {
+        let mut config: Config = toml::from_str("[mining]\nchunk_chars = 1000").unwrap();
+        assert_eq!(config.mining.chunk_chars, 1000);
+        assert_eq!(config.mining.max_documents, DEFAULT_MINING_MAX_DOCUMENTS);
+
+        config
+            .apply_overrides_from(env(&[
+                ("MEMCASTLE_MINING_CHUNK_CHARS", "2000"),
+                ("MEMCASTLE_MINING_MAX_FILE_BYTES", "4096"),
+                ("MEMCASTLE_MINING_MAX_DOCUMENTS", "7"),
+                ("MEMCASTLE_MINING_PI_SESSIONS_DIR", "/pi/sessions"),
+            ]))
+            .unwrap();
+        assert_eq!(config.mining.chunk_chars, 2000);
+        assert_eq!(config.mining.max_file_bytes, 4096);
+        assert_eq!(config.mining.max_documents, 7);
+        assert_eq!(
+            config.mining.pi_sessions_dir,
+            Some(PathBuf::from("/pi/sessions"))
+        );
+    }
+
+    #[test]
+    fn a_malformed_mining_variable_is_named_in_the_error() {
+        let err = Config::default()
+            .apply_overrides_from(env(&[("MEMCASTLE_MINING_CHUNK_CHARS", "big")]))
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("MEMCASTLE_MINING_CHUNK_CHARS"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn out_of_range_mining_settings_are_rejected_by_name() {
+        for (edit, name) in [
+            (
+                (|c: &mut Config| c.mining.chunk_chars = 10) as fn(&mut Config),
+                "mining.chunk_chars",
+            ),
+            (|c| c.mining.max_documents = 0, "mining.max_documents"),
+            (|c| c.mining.max_file_bytes = 0, "mining.max_file_bytes"),
+            (
+                |c| c.mining.pi_sessions_dir = Some(PathBuf::from("relative")),
+                "mining.pi_sessions_dir",
+            ),
+        ] {
+            let mut config = Config::default();
+            config.palace.path = std::env::temp_dir();
+            edit(&mut config);
+            let err = config.validate().unwrap_err();
             assert!(err.to_string().contains(name), "{err}");
         }
     }

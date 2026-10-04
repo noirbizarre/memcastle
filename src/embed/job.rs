@@ -112,6 +112,7 @@ mod tests {
                     kind: SourceKind::Manual,
                     uri: None,
                     agent: None,
+                    origin: None,
                 },
                 vec![],
                 Provenance {
@@ -271,6 +272,7 @@ mod tests {
                 kind: SourceKind::Manual,
                 uri: None,
                 agent: None,
+                origin: None,
             },
             vec![],
             Provenance {
