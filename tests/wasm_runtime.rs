@@ -122,7 +122,7 @@ impl Fixture {
             .json()
             .await
             .unwrap();
-        report["providers"]
+        report["adapters"]
             .as_array()
             .unwrap()
             .iter()
@@ -134,9 +134,7 @@ impl Fixture {
     async fn mine(&self, tree: &Path) -> reqwest::Response {
         self.client
             .post(self.url("/api/jobs"))
-            .json(
-                &json!({"type": "mine", "provider": NAME, "locator": tree, "requested_by": "test"}),
-            )
+            .json(&json!({"type": "mine", "source": NAME, "locator": tree, "requested_by": "test"}))
             .send()
             .await
             .expect("request")
@@ -254,7 +252,7 @@ async fn an_installed_source_is_mined_only_while_enabled_and_idempotently() {
     );
     let hits = fixture.search("gazebos").await;
     assert_eq!(hits.len(), 1, "{hits:?}");
-    assert_eq!(hits[0]["source"]["origin"]["provider"], NAME);
+    assert_eq!(hits[0]["source"]["origin"]["source"], NAME);
 
     let second = fixture.mined(tree.path()).await;
     let summary = second.result.as_ref().unwrap();

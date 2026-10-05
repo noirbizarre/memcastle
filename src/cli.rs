@@ -647,7 +647,7 @@ pub struct AuditArgs {
     /// Orphan-drawer and dangling-provenance findings are always
     /// palace-wide regardless of this (see `memcastle::audit`'s module doc).
     #[arg(long)]
-    pub scope: Option<String>,
+    pub wing: Option<String>,
 }
 
 /// Arguments for `memcastle embed`.

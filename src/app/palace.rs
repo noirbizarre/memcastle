@@ -1036,7 +1036,7 @@ mod tests {
     async fn a_read_only_audit_does_not_block_a_delete() {
         let app = app().await;
         drawer(&app, ("work", "r"), None, "x").await;
-        let audit = Job::new(JobKind::Audit { scope: None }, Priority::Normal, "test");
+        let audit = Job::new(JobKind::Audit { wing: None }, Priority::Normal, "test");
         app.store.save_job(&audit).await.unwrap();
         app.delete_wing("work", FULL).await.unwrap();
     }

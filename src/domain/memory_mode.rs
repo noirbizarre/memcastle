@@ -13,7 +13,7 @@
 //!
 //! ## The allow/deny matrix
 //!
-//! | mode        | read (`search`/`recall`/`wake_up`/`diary_read`, job `list`/`show`, wing/room/drawer `list`/`show`) | write (`checkpoint`/`emergency_checkpoint`/`diary_write`, `mine`, applied `repair`, wing/room/drawer `create`/`delete`) |
+//! | mode        | read (`search`/`recall`/`wake_up`/`diary_read`, job `list`/`get`, wing/room/drawer `list`/`show`, drawer `history`/`duplicates`, entity `list`/`mentions`/`relationships`/`candidates`, source `list`/`show`) | write (`checkpoint`/`emergency_checkpoint`/`diary_write`/`note_write`, `mine`/`embed`/`extract`, applied `repair`, wing/room/drawer `create`/`delete`, drawer `supersede`/`link`/`embed`, `entity_alias`) |
 //! |-------------|--------------------------------------------------|-------------------------------------------------------------|
 //! | `Full`      | ok                                               | ok                                                            |
 //! | `ReadOnly`  | ok                                               | rejected (`Error::ModeForbidden`)                             |

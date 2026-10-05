@@ -1,4 +1,4 @@
-//! Migration 3: derive the identity keys deduplication reads (docs/adr/025).
+//! Piece of migration 3 (`since-0.2`): derive the identity keys deduplication reads (docs/adr/025).
 //!
 //! Drawers written earlier have no `fingerprint` and entities have no `key` or aliases, so an old memory could not
 //! be recognised as a duplicate of a new one and an old entity could not be converged on. This fills them in from

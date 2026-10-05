@@ -6,7 +6,7 @@
 //!
 //! What it cannot see: a file that appears with an old modification time (restored from a backup, copied with
 //! its times preserved) sorts before the watermark and is missed until a `--full` run. A deleted file is not
-//! noticed at all. Both are limits of a local watermark, not of the model: a provider with real change feeds
+//! noticed at all. Both are limits of a local watermark, not of the model: a source with real change feeds
 //! supplies a cursor that does see them.
 
 use serde_json::json;
@@ -35,13 +35,13 @@ impl Watermark {
     ///
     /// # Errors
     ///
-    /// [`Error::SourceCursorInvalid`] naming `provider` when `cursor` is neither `null` nor a watermark.
-    pub fn parse(provider: &str, cursor: &Cursor) -> Result<Option<Self>> {
+    /// [`Error::SourceCursorInvalid`] naming `source` when `cursor` is neither `null` nor a watermark.
+    pub fn parse(source: &str, cursor: &Cursor) -> Result<Option<Self>> {
         if cursor.is_null() {
             return Ok(None);
         }
         let invalid = |message: &str| Error::SourceCursorInvalid {
-            provider: provider.to_string(),
+            adapter: source.to_string(),
             message: message.to_string(),
         };
         let mtime_ns = cursor
@@ -190,7 +190,7 @@ mod tests {
         assert!(Watermark::parse("p", &Cursor::Null).unwrap().is_none());
         let err = Watermark::parse("directory", &serde_json::json!({"offset": 3})).unwrap_err();
         assert!(
-            matches!(err, Error::SourceCursorInvalid { ref provider, .. } if provider == "directory")
+            matches!(err, Error::SourceCursorInvalid { ref adapter, .. } if adapter == "directory")
         );
     }
 }

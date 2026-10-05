@@ -216,6 +216,30 @@ async fn a_semantic_search_without_any_vector_is_refused_and_auto_falls_back_to_
 }
 
 #[tokio::test]
+async fn a_post_search_body_may_call_its_text_query_like_every_other_search() {
+    let daemon = TestDaemon::start().await;
+    let base = &daemon.base_url;
+    write(base, "w", "r", "a zebra crossed the road").await;
+
+    // `text` is the field's own name; `query` is what MCP, the CLI and the GET form say, and a body that used it
+    // must find the drawer rather than search for an empty string.
+    for field in ["text", "query"] {
+        let hits: Value = client()
+            .post(format!("{base}/api/search"))
+            .json(&json!({ field: "zebra" }))
+            .send()
+            .await
+            .expect("post search")
+            .json()
+            .await
+            .expect("json");
+        assert_eq!(contents(&hits), ["a zebra crossed the road"], "`{field}`");
+    }
+
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
 async fn caller_supplied_vectors_work_against_a_daemon_with_no_provider() {
     let daemon = TestDaemon::start().await;
     let base = &daemon.base_url;

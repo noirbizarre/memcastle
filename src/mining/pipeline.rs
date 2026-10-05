@@ -2,7 +2,7 @@
 //!
 //! Given a [`SourceAdapter`], it discovers what is new past the source's stored cursor, reads each candidate,
 //! skips what is unchanged, normalizes and chunks what is not, files the chunks as drawers, and only then moves
-//! the cursor. It knows nothing about any particular source: no file system, no provider names (a test holds this
+//! the cursor. It knows nothing about any particular source: no file system, no source names (a test holds this
 //! file to that), because the day it does, the next adapter needs a second pipeline.
 //!
 //! # Idempotence
@@ -119,7 +119,7 @@ pub async fn mine<A: SourceAdapter>(
     let total = base + discovery.candidates.len() as u64;
     // Counts only: names, paths and contents stay out of the log.
     tracing::info!(
-        provider = adapter.provider(),
+        source = adapter.name(),
         candidates = discovery.candidates.len(),
         full = request.full,
         resumed = job.checkpoint.get("cursor").is_some(),
@@ -158,7 +158,7 @@ pub async fn mine<A: SourceAdapter>(
                     let record = ingest(
                         store,
                         &Ingest {
-                            provider: adapter.provider(),
+                            adapter: adapter.name(),
                             retains_raw: adapter.capabilities().retains_raw,
                             chunk_chars: settings.chunk_chars,
                             source: &source,
@@ -205,8 +205,8 @@ pub async fn mine<A: SourceAdapter>(
     // The only report a mining job leaves besides its progress line, and where a caller checks whether the whole
     // source was covered.
     job.result = Some(json!({
-        "source": source.id,
-        "provider": adapter.provider(),
+        "source_id": source.id,
+        "source": adapter.name(),
         "documents": stats.documents,
         "created": stats.created,
         "superseded": stats.superseded,
@@ -222,7 +222,8 @@ pub async fn mine<A: SourceAdapter>(
 
 /// Everything [`ingest`] needs besides the document itself.
 struct Ingest<'a> {
-    provider: &'a str,
+    /// The adapter's name, recorded on every drawer's origin.
+    adapter: &'a str,
     retains_raw: bool,
     chunk_chars: usize,
     source: &'a SourceRecord,
@@ -286,8 +287,8 @@ async fn ingest(
                 uri: canonical.uri.clone(),
                 agent: None,
                 origin: Some(Origin {
-                    source: ctx.source.id,
-                    provider: ctx.provider.to_string(),
+                    source_id: ctx.source.id,
+                    source: ctx.adapter.to_string(),
                     document: raw.external_id.clone(),
                     chunk: index,
                     revision: raw.revision.clone(),

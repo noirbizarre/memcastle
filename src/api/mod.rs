@@ -100,8 +100,8 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
         )
         .route("/api/source-registry/update", post(source_registry::update))
         .route("/api/shutdown", post(shutdown_now))
-        // The hierarchy. Reads and creates are open to the same callers as any
-        // other palace content; deletes have no MCP tool (docs/adr/018).
+        // The hierarchy. REST and CLI only: no wing, room or drawer route has an MCP tool, because agents write memory
+        // through `memcastle_checkpoint` and the diary, and shaping the palace is a human decision (docs/adr/018).
         .route(
             "/api/wings",
             get(palace::list_wings).post(palace::create_wing),
@@ -455,10 +455,10 @@ async fn submit_job(
                 .submit_checkpoint_with_urgency(payload, body.emergency, &body.requested_by, mode)
                 .await?
         }
-        JobKind::Audit { scope } => {
+        JobKind::Audit { wing } => {
             // Not gated by `mode`, unlike `Mine` above, because an audit only reads
             // (see `AppServices::submit_audit`'s doc comment).
-            state.app.submit_audit(scope, &body.requested_by).await?
+            state.app.submit_audit(wing, &body.requested_by).await?
         }
         JobKind::Embed { wing } => {
             // Gated as a write inside `submit_embed`: it fills every drawer's embedding.

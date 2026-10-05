@@ -157,6 +157,10 @@ pub struct SearchFilter {
 #[serde(default)]
 pub struct SearchQuery {
     /// What to look for, in the caller's words.
+    ///
+    /// `query` is accepted as an alias: MCP, the CLI and the `GET` form of this route all call it that, and with the
+    /// whole struct defaulted a body that said `query` would otherwise search for nothing without saying so.
+    #[serde(alias = "query")]
     pub text: String,
     /// How to rank.
     pub ranking: RankingMode,

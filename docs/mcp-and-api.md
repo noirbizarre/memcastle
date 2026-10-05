@@ -27,7 +27,7 @@ A failure comes back as an MCP error result carrying the [error body](#errors) b
 | `memcastle_diary_read` | `agent_identity`, `wing`, `limit?` | Read an agent's newest diary entries. |
 | `memcastle_checkpoint` | `payload`, `emergency?` | Submit a durable checkpoint job. |
 | `memcastle_mine` | `path` or `source`, `locator?`, `full?`, `wing?` | Submit a job that mines a directory, or a [source](mining-sources.md) such as `pi`. |
-| `memcastle_audit` | `scope?` | Submit a read-only consistency audit job. |
+| `memcastle_audit` | `wing?` | Submit a read-only consistency audit job. |
 | `memcastle_repair` | `dry_run?`, `based_on_job?` | Submit a repair job; a dry run unless `dry_run` is `false`. |
 | `memcastle_job_list` | `status?` | List jobs, newest first. |
 | `memcastle_job_get` | `id` | Show one job. |
@@ -103,7 +103,7 @@ and `/api/status` accepts it only to report the mode
 as `full`.
 `/api/health`, job control (pause, resume, cancel, retry) and `/api/shutdown` are never gated and ignore it.
 
-A mode the daemon refuses is a `403` with the code `memcastle::app::mode_forbidden`.
+A mode the daemon refuses is a `403` with the code `memcastle::mode::forbidden`.
 A request without a valid token, on a daemon with [authentication](authentication.md) enabled,
 is a `401` with the code `memcastle::auth::unauthorized` and a `WWW-Authenticate: Bearer` header.
 Other statuses are `400` for invalid input, a transition the job's state does not allow, or a database admin endpoint
@@ -129,6 +129,7 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `GET /api/diary` | Read diary entries. | `agent_identity`, `wing`, `limit` |
 | `POST /api/diary` | Write a diary entry. | JSON body: `agent_identity`, `wing`, `content`, `requested_by?` |
 | `POST /api/notes` | Capture a note: an unnamed drawer of source kind `note`. `201` when stored, `200` when an identical note was already in the room. There is no MCP tool: agents write memory through `memcastle_checkpoint` and the diary. | JSON body: `wing`, `room`, `content`, `uri?`, `requested_by?` |
+| `GET /api/sources` | The mining adapters this daemon can run and the sources that have been mined: `{adapters, sources}`. A read. | none |
 | `GET /api/jobs` | List jobs. | `status` |
 | `POST /api/jobs` | Submit a job. | JSON body, see [below](#submitting-jobs) |
 | `GET /api/jobs/{id}` | Show one job. | none |
@@ -167,7 +168,7 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `POST /api/source-packages/{name}/disable` | Stop an installed source from being mined. Idempotent. | none |
 | `DELETE /api/source-packages/{name}` | Remove an installed source and its files: `{"removed": name}`. | none |
 | `GET /api/source-registry/search` | Search the bundled sources and the configured registries: `{entries, warnings}`, each entry with the version an install would take and what is installed. | query string: `q`, `registry` |
-| `GET /api/source-registry/sources/{name}` | Download and verify a source and say what installing it would do, installing nothing: `{version, origin, registry, signed_by, archive_digest, permissions, consent_digest, replaces}`. | query string: `version`, `registry` |
+| `GET /api/source-registry/sources/{name}` | Download and verify a source and say what installing it would do, installing nothing: `{name, version, description, origin, registry, signed_by, archive_digest, permissions, consent_digest, replaces}`. | query string: `version`, `registry` |
 | `POST /api/source-registry/install` | Install a source by name from the bundle or a registry. Answers `{source, replaced}`. | JSON body: `name`, `version?`, `registry?`, `consent?`, `enable?` |
 | `GET /api/source-registry/updates` | The installed sources that have a newer version: `{updates, warnings}`. | none |
 | `POST /api/source-registry/update` | Update one source, or every source with an update. Answers a list of `{name, from, to, status}`, where `status` is `updated`, `current`, `needs_consent` (with `permissions` and `digest`) or `failed` (with `message`). | JSON body: `name?`, `consent?` |
@@ -280,7 +281,9 @@ Equal scores order by drawer id, so a query ranks identically every time.
 A hit never carries the embedding vector.
 
 **Your own vectors.**
-`POST /api/search` takes the request as JSON, so it can carry a `query_embedding`:
+`POST /api/search` takes the request as JSON, so it can carry a `query_embedding`.
+Its text is `text` (or `query`, like everywhere else), and the scope is a nested `filter` rather than the flat
+`wing`, `room` and `tags` of the `GET` form:
 
 ```json
 { "text": "…", "ranking": "semantic", "limit": 5,
@@ -430,7 +433,7 @@ A relationship says what it relates and when it holds, and where an extractor de
   "valid_from": "2026-07-14T14:27:12Z", "valid_to": null,
   "provenance": {
     "drawer": "…", "extractor": "heuristic", "job_id": "…", "extracted_at": "…",
-    "origin": {"source": "…", "provider": "directory", "document": "team.md", "chunk": 0, "revision": "…"}
+    "origin": {"source_id": "…", "source": "directory", "document": "team.md", "chunk": 0, "revision": "…"}
   }
 }
 ```
@@ -457,9 +460,10 @@ The reasoning is in [ADR-024](adr/024-entity-extraction-as-an-enrich-job.md).
 
 | `type` | Other fields |
 |---|---|
-| `mine` | `path` (absolute directory) or `provider` (a [source](mining-sources.md)) with `locator?`, then `wing?` and `full?` |
+| `mine` | `path` (absolute directory) or `source` (a [source](mining-sources.md) by name) with `locator?`, then `wing?` and `full?` |
 | `checkpoint` | `payload` (see [above](#checkpoint-payload)), `emergency?` |
-| `audit` | `scope?` |
+| `audit` | `wing?` |
+| `embed` | `wing?`; fills the embeddings that are missing, and needs an `[embeddings]` provider (REST and CLI only, no MCP tool) |
 | `extract` | `wing?`, see [the knowledge graph](#the-knowledge-graph) |
 | `repair` | `dry_run?` (default `true`), `based_on_job?` |
 | `demo` | `steps` |
@@ -473,22 +477,22 @@ curl -s -X POST http://127.0.0.1:8420/api/jobs \
 ```sh
 curl -s -X POST http://127.0.0.1:8420/api/jobs \
   -H 'Content-Type: application/json' \
-  -d '{"type": "mine", "provider": "pi"}'
+  -d '{"type": "mine", "source": "pi"}'
 ```
 
-An unknown `provider` is a `400` that names the known ones.
-`GET /api/sources` lists the providers and the sources that have been mined:
+An unknown `source` is a `400` that names the known ones.
+`GET /api/sources` lists the adapters and the sources that have been mined:
 
 ```json
 {
-  "providers": [{"name": "pi", "description": "...", "capabilities": {"incremental": true, "retains_raw": true, "needs_credentials": false},
+  "adapters": [{"name": "pi", "description": "...", "capabilities": {"incremental": true, "retains_raw": true, "needs_credentials": false},
                  "origin": "package", "version": "0.1.0", "state": "enabled", "permissions": {...}}],
-  "sources": [{"id": "...", "provider": "pi", "account": null, "locator": "/home/alice/.pi/agent/sessions",
+  "sources": [{"id": "...", "source": "pi", "account": null, "locator": "/home/alice/.pi/agent/sessions",
                "cursor": {"mtime_ns": 1784039240000000000, "key": "..."}, "last_job": "...", "last_run_at": "...", "documents": 12}]
 }
 ```
 
-A provider's `origin` is `builtin` or `package`; an installed one also has a `version`, and a `state` of `installed`,
+An adapter's `origin` is `builtin` or `package`; an installed one also has a `version`, and a `state` of `installed`,
 `enabled`, `disabled` or `unavailable` (with an `unavailable_reason`).
 It is a read, so a `disabled` session is refused, and it is guarded like every route but the health check.
 There is no MCP tool for it, and none for credentials or for installing sources.
@@ -502,7 +506,7 @@ Whichever interface you use, a failure has the same three fields:
 ```json
 {
   "error": "`diary_write` is not permitted in read_only mode",
-  "code": "memcastle::app::mode_forbidden",
+  "code": "memcastle::mode::forbidden",
   "help": "switch the session/request to Full mode to allow writes, or to Full/ReadOnly to allow reads"
 }
 ```

@@ -15,7 +15,7 @@ use super::{SourceCapabilities, sha256_hex};
 /// While the major version is `0`, a source built for `0.N` runs only on a host that implements `0.N`; from `1.0` a
 /// source runs on any host of the same major version whose minor is at least the source's. A patch version is
 /// documentation only and never affects compatibility. See [`contract_compatibility`].
-pub const CONTRACT_VERSION: &str = "0.1.0";
+pub const CONTRACT_VERSION: &str = "0.2.0";
 
 /// What a source package declares about itself: `memcastle-source.toml`.
 ///
@@ -54,7 +54,7 @@ pub struct SourceManifest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ManifestSource {
-    /// The provider name: lowercase letters, digits and `-`.
+    /// The source's name: lowercase letters, digits and `-`.
     pub name: String,
     /// The package's own semantic version.
     pub version: String,
@@ -327,22 +327,35 @@ pub enum SourcePackageEvent {
     Disable,
 }
 
+impl std::fmt::Display for SourcePackageState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The wire names, like `SourceState`'s: a message that said `Enabled` would not match what `source list` shows.
+        f.write_str(match self {
+            Self::Installed => "installed",
+            Self::Enabled => "enabled",
+            Self::Disabled => "disabled",
+        })
+    }
+}
+
+impl std::fmt::Display for SourcePackageEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Enable => "enable",
+            Self::Disable => "disable",
+        })
+    }
+}
+
 /// An event the source's state does not allow.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("a source that is {state} cannot be asked to {event}")]
 pub struct PackageTransitionError {
     /// Where the source was.
     pub state: SourcePackageState,
     /// What was attempted.
     pub event: SourcePackageEvent,
 }
-
-impl std::fmt::Display for PackageTransitionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "a {:?} source cannot {:?}", self.state, self.event)
-    }
-}
-
-impl std::error::Error for PackageTransitionError {}
 
 impl SourcePackageState {
     /// The state after `event`, or why not.
@@ -496,7 +509,11 @@ mod tests {
     fn a_refused_transition_names_the_state_and_the_event() {
         let error = Enabled.apply(Enable).unwrap_err();
         assert_eq!(error.state, Enabled);
-        assert!(error.to_string().contains("Enabled"));
+        // The names `source list` shows, not the Rust variant names.
+        assert_eq!(
+            error.to_string(),
+            "a source that is enabled cannot be asked to enable"
+        );
     }
 
     #[test]
@@ -532,9 +549,10 @@ mod tests {
 
     #[test]
     fn contracts_are_compatible_by_minor_before_one_point_zero() {
-        assert!(contract_compatibility("0.1").is_ok());
-        assert!(contract_compatibility("0.1.7").is_ok());
-        assert!(contract_compatibility("0.2").is_err());
+        assert!(contract_compatibility("0.2").is_ok());
+        assert!(contract_compatibility("0.2.7").is_ok());
+        assert!(contract_compatibility("0.1").is_err());
+        assert!(contract_compatibility("0.3").is_err());
         assert!(contract_compatibility("0.0").is_err());
         assert!(contract_compatibility("1.1").is_err());
         assert!(contract_compatibility("nonsense").is_err());
@@ -622,7 +640,7 @@ mod tests {
             "digest": "d",
             "manifest": {
                 "source": {"name": "x", "version": "1.0.0", "description": "x"},
-                "compatibility": {"contract": "0.1", "memcastle": ">=0.1"}
+                "compatibility": {"contract": "0.2", "memcastle": ">=0.1"}
             },
             "installed_at": "2026-01-01T00:00:00Z",
             "updated_at": "2026-01-01T00:00:00Z"

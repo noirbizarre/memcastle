@@ -606,7 +606,7 @@ See [ADR-015](adr/015-database-admin-endpoint.md).
 
 **Mining sources are one contract with two kinds of implementation.**
 A built-in adapter is Rust in the binary; an installed source is a WebAssembly component the daemon runs in a sandbox,
-and `mining::registry` turns a provider name into either behind the same `SourceAdapter` trait, so the pipeline is
+and `mining::registry` turns a source name into either behind the same `SourceAdapter` trait, so the pipeline is
 identical for both.
 
 ```mermaid
@@ -625,7 +625,7 @@ named programs without a shell, named environment variables, the network all or 
 limit.
 The source never sees the store, and the core compiles no source-specific SDK.
 Installing, enabling and removing are administrative (REST and CLI, no MCP tool),
-and the `source init`, `build`, `test` and `package` commands work without a daemon.
+and the `source init`, `build`, `test`, `package`, `index` and `keygen` commands work without a daemon.
 See [Writing a mining source](writing-sources.md) and [ADR-026](adr/026-pluggable-source-adapters-as-webassembly-components.md).
 
 **Sources arrive from three places and share one lifecycle.**

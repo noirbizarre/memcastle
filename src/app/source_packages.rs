@@ -13,7 +13,7 @@ use crate::domain::{
     SourceState,
 };
 use crate::error::{Error, Result};
-use crate::mining::ProviderInfo;
+use crate::mining::AdapterInfo;
 use crate::mining::registry::{BUILTIN_NAMES, describe_package, unavailable_reason};
 use crate::mining::wasm::WasmAdapter;
 use crate::source::manifest::check_compatible;
@@ -25,7 +25,7 @@ use super::AppServices;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstalledSource {
     /// The source as it is now.
-    pub source: ProviderInfo,
+    pub source: AdapterInfo,
     /// Whether it replaced an earlier install of the same name.
     pub replaced: bool,
 }
@@ -163,11 +163,11 @@ impl AppServices {
         &self,
         name: &str,
         mode: crate::domain::MemoryMode,
-    ) -> Result<ProviderInfo> {
+    ) -> Result<AdapterInfo> {
         Self::require_read(mode, "source_show")?;
-        if let Some(builtin) = crate::mining::registry::builtin_providers()
+        if let Some(builtin) = crate::mining::registry::builtin_adapters()
             .into_iter()
-            .find(|provider| provider.name == name)
+            .find(|source| source.name == name)
         {
             return Ok(builtin);
         }
@@ -184,7 +184,7 @@ impl AppServices {
     ///
     /// [`Error::SourceBuiltin`] for a built-in source, [`Error::SourceNotFound`], [`Error::SourceNotEnabled`] when
     /// enabling a source that is unavailable, and store errors.
-    pub async fn set_source_enabled(&self, name: &str, enabled: bool) -> Result<ProviderInfo> {
+    pub async fn set_source_enabled(&self, name: &str, enabled: bool) -> Result<AdapterInfo> {
         let record = self.installed(name).await?;
         let sources_dir = self.mining.sources_dir();
         let event = if enabled {

@@ -373,7 +373,7 @@ struct AuditArgs {
     /// Restrict the report's embedding-count fields to one wing by name.
     /// Orphan-drawer and dangling-provenance findings are always
     /// palace-wide regardless of this (see `memcastle::audit`'s module doc).
-    scope: Option<String>,
+    wing: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -622,12 +622,9 @@ impl McpTools {
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
         let mode = self.mode_for(&parts);
-        let history = match args.drawer_id.parse() {
+        let history = match crate::Error::parse_drawer_id("drawer_id", &args.drawer_id) {
             Ok(id) => self.app.drawer_history(id, mode).await,
-            Err(_) => Err(crate::Error::invalid_input(
-                "drawer_id",
-                format!("`{}` is not a drawer id (a UUID)", args.drawer_id),
-            )),
+            Err(error) => Err(error),
         };
         tool_result("memcastle_history", history)
     }
@@ -664,8 +661,8 @@ impl McpTools {
         let mode = self.mode_for(&parts);
         let source = match (args.path, args.source) {
             (Some(path), None) => Ok(MiningSource::Directory { path: path.into() }),
-            (None, Some(provider)) => Ok(MiningSource::Provider {
-                provider,
+            (None, Some(source)) => Ok(MiningSource::Named {
+                source,
                 locator: args.locator,
             }),
             _ => Err(crate::Error::invalid_input(
@@ -721,7 +718,7 @@ impl McpTools {
     ) -> Result<CallToolResult, McpError> {
         tool_result(
             "memcastle_audit",
-            self.app.submit_audit(args.scope, CHANNEL).await,
+            self.app.submit_audit(args.wing, CHANNEL).await,
         )
     }
 
@@ -1040,7 +1037,7 @@ mod tests {
 
         assert_eq!(result.is_error, Some(true));
         let body: serde_json::Value = serde_json::from_str(&text_of(&result)).expect("json body");
-        assert_eq!(body["code"], "memcastle::app::mode_forbidden");
+        assert_eq!(body["code"], "memcastle::mode::forbidden");
         assert!(
             body["help"].is_string(),
             "the body must say what to do: {body}"
@@ -1304,7 +1301,7 @@ mod tests {
         error.body().code
     }
 
-    const MODE_FORBIDDEN: &str = "memcastle::app::mode_forbidden";
+    const MODE_FORBIDDEN: &str = "memcastle::mode::forbidden";
 
     /// A tools surface whose one session `s` has chosen `mode`.
     async fn tools_in_mode(mode: &str) -> McpTools {
@@ -1415,7 +1412,7 @@ mod tests {
             let code = code_of(&result).expect("must fail");
             assert!(
                 Some(&code) == code_of_error(&Error::invalid_job_id("")).as_ref()
-                    || code == "memcastle::repair::invalid_based_on_job",
+                    || code == "memcastle::repair::based_on_job_invalid",
                 "{code}"
             );
         }

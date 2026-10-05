@@ -20,8 +20,8 @@ Client commands print the daemon's JSON answer, so the output pipes into `jq`.
 `status`, `db start`, `db stop` and `db status` are the exceptions: they print a readable report,
 and `--json` gives the same report as JSON (`db stop` prints the report only).
 `job list`, `sources`, `note`, every daemon-side `source` command (`search`, `install`, `update`, `list`, `show`,
-`enable` and `disable`), and every `wing`, `room` and `drawer` command (`list`, `show`, `create` and `delete`),
-are the others:
+`enable` and `disable`), and the `wing`, `room` and `drawer` commands
+(`list`, `show`, `create` and `delete`, and `drawer history`) are the others:
 they print a table or a readable view when standard output is a terminal, and JSON when it is not.
 See [Output, colour and prompts](#output-colour-and-prompts).
 
@@ -45,13 +45,17 @@ queued yellow, running cyan, paused magenta, completed green, failed red and can
 Standard output and standard error are decided separately:
 with `memcastle status 2> errors.log` the report stays coloured and the log stays plain.
 
-`repair --apply`, `auth generate`, `auth revoke`, `job cancel`, `source remove`, the `delete` commands of `wing`, `room`
-and `drawer`, and `source install` and `source update` when a package asks for permissions (see [`source`](#source))
-ask for confirmation, with a prompt on standard error that defaults to "no".
+`repair --apply`, `auth generate`, `auth revoke`, `job cancel`, `source remove` and the `delete` commands of `wing`, `room`
+and `drawer` ask for confirmation, with a prompt on standard error that defaults to "no".
 `--yes` (or `-y`) skips the question.
 When standard input or standard error is not a terminal, a script or CI job for instance,
 they never ask and proceed, because the caller has already decided.
 Declining the prompt exits with `memcastle::cli::aborted` and changes nothing.
+
+`source install` and `source update` are the exception, because what they ask about is code that will run with
+permissions: when a package asks for any, they ask in a terminal, and without a terminal they refuse
+(`memcastle::source::consent_required`, or exit `1` for `update`) unless `--yes` or `--consent <digest>` is given
+(see [`source`](#source)).
 
 ## Global flags
 
@@ -306,7 +310,7 @@ memcastle sources
 
 Lists the sources the daemon can mine, built in and installed, with each one's state and the permissions an installed
 one was given, and, for each one that has been mined, how many documents it holds, when it last ran and which job did.
-In a terminal this is two tables; piped, it is JSON with `providers` and `sources`.
+In a terminal this is two tables; piped, it is JSON with `adapters` and `sources`.
 `memcastle source list` is the same command.
 
 ### `source`
@@ -378,7 +382,8 @@ A version that asks for permissions the installed one did not is not installed u
 `--check` only lists what has an update.
 `disable` keeps the files and `remove` deletes them; what a source mined stays in the palace.
 `list` and `show` are reads, so they take `--mode` and a `disabled` session cannot use them;
-the other commands are administrative and have no `--mode`, and no MCP tool exists for any of them.
+the other commands are administrative: `--mode` is accepted (it is a global flag) but ignored by them,
+and no MCP tool exists for any of them.
 
 ### `checkpoint`
 
@@ -424,13 +429,14 @@ which is why everything after the second `/` is the drawer.
 A name cannot be empty, cannot have leading or trailing whitespace, cannot contain control characters
 and cannot look like a UUID.
 A wing or room name cannot contain `/`, and no `/`-separated segment of a drawer name can be empty, `.` or `..`.
-A path that breaks these rules is refused locally, before the daemon is contacted, with `memcastle::palace::invalid_path`.
+A path that breaks these rules is refused locally, before the daemon is contacted, with `memcastle::palace::path_invalid`.
 The same rules apply to a new wing named by `mine --wing`, a checkpoint item or a diary write,
 which the daemon refuses at submission with the same code.
 A wing that already exists is always accepted, whatever its name.
 
-Every `wing`, `room` and `drawer` command prints a table or a readable view in a terminal,
-and JSON when standard output is a pipe or a file.
+The `list`, `show`, `create` and `delete` commands of `wing`, `room` and `drawer`, and `drawer history`, print a table
+or a readable view in a terminal, and JSON when standard output is a pipe or a file.
+`drawer supersede` and `drawer mention` always print JSON.
 `wing show` prints the wing's totals and its rooms.
 `drawer list` shows the newest drawers first with a preview of each, never the whole content,
 and `drawer show` prints the content verbatim after a few lines of metadata.
@@ -520,11 +526,11 @@ Read the result with `GET /api/entities`, see [the knowledge graph](mcp-and-api.
 ### `audit`
 
 ```sh
-memcastle audit [--scope <WING>]
+memcastle audit [--wing <WING>]
 ```
 
 Submits a read-only consistency report job.
-`--scope` restricts only the embedding counts to one wing; orphan and dangling-reference findings are always palace-wide.
+`--wing` restricts only the embedding counts to one wing; orphan and dangling-reference findings are always palace-wide.
 Read the report with `memcastle job show <id>`.
 
 ### `repair`

@@ -457,12 +457,12 @@ mod tests {
             "apply must actually delete the orphan drawer"
         );
 
-        let mut audit_job = Job::new(JobKind::Audit { scope: None }, Priority::Normal, "test");
+        let mut audit_job = Job::new(JobKind::Audit { wing: None }, Priority::Normal, "test");
         let audit_ctx = ctx_for(&store, &audit_job, JobControl::default());
         crate::audit::run(
             &audit_ctx,
             &mut audit_job,
-            crate::audit::AuditParams { scope: None },
+            crate::audit::AuditParams { wing: None },
         )
         .await
         .expect("audit run");
@@ -482,12 +482,12 @@ mod tests {
         // Orphan A exists before the audit runs, so the audit finds it.
         let (drawer_a, _room_a) = create_orphan_drawer(&store).await;
 
-        let mut audit_job = Job::new(JobKind::Audit { scope: None }, Priority::Normal, "test");
+        let mut audit_job = Job::new(JobKind::Audit { wing: None }, Priority::Normal, "test");
         let audit_ctx = ctx_for(&store, &audit_job, JobControl::default());
         crate::audit::run(
             &audit_ctx,
             &mut audit_job,
-            crate::audit::AuditParams { scope: None },
+            crate::audit::AuditParams { wing: None },
         )
         .await
         .expect("audit run");
@@ -578,7 +578,7 @@ mod tests {
     #[tokio::test]
     async fn a_based_on_job_that_has_not_completed_is_rejected() {
         let store = memory_store().await;
-        let mut audit_job = Job::new(JobKind::Audit { scope: None }, Priority::Normal, "test");
+        let mut audit_job = Job::new(JobKind::Audit { wing: None }, Priority::Normal, "test");
         // A result is present, but the audit was cancelled: not a report to
         // trust for a destructive repair.
         audit_job.apply(crate::domain::JobEvent::Cancel).unwrap();

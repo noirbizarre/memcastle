@@ -35,7 +35,8 @@ And a user must not need Rust, Python or Node to install a published source, whi
   Relative package URLs resolve beside the index and may not climb out of it.
   A redirect is checked as the first request was.
 - **The daemon fetches, and nothing else does.**
-  `crate::distribution` reads indexes and archives and verifies them; `crate::app` is its only caller,
+  `crate::distribution` reads indexes and archives and verifies them; `crate::app` is its only caller
+  (`crate::config` only parses a location at load, and calls nothing else),
   `crate::source` (the local tooling) never opens the network, and the CLI asks the daemon over REST like every other
   command.
   `distribution` touches neither the store nor the jobs, and returns bytes without deciding to install them.

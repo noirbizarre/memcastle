@@ -8,6 +8,7 @@ Accepted, builds on [ADR-007](007-memory-mode-gate-follows-data-access.md) (extr
 own environment),
 [ADR-021](021-richer-retrieval.md) (the graph that expansion walks, and the provider pattern copied from embeddings)
 and [ADR-023](023-unified-source-model-for-mining.md) (the "enrich" stage it reserved, which reads what ingest filed).
+Amended by [ADR-031](031-note-capture.md): the drawers extraction reads widen from mined ones to mined ones and notes.
 
 ## Context
 

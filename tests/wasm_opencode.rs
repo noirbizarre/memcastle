@@ -288,7 +288,7 @@ async fn identify_names_the_database_opencode_reports_unless_a_locator_names_the
     let adapter = adapter();
 
     let default = adapter.identify(None).unwrap();
-    assert_eq!(default.provider, "opencode");
+    assert_eq!(default.source, "opencode");
     assert_eq!(default.locator, "/fixture/opencode/opencode.db");
 
     let named = adapter.identify(Some("work-laptop")).unwrap();
@@ -437,7 +437,7 @@ impl Fixture {
         let response = self
             .client
             .post(self.url("/api/jobs"))
-            .json(&json!({"type": "mine", "provider": "opencode", "requested_by": "test"}))
+            .json(&json!({"type": "mine", "source": "opencode", "requested_by": "test"}))
             .send()
             .await
             .expect("request");
@@ -513,7 +513,7 @@ async fn the_installed_opencode_source_mines_history_incrementally_with_provenan
     let hits = fixture.search("rotate signing keys").await;
     assert_eq!(hits.len(), 1, "{hits:?}");
     assert_eq!(hits[0]["source"]["kind"], "transcript");
-    assert_eq!(hits[0]["source"]["origin"]["provider"], "opencode");
+    assert_eq!(hits[0]["source"]["origin"]["source"], "opencode");
     assert_eq!(hits[0]["source"]["origin"]["document"], "ses_alpha");
     for left_out in ["SECRET-TOOL-OUTPUT", "SECRET-REASONING"] {
         assert!(

@@ -140,7 +140,7 @@ async fn mined_fixtures_populate_the_graph_with_provenance_and_temporal_validity
     assert!(works_on["valid_from"].is_string());
     let provenance = &works_on["provenance"];
     assert_eq!(provenance["extractor"], "heuristic");
-    assert_eq!(provenance["origin"]["provider"], "directory");
+    assert_eq!(provenance["origin"]["source"], "directory");
     assert_eq!(provenance["origin"]["document"], "team.md");
     assert!(provenance["job_id"].is_string());
     assert!(provenance["drawer"].is_string());

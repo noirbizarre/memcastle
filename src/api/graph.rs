@@ -14,9 +14,7 @@ use super::extract::{ApiJson, ApiQuery};
 use super::{ApiError, ApiState, ModeHeader};
 
 fn parse_entity_id(raw: &str) -> Result<EntityId, crate::Error> {
-    raw.parse().map_err(|_| {
-        crate::Error::invalid_input("id", format!("`{raw}` is not an entity id (a UUID)"))
-    })
+    crate::Error::parse_entity_id("id", raw)
 }
 
 #[derive(Debug, Deserialize)]

@@ -66,12 +66,14 @@ Authentication tokens (`MEMCASTLE_AUTH_TOKEN`) are a separate concern and are ne
 
 ## Precedence
 
-For each of wing and room, the first source that has a value wins.
+For each of wing and room, the first source that has a value wins,
+except that an integration's explicit choice of where wake-up reads from outranks the project file (item 3).
 
 ```mermaid
 flowchart LR
+    explicit["explicit integration choice<br/>(wakeUp.source = user, custom or none)"] -.->|outranks| env
     env["MEMCASTLE_WING / MEMCASTLE_ROOM"] --> file[".config/memcastle.toml"]
-    file --> client["integration setting<br/>(wakeUp.source, wakeUp.wing)"]
+    file --> client["integration default<br/>(wakeUp.source = project)"]
     client --> daemon["daemon default<br/>(no scope)"]
 ```
 
@@ -79,8 +81,9 @@ flowchart LR
 1. **The project file**: the project's persistent intent.
    Within it, `[memcastle] wing` comes before `[project] name`.
 1. **Client-specific settings**: an integration's own choices.
-   Pi and OpenCode's wake-up `source` is `project` by default, which follows the project context.
-   Choosing `user`, `custom` or `none` is an explicit choice that outranks the project file.
+   Pi and OpenCode's wake-up `source` is `project` by default, which follows the project context and so comes after the
+   file.
+   Choosing `user`, `custom` or `none` is an explicit choice that outranks both the environment and the project file.
 1. **Daemon defaults**: with nothing declared, no scope is applied, exactly as before.
 
 ## Finding the project

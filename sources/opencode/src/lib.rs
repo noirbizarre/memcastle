@@ -35,8 +35,8 @@ use memcastle::source::types::{
     SourceRef,
 };
 
-/// This source's provider name; it must match `source.name` in the manifest.
-const PROVIDER: &str = "opencode";
+/// This source's name; it must match `source.name` in the manifest.
+const NAME: &str = "opencode";
 
 /// The one program this source runs; it must be listed under `permissions.process` in the manifest.
 const PROGRAM: &str = "opencode";
@@ -277,7 +277,7 @@ impl Guest for OpenCode {
             }
         };
         Ok(SourceRef {
-            provider: PROVIDER.to_string(),
+            source: NAME.to_string(),
             account: None,
             locator,
         })

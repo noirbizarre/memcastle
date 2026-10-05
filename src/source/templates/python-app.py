@@ -16,7 +16,7 @@ from source.imports.types import Candidate, CanonicalDocument, Discovery, RawDoc
 from source.imports.types import SourceError_CursorInvalid, SourceError_InvalidInput
 from componentize_py_types import Err
 
-PROVIDER = "__NAME__"
+NAME = "__NAME__"
 
 
 def names(directory):
@@ -41,7 +41,7 @@ def parse_cursor(cursor):
 
 
 def revision_of(body):
-    """A revision must change exactly when the content does. A real source would use the provider's etag."""
+    """A revision must change exactly when the content does. A real source would use the source's etag."""
     value = 0xCBF29CE484222325
     for byte in body.encode("utf-8"):
         value = ((value ^ byte) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
@@ -54,7 +54,7 @@ class Adapter(exports.Adapter):
             raise Err(SourceError_InvalidInput("give the directory to mine"))
         if not os.path.isdir(locator):
             raise Err(SourceError_InvalidInput("%s is not a directory this source can read" % locator))
-        return SourceRef(provider=PROVIDER, account=None, locator=locator)
+        return SourceRef(source=NAME, account=None, locator=locator)
 
     def default_wing(self, source):
         return os.path.basename(source.locator.rstrip("/")) or "unnamed"

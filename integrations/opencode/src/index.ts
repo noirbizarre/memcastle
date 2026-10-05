@@ -1,8 +1,9 @@
 // The MemCastle plugin for OpenCode, for both OpenCode 1 and OpenCode 2 from one package.
 //
 // This file only decides *when* to talk to MemCastle; every memory operation is a call to the daemon over MCP.
-// It is a foundation: the connection, mode and failure handling are real and tested, and each lifecycle hook is wired
-// but empty, with the issue that fills it in. See docs/research.md for why each hook was chosen.
+// The connection, mode and failure handling, wake-up, search-before-answer, checkpointing and the project context are
+// all in `core.ts`; this file and the two adapters only register them. Background mining and audit/repair are not
+// built yet. See docs/research.md for why each hook was chosen.
 //
 // One default export serves both majors: OpenCode 1 calls `server()` and OpenCode 2 calls `setup()`. The two APIs are
 // separate, so each has its own adapter (`v1.ts`, `v2.ts`) over the shared behaviour in `core.ts`.

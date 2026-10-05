@@ -32,8 +32,8 @@ use memcastle::source::types::{
     SourceRef,
 };
 
-/// This source's provider name; it must match `source.name` in the manifest.
-const PROVIDER: &str = "pi";
+/// This source's name; it must match `source.name` in the manifest.
+const NAME: &str = "pi";
 
 /// The longest title taken from a session's first prompt, in characters.
 const TITLE_CHARS: usize = 80;
@@ -270,7 +270,7 @@ impl Guest for Pi {
             )));
         }
         Ok(SourceRef {
-            provider: PROVIDER.to_string(),
+            source: NAME.to_string(),
             account: None,
             locator: root.display().to_string(),
         })

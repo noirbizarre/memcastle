@@ -144,7 +144,7 @@
           }
         ]
       },
-      "expected_code": "memcastle::palace::invalid_path"
+      "expected_code": "memcastle::palace::path_invalid"
     }
   ]
 }

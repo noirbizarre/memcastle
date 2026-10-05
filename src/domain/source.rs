@@ -50,11 +50,11 @@ pub enum CredentialRef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceRef {
     /// The adapter's name (`directory`, `pi`, ...).
-    pub provider: String,
-    /// The account on the provider, when it has accounts (a Slack workspace, a GitHub login). `None` for local
+    pub source: String,
+    /// The account on the source, when it has accounts (a Slack workspace, a GitHub login). `None` for local
     /// sources.
     pub account: Option<String>,
-    /// The part of the provider to read: a directory path, a sessions root, a channel, a repository.
+    /// The part of the source to read: a directory path, a sessions root, a channel, a repository.
     pub locator: String,
 }
 
@@ -65,7 +65,7 @@ impl SourceRef {
         // NUL cannot appear in any of the three fields, so `("a", "b")` and `("ab", "")` never collide.
         let identity = format!(
             "{}\0{}\0{}",
-            self.provider,
+            self.source,
             self.account.as_deref().unwrap_or(""),
             self.locator
         );
@@ -113,7 +113,7 @@ pub struct RawDocument {
     pub revision: String,
     /// The document as acquired. Text, since every source MemCastle mines is.
     pub body: String,
-    /// Provider-specific facts that are not content (a path, a session id, a channel).
+    /// Source-specific facts that are not content (a path, a session id, a channel).
     pub metadata: serde_json::Value,
     /// When the document was created or last changed at the source, if the source says.
     pub occurred_at: Option<DateTime<Utc>>,
@@ -173,10 +173,10 @@ pub struct SourceRecord {
     /// Derived from [`SourceRecord::reference`].
     pub id: SourceId,
     /// The adapter's name.
-    pub provider: String,
-    /// The account on the provider, if any.
+    pub source: String,
+    /// The account on the source, if any.
     pub account: Option<String>,
-    /// The part of the provider that is read.
+    /// The part of the source that is read.
     pub locator: String,
     /// How to authenticate; a reference, never a secret.
     pub credential: Option<CredentialRef>,
@@ -199,7 +199,7 @@ impl SourceRecord {
         let now = Utc::now();
         Self {
             id: reference.id(),
-            provider: reference.provider.clone(),
+            source: reference.source.clone(),
             account: reference.account.clone(),
             locator: reference.locator.clone(),
             credential,
@@ -215,7 +215,7 @@ impl SourceRecord {
     #[must_use]
     pub fn reference(&self) -> SourceRef {
         SourceRef {
-            provider: self.provider.clone(),
+            source: self.source.clone(),
             account: self.account.clone(),
             locator: self.locator.clone(),
         }
@@ -238,7 +238,7 @@ pub struct SourceDocumentRecord {
     pub raw_hash: String,
     /// The document's title, if it has one.
     pub title: Option<String>,
-    /// Provider-specific facts about the document.
+    /// Source-specific facts about the document.
     pub metadata: serde_json::Value,
     /// When the document was created or last changed at the source.
     pub occurred_at: Option<DateTime<Utc>>,
@@ -264,7 +264,7 @@ mod tests {
 
     fn reference(account: Option<&str>, locator: &str) -> SourceRef {
         SourceRef {
-            provider: "demo".into(),
+            source: "demo".into(),
             account: account.map(str::to_string),
             locator: locator.into(),
         }
@@ -280,12 +280,12 @@ mod tests {
     }
 
     #[test]
-    fn sources_differing_in_provider_account_or_locator_have_different_ids() {
+    fn sources_differing_in_adapter_account_or_locator_have_different_ids() {
         let base = reference(None, "/a").id();
         assert_ne!(base, reference(None, "/b").id());
         assert_ne!(base, reference(Some("me"), "/a").id());
         let mut other = reference(None, "/a");
-        other.provider = "other".into();
+        other.source = "other".into();
         assert_ne!(base, other.id());
     }
 

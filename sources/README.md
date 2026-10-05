@@ -3,7 +3,7 @@
 One directory per source, each a complete source package (docs/writing-sources.md): a `memcastle-source.toml`, the code
 that implements `wit/memcastle-source.wit`, and the conformance cases it is tested with.
 
-| Directory | Provider | What it is |
+| Directory | Source name | What it is |
 |---|---|---|
 | `directory/` | `directory-wasm` | The built-in `directory` source, written as a Rust component. The worked example. |
 | `pi/` | `pi` | The Pi coding agent's session history. The official Pi source: the core has no Pi-specific code. Bundled with releases. |

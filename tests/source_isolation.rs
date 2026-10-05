@@ -2,7 +2,7 @@
 //! storage.
 //!
 //! The unified source model only pays off if the pipeline never learns what any one source is: the day
-//! `pipeline.rs` names a provider or reads a file itself, the next adapter needs a second pipeline, which is the
+//! `pipeline.rs` names an adapter or reads a file itself, the next adapter needs a second pipeline, which is the
 //! incompatible second abstraction #85 exists to prevent. These checks read the source text, the same way the
 //! `prek` architecture hooks do, because a rule nothing checks is only a comment.
 
@@ -53,8 +53,8 @@ fn rust_files(dir: &str) -> Vec<String> {
     files
 }
 
-/// The provider names the pipeline must never mention, in every spelling they appear in.
-const PROVIDER_NAMES: &[&str] = &[
+/// The adapter names the pipeline must never mention, in every spelling they appear in.
+const ADAPTER_NAMES: &[&str] = &[
     "pi-sessions",
     "pi_sessions",
     "\"directory\"",
@@ -63,14 +63,14 @@ const PROVIDER_NAMES: &[&str] = &[
 ];
 
 #[test]
-fn the_pipeline_and_the_chunker_name_no_provider_and_read_no_files() {
+fn the_pipeline_and_the_chunker_name_no_adapter_and_read_no_files() {
     for file in [
         "src/mining/pipeline.rs",
         "src/mining/chunk.rs",
         "src/mining/adapter.rs",
     ] {
         let source = code(file);
-        for forbidden in PROVIDER_NAMES.iter().chain(
+        for forbidden in ADAPTER_NAMES.iter().chain(
             [
                 "std::fs",
                 "tokio::fs",
@@ -173,11 +173,11 @@ fn shipped_code(path: &str) -> String {
 #[test]
 fn extraction_names_no_source_and_never_writes_what_it_reads() {
     // Extraction consumes what the unified Source model filed (docs/adr/024). It must not learn what any one
-    // provider is, must not write a source's bookkeeping, and must never create, replace or delete a drawer: derived
+    // adapter is, must not write a source's bookkeeping, and must never create, replace or delete a drawer: derived
     // information adds graph records beside canonical memory, it does not rewrite it.
     for file in rust_files("src/extract") {
         let source = shipped_code(&file);
-        for forbidden in PROVIDER_NAMES.iter().chain(
+        for forbidden in ADAPTER_NAMES.iter().chain(
             [
                 "adapters::",
                 "save_source_cursor",
@@ -205,7 +205,7 @@ fn deduplication_names_no_source_and_touches_no_file_or_source_bookkeeping() {
     // graph, and never reads a file or writes a source's cursor or document records.
     for file in rust_files("src/dedup") {
         let source = shipped_code(&file);
-        for forbidden in PROVIDER_NAMES.iter().chain(
+        for forbidden in ADAPTER_NAMES.iter().chain(
             [
                 "adapters::",
                 "std::fs",

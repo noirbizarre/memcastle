@@ -3,7 +3,8 @@
 ## Status
 
 Accepted.
-Amends [ADR-029](029-project-local-configuration.md): the CLI now reads the project file, for `note` only.
+Amends [ADR-029](029-project-local-configuration.md): the CLI now reads the project file, for `note` only,
+and [ADR-024](024-entity-extraction-as-an-enrich-job.md): extraction also reads notes.
 
 ## Context
 

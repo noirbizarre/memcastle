@@ -1,16 +1,17 @@
 -- The unified mining source model (docs/adr/023): what MemCastle remembers about
 -- the places it mines between jobs. Applied through SurrealKit's `Sync`, like
--- every other file here (docs/adr/004); purely additive, so no data migration.
+-- every other file here (docs/adr/004).
 --
 -- Drawers are still the canonical memory. These two tables are bookkeeping that
 -- makes mining incremental and idempotent: where the last run stopped, and which
 -- revision of each document is already filed as which drawers.
 
 -- One row per place that is mined. The record id is derived from
--- (provider, account, locator), so two jobs mining the same place agree on it
+-- (adapter, account, locator), so two jobs mining the same place agree on it
 -- and no unique index over the three fields is needed.
 DEFINE TABLE IF NOT EXISTS source SCHEMAFULL;
-DEFINE FIELD IF NOT EXISTS provider ON TABLE source TYPE string;
+-- The adapter's name (`directory`, `pi`, ...). Called `provider` until 0.3; migration 3 renames stored rows.
+DEFINE FIELD IF NOT EXISTS source ON TABLE source TYPE string;
 -- `option<string>`: local sources have no account.
 DEFINE FIELD IF NOT EXISTS account ON TABLE source TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS locator ON TABLE source TYPE string;

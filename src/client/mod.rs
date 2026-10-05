@@ -134,12 +134,18 @@ impl DaemonClient {
     /// would otherwise end the path early and address something else. `trailing` is split on `/` and each part pushed
     /// as its own segment, for the one route whose last segment is a wildcard (a drawer's name).
     fn api_url(&self, segments: &[&str], trailing: Option<&str>) -> Result<reqwest::Url> {
-        let mut url = reqwest::Url::parse(&self.base_url).map_err(|source| Error::Client {
-            message: format!("invalid daemon address `{}`: {source}", self.base_url),
+        // `Error::config`, not `Error::Client`: the address comes from `server.bind`/`server.port` or the registry,
+        // so the fix is the setting, and `Client`'s "the daemon may be restarting; retry" would send the user the
+        // wrong way.
+        let mut url = reqwest::Url::parse(&self.base_url).map_err(|source| {
+            Error::config(format!(
+                "invalid daemon address `{}`: {source}",
+                self.base_url
+            ))
         })?;
-        let mut path = url.path_segments_mut().map_err(|()| Error::Client {
-            message: format!("invalid daemon address `{}`", self.base_url),
-        })?;
+        let mut path = url
+            .path_segments_mut()
+            .map_err(|()| Error::config(format!("invalid daemon address `{}`", self.base_url)))?;
         path.pop_if_empty().push("api");
         for segment in segments {
             path.push(segment);
@@ -429,7 +435,7 @@ impl DaemonClient {
         wing: Option<String>,
         full: bool,
     ) -> Result<Job> {
-        // `MiningSource` serialises flat (`path`, or `provider` and `locator`), which is the wire shape the daemon
+        // `MiningSource` serialises flat (`path`, or `source` and `locator`), which is the wire shape the daemon
         // reads; `full` is left off when false so a plain mine sends exactly what it always did.
         let mut body = serde_json::to_value(&source)
             .map_err(|source| Error::serialization("a mining request", source))?;
@@ -585,7 +591,7 @@ impl DaemonClient {
     /// # Errors
     ///
     /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable, or [`Error::SourceNotFound`]'s body.
-    pub async fn show_source(&self, name: &str) -> Result<crate::mining::ProviderInfo> {
+    pub async fn show_source(&self, name: &str) -> Result<crate::mining::AdapterInfo> {
         self.send(
             self.http
                 .get(self.api_url(&["source-packages", name], None)?),
@@ -602,7 +608,7 @@ impl DaemonClient {
         &self,
         name: &str,
         enabled: bool,
-    ) -> Result<crate::mining::ProviderInfo> {
+    ) -> Result<crate::mining::AdapterInfo> {
         let action = if enabled { "enable" } else { "disable" };
         self.send(
             self.http
@@ -632,11 +638,11 @@ impl DaemonClient {
     /// # Errors
     ///
     /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
-    pub async fn submit_audit(&self, scope: Option<String>) -> Result<Job> {
+    pub async fn submit_audit(&self, wing: Option<String>) -> Result<Job> {
         self.send(
             self.http
                 .post(format!("{}/api/jobs", self.base_url))
-                .json(&json!({ "type": "audit", "scope": scope, "requested_by": CHANNEL })),
+                .json(&json!({ "type": "audit", "wing": wing, "requested_by": CHANNEL })),
         )
         .await
     }

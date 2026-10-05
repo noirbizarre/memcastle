@@ -174,7 +174,7 @@ impl Fixture {
 
     async fn listed(&self) -> Value {
         let (_, report) = self.get("/api/sources").await;
-        report["providers"]
+        report["adapters"]
             .as_array()
             .unwrap()
             .iter()

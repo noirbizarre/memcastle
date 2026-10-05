@@ -33,7 +33,7 @@ The rule follows what an operation touches, not what it is called.
 - **Never gated:** `status`, job control (pause, resume, cancel, retry), demo jobs, `audit` and a dry-run `repair`.
   They report on the palace or steer work that was already allowed, and never expose drawer content.
 
-A rejected operation fails with `memcastle::app::mode_forbidden`, on reads as well as writes.
+A rejected operation fails with `memcastle::mode::forbidden`, on reads as well as writes.
 A disabled session never receives an empty result that could be mistaken for "nothing found".
 
 ```mermaid
@@ -91,6 +91,10 @@ This is mostly useful to check what a restricted session can and cannot do.
 An agent integration usually offers the labels `full`, `read-only` and `off`.
 `off` is the integration's label for `disabled`, which is the only value MemCastle accepts,
 so the integration translates it.
+The integrations also read `MEMCASTLE_MODE`, the variable the CLI's `--mode` reads, but with their own labels:
+`MEMCASTLE_MODE=read-only` or `off` means a session of that mode in Pi and OpenCode, and `MEMCASTLE_MODE=read_only` or
+`disabled` (the CLI's values) is refused by them and disables the integration.
+The CLI is strict the other way round, so one value cannot serve both when they share a shell.
 The daemon refuses every read and write in that mode, but it only protects its own answers.
 An integration must also stop injecting anything it fetched earlier, or loaded from a skill, so that a session in `off`
 behaves as if MemCastle does not exist.

@@ -18,7 +18,7 @@ use crate::error::{Error, Result};
 use super::SurrealStore;
 
 /// The projection every source read shares.
-const SOURCE_COLUMNS: &str = "record::id(id) AS id, provider, account, locator, credential, cursor, last_job, \
+const SOURCE_COLUMNS: &str = "record::id(id) AS id, source, account, locator, credential, cursor, last_job, \
      last_run_at, <string>created_at AS created_at, <string>updated_at AS updated_at";
 
 /// The projection every source document read shares.
@@ -29,7 +29,7 @@ const DOCUMENT_COLUMNS: &str = "source, external_id, revision, raw, raw_hash, ti
 #[derive(Deserialize)]
 struct SourceRow {
     id: SourceId,
-    provider: String,
+    source: String,
     #[serde(default)]
     account: Option<String>,
     locator: String,
@@ -58,7 +58,7 @@ impl SourceRow {
         };
         Ok(SourceRecord {
             id: self.id,
-            provider: self.provider,
+            source: self.source,
             account: self.account,
             locator: self.locator,
             credential,
@@ -119,12 +119,12 @@ impl SurrealStore {
             .db
             .query(
                 "CREATE type::record('source', $id) SET \
-                 provider = $provider, account = $account, locator = $locator, credential = $credential, \
+                 source = $source, account = $account, locator = $locator, credential = $credential, \
                  cursor = $cursor, last_job = NONE, last_run_at = NONE, \
                  created_at = <datetime>$created_at, updated_at = <datetime>$updated_at",
             )
             .bind(("id", record.id.to_string()))
-            .bind(("provider", record.provider.clone()))
+            .bind(("source", record.source.clone()))
             .bind(("account", record.account.clone()))
             .bind(("locator", record.locator.clone()))
             .bind((
@@ -149,12 +149,12 @@ impl SurrealStore {
         Ok(record)
     }
 
-    /// Every source ever mined, by provider then locator.
+    /// Every source ever mined, by adapter then locator.
     pub async fn list_sources(&self) -> Result<Vec<SourceRecord>> {
         let mut response = self
             .db
             .query(format!(
-                "SELECT {SOURCE_COLUMNS} FROM source ORDER BY provider, locator"
+                "SELECT {SOURCE_COLUMNS} FROM source ORDER BY source, locator"
             ))
             .await?;
         let rows: Vec<SourceRow> = super::take_rows(&mut response, 0)?;
@@ -282,7 +282,7 @@ mod tests {
 
     fn reference(locator: &str) -> SourceRef {
         SourceRef {
-            provider: "demo".into(),
+            source: "demo".into(),
             account: None,
             locator: locator.into(),
         }

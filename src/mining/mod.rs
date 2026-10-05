@@ -10,9 +10,9 @@
 //! - [`adapter`] is the contract a source implements; [`adapters`] holds the sources MemCastle ships
 //!   (`directory`), and [`wasm`] runs the ones a user installs as WebAssembly components
 //!   (docs/adr/026). Source-specific discovery and reading live in those and nowhere else.
-//! - [`registry`] turns a provider name into one or the other, behind the same contract.
+//! - [`registry`] turns a source name into one or the other, behind the same contract.
 //! - [`pipeline`] is the one loop every source goes through: cursor, revision check, chunking, idempotent filing,
-//!   cursor commit, checkpoint. It knows no provider by name.
+//!   cursor commit, checkpoint. It knows no source by name.
 //! - [`chunk`] cuts a canonical document into drawer-sized texts.
 //!
 //! [`run`] is the seam between the job and all of that: it resolves the job's source to an adapter and hands over.
@@ -52,7 +52,7 @@ pub use crate::domain::SourceOrigin;
 /// The fields after `capabilities` were added with installable sources (docs/adr/026) and default to what a built-in
 /// source is, so an older daemon's answer still reads.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ProviderInfo {
+pub struct AdapterInfo {
     /// The name to give as `--source`.
     pub name: String,
     /// What it reads.
@@ -91,24 +91,23 @@ fn enabled() -> SourceState {
 ///
 /// # Errors
 ///
-/// Returns an error if the provider is unknown or not enabled, the source cannot be reached or read, or a store
+/// Returns an error if the source is unknown or not enabled, the source cannot be reached or read, or a store
 /// write fails.
 pub async fn run(ctx: &JobContext, job: &mut Job, params: MiningParams) -> Result<JobOutcome> {
     let MiningParams { source, wing, full } = params;
-    // A directory job and a `directory` provider job are the same source: one wire form predates the other.
-    let (provider, locator) = match &source {
-        MiningSource::Directory { path } => (
-            directory::PROVIDER,
-            Some(path.to_string_lossy().into_owned()),
-        ),
-        MiningSource::Provider { provider, locator } => (provider.as_str(), locator.clone()),
+    // A directory job and a `directory` source job are the same source: one wire form predates the other.
+    let (name, locator) = match &source {
+        MiningSource::Directory { path } => {
+            (directory::NAME, Some(path.to_string_lossy().into_owned()))
+        }
+        MiningSource::Named { source, locator } => (source.as_str(), locator.clone()),
     };
     let request = pipeline::Request {
         locator: locator.as_deref(),
         wing: wing.as_deref(),
         full,
     };
-    let adapter = registry::resolve(ctx.store(), ctx.mining(), provider).await?;
+    let adapter = registry::resolve(ctx.store(), ctx.mining(), name).await?;
     pipeline::mine(&adapter, ctx, job, request).await
 }
 
@@ -117,8 +116,11 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: MiningParams) -> Resul
 /// # Errors
 ///
 /// A store error when the installed sources cannot be read.
-pub async fn providers(store: &SurrealStore, mining: &MiningConfig) -> Result<Vec<ProviderInfo>> {
-    registry::providers(store, mining).await
+pub async fn list_adapters(
+    store: &SurrealStore,
+    mining: &MiningConfig,
+) -> Result<Vec<AdapterInfo>> {
+    registry::list_adapters(store, mining).await
 }
 
 #[cfg(test)]
@@ -249,13 +251,13 @@ mod tests {
             .origin
             .as_ref()
             .expect("a mined drawer has an origin");
-        assert_eq!(origin.provider, "directory");
+        assert_eq!(origin.source, "directory");
         assert_eq!(origin.document, "a.txt");
         assert_eq!(origin.chunk, 0);
         assert_eq!(drawer.source.kind, SourceKind::File);
         let sources = store.list_sources().await.unwrap();
         assert_eq!(sources.len(), 1);
-        assert_eq!(origin.source, sources[0].id);
+        assert_eq!(origin.source_id, sources[0].id);
     }
 
     #[tokio::test]
@@ -755,12 +757,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_unknown_provider_is_refused_naming_the_known_ones() {
+    async fn an_unknown_source_is_refused_naming_the_known_ones() {
         let store = SurrealStore::connect_memory_for_tests().await;
         let mut job = Job::new(
             JobKind::Mine {
-                source: MiningSource::Provider {
-                    provider: "carrier-pigeon".into(),
+                source: MiningSource::Named {
+                    source: "carrier-pigeon".into(),
                     locator: None,
                 },
                 wing: None,
@@ -796,7 +798,7 @@ mod tests {
     ///
     /// What the pipeline does for such a source (a transcript kind, its own room and drawer name, the raw kept next to
     /// the drawers, a grown document re-filed by its tail) is the pipeline's, so it is tested here with no real
-    /// provider involved: Pi's history is an installed component (`sources/pi`), tested in `tests/wasm_pi.rs`.
+    /// source involved: Pi's history is an installed component (`sources/pi`), tested in `tests/wasm_pi.rs`.
     struct Transcript {
         body: std::sync::Mutex<String>,
     }
@@ -818,7 +820,7 @@ mod tests {
     }
 
     impl crate::mining::adapter::SourceAdapter for Transcript {
-        fn provider(&self) -> &str {
+        fn name(&self) -> &str {
             "transcript"
         }
 
@@ -836,7 +838,7 @@ mod tests {
 
         fn identify(&self, _locator: Option<&str>) -> Result<crate::domain::SourceRef> {
             Ok(crate::domain::SourceRef {
-                provider: "transcript".into(),
+                source: "transcript".into(),
                 account: None,
                 locator: "memory".into(),
             })
@@ -919,8 +921,8 @@ mod tests {
     ) -> Job {
         let mut job = Job::new(
             JobKind::Mine {
-                source: MiningSource::Provider {
-                    provider: "transcript".into(),
+                source: MiningSource::Named {
+                    source: "transcript".into(),
                     locator: None,
                 },
                 wing: None,
@@ -953,7 +955,7 @@ mod tests {
 
         let job = mine_transcript(&store, &transcript, MiningConfig::default()).await;
 
-        assert_eq!(result(&job)["provider"], "transcript");
+        assert_eq!(result(&job)["source"], "transcript");
         let filed = drawers(&store).await;
         assert_eq!(filed.len(), 1);
         assert_eq!(filed[0].source.kind, SourceKind::Transcript);
@@ -1058,13 +1060,13 @@ mod tests {
     }
 
     #[test]
-    fn every_shipped_provider_is_listed_with_its_capabilities() {
-        let names: Vec<_> = registry::builtin_providers()
+    fn every_shipped_adapter_is_listed_with_its_capabilities() {
+        let names: Vec<_> = registry::builtin_adapters()
             .into_iter()
             .map(|p| p.name)
             .collect();
         assert_eq!(names, ["directory"]);
-        let directory = registry::builtin_providers().remove(0);
+        let directory = registry::builtin_adapters().remove(0);
         assert!(
             directory.capabilities.incremental
                 && !directory.capabilities.retains_raw
@@ -1073,9 +1075,9 @@ mod tests {
     }
 
     #[test]
-    fn an_older_daemons_provider_listing_still_reads_as_an_enabled_built_in_source() {
-        // Before installable sources a provider was exactly these three fields.
-        let info: ProviderInfo = serde_json::from_value(json!({
+    fn an_older_daemons_adapter_listing_still_reads_as_an_enabled_built_in_source() {
+        // Before installable sources a source was exactly these three fields.
+        let info: AdapterInfo = serde_json::from_value(json!({
             "name": "directory",
             "description": "files",
             "capabilities": {"incremental": true, "retains_raw": false, "needs_credentials": false},

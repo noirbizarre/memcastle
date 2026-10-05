@@ -517,7 +517,7 @@ async fn one_persistent_session_serves_wake_up_recall_and_checkpoint_without_rec
         )
         .await
         .error_code(),
-        "memcastle::app::mode_forbidden"
+        "memcastle::mode::forbidden"
     );
     assert_eq!(reported_mode(&read_only).await, "read_only");
 
@@ -633,7 +633,7 @@ async fn each_failure_class_is_distinguishable_with_its_code_and_help() {
         expected("invalid_input")["code"].as_str().unwrap()
     );
     // ...and the more specific codes the daemon answers with a 400 are listed too, because a tool error carries no
-    // status: a wing no path can address is refused with `invalid_path`, which a client must read as invalid input.
+    // status: a wing no path can address is refused with `path_invalid`, which a client must read as invalid input.
     let mut unaddressable = checkpoint_of("refused");
     unaddressable["items"][0]["wing"] = json!("0b8c1e8e-7a52-4a1c-9d0e-6f0a3b2c1d4e");
     let code = call(
@@ -748,7 +748,7 @@ async fn audit_is_read_only_and_a_dry_run_repair_is_allowed_in_read_only_but_app
         )
         .await
         .error_code(),
-        "memcastle::app::mode_forbidden"
+        "memcastle::mode::forbidden"
     );
     // A repair is a dry run unless it says otherwise, so forgetting the flag can never be destructive.
     let default = call(&session, "memcastle_repair", json!({})).await.ok();

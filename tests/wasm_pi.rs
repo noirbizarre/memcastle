@@ -389,9 +389,7 @@ impl Fixture {
         let response = self
             .client
             .post(self.url("/api/jobs"))
-            .json(
-                &json!({"type": "mine", "provider": "pi", "locator": root, "requested_by": "test"}),
-            )
+            .json(&json!({"type": "mine", "source": "pi", "locator": root, "requested_by": "test"}))
             .send()
             .await
             .expect("request");
@@ -474,7 +472,7 @@ async fn the_installed_pi_source_mines_history_idempotently_with_provenance_and_
     let hits = fixture.search("rotate signing keys").await;
     assert_eq!(hits.len(), 1, "{hits:?}");
     assert_eq!(hits[0]["source"]["kind"], "transcript");
-    assert_eq!(hits[0]["source"]["origin"]["provider"], "pi");
+    assert_eq!(hits[0]["source"]["origin"]["source"], "pi");
     assert_eq!(hits[0]["source"]["origin"]["document"], SESSION_ID);
     assert!(
         fixture.search("SECRET-TOOL-OUTPUT").await.is_empty(),

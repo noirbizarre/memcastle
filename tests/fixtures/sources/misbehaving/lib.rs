@@ -32,7 +32,7 @@ fn raw(candidate: &Candidate, metadata: &str, occurred_at: Option<&str>) -> RawD
 impl Guest for Source {
     fn identify(locator: Option<String>) -> Result<SourceRef, SourceError> {
         let locator = locator.ok_or_else(|| SourceError::InvalidInput("a directory, please".to_string()))?;
-        Ok(SourceRef { provider: "misbehaving".to_string(), account: None, locator })
+        Ok(SourceRef { source: "misbehaving".to_string(), account: None, locator })
     }
 
     fn default_wing(source: SourceRef) -> String {

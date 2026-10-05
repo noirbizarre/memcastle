@@ -159,7 +159,7 @@ mod tests {
                     repository: None,
                 },
                 compatibility: Compatibility {
-                    contract: "0.1".into(),
+                    contract: "0.2".into(),
                     memcastle: ">=0.1".into(),
                 },
                 capabilities: Default::default(),

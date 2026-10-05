@@ -52,7 +52,12 @@ Enabling both would show the model two copies of every tool.
 Plugin options win over the environment.
 OpenCode 1 takes them as `["path-or-package", { ... }]` in `opencode.json`'s `plugin` list,
 and OpenCode 2 as `{ "package": "path-or-package", "options": { ... } }` in its `plugins` list.
-The environment variables are the ones the MemCastle CLI already reads.
+The variables below share their names with the MemCastle CLI's where it has one, but not always their values:
+`MEMCASTLE_MODE` takes this integration's labels (`full`, `read-only`, `off`), whereas the CLI's `--mode` and `MEMCASTLE_MODE`
+take the daemon's (`full`, `read_only`, `disabled`).
+A shell that exports one set therefore breaks the other tool, so set the integration's mode in its own settings when you
+also use the CLI.
+The wake-up and checkpoint variables, and `MEMCASTLE_FORCE_MEMORY_RECALL`, belong to this integration alone: the CLI does not read them.
 
 | Option | Environment | Default | Meaning |
 | --- | --- | --- | --- |
@@ -271,7 +276,7 @@ The label is translated to the daemon's wire value (`off` is `disabled`, `read-o
 | `memcastle_checkpoint` tool and `/memcastle-checkpoint` | review or save | refuse, with the way out; no write is sent, even for a payload the model wrote | not registered |
 
 - **`read-only` skips writes instead of attempting them.**
-  The daemon would refuse them with `memcastle::app::mode_forbidden`, but only after a rejected call, and after a review
+  The daemon would refuse them with `memcastle::mode::forbidden`, but only after a rejected call, and after a review
   had paid for a model call whose result must be thrown away.
   The tool throws a failure of class `mode_rejected` that says to start with `MEMCASTLE_MODE=full`.
 - **`off` is absent, not refused.**
@@ -324,6 +329,7 @@ src/session.ts    one MCP session; selects the mode on every (re)connect before 
 src/registry.ts   one session per OpenCode sessionID, connected lazily
 src/recall-core.ts   search-before-answer without a host: the level and the text to inject (the same file as Pi's)
 src/skill-text.ts    reads a shared skill from `skills/` and strips its frontmatter (the same file as Pi's)
+src/project-core.ts  the project context: `.config/memcastle.toml`, `MEMCASTLE_WING` and `MEMCASTLE_ROOM` (the same file as Pi's)
 src/skills.ts        the shared skills as OpenCode registers them: a `skills.paths` entry (V1), a skill list (V2)
 src/checkpoint-core.ts  checkpointing without a host: settings, the review, the payload, submission (the same file as Pi's)
 src/checkpoint.ts    checkpoints per OpenCode session: interval counting, emergency before compaction, the tool, the command
@@ -349,7 +355,6 @@ The tests never skip when the binary is missing, because a suite that passes wit
 ## Conformance matrix
 
 The contract is [`docs/integration-contract.md`](../../docs/integration-contract.md).
-**Foundation** means the building block exists and is tested, but the lifecycle behaviour is not wired yet.
 
 | Capability | Status | Where it lands |
 | --- | --- | --- |

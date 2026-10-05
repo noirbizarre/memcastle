@@ -71,7 +71,7 @@ A registry is one JSON file, `memcastle-index.json`, served from anywhere that s
       "versions": [
         {
           "version": "1.2.0",
-          "contract": "0.1",
+          "contract": "0.2",
           "memcastle": ">=0.2, <0.4",
           "url": "claude-1.2.0.tar.gz",
           "sha256": "<64 lowercase hex characters>",

@@ -44,5 +44,5 @@ Read the diary when the user asks what was noted earlier, or when the wake-up en
 
 ## Memory modes
 
-Writing is refused with `memcastle::app::mode_forbidden` in `read_only` and `disabled`, and reading in `disabled`.
+Writing is refused with `memcastle::mode::forbidden` in `read_only` and `disabled`, and reading in `disabled`.
 Stop at the first refusal, do not retry, and do not call `memcastle_set_mode` to get around it.

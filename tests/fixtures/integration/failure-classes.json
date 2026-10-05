@@ -24,7 +24,7 @@
       "id": "mode_rejected",
       "detected_by": "tool_error",
       "http_status": 403,
-      "code": "memcastle::app::mode_forbidden",
+      "code": "memcastle::mode::forbidden",
       "severity": "info",
       "message_must_contain": [],
       "client_must": "treat it as the session's own choice, not as a fault, and say which operation was refused"
@@ -35,9 +35,9 @@
       "http_status": 400,
       "code": "memcastle::input::invalid",
       "also_codes": [
-        "memcastle::palace::invalid_path",
-        "memcastle::repair::invalid_based_on_job",
-        "memcastle::domain::empty_label",
+        "memcastle::palace::path_invalid",
+        "memcastle::repair::based_on_job_invalid",
+        "memcastle::graph::empty_label",
         "memcastle::search::semantic_unavailable"
       ],
       "severity": "warning",

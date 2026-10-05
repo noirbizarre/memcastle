@@ -148,7 +148,7 @@ async fn write_graph(
     let mut valid_from = drawer.valid_from;
     if let Some(origin) = &origin
         && let Some(document) = store
-            .get_source_document(origin.source, &origin.document)
+            .get_source_document(origin.source_id, &origin.document)
             .await?
         && let Some(occurred_at) = document.occurred_at
     {

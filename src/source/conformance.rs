@@ -144,7 +144,7 @@ pub async fn run_case<A: SourceAdapter>(adapter: &A, case: &Case, tree: &Path) -
     let mut failures = Vec::new();
     let mut fail = |message: String| failures.push(message);
 
-    if adapter.provider().is_empty() || adapter.description().trim().is_empty() {
+    if adapter.name().is_empty() || adapter.description().trim().is_empty() {
         fail("the source has no name or description".to_string());
     }
     if adapter.description().contains('\n') {
@@ -159,11 +159,11 @@ pub async fn run_case<A: SourceAdapter>(adapter: &A, case: &Case, tree: &Path) -
             return failures;
         }
     };
-    if source.provider != adapter.provider() {
+    if source.source != adapter.name() {
         fail(format!(
-            "identify returned provider `{}`, not `{}`",
-            source.provider,
-            adapter.provider()
+            "identify returned source `{}`, not `{}`",
+            source.source,
+            adapter.name()
         ));
     }
     match adapter.identify(Some(&locator)) {
@@ -436,7 +436,7 @@ mod tests {
     enum Fault {
         EmptyName,
         MultiLineDescription,
-        WrongProvider,
+        WrongSource,
         UnstableIdentity,
         IdentifyFails,
         IdentifyFailsTheSecondTime,
@@ -481,11 +481,11 @@ mod tests {
     }
 
     impl SourceAdapter for Faulty {
-        fn provider(&self) -> &str {
+        fn name(&self) -> &str {
             if self.is(Fault::EmptyName) {
                 ""
             } else {
-                self.inner.provider()
+                self.inner.name()
             }
         }
 
@@ -509,8 +509,8 @@ mod tests {
                 return Err(Error::invalid_input("locator", "refused again"));
             }
             let mut source = self.inner.identify(locator)?;
-            if self.is(Fault::WrongProvider) {
-                source.provider = "someone-else".to_string();
+            if self.is(Fault::WrongSource) {
+                source.source = "someone-else".to_string();
             }
             if self.is(Fault::UnstableIdentity) {
                 source.account = Some(self.tick().to_string());
@@ -629,7 +629,7 @@ mod tests {
         let cases = [
             (Fault::EmptyName, 1, "no name or description"),
             (Fault::MultiLineDescription, 1, "more than one line"),
-            (Fault::WrongProvider, 1, "returned provider `someone-else`"),
+            (Fault::WrongSource, 1, "returned source `someone-else`"),
             (Fault::UnstableIdentity, 1, "different identity"),
             (Fault::IdentifyFails, 1, "identify("),
             (
@@ -677,7 +677,7 @@ mod tests {
     fn the_wrapper_delegates_what_it_does_not_break() {
         let faulty = Faulty::new(Fault::EmptyName);
         let source = SourceRef {
-            provider: "directory".into(),
+            source: "directory".into(),
             account: None,
             locator: "/data/notes".into(),
         };

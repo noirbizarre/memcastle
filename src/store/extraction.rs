@@ -152,8 +152,8 @@ mod tests {
 
     fn origin() -> Origin {
         Origin {
-            source: SourceId::new(),
-            provider: "directory".into(),
+            source_id: SourceId::new(),
+            source: "directory".into(),
             document: "a.md".into(),
             chunk: 0,
             revision: "rev1".into(),

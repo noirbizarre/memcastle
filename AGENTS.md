@@ -99,7 +99,7 @@ An invariant nothing checks is a comment, and it will be violated.
    (see `docs/adr/033-source-distribution.md`).
    Entity extraction is the stage after: it reads drawers, names no source, and only adds graph records, never writing a
    drawer (see `docs/adr/024-entity-extraction-as-an-enrich-job.md`).
-   Enforced by `tests/source_isolation.rs`, which fails on a provider name or file access in `pipeline.rs`, `chunk.rs`
+   Enforced by `tests/source_isolation.rs`, which fails on an adapter name or file access in `pipeline.rs`, `chunk.rs`
    or `adapter.rs`, on an adapter reaching `store` or `jobs`, on any other module calling the source writers,
    and on `src/extract` naming a source or calling a drawer writer.
    Deduplication is called by the pipeline for every chunk it stores, so `src/dedup` obeys the same rule: it names no
@@ -262,7 +262,8 @@ so staying inside the request is a rule here and not a courtesy.
 mise run ci
 ```
 
-Formatting, Clippy, spelling, workflow and Markdown linting, the architecture guard hooks, tests
+Formatting, Clippy, spelling, workflow and Markdown linting, the architecture guard hooks, the basic and WebAssembly
+tests, the build and test of every reference source and integration (which needs bun and the `wasm32-wasip2` target)
 and the documentation build.
 This is the local equivalent of CI's lint, test and docs steps; CI additionally runs every prek hook, coverage on three
 operating systems and `gh ship validate`.

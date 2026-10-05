@@ -69,6 +69,7 @@ There is no stdio mode, so a client that can only spawn a local command cannot c
   with `--scope user` for every project, then `claude mcp list` to check.
 - OpenCode: add an `mcp.memcastle` entry with `"type": "remote"`, the URL and `"enabled": true` to `opencode.json`,
   then `opencode mcp list` to check.
+  Skip this if the user installs the MemCastle OpenCode plugin: it connects by itself, and both would show every tool twice.
 - Any other client: register a remote server of type streamable HTTP with that URL.
 
 When authentication is enabled, the client sends `Authorization: Bearer <token>`.

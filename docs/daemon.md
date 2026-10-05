@@ -103,8 +103,10 @@ memcastle status > /dev/null || echo "exit $?"
 ```
 
 !!! note
-    `status || memcastle daemon start` also starts a daemon when `status` exits `1`.
-    Test for exit code 3 explicitly if a degraded daemon must not be replaced.
+    `status || memcastle daemon start` also runs `daemon start` when `status` exits `1` (a degraded daemon),
+    but that fails with `memcastle::client::already_running`, because anything that answers its health check counts as running.
+    A degraded daemon is never replaced by it: use `daemon restart` for that,
+    or test for exit code 3 explicitly to start a daemon only when none is running.
 
 ## How clients find the daemon
 

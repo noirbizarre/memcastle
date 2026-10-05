@@ -76,7 +76,7 @@ pub struct AuditReport {
     /// The wing name this audit's in-scope counts were restricted to, if
     /// any. Orphan/dangling-provenance findings are never restricted by
     /// this — see the module doc.
-    pub scope: Option<String>,
+    pub wing: Option<String>,
     /// Drawers whose `room` reference no longer resolves.
     pub orphan_drawers: Vec<OrphanDrawer>,
     /// Drawers whose `provenance.job_id` reference no longer resolves.
@@ -88,11 +88,11 @@ pub struct AuditReport {
     /// produces this count — counting itself would make this number never
     /// read `0` and defeat the point of a cross-check).
     pub running_jobs: u64,
-    /// Drawers with no `embedding`, within `scope` if given. Informational
+    /// Drawers with no `embedding`, within the `wing` if given. Informational
     /// only — see the module doc.
     pub drawers_without_embedding: u64,
     /// Total drawers considered for `drawers_without_embedding` (i.e.
-    /// within `scope`, excluding orphans, which belong to no wing) — lets a
+    /// within the `wing`, excluding orphans, which belong to no wing) — lets a
     /// caller compute a ratio without a second query.
     pub total_drawers_in_scope: u64,
     /// When this report was generated.
@@ -107,7 +107,7 @@ const CHECK_EVERY: usize = 500;
 /// What an `Audit` job needs, gathered from its [`crate::domain::JobKind`].
 pub struct AuditParams {
     /// Narrow the embedding-count fields to this wing, by name.
-    pub scope: Option<String>,
+    pub wing: Option<String>,
 }
 
 /// Run a read-only consistency audit, optionally narrowing the
@@ -119,14 +119,14 @@ pub struct AuditParams {
 /// serialize (effectively never — see [`AuditReport`]'s fields, all plain
 /// serializable types).
 pub async fn run(ctx: &JobContext, job: &mut Job, params: AuditParams) -> Result<JobOutcome> {
-    let AuditParams { scope } = params;
+    let AuditParams { wing } = params;
     let store = ctx.store();
-    tracing::info!(scoped = scope.is_some(), "audit started");
+    tracing::info!(scoped = wing.is_some(), "audit started");
     if let Some(stop) = ctx.stop_requested() {
         return Ok(stop);
     }
 
-    let report = match build_report(ctx, store, scope.as_deref(), job.id).await? {
+    let report = match build_report(ctx, store, wing.as_deref(), job.id).await? {
         Scan::Done(report) => report,
         Scan::Stopped(outcome) => return Ok(outcome),
     };
@@ -190,14 +190,14 @@ pub(crate) async fn find_orphan_drawers(store: &SurrealStore) -> Result<Vec<Orph
 async fn build_report(
     ctx: &JobContext,
     store: &SurrealStore,
-    scope: Option<&str>,
+    wing: Option<&str>,
     self_job_id: JobId,
 ) -> Result<Scan> {
     let wings = store.list_wings().await?;
 
     // Every currently-valid room id, mapped to its owning wing — shared by
     // orphan detection ("does this drawer's room appear here at all?") and
-    // the scope filter ("does this drawer's room fall under wing X?").
+    // the wing filter ("does this drawer's room fall under wing X?").
     let mut room_wing: HashMap<RoomId, WingId> = HashMap::new();
     let mut wing_id_by_name: HashMap<&str, WingId> = HashMap::new();
     for wing in &wings {
@@ -209,12 +209,12 @@ async fn build_report(
             room_wing.insert(room.id, wing.id);
         }
     }
-    // Resolving `scope` once up front, not per-drawer: `None` means "no
+    // Resolving `wing` once up front, not per-drawer: `None` means "no
     // wing name was given"; `Some(None)` (a name with no matching wing)
-    // must still be distinguishable from that, so a typo'd scope yields
+    // must still be distinguishable from that, so a typo'd wing yields
     // zero in-scope drawers rather than silently falling back to
     // unscoped — see the loop below.
-    let scope_wing_id = scope.map(|name| wing_id_by_name.get(name).copied());
+    let wing_id = wing.map(|name| wing_id_by_name.get(name).copied());
 
     if let Some(stop) = ctx.stop_requested() {
         return Ok(Scan::Stopped(stop));
@@ -264,14 +264,14 @@ async fn build_report(
             });
         }
 
-        let in_scope = match scope_wing_id {
-            // No scope requested: every drawer whose room resolves at all
+        let in_scope = match wing_id {
+            // No wing requested: every drawer whose room resolves at all
             // (an orphan belongs to no wing, so it can't be "in scope").
             None => wing_of_drawer.is_some(),
-            // A scope was requested and it resolved to a real wing: only
+            // A wing was requested and it resolved to a real wing: only
             // that wing's drawers count.
             Some(Some(resolved)) => wing_of_drawer == Some(resolved),
-            // A scope was requested but no such wing exists: nothing is
+            // A wing was requested but no such wing exists: nothing is
             // in scope, same as `list_drawers_matching`'s handling of a typo'd
             // wing name — not an error, just an empty result.
             Some(None) => false,
@@ -285,7 +285,7 @@ async fn build_report(
     }
 
     Ok(Scan::Done(AuditReport {
-        scope: scope.map(str::to_string),
+        wing: wing.map(str::to_string),
         orphan_drawers,
         dangling_provenance_drawers,
         stuck_failed_jobs,
@@ -313,8 +313,8 @@ mod tests {
         JobContext::new(job.id, control, store.clone())
     }
 
-    fn audit_job(scope: Option<String>) -> Job {
-        Job::new(JobKind::Audit { scope }, Priority::Normal, "test")
+    fn audit_job(wing: Option<String>) -> Job {
+        Job::new(JobKind::Audit { wing }, Priority::Normal, "test")
     }
 
     fn report_of(job: &Job) -> AuditReport {
@@ -328,7 +328,7 @@ mod tests {
         let mut job = audit_job(None);
         let ctx = ctx_for(&store, &job, JobControl::default());
 
-        let outcome = run(&ctx, &mut job, AuditParams { scope: None })
+        let outcome = run(&ctx, &mut job, AuditParams { wing: None })
             .await
             .expect("run");
         assert_eq!(outcome, JobOutcome::Completed);
@@ -379,7 +379,7 @@ mod tests {
 
         let mut job = audit_job(None);
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&ctx, &mut job, AuditParams { scope: None })
+        run(&ctx, &mut job, AuditParams { wing: None })
             .await
             .expect("run");
 
@@ -433,7 +433,7 @@ mod tests {
 
         let mut job = audit_job(None);
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&ctx, &mut job, AuditParams { scope: None })
+        run(&ctx, &mut job, AuditParams { wing: None })
             .await
             .expect("run");
 
@@ -471,7 +471,7 @@ mod tests {
 
         let mut job = audit_job(None);
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&ctx, &mut job, AuditParams { scope: None })
+        run(&ctx, &mut job, AuditParams { wing: None })
             .await
             .expect("run");
 
@@ -488,7 +488,7 @@ mod tests {
 
         let mut job = audit_job(None);
         let ctx = ctx_for(&store, &job, JobControl::default());
-        run(&ctx, &mut job, AuditParams { scope: None })
+        run(&ctx, &mut job, AuditParams { wing: None })
             .await
             .expect("run");
 
@@ -501,7 +501,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_scope_filter_narrows_the_embedding_count_but_not_orphan_or_dangling_findings() {
+    async fn a_wing_filter_narrows_the_embedding_count_but_not_orphan_or_dangling_findings() {
         let store = memory_store().await;
 
         // One drawer in scope ("project-x"), one out of scope
@@ -545,7 +545,7 @@ mod tests {
         seed(&store, "project-y", "out of scope").await;
 
         // Plus one orphan and one dangling-provenance drawer, which must
-        // still be reported regardless of the scope filter below.
+        // still be reported regardless of the wing filter below.
         let orphan_room = RoomId::new();
         let now = Utc::now();
         store
@@ -583,7 +583,7 @@ mod tests {
             &ctx,
             &mut job,
             AuditParams {
-                scope: Some("project-x".to_string()),
+                wing: Some("project-x".to_string()),
             },
         )
         .await
@@ -598,23 +598,23 @@ mod tests {
         assert_eq!(
             report.orphan_drawers.len(),
             1,
-            "orphan detection must not be narrowed by scope"
+            "orphan detection must not be narrowed by the wing"
         );
 
-        // An unknown scope name must yield zero in-scope drawers, not an
+        // An unknown wing name must yield zero in-scope drawers, not an
         // error and not a silent fallback to unscoped.
-        let mut unknown_scope_job = audit_job(Some("no-such-wing".to_string()));
-        let ctx = ctx_for(&store, &unknown_scope_job, JobControl::default());
+        let mut unknown_wing_job = audit_job(Some("no-such-wing".to_string()));
+        let ctx = ctx_for(&store, &unknown_wing_job, JobControl::default());
         run(
             &ctx,
-            &mut unknown_scope_job,
+            &mut unknown_wing_job,
             AuditParams {
-                scope: Some("no-such-wing".to_string()),
+                wing: Some("no-such-wing".to_string()),
             },
         )
         .await
         .expect("run");
-        let report = report_of(&unknown_scope_job);
+        let report = report_of(&unknown_wing_job);
         assert_eq!(report.total_drawers_in_scope, 0);
     }
 
@@ -626,7 +626,7 @@ mod tests {
         let mut job = audit_job(None);
         let ctx = ctx_for(&store, &job, control);
 
-        let outcome = run(&ctx, &mut job, AuditParams { scope: None })
+        let outcome = run(&ctx, &mut job, AuditParams { wing: None })
             .await
             .expect("run");
 
@@ -634,7 +634,7 @@ mod tests {
         assert!(job.result.is_none());
 
         let ctx = ctx_for(&store, &job, JobControl::default());
-        let outcome = run(&ctx, &mut job, AuditParams { scope: None })
+        let outcome = run(&ctx, &mut job, AuditParams { wing: None })
             .await
             .expect("resumed run");
         assert_eq!(outcome, JobOutcome::Completed);
@@ -650,7 +650,7 @@ mod tests {
         let mut job = audit_job(None);
         let ctx = ctx_for(&store, &job, control);
 
-        let outcome = run(&ctx, &mut job, AuditParams { scope: None })
+        let outcome = run(&ctx, &mut job, AuditParams { wing: None })
             .await
             .expect("run");
 
@@ -665,7 +665,7 @@ mod tests {
         let mut job = audit_job(None);
         let ctx = ctx_for(&store, &job, control.clone());
 
-        let outcome = run(&ctx, &mut job, AuditParams { scope: None })
+        let outcome = run(&ctx, &mut job, AuditParams { wing: None })
             .await
             .expect("run");
 

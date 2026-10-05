@@ -83,10 +83,10 @@ impl std::str::FromStr for JobStatus {
 
 /// Where a mining job reads its source material from: the directory form that
 /// predates the unified source model, or any registered source adapter
-/// ([`crate::mining`]'s provider list) by name.
+/// ([`crate::mining`]'s adapter list) by name.
 ///
 /// `JobKind::Mine`'s shape (`source`, `wing`, `full`) never changes when an
-/// adapter is added: a new adapter is a new provider name, not a new variant,
+/// adapter is added: a new adapter is a new source name, not a new variant,
 /// so neither `Scheduler::execute`'s dispatch nor the wire format's
 /// `"type": "mine"` tag needs to change.
 ///
@@ -94,7 +94,7 @@ impl std::str::FromStr for JobStatus {
 /// holds this in `JobKind::Mine`, is what keeps the on-the-wire shape of a
 /// directory job exactly `{"type": "mine", "path": ..., "wing": ...}` — the
 /// same JSON every existing caller (CLI, MCP, HTTP, jobs already on disk)
-/// sends. A provider job is `{"type": "mine", "provider": ..., "locator": ...}`.
+/// sends. A named-source job is `{"type": "mine", "source": ..., "locator": ...}`.
 /// `Directory` stays first: a body carrying `path` is always a directory job.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -106,10 +106,10 @@ pub enum MiningSource {
         path: PathBuf,
     },
     /// Mine through a named source adapter.
-    Provider {
-        /// The adapter's name (`pi`, ...); see `crate::mining::providers`.
-        provider: String,
-        /// The part of the provider to read; `None` takes the adapter's default
+    Named {
+        /// The adapter's name (`pi`, ...); see `crate::mining::adapters`.
+        source: String,
+        /// The part of the source to read; `None` takes the adapter's default
         /// (the Pi sessions directory, say).
         #[serde(default)]
         locator: Option<String>,
@@ -164,7 +164,7 @@ pub enum JobKind {
         /// name. Orphan-drawer and dangling-provenance findings are always
         /// palace-wide regardless of this — see `crate::audit::run`'s doc
         /// comment for why a partial consistency scan would be misleading.
-        scope: Option<String>,
+        wing: Option<String>,
     },
     /// A narrow, dry-run-first set of destructive palace-consistency
     /// fixes — see `crate::repair`'s module doc for exactly what it does
@@ -913,10 +913,10 @@ mod tests {
     }
 
     #[test]
-    fn a_provider_mine_job_is_flat_on_the_wire_and_round_trips() {
+    fn a_named_source_mine_job_is_flat_on_the_wire_and_round_trips() {
         let kind = JobKind::Mine {
-            source: MiningSource::Provider {
-                provider: "pi".into(),
+            source: MiningSource::Named {
+                source: "pi".into(),
                 locator: None,
             },
             wing: None,
@@ -926,24 +926,24 @@ mod tests {
         assert_eq!(
             json,
             serde_json::json!({
-                "type": "mine", "provider": "pi", "locator": null, "wing": null, "full": true
+                "type": "mine", "source": "pi", "locator": null, "wing": null, "full": true
             })
         );
         let back: JobKind = serde_json::from_value(json).unwrap();
         assert!(matches!(
             back,
             JobKind::Mine {
-                source: MiningSource::Provider { ref provider, locator: None },
+                source: MiningSource::Named { ref source, locator: None },
                 full: true,
                 ..
-            } if provider == "pi"
+            } if source == "pi"
         ));
     }
 
     #[test]
-    fn a_body_naming_a_path_is_a_directory_job_even_if_it_also_names_a_provider() {
+    fn a_body_naming_a_path_is_a_directory_job_even_if_it_also_names_a_source() {
         // `Directory` is tried first, so the legacy shape can never be reinterpreted by a later variant.
-        let body = serde_json::json!({"type": "mine", "path": "/x", "provider": "pi"});
+        let body = serde_json::json!({"type": "mine", "path": "/x", "source": "pi"});
         let kind: JobKind = serde_json::from_value(body).unwrap();
         assert!(matches!(
             kind,
