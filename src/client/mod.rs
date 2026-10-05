@@ -134,12 +134,18 @@ impl DaemonClient {
     /// would otherwise end the path early and address something else. `trailing` is split on `/` and each part pushed
     /// as its own segment, for the one route whose last segment is a wildcard (a drawer's name).
     fn api_url(&self, segments: &[&str], trailing: Option<&str>) -> Result<reqwest::Url> {
-        let mut url = reqwest::Url::parse(&self.base_url).map_err(|source| Error::Client {
-            message: format!("invalid daemon address `{}`: {source}", self.base_url),
+        // `Error::config`, not `Error::Client`: the address comes from `server.bind`/`server.port` or the registry,
+        // so the fix is the setting, and `Client`'s "the daemon may be restarting; retry" would send the user the
+        // wrong way.
+        let mut url = reqwest::Url::parse(&self.base_url).map_err(|source| {
+            Error::config(format!(
+                "invalid daemon address `{}`: {source}",
+                self.base_url
+            ))
         })?;
-        let mut path = url.path_segments_mut().map_err(|()| Error::Client {
-            message: format!("invalid daemon address `{}`", self.base_url),
-        })?;
+        let mut path = url
+            .path_segments_mut()
+            .map_err(|()| Error::config(format!("invalid daemon address `{}`", self.base_url)))?;
         path.pop_if_empty().push("api");
         for segment in segments {
             path.push(segment);
