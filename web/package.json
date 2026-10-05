@@ -1,0 +1,34 @@
+{
+  "name": "memcastle-web",
+  "private": true,
+  "version": "0.0.0",
+  "description": "The MemCastle web dashboard: a Vue client of the daemon's REST API, served under /ui when web.enable is set",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "test:daemon": "bun test --timeout 60000 test/daemon"
+  },
+  "dependencies": {
+    "@openvue/themes": "^1.0.0",
+    "cytoscape": "^3.34.0",
+    "openvue": "^1.0.0",
+    "vue": "^3.5.0",
+    "vue-router": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/cytoscape": "^3.21.0",
+    "@types/node": "^24.0.0",
+    "@vitejs/plugin-vue": "^6.0.0",
+    "@vue/test-utils": "^2.4.0",
+    "happy-dom": "^20.0.0",
+    "typescript": "^5.9.0",
+    "vite": "^8.0.0",
+    "vitest": "^5.0.0",
+    "vue-tsc": "^3.0.0",
+    "@types/bun": "^1.4.2"
+  }
+}
