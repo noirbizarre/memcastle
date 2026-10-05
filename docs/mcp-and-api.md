@@ -280,7 +280,9 @@ Equal scores order by drawer id, so a query ranks identically every time.
 A hit never carries the embedding vector.
 
 **Your own vectors.**
-`POST /api/search` takes the request as JSON, so it can carry a `query_embedding`:
+`POST /api/search` takes the request as JSON, so it can carry a `query_embedding`.
+Its text is `text` (or `query`, like everywhere else), and the scope is a nested `filter` rather than the flat
+`wing`, `room` and `tags` of the `GET` form:
 
 ```json
 { "text": "…", "ranking": "semantic", "limit": 5,
