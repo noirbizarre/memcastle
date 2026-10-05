@@ -242,7 +242,7 @@ pub enum IntegrationCommand {
     Update(IntegrationAgentArgs),
     /// Forget an integration in its agent and delete its installed copy.
     /// Everything else in the agent's configuration is left as it was.
-    Remove(IntegrationAgentArgs),
+    Remove(IntegrationRemoveArgs),
 }
 
 /// The flags every `memcastle integration` subcommand takes.
@@ -275,6 +275,20 @@ pub struct IntegrationAgentArgs {
     pub agent: String,
     #[command(flatten)]
     pub common: IntegrationCommonArgs,
+}
+
+/// Arguments for `memcastle integration remove`.
+///
+/// It has no `--assets-dir`: removing reads no assets (it must work after the package that shipped the integration is
+/// gone), so a flag that chose them would be accepted and silently do nothing.
+#[derive(Debug, Args)]
+pub struct IntegrationRemoveArgs {
+    /// The integration, which is named for its agent (`pi`, `opencode`), as
+    /// `memcastle integration list` shows it.
+    pub agent: String,
+    /// Print the result as JSON instead of text, for scripts.
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// `memcastle source` subcommands: the lifecycle of a mining source, from a new project to an installed package.

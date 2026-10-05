@@ -177,12 +177,12 @@ fn overrides_from(args: &Cli) -> Overrides {
         | Command::Daemon(DaemonCommand::Start(serve) | DaemonCommand::Restart(serve)) => {
             (serve.bind, serve.port, serve.assets_dir.clone())
         }
-        // The integration commands read the assets root and nothing else of the daemon's settings.
+        // The integration commands read the assets root and nothing else of the daemon's settings,
+        // except `remove`, which reads no assets at all.
         Command::Integration(
             IntegrationCommand::List(cli::IntegrationListArgs { common })
             | IntegrationCommand::Install(cli::IntegrationAgentArgs { common, .. })
-            | IntegrationCommand::Update(cli::IntegrationAgentArgs { common, .. })
-            | IntegrationCommand::Remove(cli::IntegrationAgentArgs { common, .. }),
+            | IntegrationCommand::Update(cli::IntegrationAgentArgs { common, .. }),
         ) => (None, None, common.assets_dir.clone()),
         _ => (None, None, None),
     };
@@ -1340,9 +1340,7 @@ fn cmd_integration(config: &Config, command: &IntegrationCommand) -> Result<()> 
         IntegrationCommand::Update(args) => {
             (Operation::Update(args.agent.clone()), args.common.json)
         }
-        IntegrationCommand::Remove(args) => {
-            (Operation::Remove(args.agent.clone()), args.common.json)
-        }
+        IntegrationCommand::Remove(args) => (Operation::Remove(args.agent.clone()), args.json),
     };
     let locations = Locations::from_process();
     let runner = SystemRunner;

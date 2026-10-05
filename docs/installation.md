@@ -34,7 +34,7 @@ The daemon looks for assets in a fixed order: a directory you name with `--asset
 `share/memcastle`, then what is built in.
 See [Runtime assets](configuration.md#runtime-assets) for the rule, and
 [ADR-013](adr/013-release-packaging-and-asset-resolution.md) for why.
-The one package asset is the set of sources that ship with MemCastle, under `share/memcastle/sources/`
+One package asset is the set of sources that ship with MemCastle, under `share/memcastle/sources/`
 (see [Publishing and installing sources](publishing-sources.md#bundled-sources)): the release tarballs, the `.deb` and
 `.rpm`, the AUR package and the Homebrew formula carry them, and a standalone binary does not, so it installs a source
 from a file or a registry instead.
@@ -65,8 +65,9 @@ paru -S memcastle-bin   # or your AUR helper of choice
 The `memcastle-bin` package installs the release binary for x86_64 and aarch64,
 a systemd user unit, `/usr/lib/systemd/user/memcastle.service`,
 the bash, zsh and fish completion scripts,
-and the sources bundled with MemCastle under `/usr/share/memcastle/sources/`, so `memcastle source install pi` and
-`memcastle source install opencode` work with no registry.
+the sources bundled with MemCastle under `/usr/share/memcastle/sources/`, so `memcastle source install pi` and
+`memcastle source install opencode` work with no registry,
+and the agent integrations and skills under `/usr/share/memcastle/integrations/` and `/usr/share/memcastle/skills/`.
 
 The package owns only those files and its licence under `/usr`.
 Your configuration (`~/.config/memcastle`), palace (`~/.local/share/memcastle`) and state (`~/.local/state/memcastle`)
@@ -101,8 +102,9 @@ sudo dnf install ./memcastle_<version>_linux-amd64.rpm
 ```
 
 They install `/usr/bin/memcastle`, the systemd user unit `/usr/lib/systemd/user/memcastle.service`,
-the bash, zsh and fish completion scripts, `/usr/share/doc/memcastle/` and the bundled sources under
-`/usr/share/memcastle/sources/`, and nothing under your XDG directories,
+the bash, zsh and fish completion scripts, `/usr/share/doc/memcastle/`, the bundled sources under
+`/usr/share/memcastle/sources/` and the agent integrations and skills under `/usr/share/memcastle/integrations/` and
+`/usr/share/memcastle/skills/`, and nothing under your XDG directories,
 so removing the package leaves your configuration and palace alone.
 The unit is used as on Arch: `systemctl --user start memcastle`, as described in [Arch Linux](#arch-linux-aur).
 The package does not enable or start it.
@@ -141,7 +143,7 @@ memcastle-<version>-<platform>/
 ├── bin/memcastle
 └── share/
     ├── doc/memcastle/{LICENSE,README.md}
-    └── memcastle/sources/
+    └── memcastle/{sources,integrations,skills}/
 ```
 
 Unpack it at a prefix to install it in the same places a package would:
@@ -150,7 +152,8 @@ Unpack it at a prefix to install it in the same places a package would:
 sudo tar -xzf memcastle_*_linux-amd64.tar.gz --strip-components=1 -C /usr/local
 ```
 
-The tarball carries the bundled sources under `share/memcastle/sources/`, which is a package asset.
+The tarball carries the bundled sources, the agent integrations and the skills under `share/memcastle/`,
+which are package assets.
 Do not unpack it at `~/.local`: that would put the package's assets inside your data directory,
 which MemCastle ignores as an asset location on purpose.
 Use `/usr/local`, or a directory of your own together with `--assets-dir`.

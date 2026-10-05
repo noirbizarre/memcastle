@@ -5,11 +5,13 @@ The `memcastle` binary is one daemon plus a set of thin clients.
 and `migrate` talks to storage directly.
 Every other subcommand is an HTTP call to a running daemon, so it fails with `memcastle::client::not_running`
 (and points you at `memcastle daemon start`) when none is running.
-Six things differ:
+Seven things differ:
 `status` reports a stopped daemon instead of failing, `daemon restart` starts a daemon when none is running,
 `completions` prints a script locally and needs neither a daemon nor a configuration file,
 the local `source` commands (`init`, `build`, `test`, `package`, `index` and `keygen`) work on a project directory or on
 archives with no daemon at all,
+the `integration` commands (`list`, `install`, `update` and `remove`) work on files and the agent's own commands with no
+daemon at all,
 `note` reads the project directory to choose a wing and room before it calls the daemon,
 and the reserved command (see [Not implemented yet](#not-implemented-yet)) fails with `memcastle::cli::not_implemented`
 without contacting a daemon.

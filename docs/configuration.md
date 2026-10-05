@@ -17,7 +17,8 @@ so a dotfiles repository or a shell profile written once works on both.
 | Package assets (not user data) | `<prefix>/share/memcastle`, or none | `--assets-dir` / `MEMCASTLE_ASSETS_DIR` / `assets.dir` |
 
 The last row is not a place you keep anything.
-It is where an OS package installs read-only files, today the bundled sources, and it is never under the XDG directories.
+It is where an OS package installs read-only files, the bundled sources, the agent integrations and the skills,
+and it is never under the XDG directories.
 See [Runtime assets](#runtime-assets).
 
 The XDG variables are honoured as the specification describes:

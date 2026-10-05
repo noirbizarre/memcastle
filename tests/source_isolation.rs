@@ -53,13 +53,13 @@ fn rust_files(dir: &str) -> Vec<String> {
     files
 }
 
-/// The adapter names the pipeline must never mention, in every spelling they appear in.
+/// The source names the pipeline must never mention, in every spelling they appear in:
+/// the built-in `directory` adapter and the `pi` and `opencode` sources, which are WebAssembly components now.
 const ADAPTER_NAMES: &[&str] = &[
-    "pi-sessions",
-    "pi_sessions",
     "\"directory\"",
     "DirectoryAdapter",
-    "PiSessions",
+    "\"pi\"",
+    "\"opencode\"",
 ];
 
 #[test]
@@ -100,6 +100,13 @@ fn the_source_model_in_the_domain_does_no_io() {
         assert!(
             !source.contains(forbidden),
             "src/domain/source.rs mentions `{forbidden}`: the domain is pure types (AGENTS.md layout)"
+        );
+    }
+    // The domain model knows no source by name either (AGENTS.md invariant 9).
+    for forbidden in ADAPTER_NAMES {
+        assert!(
+            !source.contains(forbidden),
+            "src/domain/source.rs mentions `{forbidden}`: the domain model must name no source (AGENTS.md invariant 9)"
         );
     }
 }
