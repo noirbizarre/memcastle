@@ -180,6 +180,8 @@ async fn every_other_route_is_guarded_including_ones_that_do_not_exist() {
         (Method::PUT, "/api/drawers/x/embedding"),
         (Method::POST, "/api/drawers/x/mentions"),
         (Method::GET, "/api/drawers/x/duplicates"),
+        // History returns every version of a drawer's chain, so it exposes content like a read of the drawer.
+        (Method::GET, "/api/drawers/x/history"),
         // The knowledge graph: read-only apart from settling a name by hand.
         (Method::GET, "/api/entities"),
         (Method::GET, "/api/entities/x/relationships"),
