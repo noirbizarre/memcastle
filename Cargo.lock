@@ -3165,7 +3165,7 @@ version = "0.3.0"
 dependencies = [
  "assert_cmd",
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "clap",
  "clap_complete",

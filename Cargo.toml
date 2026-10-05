@@ -205,7 +205,7 @@ getrandom = "0.4.3"
 # `default-features = false` drops the random-number and zeroize extras, because the seed comes from `getrandom`.
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 # Keys and signatures are written as base64 so they paste into a config file or an index.
-base64 = "0.22"
+base64 = "0.23"
 
 [dev-dependencies]
 assert_cmd = "2"
