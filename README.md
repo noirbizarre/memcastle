@@ -16,6 +16,11 @@
     <img src="https://img.shields.io/badge/docs-noirbizarre.github.io-blue" alt="Documentation">
   </a>
   <img src="https://img.shields.io/github/license/noirbizarre/memcastle" alt="License">
+  <!-- Kept off until the score is worth showing:
+  <a href="https://m8ven.ai/mcp/noirbizarre/memcastle?s=readme">
+    <img src="https://m8ven.ai/badge/mcp/noirbizarre/memcastle" alt="M8ven Score">
+  </a>
+  -->
 </p>
 
 ---
