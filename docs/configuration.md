@@ -17,7 +17,7 @@ so a dotfiles repository or a shell profile written once works on both.
 | Package assets (not user data) | `<prefix>/share/memcastle`, or none | `--assets-dir` / `MEMCASTLE_ASSETS_DIR` / `assets.dir` |
 
 The last row is not a place you keep anything.
-It is where an OS package may install read-only files such as a future web UI, and it is never under the XDG directories.
+It is where an OS package installs read-only files, today the bundled sources, and it is never under the XDG directories.
 See [Runtime assets](#runtime-assets).
 
 The XDG variables are honoured as the specification describes:
@@ -516,7 +516,9 @@ The daemon logs which source it resolved at startup (`runtime assets resolved`).
 The schema and the data migrations are always built into the binary and are not affected by any of this.
 [Installation](installation.md#standalone-binary-or-native-package) describes the package layout.
 
-Nothing in 0.1 installs files into the assets directory, so you only need the setting when developing a web UI locally.
+The only files a package installs into the assets directory are the bundled sources, under `sources/`
+(see [Publishing and installing sources](publishing-sources.md#bundled-sources)).
+A standalone binary has none, so you only need the setting to point at a bundle unpacked somewhere else.
 
 ## Not supported: other platforms' conventions
 

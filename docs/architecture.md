@@ -532,7 +532,8 @@ What else a release may carry falls into three kinds, kept apart on purpose:
 
 - **Embedded** in the binary: anything small that must match its version exactly.
   The SurrealDB schema (`surrealkit::embed_schema!`) and the data migrations (`crate::migrate`) are of this kind.
-- **Installed** by a package manager under `share/memcastle`: a future web UI, for instance.
+- **Installed** by a package manager under `share/memcastle`: the sources bundled with MemCastle today, a web UI
+  perhaps later.
 - **User data and configuration**, under the XDG directories and never treated as assets.
 
 `assets::Assets::resolve` picks one source for the run, in this order:
@@ -548,8 +549,8 @@ flowchart TD
     installed -- no --> useEmbedded[use the embedded assets]
 ```
 
-The resolver only reads directories, so startup never needs the network, and it serves nothing yet:
-the web UI is the first consumer.
+The resolver only reads directories, so startup never needs the network.
+Its one consumer so far is the bundle of sources (`sources/`); a web UI would be the next.
 The module is pure and the daemon's composition root calls it once, before binding the listener,
 so a mistyped override fails a start that has changed nothing.
 [ADR-013](adr/013-release-packaging-and-asset-resolution.md) records the layout, the order and what was rejected;
@@ -680,7 +681,7 @@ Deliberately out of scope, and each is structurally possible without rework give
   (they are a best-effort detached spawn; use a real supervisor in production).
 - A web dashboard (the API is shaped so one can be built entirely as an API client, as the CLI is).
   Its packaging is settled, in [ADR-013](adr/013-release-packaging-and-asset-resolution.md);
-  the daemon serves nothing from the asset directory yet.
+  the asset directory holds only the bundled sources so far.
 - Any network-based asset download.
 
 Decisions and their rejected alternatives are collected in the [Architecture Decisions](adr/README.md).

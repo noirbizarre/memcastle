@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted, amended by a dated note under Alternatives rejected (2026-09-30: `.deb` and `.rpm` packages)
+Accepted, amended by dated notes under Alternatives rejected
+(2026-09-30: `.deb` and `.rpm` packages; 2026-10-03: completions)
+and by [ADR-033](033-source-distribution.md), whose bundled sources are the first package asset
+(the "no `share/memcastle/` in 0.1" statements below describe the original decision)
 
 ## Context
 
