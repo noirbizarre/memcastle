@@ -262,7 +262,8 @@ so staying inside the request is a rule here and not a courtesy.
 mise run ci
 ```
 
-Formatting, Clippy, spelling, workflow and Markdown linting, the architecture guard hooks, tests
+Formatting, Clippy, spelling, workflow and Markdown linting, the architecture guard hooks, the basic and WebAssembly
+tests, the build and test of every reference source and integration (which needs bun and the `wasm32-wasip2` target)
 and the documentation build.
 This is the local equivalent of CI's lint, test and docs steps; CI additionally runs every prek hook, coverage on three
 operating systems and `gh ship validate`.

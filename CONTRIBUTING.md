@@ -26,6 +26,8 @@ CI uses `dtolnay/rust-toolchain` because it needs per-job components and cross-c
 | `mise run test:wasm` | Run the WebAssembly suite, every `tests/wasm_*.rs` binary (slow, needs the `wasm32-wasip2` target) |
 | `mise run sources:check` | Build and conformance-test every source under `sources/` |
 | `mise run sources:test -- <name>` | Build and conformance-test one source under `sources/` |
+| `mise run sources:package` | Package the sources that ship with releases, with their index, into `target/bundled-sources` |
+| `mise run integrations:check` | Typecheck and test every package under `integrations/` against a real daemon (needs bun) |
 | `mise run cover` | Run the tests with coverage |
 | `mise run format` | Format |
 | `mise run format:check` | Check the formatting without rewriting |

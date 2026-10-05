@@ -30,6 +30,12 @@ flowchart LR
 - [Running the daemon](daemon.md): start, stop, supervise and check it.
 - [Authentication](authentication.md): require a bearer token from every client.
 - [Memory modes](memory-modes.md): make a session read-only, or turn memory off for it.
+- [Project configuration](project-config.md): scope a project's memory to a wing and room with a file in the repository.
+- [Agent skills](skills.md): the shared instructions an integration loads for the agent.
+- [Mining sources](mining-sources.md): fill the palace from files, agent histories and other origins.
+- [Deduplication](deduplication.md): how an exact copy or a near-duplicate memory is handled.
+- [Writing a mining source](writing-sources.md) and [Publishing and installing sources](publishing-sources.md): make,
+  distribute and install a source.
 - [Storage and data](storage.md): where data lives, what is in it, how to back it up.
 - [Database access](database-access.md): open the daemon's database to SurrealDB Studio.
 - [Migrations and upgrades](migrations.md): how a palace is kept up to date across releases.
@@ -40,6 +46,7 @@ flowchart LR
 - [Configuration](configuration.md): paths, the config file, environment variables, flags and precedence.
 - [CLI](cli.md): every command and flag.
 - [MCP tools and REST API](mcp-and-api.md): the interfaces agents and scripts use.
+- [Integration contract](integration-contract.md): what an agent integration must do, whatever the agent.
 
 ## Project
 
