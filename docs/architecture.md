@@ -78,8 +78,9 @@ Nothing in `domain` knows SurrealDB exists, and nothing in `cli`, `mcp` or `api`
 The dotted line is the important one: the CLI is an HTTP client of the daemon, exactly as a script or dashboard would be.
 
 **The CLI has no business logic MCP/HTTP can't reuse.**
-Every subcommand except `serve`/`daemon start`/`daemon restart`/`migrate`, the local `completions` and the local
-`source init`/`build`/`test`/`package`/`index`/`keygen` is a thin `client::DaemonClient` call
+Every subcommand except `serve`/`daemon start`/`daemon restart`/`migrate`, the local `completions`, the local
+`source init`/`build`/`test`/`package`/`index`/`keygen` and the local `integration list`/`install`/`update`/`remove`
+is a thin `client::DaemonClient` call
 (`note` also reads the project directory through `crate::project` to choose a wing and room, then calls the daemon) —
 `memcastle mine ./project` submits a job over HTTP the way an MCP tool call would, rather than mining anything itself.
 `daemon stop` is one of them: it only asks the daemon to shut down.
