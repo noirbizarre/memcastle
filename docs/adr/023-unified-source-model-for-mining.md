@@ -170,7 +170,8 @@ The pipeline, the chunker and the wire shape of a job did not change.
 
 ## Note, 2026-10-05: the adapter's name is `source`, not `provider`
 
-Where this record says `provider` for the adapter that reads a source, the code, the wire and the stored records now say `source`.
+Where this record says `provider` for the adapter that reads a source,
+the code, the wire and the stored records now say `source`.
 A source is identified by `(source, account, locator)`, a mining job is `{"type": "mine", "source": ..., "locator": ...}`,
 and `GET /api/sources` lists `adapters` and `sources`.
 The one name a user already typed was `--source`, and the word `provider` was left to the embedding and extraction providers,

@@ -24,9 +24,14 @@ Version 3 is made of these pieces, run in this order:
 
 - **Renamed fields.** Moves values stored under a name this release changed to the new name.
   An audit job's `scope` becomes `wing`, in the job and in its report, so a queued audit keeps its filter.
-- **Deduplication keys.** Fills the derived keys [deduplication](deduplication.md) reads (a drawer's fingerprint, an entity's key and aliases) on records written earlier.
+  The adapter's `provider` becomes `source` in mining jobs and their reports, in each drawer's origin (and the origin
+  copied onto extracted facts) and on the `source` table, and the mined place's own id, which was called `source`, becomes
+  `source_id`.
+- **Deduplication keys.** Fills the derived keys [deduplication](deduplication.md) reads
+  (a drawer's fingerprint, an entity's key and aliases) on records written earlier.
   It merges nothing, so existing duplicates stay as they are.
-- **Supersession lineage.** Links a drawer closed before supersession links existed to the successor it was replaced by, when exactly one drawer qualifies (see [ADR-032](adr/032-temporal-retrieval-and-history.md)).
+- **Supersession lineage.** Links a drawer closed before supersession links existed to the successor it was replaced by,
+  when exactly one drawer qualifies (see [ADR-032](adr/032-temporal-retrieval-and-history.md)).
   An ambiguous or unmatched close is left alone.
 
 Adding the `source` and `source_document` tables ([Mining sources](mining-sources.md)) needed no data migration:
