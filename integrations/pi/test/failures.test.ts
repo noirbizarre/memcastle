@@ -40,7 +40,7 @@ test("every code the daemon answers with a 400 is invalid input over MCP too, wh
 })
 
 test("a code that is not a caller's mistake stays unexpected when no status says otherwise", () => {
-  expect(failureFromBody({ error: "boom", code: "memcastle::store::backend_failed", help: null }).failureClass).toBe(
+  expect(failureFromBody({ error: "boom", code: "memcastle::migrate::failed", help: null }).failureClass).toBe(
     "unexpected",
   )
 })

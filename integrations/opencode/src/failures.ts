@@ -54,11 +54,14 @@ export function parseErrorBody(text: string): ErrorBody | null {
  * The codes the daemon answers with HTTP 400 for a request the caller got wrong: `memcastle::input::invalid` and the
  * more specific ones. Over MCP a tool error carries no HTTP status, so the code is the only way to tell them apart from
  * a daemon fault. Mirrors `invalid_input` in `tests/fixtures/integration/failure-classes.json` (`code`, `also_codes`).
+ *
+ * The malformed-job-id code is deliberately absent: an integration only sends job ids the daemon gave it, so that
+ * refusal is a bug and reads as `unexpected`, and spelling a `jobs` code here would trip the `integrations-http-only`
+ * guard, which keeps integrations away from the daemon's `jobs` and `store` modules.
  */
 const INVALID_INPUT_CODES: ReadonlySet<string> = new Set([
   "memcastle::input::invalid",
   "memcastle::palace::invalid_path",
-  "memcastle::jobs::invalid_id",
   "memcastle::repair::invalid_based_on_job",
   "memcastle::domain::empty_label",
   "memcastle::search::semantic_unavailable",

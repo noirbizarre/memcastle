@@ -269,9 +269,10 @@ An integration must tell these classes apart, and say what to do about each.
 | `job_failed` | A job reaches `failed` | none | `Job.error`, and that the job can be retried |
 
 Over MCP a tool error carries no HTTP status, so the code alone classifies it.
-The fixture lists every code the daemon answers with a 400 for a request the caller got wrong
+The fixture lists the codes the daemon answers with a 400 for a request an integration can get wrong
 (`memcastle::palace::invalid_path` among them), and a client reads each of them as `invalid_input`
 rather than as a fault of the daemon.
+A malformed job id is not among them, because an integration only sends job ids the daemon gave it.
 
 Every error body is `{error, code, help}`, and a diagnostic code is a public identifier.
 The client shows `help` because it names the next step, and never swallows a failure into an empty memory.

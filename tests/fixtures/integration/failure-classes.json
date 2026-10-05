@@ -30,7 +30,6 @@
       "code": "memcastle::input::invalid",
       "also_codes": [
         "memcastle::palace::invalid_path",
-        "memcastle::jobs::invalid_id",
         "memcastle::repair::invalid_based_on_job",
         "memcastle::domain::empty_label",
         "memcastle::search::semantic_unavailable"
