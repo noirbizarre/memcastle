@@ -45,13 +45,17 @@ queued yellow, running cyan, paused magenta, completed green, failed red and can
 Standard output and standard error are decided separately:
 with `memcastle status 2> errors.log` the report stays coloured and the log stays plain.
 
-`repair --apply`, `auth generate`, `auth revoke`, `job cancel`, `source remove`, the `delete` commands of `wing`, `room`
-and `drawer`, and `source install` and `source update` when a package asks for permissions (see [`source`](#source))
-ask for confirmation, with a prompt on standard error that defaults to "no".
+`repair --apply`, `auth generate`, `auth revoke`, `job cancel`, `source remove` and the `delete` commands of `wing`, `room`
+and `drawer` ask for confirmation, with a prompt on standard error that defaults to "no".
 `--yes` (or `-y`) skips the question.
 When standard input or standard error is not a terminal, a script or CI job for instance,
 they never ask and proceed, because the caller has already decided.
 Declining the prompt exits with `memcastle::cli::aborted` and changes nothing.
+
+`source install` and `source update` are the exception, because what they ask about is code that will run with
+permissions: when a package asks for any, they ask in a terminal, and without a terminal they refuse
+(`memcastle::source::consent_required`, or exit `1` for `update`) unless `--yes` or `--consent <digest>` is given
+(see [`source`](#source)).
 
 ## Global flags
 
