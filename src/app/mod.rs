@@ -866,10 +866,10 @@ impl AppServices {
     /// Runs at [`Priority::Normal`] — above background mining, below a
     /// checkpoint's `High`/`Critical` (see `submit_mine`'s doc comment,
     /// which already anticipates this). **Not** gated by [`MemoryMode`]:
-    /// like `submit_mine`/`submit_demo`, this is an administrative/
-    /// daemon-level operation, not a session-scoped memory read — see
-    /// `domain::MemoryMode`'s module doc, and ADR-002 for why leaving
-    /// `Audit` ungated is provisional rather than a settled boundary.
+    /// like `submit_demo` and unlike `submit_mine` (a gated write), this is
+    /// an administrative/daemon-level operation, not a session-scoped memory
+    /// read — see `domain::MemoryMode`'s module doc, and ADR-002 for why
+    /// leaving `Audit` ungated is provisional rather than a settled boundary.
     ///
     /// # Errors
     ///

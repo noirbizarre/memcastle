@@ -1,4 +1,4 @@
-//! The extract job handler: read every mined drawer that has not been read, and add what it says to the graph.
+//! The extract job handler: read every mined or noted drawer that has not been read, and add what it says to the graph.
 //!
 //! Like the embed sweep, this keeps no cursor of its own: each pass asks the store for the next drawers *without an
 //! extraction marker*, so the database is the checkpoint and a crash, a pause or a retry simply asks again.

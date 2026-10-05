@@ -827,8 +827,9 @@ impl Scheduler {
         if event == JobEvent::Complete && kind_wrote_drawers {
             self.ensure_embedding_sweep().await;
         }
-        // Only a mining job files drawers with an origin, which is all the
-        // extraction sweep reads.
+        // A mining job files drawers with an origin, which (with notes, queued
+        // by `app::palace` when one is captured) is all the extraction sweep
+        // reads.
         if event == JobEvent::Complete && matches!(job.kind, JobKind::Mine { .. }) {
             self.ensure_extraction_sweep().await;
         }
