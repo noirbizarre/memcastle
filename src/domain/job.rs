@@ -398,14 +398,15 @@ pub struct Job {
     /// generic resume-state every job kind — including a `Checkpoint` job
     /// itself — carries here.
     pub checkpoint: Value,
-    /// The final output of a job whose whole point is to produce a report —
-    /// [`JobKind::Audit`] and [`JobKind::Repair`]. Deliberately a separate field from
+    /// The final output of a job: the whole report of [`JobKind::Audit`] and
+    /// [`JobKind::Repair`], and a small summary for the others that give one
+    /// (`Mine`: what was read, filed and skipped, the limit, and whether the
+    /// source was truncated; `Checkpoint`: the item and duplicate totals;
+    /// `Extract`: what was read and written). Deliberately a separate field from
     /// [`Self::checkpoint`], not a reuse of it: `checkpoint` is documented
     /// as handler-defined *resume* state, and stuffing a final report in
     /// there would be exactly the "abuse of a field's stated purpose" this
-    /// split avoids. `None` for every job kind that has no report to give
-    /// (`Demo`/`Checkpoint` never set this). `Mine` sets only a small summary:
-    /// the files considered, the limit, and whether the tree was truncated.
+    /// split avoids. `None` for a job with nothing to report (`Demo`, `Embed`).
     pub result: Option<Value>,
     /// The terminal error, when `status == Failed`.
     pub error: Option<String>,
