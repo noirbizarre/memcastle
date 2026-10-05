@@ -13,6 +13,13 @@ With authentication enabled, every request needs `Authorization: Bearer <token>`
 `GET /api/health`, the liveness probe, stays open.
 It answers only `{"status": "ok"}`, and `daemon restart`, supervisors and health checks depend on it.
 
+If you enable the [web dashboard](web.md) (`web.enable`), its static files are a second exception:
+`GET` and `HEAD` of `/ui` and anything under `/ui/` need no token,
+because a browser cannot send a header when it loads a page, and so could never load the page that asks for the token.
+The files are the same for everyone and hold no data; every call the page then makes to `/api` carries the token and is
+checked like any other.
+With the dashboard off, `/ui` is guarded like every other path.
+
 Everything else is protected, including `/api/status`, `/api/shutdown`, every other REST route, and `/mcp`.
 A path that does not exist is refused with `401` too, rather than `404`.
 
@@ -214,6 +221,16 @@ A connection that is already signed in is not closed by a revocation.
 Five refused sign-ins close the connection, and until a session has signed in only the handshake methods work.
 
 The endpoint listens beyond loopback only when `auth.enabled` is true, and never otherwise.
+
+## The web dashboard
+
+When authentication is on, the [web dashboard](web.md) shows a login page that works like the database console's:
+the user is `memcastle` and the password is the token.
+The token is sent as `Authorization: Bearer` with each request, so the page is checked by the same layer as everything else,
+and a token you rotate or revoke stops working at the next request, which returns the page to its login.
+It is kept in the browser tab's `sessionStorage` only, so closing the tab signs out.
+There is no cookie and no extra credential.
+There is no limit on refused sign-ins, as there is for a database connection, since each attempt is an independent request.
 
 ## Exposing the daemon
 

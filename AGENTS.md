@@ -65,11 +65,14 @@ An invariant nothing checks is a comment, and it will be violated.
 6. **Every route but `GET /api/health` passes the authentication layer, and MCP never touches credentials** —
    the layer wraps the merged router in `server::run`, so a route added later is guarded by default,
    and token generation and revocation are REST/CLI operations with no MCP tool.
+   The one other exception is the web dashboard's static files: `GET`/`HEAD` of `/ui` and below, only when `web.enable`
+   is set, named in `api::auth::is_public` and nowhere else (see `docs/adr/035-web-dashboard.md`).
    A token or secret is never logged, serialised or persisted in plaintext (`config::Secret` redacts it;
    the store holds only a digest) — see `docs/adr/014-optional-token-authentication.md`.
    Enforced by `tests/in_process/auth.rs`
-   (every route and an unknown path refused without a token, no credential-named MCP tool)
-   and `tests/auth_lifecycle.rs` (no token in the log, the database or any file).
+   (every route and an unknown path refused without a token, `/ui` refused while the dashboard is off, no
+   credential-named MCP tool), `tests/in_process/web.rs` (with the dashboard on, only `/ui` is open: `/uix`, every `/api`
+   route and `/mcp` are still refused) and `tests/auth_lifecycle.rs` (no token in the log, the database or any file).
 7. **The database admin endpoint is opt-in, loopback by default, and runs on the daemon's own handle** —
    only an explicit `memcastle db start` (REST `/api/db`) opens it, `serve` never does, and it never binds beyond loopback
    without `--allow-remote` *and* authentication.
@@ -137,6 +140,22 @@ An invariant nothing checks is a comment, and it will be violated.
     `tests/wasm_registry.rs` (a tampered or substituted package is never installed, `required` trust refuses what no
     trusted key signed, an update never widens permissions silently).
 
+11. **The web dashboard is a client of the REST API and nothing else, and it is opt-in** —
+    everything under `web/` reaches MemCastle only over HTTP, never storage, the job code or the database admin endpoint,
+    exactly as an integration does (invariant 8), and the daemon serves it only when `web.enable` is set.
+    It is found through the one assets root at `web/dist/`, in a checkout and in a package alike, and what it may do
+    is what the REST API lets any client do: no shutdown, source installation or token management from the page.
+    Its login is the database console's (the user `memcastle`, the token as the password), checked by the same layer on
+    every request; the token lives in `sessionStorage` and is never put in a URL, a cookie or a log
+    (see `docs/adr/035-web-dashboard.md`).
+    Enforced by the `prek` `web-http-only` hook (it fails on `surrealdb`, `surrealkv`, `SurrealStore`, a `store`/`jobs`
+    path or `/api/db` anywhere under `web/`, Markdown, `node_modules` and `dist` excepted),
+    by `tests/in_process/web.rs` (off by default, no path leaves `web/dist`, the headers, a missing build is a 503 and
+    never a failed start, `/api/config` carries no secret),
+    by `tests/web_bundle.rs` (the package holds the build and nothing else, and a daemon serves it from an installed prefix
+    and from the checkout through the same lookup)
+    and by `web/test` (the login, the route guard and the client, with a real daemon).
+
 ## Layout
 
 ```text
@@ -174,8 +193,9 @@ src/
 ├── app/        application services — the one layer mcp/api call into (the CLI reaches it over HTTP, via `client/`)
 ├── server/     the daemon composition root + lifecycle (registry file)
 ├── mcp/        MCP tool surface, over HTTP
-├── api/        the REST API (health/status/jobs/search/recall/wake-up/diary/notes/wings/rooms/drawers/entities/sources/
-│               source-packages/source-registry/auth-token/db/shutdown; `docs/mcp-and-api.md` lists every route)
+├── api/        the REST API (health/status/config/jobs/search/recall/wake-up/diary/notes/wings/rooms/drawers/entities/graph/
+│               sources/source-packages/source-registry/auth-token/db/shutdown; `docs/mcp-and-api.md` lists every route),
+│               and `web.rs`, the dashboard's static files under `/ui` (only when `web.enable`; no store, no jobs)
 └── client/     the CLI's HTTP client for a running daemon, and the human renderings of its answers (status, tables)
 
 wit/            the source contract (`memcastle:source`), the one definition components and the host are built from
@@ -183,6 +203,8 @@ sources/        official and reference WebAssembly sources (`directory`, `pi`, `
                 tested but not compiled into MemCastle; `pi` and `opencode` ship with releases (`packaging/sources/build.sh`)
 integrations/   per-agent lifecycle adapters (Pi, OpenCode, ...), in each agent's own language, over MCP and HTTP only;
                 each carries a `memcastle-integration.toml` and is bundled into `dist/` for `memcastle integration install`
+web/            the web dashboard: a Vue 3 and OpenVue application, a client of the REST API, built into `web/dist/` and
+                served under `/ui` from the assets root when `web.enable` is set (docs/web.md)
 skills/         reusable agent instructions shared by every integration; `tests/in_process/skills.rs` holds them to the
                 tools, commands and routes they name (docs/skills.md)
 tests/fixtures/integration/   the language-neutral conformance fixtures every integration is held to

@@ -11,7 +11,7 @@ Behaviour that users rely on is documented in the guides and references, and lin
 > MemCastle is a long-running memory server, not a CLI process that happens to expose MCP.
 
 There is one MemCastle daemon per palace.
-Multiple AI coding-agent instances — several OpenCode sessions, Claude Code, Cursor, a future web dashboard —
+Multiple AI coding-agent instances — several OpenCode sessions, Claude Code, Cursor, the web dashboard —
 connect to that *same* daemon, so they share exactly the same palace, job queue and search.
 
 ```mermaid
@@ -535,7 +535,7 @@ What else a release may carry falls into three kinds, kept apart on purpose:
 - **Embedded** in the binary: anything small that must match its version exactly.
   The SurrealDB schema (`surrealkit::embed_schema!`) and the data migrations (`crate::migrate`) are of this kind.
 - **Installed** by a package manager under `share/memcastle`: the sources bundled with MemCastle, the agent integrations
-  and the skills they read, a web UI perhaps later.
+  and the skills they read, and the web dashboard.
 - **User data and configuration**, under the XDG directories and never treated as assets.
 
 `assets::Assets::resolve` picks one source for the run, in this order:
@@ -552,8 +552,8 @@ flowchart TD
 ```
 
 The resolver only reads directories, so startup never needs the network.
-Its consumers are the bundle of sources (`sources/`) and the integration installer (`integrations/`, `skills/`); a web UI
-would be the next.
+Its consumers are the bundle of sources (`sources/`), the integration installer (`integrations/`, `skills/`) and the
+dashboard's static routes (`web/dist/`, only when `web.enable` is set).
 The assets root is a directory with that layout, so a checkout of the repository is a valid one,
 which is how a developer installs the integrations as built in their worktree (see below).
 The module is pure and the daemon's composition root calls it once, before binding the listener,
@@ -702,9 +702,10 @@ Deliberately out of scope, and each is structurally possible without rework give
   and the authentication layer is where those would attach ([ADR-014](adr/014-optional-token-authentication.md)).
 - Robust cross-platform process supervision for `memcastle daemon start` and `daemon restart`
   (they are a best-effort detached spawn; use a real supervisor in production).
-- A web dashboard (the API is shaped so one can be built entirely as an API client, as the CLI is).
-  Its packaging is settled, in [ADR-013](adr/013-release-packaging-and-asset-resolution.md);
-  the asset directory holds the bundled sources, the agent integrations and the skills.
+- A dashboard that is more than an API client.
+  The [web dashboard](web.md) is one: a Vue application in `web/` that calls the REST API as the CLI does, is served from
+  the runtime assets under `/ui` only when asked to be, and reaches no storage
+  ([ADR-035](adr/035-web-dashboard.md)).
 - Any network-based asset download.
 
 Decisions and their rejected alternatives are collected in the [Architecture Decisions](adr/README.md).
