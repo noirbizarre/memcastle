@@ -460,6 +460,7 @@ The reasoning is in [ADR-024](adr/024-entity-extraction-as-an-enrich-job.md).
 | `mine` | `path` (absolute directory) or `source` (a [source](mining-sources.md) by name) with `locator?`, then `wing?` and `full?` |
 | `checkpoint` | `payload` (see [above](#checkpoint-payload)), `emergency?` |
 | `audit` | `wing?` |
+| `embed` | `wing?`; fills the embeddings that are missing, and needs an `[embeddings]` provider (REST and CLI only, no MCP tool) |
 | `extract` | `wing?`, see [the knowledge graph](#the-knowledge-graph) |
 | `repair` | `dry_run?` (default `true`), `based_on_job?` |
 | `demo` | `steps` |
