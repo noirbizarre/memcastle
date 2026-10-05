@@ -285,12 +285,19 @@ mod tests {
             ("http://example.org/i.json", "plain `http://`"),
             ("ftp://example.org/i.json", "not supported"),
             ("relative/index.json", "absolute"),
-            ("file://relative/index.json", "absolute"),
             ("", "empty"),
         ] {
             let error = Location::parse(raw).unwrap_err();
             assert!(error.contains(expected), "{raw}: {error}");
         }
+        // A host in a `file://` URL is a network share on Windows, which is a legitimate absolute path there, and
+        // a path that is not on this machine anywhere else.
+        #[cfg(unix)]
+        assert!(
+            Location::parse("file://relative/index.json")
+                .unwrap_err()
+                .contains("absolute")
+        );
     }
 
     #[test]
