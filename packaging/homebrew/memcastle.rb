@@ -33,6 +33,13 @@ class Memcastle < Formula
     sha256 "@SHA256_SOURCES@"
   end
 
+  # The agent integrations and the shared skills they read (docs/adr/034): bundled JavaScript, one asset for every
+  # platform, with `integrations/` and `skills/` under its single top-level directory.
+  resource "integrations" do
+    url "https://github.com/noirbizarre/memcastle/releases/download/#{version}/memcastle_#{version}_integrations.tar.gz"
+    sha256 "@SHA256_INTEGRATIONS@"
+  end
+
   def install
     # Exactly one file lands here, whichever `url` above matched — renamed on
     # the way in because the downloaded asset's name carries the platform
@@ -43,6 +50,12 @@ class Memcastle < Formula
     # `memcastle source install pi` needs no registry and no network.
     resource("sources").stage { (pkgshare/"sources").install Dir["*"] }
 
+    # Likewise `share/memcastle/{integrations,skills}`, where `memcastle integration install pi` looks.
+    resource("integrations").stage do
+      (pkgshare/"integrations").install Dir["integrations/*"]
+      (pkgshare/"skills").install Dir["skills/*"]
+    end
+
     # Generated from the installed binary, so the scripts always match its
     # commands and flags; `memcastle completions <shell>` needs no daemon.
     generate_completions_from_executable(bin/"memcastle", "completions", shells: [:bash, :zsh, :fish])
@@ -51,6 +64,8 @@ class Memcastle < Formula
   test do
     assert_match version.to_s, shell_output("#{bin}/memcastle --version")
     assert_path_exists pkgshare/"sources/memcastle-index.json"
+    assert_path_exists pkgshare/"integrations/pi/memcastle-integration.toml"
+    assert_path_exists pkgshare/"skills/wake-up/SKILL.md"
 
   end
 end

@@ -273,6 +273,10 @@ run = """
 #!/usr/bin/env bash
 set -euo pipefail
 export MEMCASTLE_BIN="$PWD/target/debug/memcastle"
+# The bundles the release ships, built by the release's own script and installed from both the package tree and this
+# checkout (docs/adr/034). The test is `#[ignore]`d in the basic suite because it needs bun; here bun is on the PATH.
+packaging/integrations/build.sh target/bundled-integrations
+cargo test --test integration_bundle -- --ignored
 packages=()
 for manifest in integrations/*/package.json; do
   package="$(dirname "$manifest")"
@@ -286,6 +290,19 @@ for package in "${packages[@]}"; do
   (cd "$package" && bun install --frozen-lockfile && bun run typecheck && bun run test)
 done
 """
+
+[tasks."integrations:build"]
+description = "Bundle the Pi and OpenCode integrations into integrations/<id>/dist, which is all development mode needs"
+# After this, `memcastle integration install pi --assets-dir "$PWD"` installs the integration as built in this checkout.
+tools = { bun = "1" }
+run = "packaging/integrations/build.sh"
+
+[tasks."integrations:package"]
+description = "Lay out the integrations and skills that ship with releases in target/bundled-integrations"
+# The script `publish-release.yaml` runs: what a release bundles is what a developer can build and install from
+# (`memcastle integration install pi --assets-dir target/bundled-integrations`).
+tools = { bun = "1" }
+run = "packaging/integrations/build.sh target/bundled-integrations"
 
 [tasks."sources:check"]
 description = "Build and conformance-test every reference WebAssembly source under sources/"

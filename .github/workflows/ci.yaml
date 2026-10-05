@@ -308,7 +308,13 @@ jobs:
           # tests/wasm_bundle.rs checks): enough to prove the packages carry whatever the bundle holds.
           mkdir bundle
           echo '{"format":1,"sources":[]}' > bundle/memcastle-index.json
-          SOURCES_DIR="${PWD}/bundle" packaging/nfpm/build.sh 0.0.0 dist
+          # Likewise for the integrations (packaging/integrations/build.sh builds the real ones, which
+          # tests/integration_bundle.rs checks): the layout is what the packages must carry.
+          mkdir -p integrations-bundle/integrations/pi integrations-bundle/skills/wake-up
+          echo 'format = 1' > integrations-bundle/integrations/pi/memcastle-integration.toml
+          echo '# wake' > integrations-bundle/skills/wake-up/SKILL.md
+          SOURCES_DIR="${PWD}/bundle" INTEGRATIONS_DIR="${PWD}/integrations-bundle" \
+            packaging/nfpm/build.sh 0.0.0 dist
 
       # Building without error is not enough: the binary must land where the
       # systemd unit expects it.
@@ -323,6 +329,8 @@ jobs:
               dpkg-deb --contents "dist/memcastle_0.0.0_${asset}.deb" | grep -q " ./${file}$"
             done
             dpkg-deb --contents "dist/memcastle_0.0.0_${asset}.deb" | grep -q ' ./usr/share/memcastle/sources/memcastle-index.json$'
+            dpkg-deb --contents "dist/memcastle_0.0.0_${asset}.deb" | grep -q ' ./usr/share/memcastle/integrations/pi/memcastle-integration.toml$'
+            dpkg-deb --contents "dist/memcastle_0.0.0_${asset}.deb" | grep -q ' ./usr/share/memcastle/skills/wake-up/SKILL.md$'
           done
 
   # gh-ship runs the release. Its configuration and the workflows it names must

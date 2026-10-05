@@ -16,7 +16,12 @@ See [`docs/research.md`](docs/research.md) for how OpenCode's mechanisms map to 
 The plugin needs a running daemon (`memcastle daemon start`) but does not need one to load:
 it connects lazily, so OpenCode starts normally when the daemon is down.
 
-Load it from a project or user plugin directory with a one-line module:
+```sh
+memcastle integration install opencode    # copies the bundled plugin and writes the one-line module below
+```
+
+See [OpenCode integration](../../docs/integrations-opencode.md) for what it changes and how to update and remove it.
+To work on the plugin itself, load it from the sources with a one-line module in a project or user plugin directory:
 
 ```ts
 // .opencode/plugins/memcastle.ts   (or ~/.config/opencode/plugins/memcastle.ts)

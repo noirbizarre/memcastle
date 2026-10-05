@@ -43,6 +43,16 @@ contents:
     dst: /usr/share/memcastle/sources
     type: tree
     expand: true
+  # The agent integrations and the shared skills they read (docs/adr/034), where `memcastle integration install` looks
+  # first when run from `/usr/bin`: bundles built by packaging/integrations/build.sh, with no `node_modules`.
+  - src: "${INTEGRATIONS_DIR}/integrations"
+    dst: /usr/share/memcastle/integrations
+    type: tree
+    expand: true
+  - src: "${INTEGRATIONS_DIR}/skills"
+    dst: /usr/share/memcastle/skills
+    type: tree
+    expand: true
   - src: packaging/systemd/memcastle.service
     dst: /usr/lib/systemd/user/memcastle.service
     file_info:

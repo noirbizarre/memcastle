@@ -68,6 +68,7 @@ jobs:
             [DARWIN_ARM64]="memcastle_${TAG}_darwin-arm64"
             [DARWIN_AMD64]="memcastle_${TAG}_darwin-amd64"
             [SOURCES]="memcastle_${TAG}_sources.tar.gz"
+            [INTEGRATIONS]="memcastle_${TAG}_integrations.tar.gz"
           )
           for placeholder in "${!targets[@]}"; do
             sha256=$(checksum "${targets[$placeholder]}")
