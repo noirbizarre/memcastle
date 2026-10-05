@@ -1,0 +1,28 @@
+# The Pi integration as `memcastle integration install pi` sees it (docs/integrations.md).
+# `dist/` is built by `packaging/integrations/build.sh` (`mise run integrations:build`); it is not committed.
+format = 1
+
+[integration]
+id = "pi"
+version = "0.1.0"
+description = "Wake-up, recall, checkpoint and mining lifecycle for the Pi coding agent, over MCP and HTTP"
+
+[compatibility]
+# The MemCastle contract the client half speaks (docs/integration-contract.md) arrived with 0.2.
+memcastle = ">=0.2"
+# Tested against Pi 0.99.2 (the pinned peer) and the 1.x line.
+agent = ">=0.99"
+
+[agent]
+kind = "pi"
+# Pi finds this through the `package.json` the build writes beside it.
+entry = "extension.js"
+
+# The bundle, its `package.json` and nothing else: no `node_modules`, no sources.
+[[assets]]
+from = "dist"
+to = "."
+
+# The wake-up, search-before-answer and checkpoint instructions the extension injects (docs/skills.md).
+[skills]
+install = true

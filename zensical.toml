@@ -27,6 +27,12 @@ nav = [
     { "Connect an MCP client" = "mcp-clients.md" },
     { "Agent skills" = "skills.md" },
   ] },
+  { "Integrations" = [
+    { "Agent integrations" = "integrations.md" },
+    { "Pi" = "integrations-pi.md" },
+    { "OpenCode" = "integrations-opencode.md" },
+    { "Integration contract" = "integration-contract.md" },
+  ] },
   { "Guides" = [
     { "Running the daemon" = "daemon.md" },
     { "Authentication" = "authentication.md" },
@@ -45,7 +51,6 @@ nav = [
     { "Configuration" = "configuration.md" },
     { "CLI" = "cli.md" },
     { "MCP tools and REST API" = "mcp-and-api.md" },
-    { "Integration contract" = "integration-contract.md" },
   ] },
   { "Project" = [
     { "Architecture" = "architecture.md" },

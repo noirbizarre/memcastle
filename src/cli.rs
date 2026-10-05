@@ -139,6 +139,10 @@ pub enum Command {
     /// `test` and `package` are local and need no daemon.
     #[command(subcommand)]
     Source(SourceCommand),
+    /// Install, update and remove the integrations MemCastle ships for coding
+    /// agents (Pi, OpenCode). Local: needs no daemon.
+    #[command(subcommand)]
+    Integration(IntegrationCommand),
     /// Capture a note: a thought written down as it comes, filed under the
     /// current project and kept verbatim. The text is an argument, a file
     /// (`--file`, `-` for standard input), piped standard input, or written
@@ -221,6 +225,56 @@ pub enum DaemonCommand {
 pub struct CompletionsArgs {
     /// The shell to generate completions for.
     pub shell: clap_complete::Shell,
+}
+
+/// `memcastle integration` subcommands: the lifecycle of an agent integration.
+#[derive(Debug, Subcommand)]
+pub enum IntegrationCommand {
+    /// List the integrations this installation ships, with their versions and
+    /// whether each one is installed, outdated or cannot be installed here.
+    List(IntegrationListArgs),
+    /// Install an integration: copy it, register it with its agent, and check
+    /// the result. Running it again changes nothing.
+    Install(IntegrationAgentArgs),
+    /// Bring an installed integration up to the version this installation
+    /// ships. An integration that was never installed is not installed by
+    /// `update`.
+    Update(IntegrationAgentArgs),
+    /// Forget an integration in its agent and delete its installed copy.
+    /// Everything else in the agent's configuration is left as it was.
+    Remove(IntegrationAgentArgs),
+}
+
+/// The flags every `memcastle integration` subcommand takes.
+#[derive(Debug, Args)]
+pub struct IntegrationCommonArgs {
+    /// Directory holding `integrations/` and `skills/`, overriding
+    /// `assets.dir` and `MEMCASTLE_ASSETS_DIR`. Point it at a checkout of
+    /// MemCastle to install the integrations as built there, or at an unpacked
+    /// package. Must be an absolute path to an existing directory; it is only
+    /// read, never written.
+    #[arg(long, value_name = "DIR")]
+    pub assets_dir: Option<PathBuf>,
+    /// Print the result as JSON instead of text, for scripts.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for `memcastle integration list`.
+#[derive(Debug, Args)]
+pub struct IntegrationListArgs {
+    #[command(flatten)]
+    pub common: IntegrationCommonArgs,
+}
+
+/// An integration named on the command line.
+#[derive(Debug, Args)]
+pub struct IntegrationAgentArgs {
+    /// The integration, which is named for its agent (`pi`, `opencode`), as
+    /// `memcastle integration list` shows it.
+    pub agent: String,
+    #[command(flatten)]
+    pub common: IntegrationCommonArgs,
 }
 
 /// `memcastle source` subcommands: the lifecycle of a mining source, from a new project to an installed package.

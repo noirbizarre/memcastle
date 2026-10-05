@@ -64,6 +64,17 @@ this is not forced into Rust, and there is no shared plugin runtime or package
 manager across them. A MemCastle release can still ship the complete
 integration ecosystem from this one repository.
 
+## Install and distribution
+
+Users install an integration with `memcastle integration install <agent>`; see
+[Agent integrations](../docs/integrations.md).
+Each integration here carries a `memcastle-integration.toml` (id, version, the MemCastle and agent versions it supports,
+the files to install), and `mise run integrations:build` bundles its sources into `dist/` (not committed).
+Releases ship those bundles under `share/memcastle/integrations/`, with no npm package: a bundle has its dependencies
+inlined, and the agents' own SDKs stay external.
+The same command installs from this checkout with `--assets-dir "$PWD"`, so what you test is what ships
+([ADR-034](../docs/adr/034-agent-integration-distribution.md)).
+
 ## Skills
 
 An integration never keeps its own copy of agent instructions: it loads them from [`skills/`](../skills/README.md),
@@ -80,7 +91,8 @@ memory mode is off.
 
 No plugin marketplace, no dynamic plugin runtime, no package manager across
 ecosystems — this is plain directories with markdown and each ecosystem's own
-native tooling, nothing more.
+native tooling, nothing more. `memcastle integration` copies a bundle and uses the agent's own command to register it;
+it is not a package manager and resolves nothing.
 
 ## Status
 

@@ -211,12 +211,24 @@ jobs:
           chmod +x "dist/memcastle_${TAG}_linux-amd64"
           packaging/sources/build.sh "dist/memcastle_${TAG}_linux-amd64" stage-sources
 
+      # The agent integrations (docs/adr/034): Pi and OpenCode, each bundled into one self-contained file, with the
+      # shared skills they read. Nothing is published to npm: the bundles are release assets and package content, and
+      # `memcastle integration install` copies them from `share/memcastle/`. The script is the one
+      # `mise run integrations:package` runs and tests/integration_bundle.rs checks.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1"
+      - name: Package the bundled integrations
+        run: packaging/integrations/build.sh stage-integrations
+
       # The native-package layout (docs/adr/013): the executable under `bin/`,
-      # the documentation under `share/doc/memcastle/` and the bundled sources
-      # under `share/memcastle/sources/`, so unpacking at a prefix
+      # the documentation under `share/doc/memcastle/`, the bundled sources
+      # under `share/memcastle/sources/` and the integrations and skills under
+      # `share/memcastle/{integrations,skills}/`, so unpacking at a prefix
       # (`tar -xzf ... --strip-components=1 -C /usr/local`) puts each file
       # where a package manager would, and `memcastle source install <name>`
-      # finds the bundle beside the binary.
+      # finds the bundle beside the binary, and so does
+      # `memcastle integration install pi`.
       #
       # Every flag that follows exists so the same inputs give the same bytes:
       # a fixed order, the commit time for every mtime, no owner, and `gzip -n`
@@ -239,6 +251,9 @@ jobs:
             install -m 755 "dist/memcastle_${TAG}_${asset}" "${root}/bin/memcastle"
             install -m 644 LICENSE README.md "${root}/share/doc/memcastle/"
             install -m 644 stage-sources/* "${root}/share/memcastle/sources/"
+            cp -r stage-integrations/integrations stage-integrations/skills "${root}/share/memcastle/"
+            find "${root}/share/memcastle/integrations" "${root}/share/memcastle/skills" -type d -exec chmod 755 {} +
+            find "${root}/share/memcastle/integrations" "${root}/share/memcastle/skills" -type f -exec chmod 644 {} +
             tar -C stage --sort=name --format=gnu --mtime="@${epoch}" \
               --owner=0 --group=0 --numeric-owner -cf - "${name}" \
               | gzip -n -9 > "dist/memcastle_${TAG}_${asset}.tar.gz"
@@ -254,6 +269,17 @@ jobs:
             --owner=0 --group=0 --numeric-owner -cf - "${name}" \
             | gzip -n -9 > "dist/memcastle_${TAG}_sources.tar.gz"
 
+          # The integrations and the skills on their own (docs/adr/034), for the AUR package and the Homebrew
+          # formula, whose recipes fetch a single raw binary and would otherwise ship none.
+          name="memcastle-integrations-${TAG}"
+          install -d -m 755 "stage/${name}"
+          cp -r stage-integrations/integrations stage-integrations/skills "stage/${name}/"
+          find "stage/${name}" -type d -exec chmod 755 {} +
+          find "stage/${name}" -type f -exec chmod 644 {} +
+          tar -C stage --sort=name --format=gnu --mtime="@${epoch}" \
+            --owner=0 --group=0 --numeric-owner -cf - "${name}" \
+            | gzip -n -9 > "dist/memcastle_${TAG}_integrations.tar.gz"
+
       # `.deb` and `.rpm` from the staged binaries. The same install and the
       # same script run in CI on every pull request (see ci.yaml), so a broken
       # nfpm config fails there rather than here.
@@ -262,7 +288,9 @@ jobs:
       - name: Package the .deb and .rpm
         env:
           TAG: ${{ inputs.tag }}
-        run: SOURCES_DIR="${PWD}/stage-sources" packaging/nfpm/build.sh "${TAG}" dist
+        run: |
+          SOURCES_DIR="${PWD}/stage-sources" INTEGRATIONS_DIR="${PWD}/stage-integrations" \
+            packaging/nfpm/build.sh "${TAG}" dist
 
       # Before upload, so a broken package never reaches the draft release.
       # arm64 has no runner: metadata only.
@@ -274,9 +302,9 @@ jobs:
           deb="memcastle_${TAG}_linux-amd64.deb"
           rpm="memcastle_${TAG}_linux-amd64.rpm"
           docker run --rm -v "${PWD}/dist:/dist:ro" debian:stable sh -euc \
-            "apt-get update -qq && apt-get install -y -qq /dist/${deb} && memcastle --version"
+            "apt-get update -qq && apt-get install -y -qq /dist/${deb} && memcastle --version && memcastle integration list --json | grep -q '\"assets_source\": \"installed\"'"
           docker run --rm -v "${PWD}/dist:/dist:ro" fedora:latest sh -euc \
-            "dnf install -y -q /dist/${rpm} && memcastle --version"
+            "dnf install -y -q /dist/${rpm} && memcastle --version && memcastle integration list --json | grep -q '\"assets_source\": \"installed\"'"
           dpkg-deb --info "dist/memcastle_${TAG}_linux-arm64.deb"
           sudo apt-get install -y -qq rpm
           rpm -qpi "dist/memcastle_${TAG}_linux-arm64.rpm"

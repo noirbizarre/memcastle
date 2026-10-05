@@ -255,7 +255,7 @@ Some variables are read by the command line rather than the config file:
 | `--palace <PATH>` | every command | `palace.path`, `MEMCASTLE_PALACE_PATH` |
 | `--bind <IP>` | `serve`, `daemon start`, `daemon restart` | `server.bind`, `MEMCASTLE_BIND` |
 | `--port <PORT>` | `serve`, `daemon start`, `daemon restart` | `server.port`, `MEMCASTLE_PORT` |
-| `--assets-dir <DIR>` | `serve`, `daemon start`, `daemon restart` | `assets.dir`, `MEMCASTLE_ASSETS_DIR` |
+| `--assets-dir <DIR>` | `serve`, `daemon start`, `daemon restart`, `integration list`, `install` and `update` | `assets.dir`, `MEMCASTLE_ASSETS_DIR` |
 | `--mode <MODE>` | every command (acted on by client commands) | the memory mode of the session |
 | `-v`, `-vv` | every command | the log level of memcastle itself |
 
@@ -516,9 +516,21 @@ The daemon logs which source it resolved at startup (`runtime assets resolved`).
 The schema and the data migrations are always built into the binary and are not affected by any of this.
 [Installation](installation.md#standalone-binary-or-native-package) describes the package layout.
 
-The only files a package installs into the assets directory are the bundled sources, under `sources/`
-(see [Publishing and installing sources](publishing-sources.md#bundled-sources)).
-A standalone binary has none, so you only need the setting to point at a bundle unpacked somewhere else.
+This is the one root for everything a package ships, in the same layout wherever it is:
+
+| Under the root | What | Read by |
+|---|---|---|
+| `sources/` | the bundled mining sources and their `memcastle-index.json` | the daemon, for `source install <name>` (see [Publishing and installing sources](publishing-sources.md#bundled-sources)) |
+| `integrations/<id>/` | the Pi and OpenCode integrations: a `memcastle-integration.toml` and a bundled `dist/` | `memcastle integration` (see [Integrations](integrations.md)) |
+| `skills/` | the shared agent skills | `memcastle integration`, which copies them beside an integration |
+
+A standalone binary has none, so you only need the setting to point at a package unpacked somewhere else, or at a
+checkout of the repository to install the integrations as built there.
+The bundled sources are taken from `<root>/sources` when it holds a `memcastle-index.json`, and `mining.bundled_dir`
+outranks that.
+A root with no such index, like a checkout, leaves the sources to the installed assets.
+`memcastle integration` reads the root from the same three places as the daemon; `--assets-dir` is accepted by its
+`list`, `install` and `update` commands.
 
 ## Not supported: other platforms' conventions
 

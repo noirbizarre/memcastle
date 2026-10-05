@@ -1,0 +1,28 @@
+# The OpenCode integration as `memcastle integration install opencode` sees it (docs/integrations.md).
+# `dist/` is built by `packaging/integrations/build.sh` (`mise run integrations:build`); it is not committed.
+format = 1
+
+[integration]
+id = "opencode"
+version = "0.1.0"
+description = "Wake-up, recall, checkpoint and mining lifecycle for OpenCode, over MCP and HTTP"
+
+[compatibility]
+# The MemCastle contract the client half speaks (docs/integration-contract.md) arrived with 0.2.
+memcastle = ">=0.2"
+# OpenCode 1.18.29 is the first release with the plugin hooks this uses; 2.x is covered by the same range.
+agent = ">=1.18.29"
+
+[agent]
+kind = "opencode"
+# OpenCode loads a one-line shim that re-exports this file (`plugins/memcastle.ts`).
+entry = "index.js"
+
+# The bundle and nothing else: no `node_modules`, no sources.
+[[assets]]
+from = "dist"
+to = "."
+
+# The wake-up, search-before-answer and checkpoint instructions the plugin injects (docs/skills.md).
+[skills]
+install = true

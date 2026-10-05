@@ -385,6 +385,40 @@ A version that asks for permissions the installed one did not is not installed u
 the other commands are administrative: `--mode` is accepted (it is a global flag) but ignored by them,
 and no MCP tool exists for any of them.
 
+### `integration`
+
+```sh
+memcastle integration list [--json] [--assets-dir <DIR>]
+memcastle integration install <AGENT> [--json] [--assets-dir <DIR>]
+memcastle integration update <AGENT> [--json] [--assets-dir <DIR>]
+memcastle integration remove <AGENT> [--json]
+```
+
+Install, update and remove the integrations MemCastle ships for coding agents: `pi` and `opencode`.
+[Integrations](integrations.md) is the guide; this is the reference.
+
+All four are **local**: they read files and run the agent's own command, need no daemon, no palace and no network, and are
+not available to MCP clients.
+`<AGENT>` is an integration id as `list` shows it, which is the agent's name.
+
+`list` shows each shipped integration with the version shipped and the version installed, the agent's version,
+and a state: `not installed`, `installed`, `outdated` (the package ships a different version or different files),
+`modified` (a file changed, or the agent no longer knows the copy), `incompatible` (your MemCastle or agent is outside the
+supported range) or `unavailable` (the shipped files are incomplete).
+It ends with the assets root it used and how it was chosen.
+`install` copies the integration and the shared skills to `~/.local/share/memcastle/agents/<AGENT>/`, registers them with
+the agent, checks the result and reports every change.
+It changes nothing, and says so, when the integration is already installed and current.
+`update` is `install` for an integration that is already installed, and refuses one that is not.
+`remove` unregisters the integration and deletes the copy; it needs no assets, so it works after the package is gone.
+
+`--assets-dir` names the directory that holds `integrations/` and `skills/`, overriding `assets.dir` and
+`MEMCASTLE_ASSETS_DIR`: a checkout of the repository, or an unpacked package (see
+[Where integrations come from](integrations.md#where-integrations-come-from)).
+`--json` prints the report or the outcome as JSON, with the same fields in both.
+An error exits non-zero and names a `memcastle::integration::*` code, listed in
+[Troubleshooting](integrations.md#troubleshooting).
+
 ### `checkpoint`
 
 ```sh

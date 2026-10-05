@@ -29,6 +29,10 @@ An invariant nothing checks is a comment, and it will be violated.
    daemon at all, through `crate::source`, which `tests/source_isolation.rs` holds to touching neither `store` nor `jobs`
    nor the network, and `source install` of a file or a project directory reads it locally to show its permissions before
    calling the daemon.
+   `integration list`, `install`, `update` and `remove` work on files and the agent's own commands with no daemon at all,
+   through `crate::integration`, which `tests/integration_isolation.rs` holds to touching neither `store`, `jobs`, the
+   client nor the network, and which nothing but `main.rs` may call, so there is no MCP tool and no route that installs
+   one (see `docs/adr/034-agent-integration-distribution.md`).
    `source search`, `install <name>` and `update` never fetch anything themselves: the daemon does, through
    `crate::distribution`, and the CLI calls it over REST.
    `note` also reads the project directory through `crate::project` to choose a wing and room, then calls the daemon.)
@@ -154,6 +158,8 @@ src/
 ├── mining/     the mining job handler: the source adapter contract, the shared pipeline and chunker, the built-in adapters
 │               (the directory adapter alone reads a project's `.config/memcastle.toml`, for its default wing, through `project`),
 │               the registry that names them, and the WebAssembly host that runs installed sources (`wasm/`)
+├── integration/ agent integrations: manifest, discovery under the assets root, install/update/remove with a receipt, and
+│               the Pi and OpenCode adapters (no store, no jobs, no network, no daemon)
 ├── source/     source packages: manifest, archive, scaffolding, build, signing, publishing an index, and the conformance runner
 │               (no store, no jobs, no network)
 ├── distribution/ finding and fetching source packages: registry indexes, locations, the SHA-256 and signature checks;
@@ -174,7 +180,8 @@ src/
 wit/            the source contract (`memcastle:source`), the one definition components and the host are built from
 sources/        official and reference WebAssembly sources (`directory`, `pi`, `opencode`), one package per directory, built and
                 tested but not compiled into MemCastle; `pi` and `opencode` ship with releases (`packaging/sources/build.sh`)
-integrations/   per-agent lifecycle adapters (Pi, OpenCode, ...), in each agent's own language, over MCP and HTTP only
+integrations/   per-agent lifecycle adapters (Pi, OpenCode, ...), in each agent's own language, over MCP and HTTP only;
+                each carries a `memcastle-integration.toml` and is bundled into `dist/` for `memcastle integration install`
 skills/         reusable agent instructions shared by every integration; `tests/in_process/skills.rs` holds them to the
                 tools, commands and routes they name (docs/skills.md)
 tests/fixtures/integration/   the language-neutral conformance fixtures every integration is held to

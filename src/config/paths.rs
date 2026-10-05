@@ -67,11 +67,24 @@ pub fn resolve(
     lookup: impl Fn(&str) -> Option<String>,
     home: Option<&Path>,
 ) -> Option<PathBuf> {
-    let base = lookup(dir.variable())
+    base(dir, lookup, home).map(|base| base.join(APP_DIR))
+}
+
+/// The XDG base directory itself (`~/.config`), for a file that belongs to another program and so is not under
+/// `memcastle/`: an agent's own configuration directory, which an integration installs into.
+///
+/// Resolved exactly as [`resolve`] does, a relative variable included, so MemCastle and the agents it configures agree
+/// about where the base is.
+#[must_use]
+pub fn base(
+    dir: XdgDir,
+    lookup: impl Fn(&str) -> Option<String>,
+    home: Option<&Path>,
+) -> Option<PathBuf> {
+    lookup(dir.variable())
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
-        .or_else(|| home.map(|home| home.join(dir.home_relative_default())))?;
-    Some(base.join(APP_DIR))
+        .or_else(|| home.map(|home| home.join(dir.home_relative_default())))
 }
 
 /// [`resolve`] against the real process environment and home directory.
@@ -115,6 +128,18 @@ pub fn default_sources_dir() -> PathBuf {
         .join("sources")
 }
 
+/// The default directory for installed agent integrations: `$XDG_DATA_HOME/memcastle/agents`.
+///
+/// User data, not package content: an integration is copied here so that it keeps working when a package upgrade
+/// replaces the shipped files, and a receipt beside it records what was installed. Relative when nothing resolves, for
+/// the same reason as [`default_palace_dir`].
+#[must_use]
+pub fn default_agents_dir() -> PathBuf {
+    resolve_from_process(XdgDir::Data)
+        .unwrap_or_else(|| PathBuf::from(APP_DIR))
+        .join("agents")
+}
+
 /// The directory holding per-daemon runtime files: `$XDG_STATE_HOME/memcastle/run`.
 ///
 /// Falls back to the system temp directory when no home exists (a minimal
@@ -130,6 +155,39 @@ pub fn run_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Absolute paths are spelled the Unix way; a Windows `/cfg` has no drive and so is not absolute there.
+    #[cfg(unix)]
+    #[test]
+    fn the_base_directory_is_the_xdg_variable_or_the_home_default_without_the_application_name() {
+        let home = Path::new("/home/u");
+        let none = |_: &str| None;
+        let set = |name: &str| (name == "XDG_CONFIG_HOME").then(|| "/cfg".to_string());
+        let relative = |name: &str| (name == "XDG_CONFIG_HOME").then(|| "cfg".to_string());
+
+        assert_eq!(
+            base(XdgDir::Config, set, Some(home)),
+            Some(PathBuf::from("/cfg"))
+        );
+        assert_eq!(
+            base(XdgDir::Config, none, Some(home)),
+            Some(PathBuf::from("/home/u/.config"))
+        );
+        assert_eq!(
+            base(XdgDir::Config, relative, Some(home)),
+            Some(PathBuf::from("/home/u/.config"))
+        );
+        assert_eq!(base(XdgDir::Config, none, None), None);
+    }
+
+    #[test]
+    fn installed_agent_integrations_live_in_an_agents_directory_beside_the_palace() {
+        assert!(
+            default_agents_dir().ends_with("memcastle/agents")
+                || default_agents_dir().ends_with("agents")
+        );
+        assert_eq!(default_agents_dir().parent(), default_palace_dir().parent());
+    }
 
     fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
         move |name| {

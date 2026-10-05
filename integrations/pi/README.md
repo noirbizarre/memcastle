@@ -21,8 +21,15 @@ Loading only registers handlers; the connection is opened in the background when
 so Pi starts normally when the daemon is down and the user is told once how to start it.
 
 ```sh
+memcastle integration install pi    # copies the bundled extension and registers it with Pi
+```
+
+See [Pi integration](../../docs/integrations-pi.md) for what it changes and how to update and remove it.
+To work on the extension itself, run it from the sources instead:
+
+```sh
 pi -e /path/to/memcastle/integrations/pi/src/extension.ts          # try it for one run
-pi install /path/to/memcastle/integrations/pi                       # or install the package
+mise run integrations:build && memcastle integration install pi --assets-dir "$PWD"   # install this checkout's build
 ```
 
 Pi supplies `@earendil-works/pi-coding-agent` to extensions, so it is a peer dependency here and is never bundled.

@@ -232,6 +232,12 @@ The set is a line in `packaging/sources/build.sh`, which a release and `mise run
 and it does not constrain the runtime: any directory under `sources/` could be added.
 `directory` is the worked example of the built-in source and is not bundled.
 
+The bundle shares its root with the agent integrations and the skills: `assets.dir` is the one directory a package
+installs into, and `sources/` is one of the directories under it (see [Runtime assets](configuration.md#runtime-assets)
+and [Agent integrations](integrations.md)).
+The `pi` and `opencode` sources here mine those agents' session history; they are not the integrations that run inside the
+agent.
+
 ## When something goes wrong
 
 | Code | Meaning |

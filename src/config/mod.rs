@@ -145,6 +145,9 @@ pub struct ServerConfig {
 }
 
 /// The default listener address: loopback only, never a wildcard.
+/// The directory under the assets root that holds the bundled source packages and their index.
+const ASSETS_SOURCES_DIR: &str = "sources";
+
 const DEFAULT_BIND: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 /// The default listener port.
 const DEFAULT_PORT: u16 = 8420;
@@ -753,6 +756,28 @@ impl Config {
         config.apply_cli_overrides(overrides);
         config.validate()?;
         Ok(config)
+    }
+
+    /// The `[mining]` settings the daemon runs with: `mining.bundled_dir`, or else `sources/` under `assets.dir` when
+    /// that directory carries a bundle index.
+    ///
+    /// `assets.dir` is the one data root for everything MemCastle ships (docs/adr/034), so pointing it at a package
+    /// layout must also point the bundled sources there. A root with no bundle (a development worktree holds source
+    /// *projects*, not packages) leaves the lookup to the installed assets instead of making `source install <name>`
+    /// fail, and an explicit `mining.bundled_dir` always wins because it is the more specific setting.
+    #[must_use]
+    pub fn effective_mining(&self) -> MiningConfig {
+        let mut mining = self.mining.clone();
+        if mining.bundled_dir.is_none()
+            && let Some(root) = &self.assets.dir
+        {
+            let sources = root.join(ASSETS_SOURCES_DIR);
+            // The file name is the one `distribution::INDEX_FILE` names; config may not call `distribution`.
+            if sources.join("memcastle-index.json").is_file() {
+                mining.bundled_dir = Some(sources);
+            }
+        }
+        mining
     }
 
     /// Apply the command-line layer, which outranks the environment so that a
@@ -1477,6 +1502,46 @@ mod tests {
     #[test]
     fn no_assets_directory_is_configured_by_default() {
         assert_eq!(Config::default().assets.dir, None);
+    }
+
+    #[test]
+    fn the_assets_directory_supplies_the_bundled_sources_when_it_carries_an_index() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("sources")).unwrap();
+        std::fs::write(root.path().join("sources/memcastle-index.json"), "{}").unwrap();
+        let mut config = Config::default();
+        config.assets.dir = Some(root.path().to_path_buf());
+
+        assert_eq!(
+            config.effective_mining().bundled_dir,
+            Some(root.path().join("sources"))
+        );
+    }
+
+    #[test]
+    fn an_assets_directory_with_no_bundle_leaves_the_bundled_sources_to_the_installed_assets() {
+        // A development worktree holds source projects, not packages: it must not turn `source install <name>`
+        // into an error.
+        let root = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config.assets.dir = Some(root.path().to_path_buf());
+
+        assert_eq!(config.effective_mining().bundled_dir, None);
+    }
+
+    #[test]
+    fn an_explicit_bundled_dir_outranks_the_assets_directory() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("sources")).unwrap();
+        std::fs::write(root.path().join("sources/memcastle-index.json"), "{}").unwrap();
+        let mut config = Config::default();
+        config.assets.dir = Some(root.path().to_path_buf());
+        config.mining.bundled_dir = Some(PathBuf::from("/explicit"));
+
+        assert_eq!(
+            config.effective_mining().bundled_dir,
+            Some(PathBuf::from("/explicit"))
+        );
     }
 
     #[test]

@@ -6,7 +6,9 @@
 //! this architecture. The exceptions: `migrate` opens storage itself (it must
 //! work before a daemon exists), and `daemon start`/`daemon restart`
 //! additionally manage the daemon process (registry file plus spawning
-//! `serve`) without touching `store` or `jobs`.
+//! `serve`) without touching `store` or `jobs`. `integration` installs agent
+//! integrations from files and the agent's own commands, through
+//! `memcastle::integration`, and needs no daemon either.
 
 #![allow(clippy::result_large_err)]
 
@@ -20,9 +22,9 @@ mod cli;
 
 use cli::{
     AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, CompletionsArgs, DaemonCommand,
-    DbCommand, DiaryCommand, DrawerCommand, EmbedArgs, ExtractArgs, JobCommand, MigrateArgs,
-    MineArgs, NoteArgs, RecallArgs, RepairArgs, RoomCommand, SearchArgs, ServeArgs, SourceCommand,
-    StatusArgs, WakeUpArgs, WingCommand,
+    DbCommand, DiaryCommand, DrawerCommand, EmbedArgs, ExtractArgs, IntegrationCommand, JobCommand,
+    MigrateArgs, MineArgs, NoteArgs, RecallArgs, RepairArgs, RoomCommand, SearchArgs, ServeArgs,
+    SourceCommand, StatusArgs, WakeUpArgs, WingCommand,
 };
 use memcastle::app::{DbEndpointRequest, DbEndpointStatus, WakeUpBudget};
 use memcastle::client::{DaemonClient, StatusView};
@@ -175,6 +177,13 @@ fn overrides_from(args: &Cli) -> Overrides {
         | Command::Daemon(DaemonCommand::Start(serve) | DaemonCommand::Restart(serve)) => {
             (serve.bind, serve.port, serve.assets_dir.clone())
         }
+        // The integration commands read the assets root and nothing else of the daemon's settings.
+        Command::Integration(
+            IntegrationCommand::List(cli::IntegrationListArgs { common })
+            | IntegrationCommand::Install(cli::IntegrationAgentArgs { common, .. })
+            | IntegrationCommand::Update(cli::IntegrationAgentArgs { common, .. })
+            | IntegrationCommand::Remove(cli::IntegrationAgentArgs { common, .. }),
+        ) => (None, None, common.assets_dir.clone()),
         _ => (None, None, None),
     };
     Overrides {
@@ -225,6 +234,7 @@ async fn run_command(
         Command::Mine(args) => cmd_mine(&config, mode, args).await,
         Command::Sources => cmd_sources(&config, mode).await,
         Command::Source(command) => cmd_source(&config, mode, command).await,
+        Command::Integration(command) => cmd_integration(&config, &command),
         Command::Note(args) => cmd_note(&config, mode, args).await,
         Command::Checkpoint(args) => cmd_checkpoint(&config, mode, args).await,
         Command::Audit(args) => cmd_audit(&config, mode, args).await,
@@ -1310,6 +1320,42 @@ async fn cmd_job(config: &Config, mode: Option<MemoryMode>, command: JobCommand)
             print_json(&job)?;
         }
     }
+    Ok(())
+}
+
+/// `memcastle integration`: local, because installing an integration touches the machine's files and the agent, never
+/// the daemon, and must work before a daemon has ever run.
+///
+/// `--assets-dir` has already been folded into `config.assets.dir` (see [`overrides_from`]), so a flag, the environment
+/// and the config file all choose the same root.
+fn cmd_integration(config: &Config, command: &IntegrationCommand) -> Result<()> {
+    use memcastle::assets::InstallSearch;
+    use memcastle::integration::{Context, Locations, Operation, SystemRunner};
+
+    let (operation, json) = match command {
+        IntegrationCommand::List(args) => (Operation::List, args.common.json),
+        IntegrationCommand::Install(args) => {
+            (Operation::Install(args.agent.clone()), args.common.json)
+        }
+        IntegrationCommand::Update(args) => {
+            (Operation::Update(args.agent.clone()), args.common.json)
+        }
+        IntegrationCommand::Remove(args) => {
+            (Operation::Remove(args.agent.clone()), args.common.json)
+        }
+    };
+    let locations = Locations::from_process();
+    let runner = SystemRunner;
+    let ctx = Context::for_process(&locations, &runner);
+    let text = memcastle::integration::execute(
+        &operation,
+        config.assets.dir.as_deref(),
+        &InstallSearch::from_process(),
+        &ctx,
+        json,
+        Painter::for_stdout(),
+    )?;
+    println!("{text}");
     Ok(())
 }
 

@@ -40,12 +40,17 @@ sha256sums_aarch64=('@SHA256_AARCH64@')
 #
 # The sources bundled with MemCastle (docs/adr/033) are portable WebAssembly packages, so one release asset serves both
 # architectures. makepkg extracts it to `$srcdir/memcastle-sources-$pkgver/`.
+#
+# The agent integrations and the shared skills (docs/adr/034) are bundled JavaScript, equally portable, and arrive the
+# same way: `$srcdir/memcastle-integrations-$pkgver/{integrations,skills}`.
 source=("LICENSE-$pkgver::$url/raw/$pkgver/LICENSE"
         "memcastle-$pkgver.service::$url/raw/$pkgver/packaging/systemd/memcastle.service"
-        "memcastle-sources-$pkgver.tar.gz::$url/releases/download/$pkgver/memcastle_${pkgver}_sources.tar.gz")
+        "memcastle-sources-$pkgver.tar.gz::$url/releases/download/$pkgver/memcastle_${pkgver}_sources.tar.gz"
+        "memcastle-integrations-$pkgver.tar.gz::$url/releases/download/$pkgver/memcastle_${pkgver}_integrations.tar.gz")
 sha256sums=('@SHA256_LICENSE@'
             '@SHA256_SERVICE@'
-            '@SHA256_SOURCES@')
+            '@SHA256_SOURCES@'
+            '@SHA256_INTEGRATIONS@')
 
 package() {
 	install -Dm755 "$srcdir/memcastle-$pkgver-$CARCH" "$pkgdir/usr/bin/memcastle"
@@ -61,6 +66,10 @@ package() {
 	# no registry and no network.
 	install -dm755 "$pkgdir/usr/share/memcastle/sources"
 	install -m644 "$srcdir/memcastle-sources-$pkgver"/* "$pkgdir/usr/share/memcastle/sources/"
+	# The integrations and skills beside them, where `memcastle integration install pi` looks. A tree, not a flat copy.
+	install -dm755 "$pkgdir/usr/share/memcastle"
+	cp -r "$srcdir/memcastle-integrations-$pkgver/integrations" "$srcdir/memcastle-integrations-$pkgver/skills" \
+		"$pkgdir/usr/share/memcastle/"
 }
 
 # --- project-specific ---------------------------------------------------

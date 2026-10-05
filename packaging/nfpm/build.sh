@@ -4,6 +4,7 @@
 # Usage: packaging/nfpm/build.sh <version> <dist-dir>
 #
 # Reads  <dist-dir>/memcastle_<version>_linux-{amd64,arm64}
+# Reads  $SOURCES_DIR (packaging/sources/build.sh) and $INTEGRATIONS_DIR (packaging/integrations/build.sh), if set
 # Runs   the amd64 binary once, to print its shell completion scripts
 # Writes <dist-dir>/memcastle_<version>_linux-{amd64,arm64}.{deb,rpm}
 #
@@ -53,6 +54,11 @@ export COMPLETIONS_DIR="${completions}"
 # nfpm error about a path that does not exist.
 export SOURCES_DIR="${SOURCES_DIR:-${completions}/sources}"
 mkdir -p "${SOURCES_DIR}"
+
+# The agent integrations and the shared skills (docs/adr/034): `integrations/` and `skills/` built by
+# packaging/integrations/build.sh. Empty directories when the caller has none, for the same reason as above.
+export INTEGRATIONS_DIR="${INTEGRATIONS_DIR:-${completions}/integrations-tree}"
+mkdir -p "${INTEGRATIONS_DIR}/integrations" "${INTEGRATIONS_DIR}/skills"
 
 for asset in linux-amd64 linux-arm64; do
   binary="${dist}/memcastle_${version}_${asset}"

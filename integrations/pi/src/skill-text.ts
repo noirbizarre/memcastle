@@ -4,10 +4,19 @@
 // The OpenCode integration carries an identical copy of this file, as it does of `wake-up-core.ts`, because the two
 // packages share nothing at runtime (ADR-022).
 
+import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 
-/** The repository's `skills/` directory, relative to this file, the way the tests reach `tests/fixtures`. */
-export const SKILLS_DIR = new URL("../../../skills/", import.meta.url)
+/**
+ * Where the shared `skills/` directory is: beside the bundle in an installed copy (`memcastle integration install`
+ * puts it there), otherwise the repository's own, relative to this file, the way the tests reach `tests/fixtures`.
+ *
+ * Decided once, at load: the bundle is a single file whose location is all there is to go by, and a checkout run
+ * from `src/` has no `skills/` beside it, so the first candidate that exists is the right one in both layouts.
+ */
+export const SKILLS_DIR = [new URL("./skills/", import.meta.url), new URL("../../../skills/", import.meta.url)].find(
+  (dir) => existsSync(dir),
+) ?? new URL("../../../skills/", import.meta.url)
 
 /**
  * The text of a `SKILL.md` below its frontmatter, trimmed.

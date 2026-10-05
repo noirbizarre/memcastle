@@ -1026,6 +1026,135 @@ pub enum Error {
         /// What went wrong.
         message: String,
     },
+
+    /// An integration manifest is malformed or breaks a rule.
+    #[error("invalid integration manifest: {message}")]
+    #[diagnostic(
+        code(memcastle::integration::manifest_invalid),
+        help(
+            "fix `memcastle-integration.toml`; docs/integrations.md lists every key, and a development checkout needs the file next to the integration's sources"
+        )
+    )]
+    IntegrationManifestInvalid {
+        /// What is wrong.
+        message: String,
+    },
+
+    /// No shipped integration has this name.
+    #[error("no integration named `{name}` is shipped in {root}")]
+    #[diagnostic(
+        code(memcastle::integration::not_found),
+        help(
+            "`memcastle integration list` shows what this installation ships; point `--assets-dir` at a checkout or a package layout to look somewhere else"
+        )
+    )]
+    IntegrationNotFound {
+        /// The name asked for.
+        name: String,
+        /// Where it was looked for.
+        root: String,
+    },
+
+    /// There is no assets directory to read integrations from.
+    #[error("no assets directory carries integrations: {message}")]
+    #[diagnostic(
+        code(memcastle::integration::assets_missing),
+        help(
+            "install MemCastle from a package that ships integrations, or run from a checkout with `--assets-dir <checkout>` after `mise run integrations:build`"
+        )
+    )]
+    IntegrationAssetsMissing {
+        /// What was missing.
+        message: String,
+    },
+
+    /// This MemCastle or this agent cannot take the integration.
+    #[error("integration `{name}` cannot be installed: {reason}")]
+    #[diagnostic(
+        code(memcastle::integration::incompatible),
+        help(
+            "upgrade MemCastle or the agent, or install the integration version shipped with the one you have; nothing was changed"
+        )
+    )]
+    IntegrationIncompatible {
+        /// The integration.
+        name: String,
+        /// Which requirement fails.
+        reason: String,
+    },
+
+    /// The agent the integration is for cannot be found or run.
+    #[error("the agent for integration `{name}` was not found: {message}")]
+    #[diagnostic(
+        code(memcastle::integration::agent_not_found),
+        help(
+            "install the agent and make sure its command is on PATH, then retry; nothing was changed"
+        )
+    )]
+    IntegrationAgentNotFound {
+        /// The integration.
+        name: String,
+        /// What was tried.
+        message: String,
+    },
+
+    /// A file the integration would write belongs to the user.
+    #[error("integration `{name}` would overwrite {path}, which MemCastle did not write")]
+    #[diagnostic(
+        code(memcastle::integration::conflict),
+        help(
+            "move or delete that file if you want the integration there, then retry; nothing was changed"
+        )
+    )]
+    IntegrationConflict {
+        /// The integration.
+        name: String,
+        /// The file in the way.
+        path: String,
+    },
+
+    /// The agent refused, or failed, to register the integration.
+    #[error("registering integration `{name}` with its agent failed: {message}")]
+    #[diagnostic(
+        code(memcastle::integration::registration_failed),
+        help(
+            "the files MemCastle copied were removed again; run the agent's own command by hand to see why it refuses"
+        )
+    )]
+    IntegrationRegistrationFailed {
+        /// The integration.
+        name: String,
+        /// What the agent said.
+        message: String,
+    },
+
+    /// The installed integration does not look right after installation.
+    #[error("integration `{name}` did not validate after installation: {message}")]
+    #[diagnostic(
+        code(memcastle::integration::validation_failed),
+        help(
+            "`memcastle integration remove <name>` undoes the installation; then check that the package is complete (`memcastle integration list`) and retry"
+        )
+    )]
+    IntegrationValidationFailed {
+        /// The integration.
+        name: String,
+        /// What failed.
+        message: String,
+    },
+
+    /// The integration is not installed.
+    #[error("integration `{name}` is not installed")]
+    #[diagnostic(
+        code(memcastle::integration::not_installed),
+        help(
+            "`memcastle integration install {name}` installs it; `memcastle integration list` shows the state of each one"
+        )
+    )]
+    IntegrationNotInstalled {
+        /// The integration.
+        name: String,
+    },
 }
 
 /// What every interface reports about a failure: the message, and the two
@@ -1518,6 +1647,39 @@ mod tests {
             Error::SourceSigning {
                 message: "bad key".to_string(),
             },
+            Error::IntegrationManifestInvalid {
+                message: "no id".to_string(),
+            },
+            Error::IntegrationNotFound {
+                name: "pi".to_string(),
+                root: "/usr/share/memcastle".to_string(),
+            },
+            Error::IntegrationAssetsMissing {
+                message: "no directory".to_string(),
+            },
+            Error::IntegrationIncompatible {
+                name: "pi".to_string(),
+                reason: "needs MemCastle 9".to_string(),
+            },
+            Error::IntegrationAgentNotFound {
+                name: "pi".to_string(),
+                message: "no `pi` on PATH".to_string(),
+            },
+            Error::IntegrationConflict {
+                name: "opencode".to_string(),
+                path: "/x/memcastle.ts".to_string(),
+            },
+            Error::IntegrationRegistrationFailed {
+                name: "pi".to_string(),
+                message: "exit 1".to_string(),
+            },
+            Error::IntegrationValidationFailed {
+                name: "pi".to_string(),
+                message: "entry missing".to_string(),
+            },
+            Error::IntegrationNotInstalled {
+                name: "pi".to_string(),
+            },
         ]
     }
 
@@ -1593,7 +1755,16 @@ mod tests {
             | Error::SourceNotInRegistry { .. }
             | Error::SourceIntegrity { .. }
             | Error::SourceUntrusted { .. }
-            | Error::SourceSigning { .. } => {}
+            | Error::SourceSigning { .. }
+            | Error::IntegrationManifestInvalid { .. }
+            | Error::IntegrationNotFound { .. }
+            | Error::IntegrationAssetsMissing { .. }
+            | Error::IntegrationIncompatible { .. }
+            | Error::IntegrationAgentNotFound { .. }
+            | Error::IntegrationConflict { .. }
+            | Error::IntegrationRegistrationFailed { .. }
+            | Error::IntegrationValidationFailed { .. }
+            | Error::IntegrationNotInstalled { .. } => {}
         }
     }
 

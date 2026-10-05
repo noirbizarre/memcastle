@@ -25,6 +25,13 @@ flowchart LR
 2. Follow the [Quickstart](quickstart.md): start the daemon, store and search your first memories.
 3. [Connect an MCP client](mcp-clients.md) such as OpenCode or Claude Code.
 
+## Integrations
+
+- [Agent integrations](integrations.md): install, update and remove the Pi and OpenCode integrations,
+  from a package or a checkout.
+- [Pi](integrations-pi.md) and [OpenCode](integrations-opencode.md): what each installs, its settings, troubleshooting.
+- [Integration contract](integration-contract.md): what an agent integration must do, whatever the agent.
+
 ## Guides
 
 - [Running the daemon](daemon.md): start, stop, supervise and check it.
@@ -46,7 +53,6 @@ flowchart LR
 - [Configuration](configuration.md): paths, the config file, environment variables, flags and precedence.
 - [CLI](cli.md): every command and flag.
 - [MCP tools and REST API](mcp-and-api.md): the interfaces agents and scripts use.
-- [Integration contract](integration-contract.md): what an agent integration must do, whatever the agent.
 
 ## Project
 
