@@ -578,7 +578,7 @@ impl AppServices {
             Ok(())
         } else {
             Err(Error::DrawerNotFound {
-                room: "-".to_string(),
+                room: None,
                 drawer: drawer.to_string(),
             })
         }
@@ -1151,7 +1151,7 @@ impl AppServices {
             crate::dedup::Outcome::Duplicate { existing } => {
                 return self.store.get_drawer(existing).await?.ok_or_else(|| {
                     Error::DrawerNotFound {
-                        room: "-".to_string(),
+                        room: None,
                         drawer: existing.to_string(),
                     }
                 });
@@ -2424,6 +2424,16 @@ mod tests {
             .await
             .expect("diary read");
         assert_eq!(entries.len(), MAX_READ_LIMIT as usize);
+    }
+
+    #[tokio::test]
+    async fn a_refused_source_show_names_the_operation_the_caller_asked_for() {
+        let app = test_app().await;
+        let result = app.show_source("directory", MemoryMode::Disabled).await;
+        assert!(
+            matches!(&result, Err(Error::ModeForbidden { operation, .. }) if operation == "source_show"),
+            "got {result:?}"
+        );
     }
 
     #[test]

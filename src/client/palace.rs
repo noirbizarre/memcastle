@@ -5,36 +5,18 @@ use serde_json::json;
 use crate::app::{Created, EntityLink, Superseded, WingDetail};
 use crate::domain::channel::CLI as CHANNEL;
 use crate::domain::{Deleted, Drawer, DrawerHistory, DrawerSummary, RoomSummary, WingSummary};
-use crate::error::{Error, Result};
+use crate::error::Result;
 
 use super::DaemonClient;
 
 impl DaemonClient {
-    /// The URL of `/api/wings/...`, with every segment percent-encoded.
-    ///
-    /// Segments are pushed one by one instead of formatted into a string: a
-    /// name with a space, `?` or `#` in it would otherwise end the path early
-    /// and address something else. `trailing` is a drawer name, whose own `/`
-    /// are kept as path separators because the daemon's drawer segment is a
+    /// The URL of `/api/wings/...`, with every segment percent-encoded (see [`Self::api_url`]).
+    /// `trailing` is a drawer name, whose own `/` are kept as path separators because the daemon's drawer segment is a
     /// wildcard.
     fn palace_url(&self, segments: &[&str], trailing: Option<&str>) -> Result<reqwest::Url> {
-        let mut url = reqwest::Url::parse(&self.base_url).map_err(|source| Error::Client {
-            message: format!("invalid daemon address `{}`: {source}", self.base_url),
-        })?;
-        let mut path = url.path_segments_mut().map_err(|()| Error::Client {
-            message: format!("invalid daemon address `{}`", self.base_url),
-        })?;
-        path.pop_if_empty().push("api").push("wings");
-        for segment in segments {
-            path.push(segment);
-        }
-        if let Some(trailing) = trailing {
-            for segment in trailing.split('/') {
-                path.push(segment);
-            }
-        }
-        drop(path);
-        Ok(url)
+        let mut all = vec!["wings"];
+        all.extend_from_slice(segments);
+        self.api_url(&all, trailing)
     }
 
     /// Every wing with its counts (`GET /api/wings`).
@@ -239,7 +221,7 @@ impl DaemonClient {
     pub async fn supersede_drawer(&self, id: &str, content: Option<String>) -> Result<Superseded> {
         self.send(
             self.http
-                .post(format!("{}/api/drawers/{id}/supersede", self.base_url))
+                .post(self.api_url(&["drawers", id, "supersede"], None)?)
                 .json(&json!({ "content": content, "requested_by": CHANNEL })),
         )
         .await
@@ -254,7 +236,7 @@ impl DaemonClient {
     pub async fn drawer_history(&self, id: &str) -> Result<DrawerHistory> {
         self.send(
             self.http
-                .get(format!("{}/api/drawers/{id}/history", self.base_url)),
+                .get(self.api_url(&["drawers", id, "history"], None)?),
         )
         .await
     }
@@ -268,7 +250,7 @@ impl DaemonClient {
     pub async fn link_drawer_entity(&self, id: &str, name: &str, kind: &str) -> Result<EntityLink> {
         self.send(
             self.http
-                .post(format!("{}/api/drawers/{id}/mentions", self.base_url))
+                .post(self.api_url(&["drawers", id, "mentions"], None)?)
                 .json(&json!({ "name": name, "kind": kind })),
         )
         .await
@@ -306,6 +288,19 @@ mod tests {
         let url = client().palace_url(&["my wing", "a?b#c"], None).unwrap();
         assert_eq!(url.path(), "/api/wings/my%20wing/a%3Fb%23c");
         assert!(url.query().is_none() && url.fragment().is_none());
+    }
+
+    #[test]
+    fn a_source_name_or_drawer_id_with_reserved_characters_cannot_end_the_path_early() {
+        let url = client()
+            .api_url(&["source-packages", "my source?x#y"], None)
+            .unwrap();
+        assert_eq!(url.path(), "/api/source-packages/my%20source%3Fx%23y");
+        assert!(url.query().is_none() && url.fragment().is_none());
+        let url = client()
+            .api_url(&["drawers", "a/b", "history"], None)
+            .unwrap();
+        assert_eq!(url.path(), "/api/drawers/a%2Fb/history");
     }
 
     #[test]

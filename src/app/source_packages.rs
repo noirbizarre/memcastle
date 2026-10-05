@@ -164,7 +164,7 @@ impl AppServices {
         name: &str,
         mode: crate::domain::MemoryMode,
     ) -> Result<ProviderInfo> {
-        Self::require_read(mode, "source_list")?;
+        Self::require_read(mode, "source_show")?;
         if let Some(builtin) = crate::mining::registry::builtin_providers()
             .into_iter()
             .find(|provider| provider.name == name)
