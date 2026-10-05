@@ -31,3 +31,4 @@ mod retrieval;
 mod server;
 mod skills;
 mod sources;
+mod web;

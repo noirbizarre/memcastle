@@ -40,6 +40,13 @@ class Memcastle < Formula
     sha256 "@SHA256_INTEGRATIONS@"
   end
 
+  # The web dashboard (docs/adr/035): static files, one asset for every platform, with `web/` under its single top-level
+  # directory.
+  resource "web" do
+    url "https://github.com/noirbizarre/memcastle/releases/download/#{version}/memcastle_#{version}_web.tar.gz"
+    sha256 "@SHA256_WEB@"
+  end
+
   def install
     # Exactly one file lands here, whichever `url` above matched — renamed on
     # the way in because the downloaded asset's name carries the platform
@@ -56,6 +63,9 @@ class Memcastle < Formula
       (pkgshare/"skills").install Dir["skills/*"]
     end
 
+    # And `share/memcastle/web/dist`, which the daemon serves under `/ui` when `web.enable` is set.
+    resource("web").stage { (pkgshare/"web").install Dir["web/*"] }
+
     # Generated from the installed binary, so the scripts always match its
     # commands and flags; `memcastle completions <shell>` needs no daemon.
     generate_completions_from_executable(bin/"memcastle", "completions", shells: [:bash, :zsh, :fish])
@@ -66,6 +76,7 @@ class Memcastle < Formula
     assert_path_exists pkgshare/"sources/memcastle-index.json"
     assert_path_exists pkgshare/"integrations/pi/memcastle-integration.toml"
     assert_path_exists pkgshare/"skills/wake-up/SKILL.md"
+    assert_path_exists pkgshare/"web/dist/index.html"
 
   end
 end

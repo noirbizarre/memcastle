@@ -16,6 +16,7 @@ mod mode;
 mod palace;
 mod source_packages;
 mod source_registry;
+mod web;
 
 use axum::Router;
 use axum::extract::{Path, State};
@@ -33,6 +34,7 @@ use extract::{ApiJson, ApiQuery};
 pub use auth::require_auth;
 pub use error::ApiError;
 pub use mode::ModeHeader;
+pub use web::{UI_PREFIX, is_ui_path, router as web_router};
 
 #[derive(Clone)]
 struct ApiState {
@@ -50,6 +52,7 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/status", get(status))
+        .route("/api/config", get(config))
         .route("/api/search", get(search).post(search_json))
         .route("/api/recall", get(recall).post(recall_json))
         .route("/api/wake-up", get(wake_up))
@@ -151,6 +154,7 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
         .route("/api/drawers/{id}/history", get(palace::drawer_history))
         // The knowledge graph: entities, what they relate to and which
         // drawers mention them, each with provenance and validity.
+        .route("/api/graph", get(graph::graph))
         .route("/api/entities", get(graph::list_entities))
         .route(
             "/api/entities/{id}/relationships",
@@ -185,6 +189,12 @@ async fn status(
     ModeHeader(mode): ModeHeader,
 ) -> Result<impl IntoResponse, ApiError> {
     Ok(Json(state.app.status(mode).await?))
+}
+
+/// `GET /api/config`: the non-secret settings in effect (docs/mcp-and-api.md). Daemon information like `status`, so
+/// not gated by the memory mode.
+async fn config(State(state): State<ApiState>) -> impl IntoResponse {
+    Json(state.app.config_report())
 }
 
 /// The query-string form of a search, shared by `search` and `recall`.
@@ -377,15 +387,28 @@ async fn diary_read(
 #[derive(Debug, Deserialize)]
 struct ListJobsParams {
     status: Option<String>,
+    /// The job's `type` (`mine`, `audit`, ...). New with `limit`: either one makes the answer a bounded page.
+    kind: Option<String>,
+    limit: Option<u32>,
 }
 
+/// `GET /api/jobs`. With neither `kind` nor `limit` it answers every job, as it always has; with either it answers
+/// a bounded page (default 50, at most 200), newest first, which is what a dashboard of a long-lived palace needs.
 async fn list_jobs(
     State(state): State<ApiState>,
     ModeHeader(mode): ModeHeader,
     ApiQuery(params): ApiQuery<ListJobsParams>,
 ) -> Result<impl IntoResponse, ApiError> {
     let status = params.status.map(|s| parse_status(&s)).transpose()?;
-    Ok(Json(state.app.list_jobs(status, mode).await?))
+    if params.kind.is_none() && params.limit.is_none() {
+        return Ok(Json(state.app.list_jobs(status, mode).await?));
+    }
+    Ok(Json(
+        state
+            .app
+            .list_jobs_page(status, params.kind.as_deref(), params.limit, mode)
+            .await?,
+    ))
 }
 
 #[derive(Debug, Deserialize)]

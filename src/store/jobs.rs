@@ -257,6 +257,30 @@ impl SurrealStore {
         super::take_rows(&mut response, 0)
     }
 
+    /// List jobs narrowed to a status and to a kind (the `type` tag of [`crate::domain::JobKind`]), newest first,
+    /// at most `limit` of them. The dashboard's history table: a bounded page rather than every job there ever was.
+    pub async fn list_jobs_page(
+        &self,
+        status: Option<JobStatus>,
+        kind: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Job>> {
+        let sql = format!(
+            // `= NULL` for an absent filter: see `list_jobs`. `LIMIT` is bound, never formatted into the text.
+            "SELECT {JOB_COLUMNS} FROM job \
+             WHERE ($status = NULL OR status = $status) AND ($kind = NULL OR kind.type = $kind) \
+             ORDER BY created_at DESC LIMIT $limit"
+        );
+        let mut response = self
+            .db
+            .query(sql)
+            .bind(("status", super::bindable(&status)?))
+            .bind(("kind", super::bindable(&kind)?))
+            .bind(("limit", i64::from(limit)))
+            .await?;
+        super::take_rows(&mut response, 0)
+    }
+
     /// How many jobs there are, optionally only those in one status — a
     /// `count()` in the database rather than fetching every row (each of which
     /// carries its whole input and checkpoint) just to take `.len()`.

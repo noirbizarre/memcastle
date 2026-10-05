@@ -16,7 +16,7 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-use crate::app::{AppServices, AuthPolicy, DbEndpoint, RuntimeContext};
+use crate::app::{AppServices, AuthPolicy, ConfigReport, DbEndpoint, RuntimeContext};
 use crate::config::{Config, Secret};
 use crate::embed::Embeddings;
 use crate::error::{Error, Result};
@@ -36,7 +36,9 @@ pub async fn run(config: Config) -> Result<()> {
     // Resolved before the listener binds, so a mistyped `--assets-dir` fails
     // before anything is bound or changed. Purely local: it reads directories and
     // never the network, which is what lets a standalone binary start offline.
-    let assets = crate::assets::Assets::resolve_for_process(config.assets.dir.as_deref())?;
+    let assets = Arc::new(crate::assets::Assets::resolve_for_process(
+        config.assets.dir.as_deref(),
+    )?);
     info!(source = %assets.source(), "runtime assets resolved");
 
     // Bound before any side effect (resolving assets above only reads): a
@@ -140,6 +142,8 @@ pub async fn run(config: Config) -> Result<()> {
             palace_path: config.palace.path.display().to_string(),
             backend: backend_info.kind.to_string(),
             location: backend_info.location,
+            // What `GET /api/config` reports, and what tells the authentication layer whether `/ui` is served.
+            config: ConfigReport::from_config(&config, &assets),
         })
         .with_auth(auth_policy)
         // Constructed, never started: the admin endpoint listens only after an
@@ -175,8 +179,24 @@ pub async fn run(config: Config) -> Result<()> {
     // Added to the merged router rather than per route, so a route added later
     // cannot be forgotten. The trace layer logs no headers, which is what
     // keeps the `Authorization` header out of the log.
-    let router = crate::api::router(app.clone(), shutdown.clone())
-        .nest_service("/mcp", mcp_service)
+    let mut router =
+        crate::api::router(app.clone(), shutdown.clone()).nest_service("/mcp", mcp_service);
+    if config.web.enable {
+        // Merged before the authentication layer is added, so `/ui` is inside it like every other route: the layer
+        // admits its static files itself (`api::auth::is_public`), and only while this is enabled.
+        router = router.merge(crate::api::web_router(Arc::clone(&assets)));
+        if assets.web_is_built() {
+            info!(path = crate::api::UI_PREFIX, assets = %assets.source(), "web dashboard enabled");
+        } else {
+            warn!(
+                path = crate::api::UI_PREFIX,
+                assets = %assets.source(),
+                "web dashboard enabled but web/dist/index.html was not found: /ui answers a page that says how to install it \
+                 (install a package, or build it with `mise run web:build` and pass --assets-dir)"
+            );
+        }
+    }
+    let router = router
         .layer(axum::middleware::from_fn_with_state(
             app,
             crate::api::require_auth,

@@ -119,3 +119,9 @@ The history is the value.
   directory, registers it through the agent's own mechanism (`pi install`, one marked OpenCode plugin file), records a
   receipt, and refuses what its manifest does not support
   (amends ADR-013, ADR-020 and ADR-022)
+- [ADR-035](035-web-dashboard.md) — the web dashboard is a Vue and OpenVue client in `web/`, opt-in (`web.enable`) and
+  served under `/ui` from `web/dist/` of the one assets root, in a checkout and in a package alike;
+  its static shell is the second public path,
+  it signs in as the database console does (user `memcastle`, the token as the password, checked by every request),
+  carries a memory mode, and a hook holds `web/` to HTTP
+  (amends ADR-013, ADR-014, ADR-015 and ADR-034)

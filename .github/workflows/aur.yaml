@@ -95,6 +95,8 @@ jobs:
           sed -i "s/@SHA256_SOURCES@/$(checksum "memcastle_${TAG}_sources.tar.gz")/" build/PKGBUILD
           # And the agent integrations with the skills they read.
           sed -i "s/@SHA256_INTEGRATIONS@/$(checksum "memcastle_${TAG}_integrations.tar.gz")/" build/PKGBUILD
+          # And the web dashboard.
+          sed -i "s/@SHA256_WEB@/$(checksum "memcastle_${TAG}_web.tar.gz")/" build/PKGBUILD
 
           service=$(curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${TAG}/packaging/systemd/memcastle.service" | sha256sum | cut -d' ' -f1)
           sed -i "s/@SHA256_SERVICE@/${service}/" build/PKGBUILD
@@ -145,6 +147,8 @@ jobs:
           # The integrations must land there too, and be found from the binary's own prefix with no flag.
           test -f /usr/share/memcastle/integrations/pi/memcastle-integration.toml
           test -f /usr/share/memcastle/skills/wake-up/SKILL.md
+          # And the dashboard, at the path a checkout has too.
+          test -f /usr/share/memcastle/web/dist/index.html
           memcastle integration list --json | grep -q '"assets_source": "installed"'
 
       - name: Generate .SRCINFO

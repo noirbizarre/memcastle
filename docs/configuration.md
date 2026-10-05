@@ -145,9 +145,14 @@ source_timeout_secs = 60    # the longest one call may run; a source's own limit
 trust = "optional"
 # trusted_keys = ["Zm9vYmFy..."]
 
-# Only to serve assets from somewhere other than the installed or embedded ones.
+# Only to serve assets from somewhere other than the installed or embedded ones: a package unpacked elsewhere, or a
+# checkout of the repository (which holds sources/, integrations/, skills/ and web/dist).
 [assets]
-dir = "/home/alice/src/memcastle-web/dist"
+dir = "/home/alice/src/memcastle"
+
+# The web dashboard, served under /ui. Off by default; see "Web dashboard".
+[web]
+enable = false
 
 [jobs]
 max_concurrency = 4
@@ -185,6 +190,7 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `server.bind` (an IP address) | `MEMCASTLE_BIND` | `127.0.0.1` |
 | `server.port` (0 to 65535) | `MEMCASTLE_PORT` | `8420` |
 | `assets.dir` (an absolute path) | `MEMCASTLE_ASSETS_DIR` | none: installed, then embedded assets |
+| `web.enable` (`true` or `false`) | `MEMCASTLE_WEB_ENABLE` | `false` |
 | `logging.level` | `MEMCASTLE_LOG` | `info` |
 | `logging.format` | `MEMCASTLE_LOG_FORMAT` | `text` (`text` or `json`) |
 | `jobs.max_concurrency` (at least 1) | `MEMCASTLE_JOBS_MAX_CONCURRENCY` | `4` |
@@ -524,14 +530,27 @@ This is the one root for everything a package ships, in the same layout wherever
 | `sources/` | the bundled mining sources and their `memcastle-index.json` | the daemon, for `source install <name>` (see [Publishing and installing sources](publishing-sources.md#bundled-sources)) |
 | `integrations/<id>/` | the Pi and OpenCode integrations: a `memcastle-integration.toml` and a bundled `dist/` | `memcastle integration` (see [Integrations](integrations.md)) |
 | `skills/` | the shared agent skills | `memcastle integration`, which copies them beside an integration |
+| `web/dist/` | the built [web dashboard](web.md) | the daemon, under `/ui`, when `web.enable` is set |
 
-A standalone binary has none, so you only need the setting to point at a package unpacked somewhere else, or at a
+A standalone binary has none (the dashboard is not built into it, so with `web.enable` it answers a page that says the
+files are missing), so you only need the setting to point at a package unpacked somewhere else, or at a
 checkout of the repository to install the integrations as built there.
 The bundled sources are taken from `<root>/sources` when it holds a `memcastle-index.json`, and `mining.bundled_dir`
 outranks that.
 A root with no such index, like a checkout, leaves the sources to the installed assets.
 `memcastle integration` reads the root from the same three places as the daemon; `--assets-dir` is accepted by its
 `list`, `install` and `update` commands.
+
+## Web dashboard
+
+`web.enable = true` (or `MEMCASTLE_WEB_ENABLE=true`) makes the daemon serve its web dashboard under `/ui`.
+It is off by default: a daemon that does not set it answers nothing at `/ui`.
+There is no command-line flag; `daemon start` and `daemon restart` pass the environment and the file to the daemon as usual.
+
+The dashboard's files are found in `web/dist/` of the [runtime assets](#runtime-assets),
+in a package and in a checkout alike.
+If they are missing, the daemon still starts, logs a warning, and answers `/ui` with a page that says how to install them.
+See [Web dashboard](web.md) for the login, the memory mode and the development workflow.
 
 ## Not supported: other platforms' conventions
 

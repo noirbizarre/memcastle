@@ -5,7 +5,7 @@ The daemon serves two interfaces on the same listener (`127.0.0.1:8420` by defau
 
 - **MCP** at `/mcp`, over streamable HTTP, for agents.
   [Connect an MCP client](mcp-clients.md) shows how to point a client at it.
-- **REST** under `/api`, which is what the CLI uses and what a script or dashboard can call.
+- **REST** under `/api`, which is what the CLI uses, what the [web dashboard](web.md) calls, and what a script can call.
 
 Both are thin layers over the same application services, so they accept the same arguments,
 enforce the same [memory modes](memory-modes.md) and fail with the same error body.
@@ -153,6 +153,7 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 |---|---|---|
 | `GET /api/health` | Liveness: `{"status": "ok"}`. Touches nothing else. | none |
 | `GET /api/status` | The full status report, also used by `memcastle status`. | none |
+| `GET /api/config` | The configuration in effect, for the [dashboard's](web.md) settings page: listener, palace, datastore, whether authentication and the dashboard are on, where the runtime assets come from, scheduler limits, provider names and models, mining limits. It carries no token, key, URL or command line, and is daemon information like `status`, so no memory mode gates it. There is no MCP tool. | none |
 | `GET /api/search` | Search drawers. | query string: `q` (or `query`), `limit`, `wing`, `room`, `ranking`, `tags`, `source_kind`, `as_of`, `from`, `until`, `include_historical`, `expand` |
 | `POST /api/search` | The same search as a JSON [`SearchQuery`](#searching), the only way to send a `query_embedding`. | JSON body |
 | `GET /api/recall` | Recall drawers. | as `GET /api/search`, and `room` is ignored |
@@ -162,7 +163,7 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `POST /api/diary` | Write a diary entry. | JSON body: `agent_identity`, `wing`, `content`, `requested_by?` |
 | `POST /api/notes` | Capture a note: an unnamed drawer of source kind `note`. `201` when stored, `200` when an identical note was already in the room. There is no MCP tool: agents write memory through `memcastle_checkpoint` and the diary. | JSON body: `wing`, `room`, `content`, `uri?`, `requested_by?` |
 | `GET /api/sources` | The mining adapters this daemon can run and the sources that have been mined: `{adapters, sources}`. A read. | none |
-| `GET /api/jobs` | List jobs. | `status` |
+| `GET /api/jobs` | List jobs, newest first. Without `kind` and `limit` it answers every job; with either it answers a bounded page. | query string: `status`, `kind` (the job's `type`, such as `mine` or `audit`), `limit` (default 50, at most 200) |
 | `POST /api/jobs` | Submit a job. | JSON body, see [below](#submitting-jobs) |
 | `GET /api/jobs/{id}` | Show one job. | none |
 | `POST /api/jobs/{id}/pause` | Request a pause. | none |
@@ -192,6 +193,7 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `GET /api/entities/{id}/mentions` | The drawers that mention an entity, with the provenance of each link and the name as that drawer spelled it. | none |
 | `GET /api/entities/{id}/candidates` | The entities this one resembles without having been equated with, or that resemble it. | none |
 | `POST /api/entities/{id}/aliases` | Record another spelling of an entity, so later sightings converge on it. | JSON body: `alias` |
+| `GET /api/graph` | A piece of the [knowledge graph](#the-knowledge-graph) in one answer, for drawing: `{nodes, edges, truncated}`. With `entity` it is that entity's neighbourhood (open facts, either direction); without it, the first entities by name and the facts among them. A read; there is no MCP tool. | query string: `entity`, `depth` (1 to 3, default 1), `limit` (entities, default 50, at most 200) |
 | `POST /api/auth/token` | Generate a token, replacing any previous one: `{token, algorithm, version, created_at}`. | none |
 | `DELETE /api/auth/token` | Revoke the generated token: `{"revoked": true}`. | none |
 | `POST /api/source-packages` | Install a [source package](writing-sources.md): the body is the `.tar.gz` itself. Answers `{source, replaced}`. | query string: `consent` (the digest of the permissions agreed to), `enable` |
@@ -217,6 +219,13 @@ curl -s http://127.0.0.1:8420/api/health
 curl -s 'http://127.0.0.1:8420/api/search?q=formatter&limit=5'
 curl -s http://127.0.0.1:8420/api/jobs?status=running
 ```
+
+### The dashboard's files
+
+With [`web.enable`](configuration.md#web-dashboard), the same listener also serves the dashboard's static files under
+`/ui` (`GET` and `HEAD` only).
+They are not part of the API and carry no data; see [Web dashboard](web.md) and [Authentication](authentication.md#what-is-protected)
+for why they are the one thing besides the liveness probe that needs no token.
 
 ### Searching
 

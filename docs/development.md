@@ -2,6 +2,8 @@
 
 ## Prerequisites
 
+- Node and bun, only for `web/` and `integrations/` (`mise run web:check` and `integrations:check` install them for the
+  task; the Rust build needs neither).
 - Rust, via `rustup`, which installs the channel pinned in `rust-toolchain.toml` (mise does not manage Rust itself).
 - The remaining tools (nextest, prek, typos, ...) via `mise` — run `mise install` once.
 
@@ -23,7 +25,11 @@ mise run guards     # the architecture guard hooks, described below
 mise run integrations:check # typecheck and test each package under integrations/, and install the bundles (needs bun)
 mise run integrations:build # bundle integrations/*/src into integrations/*/dist, for `--assets-dir "$PWD"`
 mise run integrations:package # lay out what a release ships in target/bundled-integrations
-mise run check      # every lint, the guards, both test suites, the sources and the integrations, without modifying the tree
+mise run web:check  # typecheck, test, build and package the web dashboard, then serve it from a real daemon (needs bun and node)
+mise run web:build  # build web/ into web/dist, for `--assets-dir "$PWD"` with `web.enable`
+mise run web:dev    # the dashboard's dev server, proxying /api to the running daemon
+mise run web:package # lay out what a release ships in target/bundled-web
+mise run check      # every lint, the guards, both test suites, the sources, the integrations and the dashboard, without modifying the tree
 mise run ci         # check plus the docs build: the local equivalent of CI's lint,
                     # test and docs steps
 mise cli <args>      # run memcastle from source, e.g. `mise cli status`
@@ -47,6 +53,21 @@ mise cli job demo --steps 5   # exercise the scheduler without mining anything
 mise cli search "job scheduler"
 mise cli daemon stop
 ```
+
+In this repository `mise.toml` sets development defaults in its `[env]` table:
+`MEMCASTLE_ASSETS_DIR` is the checkout and `MEMCASTLE_WEB_ENABLE` is `true`.
+They apply to `mise run`, to `mise cli` and to any shell with [mise activated](https://mise.jdx.dev/dev-tools/shims.html)
+once you are in the project directory, so `mise cli serve` already serves the dashboard from `web/dist` (after
+`mise run web:build`) and finds the integrations and sources of the checkout, with no flag.
+Because the variables follow the shell, **any `memcastle` you run from the project directory uses them, including an
+installed one**: `memcastle integration install pi` there installs the bundle built in the checkout
+(`mise run integrations:build`) and not the package's.
+Run it from another directory, or `env -u MEMCASTLE_ASSETS_DIR memcastle ...`, to use the installed assets.
+A flag still wins over the variable (`--assets-dir`), and your own `mise.local.toml` can override or drop either.
+
+The suites that start a daemon or run the installer are not affected:
+`mise run integrations:check` and `mise run web:check` unset every `MEMCASTLE_*` variable before they start,
+and the Rust and bun harnesses build their own environment, so a test never depends on where it was run from.
 
 By default the palace lives under `~/.local/share/memcastle/default` and the daemon listens on `127.0.0.1` port `8420`.
 Every path, environment variable, flag and the precedence between them is in [Configuration](configuration.md).
@@ -142,6 +163,15 @@ Every path, environment variable, flag and the precedence between them is in [Co
     daemon, and the proof, from the requests on the wire, that an `off` session receives nothing.
     It is test-only and imports the integrations' sources, see
     [ADR-027](adr/027-cross-integration-tests-live-in-a-common-package.md).
+  - `tests/in_process/web.rs` — the dashboard's routes against a real daemon: opt-in, the static files and their headers,
+    the refusal of any path that leaves `web/dist`, the page for a build that is missing, the public shell with
+    authentication on, `/api/config`, and the jobs listing's `kind` and `limit` (in-process).
+    `src/assets` unit-tests that a packaged layout and a worktree resolve `web/dist/index.html` through the same lookup.
+  - `tests/web_bundle.rs` — builds the dashboard with `packaging/web/build.sh`, checks the package tree (no sources, maps
+    or `node_modules`) and serves it from an installed prefix and from the checkout.
+    It needs bun and node, so it is `#[ignore]`d in the basic suite and `mise run web:check` runs it.
+  - `web/test/` — the dashboard's client, login, route guard and polling (vitest, no daemon), and the same client and login
+    against a real `memcastle serve` (`web/test/daemon`, bun), see [Web dashboard](web.md#developing-the-dashboard).
   - `tests/wasm_conformance.rs` — the same conformance cases run against the built-in `directory` source and against the
     reference WebAssembly source built from `sources/directory/` (in-process, WebAssembly suite).
   - `tests/wasm_pi.rs` — the Pi history source (`sources/pi/`) built and run as a component: what it files and leaves out,
@@ -270,6 +300,12 @@ The integration installer is local tooling like the source tooling, and is held 
 network or an agent's settings file or a credential, and when anything under `src/mcp`, `src/api`, `src/app` or
 `src/server` (or any module but the binary) calls it.
 `tests/integration_docs.rs` holds [Agent integrations](integrations.md) to the manifest parser and the error codes.
+
+The web dashboard is held to HTTP as an integration is: the `web-http-only` hook fails on `surrealdb`, `surrealkv`,
+`SurrealStore`, a `store` or `jobs` path, or `/api/db` anywhere under `web/` (Markdown, `node_modules` and `dist` are
+skipped), see [ADR-035](adr/035-web-dashboard.md).
+That the dashboard's static files are the only thing besides the liveness probe that needs no token is held by
+`tests/in_process/auth.rs` and `tests/in_process/web.rs`, which walk the routes with the dashboard off and on.
 
 Two more hooks guard the remaining invariants.
 `job-status-only-via-apply` fails on any `.status =` assignment outside `src/domain/job.rs`,

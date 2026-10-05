@@ -283,6 +283,28 @@ jobs:
       - name: Typecheck and test the integrations
         run: mise run integrations:check
 
+  # The web dashboard (docs/adr/035): typechecked, tested, built, packaged by the release's own script, and served by a
+  # real daemon from an installed prefix and from the checkout. Its own job because it needs bun and node, which
+  # `mise install` deliberately leaves out of [tools]. This job is local to this repository; the template does not
+  # have it.
+  web:
+    name: 🏰 Web dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: rui314/setup-mold@v1
+      - uses: mozilla-actions/sccache-action@v0.0.11
+
+      - uses: jdx/mise-action@v5
+        with:
+          cache: true
+
+      # `build` is a dependency of the task, so the debug binary the tests start is built first.
+      - name: Typecheck, test and package the dashboard
+        run: mise run web:check
+
   # The .deb and .rpm are otherwise first built by 📦 Publish Release, after the
   # tag exists, which is the worst moment to learn the nfpm config is broken.
   # Stub binaries are enough: nfpm only packages the bytes it is given. They
@@ -313,7 +335,10 @@ jobs:
           mkdir -p integrations-bundle/integrations/pi integrations-bundle/skills/wake-up
           echo 'format = 1' > integrations-bundle/integrations/pi/memcastle-integration.toml
           echo '# wake' > integrations-bundle/skills/wake-up/SKILL.md
-          SOURCES_DIR="${PWD}/bundle" INTEGRATIONS_DIR="${PWD}/integrations-bundle" \
+          # And for the dashboard (packaging/web/build.sh builds the real one, which tests/web_bundle.rs checks).
+          mkdir -p web-bundle/web/dist/assets
+          echo '<!doctype html>' > web-bundle/web/dist/index.html
+          SOURCES_DIR="${PWD}/bundle" INTEGRATIONS_DIR="${PWD}/integrations-bundle" WEB_DIR="${PWD}/web-bundle" \
             packaging/nfpm/build.sh 0.0.0 dist
 
       # Building without error is not enough: the binary must land where the
@@ -331,7 +356,8 @@ jobs:
                         usr/share/fish/vendor_completions.d/memcastle.fish \
                         usr/share/memcastle/sources/memcastle-index.json \
                         usr/share/memcastle/integrations/pi/memcastle-integration.toml \
-                        usr/share/memcastle/skills/wake-up/SKILL.md; do
+                        usr/share/memcastle/skills/wake-up/SKILL.md \
+                        usr/share/memcastle/web/dist/index.html; do
               grep -q " ./${file}$" contents.txt || { echo "::error::${asset}: ${file} is not in the package"; exit 1; }
             done
           done

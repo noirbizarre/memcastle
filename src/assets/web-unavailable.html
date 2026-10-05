@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MemCastle dashboard is not installed</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 4rem auto; padding: 0 1rem; line-height: 1.5; }
+      code { background: rgba(127, 127, 127, 0.2); padding: 0.1rem 0.3rem; border-radius: 0.2rem; }
+    </style>
+  </head>
+  <body>
+    <h1>The dashboard is enabled but its files are missing</h1>
+    <p>
+      This daemon was started with <code>web.enable = true</code>, but it found no
+      <code>web/dist/index.html</code> in its runtime assets.
+      The daemon itself is running normally, and the REST API and MCP are unaffected.
+    </p>
+    <p>To fix it, do one of:</p>
+    <ul>
+      <li>install a MemCastle package or release archive, which carries <code>share/memcastle/web/</code>;</li>
+      <li>in a checkout, run <code>mise run web:build</code> and start the daemon with <code>--assets-dir "$PWD"</code>;</li>
+      <li>set <code>web.enable = false</code> (or unset <code>MEMCASTLE_WEB_ENABLE</code>) to stop serving <code>/ui</code>.</li>
+    </ul>
+  </body>
+</html>

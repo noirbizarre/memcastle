@@ -30,6 +30,10 @@ CI uses `dtolnay/rust-toolchain` because it needs per-job components and cross-c
 | `mise run integrations:check` | Typecheck and test every package under `integrations/` against a real daemon (needs bun) |
 | `mise run integrations:build` | Bundle the Pi and OpenCode integrations into `integrations/<id>/dist`, for `--assets-dir "$PWD"` (needs bun) |
 | `mise run integrations:package` | Lay out the integrations and skills that ship with releases in `target/bundled-integrations` (needs bun) |
+| `mise run web:check` | Typecheck, test, build and package the web dashboard, then serve it from a real daemon (needs bun and node) |
+| `mise run web:build` | Build `web/` into `web/dist`, for `--assets-dir "$PWD"` with `web.enable` (needs bun and node) |
+| `mise run web:dev` | Run the dashboard's dev server against the running daemon (needs bun and node) |
+| `mise run web:package` | Lay out the dashboard that ships with releases in `target/bundled-web` (needs bun and node) |
 | `mise run cover` | Run the tests with coverage |
 | `mise run format` | Format |
 | `mise run format:check` | Check the formatting without rewriting |
@@ -37,7 +41,7 @@ CI uses `dtolnay/rust-toolchain` because it needs per-job components and cross-c
 | `mise run lint:actions` | actionlint over the workflows |
 | `mise run lint:md` | markdownlint over AGENTS.md, CONTRIBUTING.md, README.md, docs/ and the skills' `SKILL.md` files |
 | `mise run spell` | typos |
-| `mise run guards` | The architecture guard hooks (`store-isolation`, `single-writer`, `job-status-only-via-apply`, `no-hand-rolled-ddl`, `integrations-http-only`) over the whole tree |
+| `mise run guards` | The architecture guard hooks (`store-isolation`, `single-writer`, `job-status-only-via-apply`, `no-hand-rolled-ddl`, `integrations-http-only`, `web-http-only`) over the whole tree |
 | `mise run snapshots` | Review pending insta snapshots |
 | `mise run check` | Every lint, the guards, both test suites, the sources and the integrations, without modifying the working tree |
 | `mise run ci` | `check` plus the documentation build |
@@ -94,12 +98,13 @@ Nothing to release is the normal case for step 1, and costs one workflow run rep
 - the raw executables, `memcastle_<tag>_<platform>[.exe]`, which the AUR recipe, the Homebrew formula and
   `cargo binstall` fetch by name, so renaming them breaks those;
 - a tarball for each Unix platform, `memcastle_<tag>_<platform>.tar.gz`, in the native-package layout
-  (`bin/`, `share/doc/memcastle/`, `share/memcastle/{sources,integrations,skills}/`);
-- the bundled sources on their own, `memcastle_<tag>_sources.tar.gz`, and the bundled integrations with their skills,
-  `memcastle_<tag>_integrations.tar.gz`, which one asset each serves to the AUR package and the Homebrew formula;
+  (`bin/`, `share/doc/memcastle/`, `share/memcastle/{sources,integrations,skills,web}/`);
+- the bundled sources on their own, `memcastle_<tag>_sources.tar.gz`, the bundled integrations with their skills,
+  `memcastle_<tag>_integrations.tar.gz`, and the web dashboard, `memcastle_<tag>_web.tar.gz`, which one asset each serves
+  to the AUR package and the Homebrew formula;
 - `.deb` and `.rpm` packages for linux-amd64 and linux-arm64, `memcastle_<tag>_<platform>.{deb,rpm}`, built by nfpm
   from `packaging/nfpm/nfpm.yaml` (binary, systemd user unit, shell completions, documentation, bundled sources,
-  integrations and skills)
+  integrations, skills and the web dashboard)
   and smoke-tested before upload;
   CI builds them from stub binaries on every pull request, through the same `packaging/nfpm/build.sh`,
   so a broken packaging config fails on the pull request and not mid-release;

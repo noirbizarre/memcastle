@@ -182,6 +182,12 @@ Installing from a checkout goes through exactly the code a package install does,
 Because a development build never changes the integration's version, the installer compares file contents as well:
 rebuild, run `memcastle integration update pi --assets-dir "$PWD"`, and the new bundle replaces the old one.
 `MEMCASTLE_ASSETS_DIR` does the same as the flag for a whole shell session.
+In this repository `mise.toml` sets it to the checkout for you: with mise active (`mise run`, `mise cli`, or an activated
+shell), any `memcastle integration ...` run from the project directory, even an installed `memcastle`, reads the
+checkout's bundles and not the package's, so the flag is not needed.
+Run the command from another directory to use the installed assets, and see
+[Development](development.md#running-the-daemon-locally) for what else it sets.
+`mise run integrations:check` unsets it, so the checks never depend on it.
 
 `mise run integrations:package` lays out the tree a release carries in `target/bundled-integrations`,
 for installing the packaged layout with `--assets-dir target/bundled-integrations`.

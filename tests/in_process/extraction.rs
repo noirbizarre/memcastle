@@ -456,3 +456,95 @@ async fn a_command_provider_is_run_with_the_texts_and_its_answer_becomes_the_gra
     assert_eq!(edges[0]["provenance"]["extractor"], "command");
     daemon.shutdown().await;
 }
+
+#[tokio::test]
+async fn the_graph_route_answers_a_neighbourhood_and_an_overview_in_one_request() {
+    let daemon = daemon().await;
+    let base = &daemon.base_url;
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "team.md", TEAM, 1_000);
+    write(dir.path(), "architecture.md", ARCHITECTURE, 1_001);
+    mine(base, dir.path()).await;
+    settle(base).await;
+    let ada = entity(base, "Ada Lovelace").await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let hood = get(base, &format!("/api/graph?entity={ada}")).await;
+
+    let nodes = hood["nodes"].as_array().unwrap();
+    assert_eq!(nodes[0]["name"], "Ada Lovelace", "the centre comes first");
+    assert!(
+        nodes.iter().any(|node| node["name"] == "MemCastle"),
+        "{hood}"
+    );
+    let edges = hood["edges"].as_array().unwrap();
+    assert!(
+        edges.iter().any(|edge| edge["predicate"] == "works_on"),
+        "{hood}"
+    );
+    assert!(
+        edges.iter().all(|edge| {
+            let known = |id: &Value| nodes.iter().any(|node| node["id"] == *id);
+            known(&edge["from"]) && known(&edge["to"])
+        }),
+        "an edge never points at a node the answer does not hold: {hood}"
+    );
+    assert_eq!(hood["truncated"], false);
+
+    // Without a centre it is an overview, bounded by `limit`, and says when it stopped short.
+    let overview = get(base, "/api/graph").await;
+    assert!(
+        overview["nodes"].as_array().unwrap().len() > 1,
+        "{overview}"
+    );
+    let capped = get(base, "/api/graph?limit=1").await;
+    assert_eq!(capped["nodes"].as_array().unwrap().len(), 1);
+    assert_eq!(capped["truncated"], true, "{capped}");
+    assert!(
+        capped["edges"].as_array().unwrap().is_empty(),
+        "one node has no edge between its members: {capped}"
+    );
+
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_graph_route_refuses_an_unknown_or_malformed_entity() {
+    let daemon = daemon().await;
+    let base = &daemon.base_url;
+
+    let unknown = client()
+        .get(format!(
+            "{base}/api/graph?entity=00000000-0000-0000-0000-000000000000"
+        ))
+        .send()
+        .await
+        .unwrap();
+    let malformed = client()
+        .get(format!("{base}/api/graph?entity=not-an-id"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(unknown.status(), 404);
+    assert_eq!(malformed.status(), 400);
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_graph_route_is_a_read_and_a_disabled_session_gets_nothing() {
+    let daemon = daemon().await;
+    let base = &daemon.base_url;
+
+    let response = client()
+        .get(format!("{base}/api/graph"))
+        .header("x-memcastle-mode", "disabled")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 403);
+    daemon.shutdown().await;
+}

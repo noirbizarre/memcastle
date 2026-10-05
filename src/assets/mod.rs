@@ -43,14 +43,21 @@ const SYSTEM_SHARE_DIRS: &[&str] = &["/usr/local/share/memcastle", "/usr/share/m
 #[cfg(not(unix))]
 const SYSTEM_SHARE_DIRS: &[&str] = &[];
 
+/// The directory under the assets root holding the built dashboard.
+///
+/// The same relative path in a packaged installation (`<prefix>/share/memcastle/web/dist`) and in a worktree
+/// (`<checkout>/web/dist`), so one lookup serves both (docs/adr/035).
+pub const WEB_DIST_DIR: &str = "web/dist";
+/// The dashboard's entry point, relative to the assets root.
+pub const WEB_INDEX: &str = "web/dist/index.html";
+
 /// Assets compiled into the binary, as `(relative path, bytes)`.
 ///
-/// Empty for 0.1: the only version-coupled runtime data (the schema and the
-/// data migrations) is embedded by other means and is not a file asset, and
-/// the web UI is not packaged yet. The list exists so that adding a small
-/// built-in default later changes this table and nothing about how lookups
-/// are ordered.
-const EMBEDDED: &[(&str, &[u8])] = &[];
+/// The only version-coupled runtime data (the schema and the data migrations) is embedded by other means and is
+/// not a file asset. What is here is the page served in place of the dashboard when it is enabled but its build is
+/// absent: a built `web/dist/index.html` found in the chosen directory always outranks it, and it is the one
+/// embedded asset because a page that names the remedy must exist precisely when the real files do not.
+const EMBEDDED: &[(&str, &[u8])] = &[(WEB_INDEX, include_bytes!("web-unavailable.html"))];
 
 /// Where the assets in use come from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -194,6 +201,12 @@ impl Assets {
             AssetSource::Override(dir) | AssetSource::Installed(dir) => Some(dir),
             AssetSource::Embedded => None,
         }
+    }
+
+    /// Whether a built dashboard is present, as opposed to the embedded "not installed" page.
+    #[must_use]
+    pub fn web_is_built(&self) -> bool {
+        matches!(self.find(WEB_INDEX), Some(Asset::File(_)))
     }
 
     /// Find one asset by its path relative to the asset root.
@@ -431,6 +444,73 @@ mod tests {
         assert_eq!(assets.find("a/../../secret"), None);
         assert_eq!(assets.find(absolute.to_str().unwrap()), None);
         assert_eq!(assets.find(""), None);
+    }
+
+    /// Write a built dashboard (`web/dist/index.html`) under `root`.
+    fn build_web(root: &Path) {
+        std::fs::create_dir_all(root.join(WEB_DIST_DIR)).unwrap();
+        std::fs::write(root.join(WEB_INDEX), "<html>built</html>").unwrap();
+    }
+
+    #[test]
+    fn a_packaged_installation_resolves_the_dashboard_from_its_share_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let (bin, share) = prefix(root.path(), true);
+        build_web(&share);
+
+        let assets = Assets::resolve(None, &search(Some(bin))).unwrap();
+
+        assert_eq!(
+            assets.find(WEB_INDEX),
+            Some(Asset::File(share.join(WEB_INDEX)))
+        );
+        assert!(assets.web_is_built());
+    }
+
+    #[test]
+    fn a_worktree_resolves_the_dashboard_through_the_same_lookup_as_a_package() {
+        let checkout = tempfile::tempdir().unwrap();
+        build_web(checkout.path());
+
+        let assets = Assets::resolve(Some(checkout.path()), &search(None)).unwrap();
+
+        assert_eq!(
+            assets.find(WEB_INDEX),
+            Some(Asset::File(checkout.path().join(WEB_INDEX)))
+        );
+        assert!(assets.web_is_built());
+    }
+
+    #[test]
+    fn a_worktree_dashboard_outranks_an_installed_one() {
+        let root = tempfile::tempdir().unwrap();
+        let (bin, share) = prefix(root.path(), true);
+        build_web(&share);
+        let checkout = root.path().join("checkout");
+        build_web(&checkout);
+
+        let assets = Assets::resolve(Some(&checkout), &search(Some(bin))).unwrap();
+
+        assert_eq!(
+            assets.find(WEB_INDEX),
+            Some(Asset::File(checkout.join(WEB_INDEX)))
+        );
+    }
+
+    #[test]
+    fn without_a_build_the_embedded_page_stands_in_and_the_dashboard_is_not_built() {
+        let root = tempfile::tempdir().unwrap();
+        let (bin, share) = prefix(root.path(), true);
+
+        // Installed assets without a `web/` tree, and no assets at all.
+        for assets in [
+            Assets::resolve(None, &search(Some(bin))).unwrap(),
+            Assets::resolve(None, &search(None)).unwrap(),
+        ] {
+            assert!(matches!(assets.find(WEB_INDEX), Some(Asset::Embedded(_))));
+            assert!(!assets.web_is_built());
+        }
+        assert!(share.is_dir());
     }
 
     #[test]

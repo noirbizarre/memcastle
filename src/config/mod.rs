@@ -591,6 +591,18 @@ pub struct AssetsConfig {
     pub dir: Option<PathBuf>,
 }
 
+/// Web dashboard settings (see `docs/adr/035`).
+///
+/// The dashboard is a client of the REST API served from the runtime assets, so the only decision the daemon makes
+/// is whether to serve it at all.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WebConfig {
+    /// Serve the dashboard under `/ui`. Off by default: a daemon that does not need a browser UI should not
+    /// answer one, and an unauthenticated static shell is an exposure the user opts into.
+    pub enable: bool,
+}
+
 /// Job scheduler settings.
 ///
 /// `#[serde(default)]` so a config file that sets only some of these (say just
@@ -710,6 +722,9 @@ pub struct Config {
     /// Runtime asset settings.
     #[serde(default)]
     pub assets: AssetsConfig,
+    /// Web dashboard settings.
+    #[serde(default)]
+    pub web: WebConfig,
     /// Authentication settings.
     #[serde(default)]
     pub auth: AuthConfig,
@@ -863,6 +878,9 @@ impl Config {
         }
         if let Some(raw) = lookup("MEMCASTLE_AUTH_ENABLED") {
             self.auth.enabled = parse_override("MEMCASTLE_AUTH_ENABLED", &raw)?;
+        }
+        if let Some(raw) = lookup("MEMCASTLE_WEB_ENABLE") {
+            self.web.enable = parse_override("MEMCASTLE_WEB_ENABLE", &raw)?;
         }
         if let Some(bind) = lookup("MEMCASTLE_DB_BIND") {
             self.db.bind = parse_bind_host(&bind)
@@ -1559,6 +1577,33 @@ mod tests {
             ..Overrides::default()
         });
         assert_eq!(config.assets.dir, Some(PathBuf::from("/from/flag")));
+    }
+
+    #[test]
+    fn the_web_dashboard_is_off_unless_the_file_or_the_environment_turns_it_on() {
+        assert!(!Config::default().web.enable, "the dashboard is opt-in");
+        assert!(
+            !toml::from_str::<Config>("[server]\nport = 1")
+                .unwrap()
+                .web
+                .enable
+        );
+
+        let mut config: Config = toml::from_str("[web]\nenable = true").unwrap();
+        assert!(config.web.enable);
+
+        config
+            .apply_overrides_from(env(&[("MEMCASTLE_WEB_ENABLE", "false")]))
+            .unwrap();
+        assert!(!config.web.enable, "the environment outranks the file");
+    }
+
+    #[test]
+    fn a_malformed_web_enable_value_names_the_variable() {
+        let err = Config::default()
+            .apply_overrides_from(env(&[("MEMCASTLE_WEB_ENABLE", "yes")]))
+            .unwrap_err();
+        assert!(err.to_string().contains("MEMCASTLE_WEB_ENABLE"), "{err}");
     }
 
     #[test]

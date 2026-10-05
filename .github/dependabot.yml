@@ -58,3 +58,14 @@ updates:
       pi-dependencies:
         patterns: ["*"]
         update-types: [minor, patch]
+
+  # The web dashboard (docs/adr/035): a Vue application built into static files that ship with releases.
+  - package-ecosystem: bun
+    directory: /web
+    schedule:
+      interval: weekly
+    rebase-strategy: disabled
+    groups:
+      web-dependencies:
+        patterns: ["*"]
+        update-types: [minor, patch]
