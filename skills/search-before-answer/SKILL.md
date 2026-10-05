@@ -29,7 +29,8 @@ Be generous but relevant: the aim is to never miss a memory that matters, not to
 ## How to search
 
 1. Reduce the question to two to four keywords: names, nouns and distinctive terms.
-   Matching is lexical and stemmed, with no synonyms, so "formatter" does not find "prettier".
+   Matching is by words, stemmed and without synonyms, unless the daemon has an embedding provider
+   (then it also matches by meaning), so do not count on "formatter" finding "prettier".
    Short keyword queries work better than sentences.
 2. Call `memcastle_search` with the query, to see which drawers match.
    Narrow with `wing` or `room` when the topic clearly belongs to one project.

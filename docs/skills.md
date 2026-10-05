@@ -40,7 +40,7 @@ The [integration contract](integration-contract.md) describes how an integration
 | Skill | Use it when | Tools and commands it relies on |
 |---|---|---|
 | `memcastle-setup` | MemCastle is not installed, not running or not connected | `memcastle status`, `memcastle daemon start`, `memcastle_status` |
-| `search-before-answer` | a question may depend on earlier sessions, decisions or preferences | `memcastle_search`, `memcastle_recall` |
+| `search-before-answer` | a question may depend on earlier sessions, decisions or preferences | `memcastle_search`, `memcastle_recall`, `memcastle_history` |
 | `checkpoint-instructions` | something durable was decided, solved, discovered or preferred | `memcastle_checkpoint`, `memcastle_job_get`, `memcastle_job_retry` |
 | `wake-up` | a session starts or its context was reset | `memcastle_wake_up` |
 | `diary` | a work stage ends and the next session needs a note | `memcastle_diary_write`, `memcastle_diary_read` |
