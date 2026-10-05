@@ -18,7 +18,7 @@ use crate::domain::{
 };
 use crate::error::{Error, Result};
 
-use super::{AppServices, MAX_READ_LIMIT};
+use super::{AppServices, effective_limit};
 
 /// How many drawers a listing returns when the caller does not say.
 pub const DEFAULT_LIST_LIMIT: u32 = 50;
@@ -360,7 +360,7 @@ impl AppServices {
         Self::require_read(mode, "drawer_list")?;
         let wing = self.resolve_wing(wing).await?;
         let room = self.resolve_room(&wing, room).await?;
-        let limit = limit.unwrap_or(DEFAULT_LIST_LIMIT).clamp(1, MAX_READ_LIMIT);
+        let limit = effective_limit(limit, DEFAULT_LIST_LIMIT);
         self.store.list_drawer_summaries(room.id, limit).await
     }
 

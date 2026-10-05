@@ -165,12 +165,29 @@ pub const DEFAULT_SEARCH_LIMIT: u32 = 10;
 /// shared by every interface for the same reason as [`DEFAULT_SEARCH_LIMIT`].
 pub const DEFAULT_DIARY_LIMIT: u32 = 20;
 
-/// The most hits or entries any one read returns, whatever the caller asks
-/// for. Without a ceiling `limit=4294967295` is accepted verbatim and the
-/// query is asked to materialise (and the response to serialize) the whole
-/// palace. Clamped rather than rejected so an over-eager integration still
-/// gets a useful answer instead of a failure it must special-case.
+/// The most hits or entries a search, recall, diary read, drawer listing or
+/// entity listing returns, whatever the caller asks for. Without a ceiling
+/// `limit=4294967295` is accepted verbatim and the query is asked to
+/// materialise (and the response to serialize) the whole palace. Clamped
+/// rather than rejected so an over-eager integration still gets a useful
+/// answer instead of a failure it must special-case. Job, source and
+/// per-entity or per-drawer lookups take no `limit` from the caller, so this
+/// does not apply to them.
 pub const MAX_READ_LIMIT: u32 = 200;
+
+/// The number of rows a read returns for the `requested` limit: the
+/// `default` when the caller gave none or gave `0`, else the request clamped
+/// to [`MAX_READ_LIMIT`]. The one place this rule is written, because `0`
+/// used to mean "the default" for `search`, "nothing" for `diary_read` and
+/// "one" for the listings, so the same `--limit 0` answered differently
+/// depending on the command.
+#[must_use]
+pub fn effective_limit(requested: Option<u32>, default: u32) -> u32 {
+    match requested {
+        None | Some(0) => default,
+        Some(limit) => limit.min(MAX_READ_LIMIT),
+    }
+}
 
 impl WakeUpBudget {
     /// A budget from optional caller-supplied limits, each falling back to
@@ -482,11 +499,7 @@ impl AppServices {
             .temporal
             .checked()
             .map_err(|message| Error::invalid_input("temporal", message))?;
-        let limit = if query.limit == 0 {
-            DEFAULT_SEARCH_LIMIT
-        } else {
-            query.limit.min(MAX_READ_LIMIT)
-        };
+        let limit = effective_limit(Some(query.limit), DEFAULT_SEARCH_LIMIT);
         let vector = self.query_vector(&query).await?;
         crate::search::search(&self.store, &query, limit, vector.as_deref()).await
     }
@@ -1167,7 +1180,7 @@ impl AppServices {
         mode: MemoryMode,
     ) -> Result<Vec<Drawer>> {
         Self::require_read(mode, "diary_read")?;
-        let limit = limit.min(MAX_READ_LIMIT);
+        let limit = effective_limit(Some(limit), DEFAULT_DIARY_LIMIT);
         // Read-only lookups: a `ReadOnly` session reading a wing nobody has
         // written to must not create that wing and its diary room. No wing or
         // room simply means no entries.
@@ -2411,6 +2424,27 @@ mod tests {
             .await
             .expect("diary read");
         assert_eq!(entries.len(), MAX_READ_LIMIT as usize);
+    }
+
+    #[test]
+    fn a_limit_of_zero_or_none_means_the_default_and_anything_else_is_clamped() {
+        assert_eq!(effective_limit(None, 7), 7);
+        assert_eq!(effective_limit(Some(0), 7), 7);
+        assert_eq!(effective_limit(Some(3), 7), 3);
+        assert_eq!(effective_limit(Some(u32::MAX), 7), MAX_READ_LIMIT);
+    }
+
+    #[tokio::test]
+    async fn a_diary_read_with_a_zero_limit_returns_the_default_number_of_entries_not_nothing() {
+        let app = test_app().await;
+        app.diary_write("agent-a", "wing", "one".into(), "test", MemoryMode::Full)
+            .await
+            .expect("diary write");
+        let entries = app
+            .diary_read("agent-a", "wing", 0, MemoryMode::Full)
+            .await
+            .expect("diary read");
+        assert_eq!(entries.len(), 1);
     }
 
     #[tokio::test]
