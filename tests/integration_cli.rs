@@ -243,19 +243,23 @@ fn another_plugin_file_and_the_users_opencode_config_survive_install_and_remove(
     std::fs::write(config.join("opencode.json"), "{\"theme\":\"dark\"}\n").unwrap();
     let assets = machine.path("assets");
 
-    for verb in ["install", "remove"] {
-        machine
-            .memcastle()
-            .args([
-                "integration",
-                verb,
-                "opencode",
-                "--assets-dir",
-                assets.to_str().unwrap(),
-            ])
-            .assert()
-            .success();
-    }
+    machine
+        .memcastle()
+        .args([
+            "integration",
+            "install",
+            "opencode",
+            "--assets-dir",
+            assets.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    // `remove` reads no assets, so it takes no `--assets-dir`.
+    machine
+        .memcastle()
+        .args(["integration", "remove", "opencode"])
+        .assert()
+        .success();
 
     assert_eq!(
         std::fs::read_to_string(config.join("plugins/mine.ts")).unwrap(),
@@ -322,6 +326,19 @@ fn removing_works_without_any_assets_so_it_outlives_the_package() {
 
     assert!(!machine.installed("pi").exists());
     assert!(machine.pi_packages().is_empty());
+}
+
+#[test]
+fn removing_refuses_an_assets_directory_flag_because_it_reads_no_assets() {
+    let machine = machine();
+
+    // A flag that is accepted and ignored would suggest `remove` depends on the assets root.
+    machine
+        .memcastle()
+        .args(["integration", "remove", "pi", "--assets-dir", "/tmp"])
+        .assert()
+        .failure()
+        .stderr(contains("--assets-dir"));
 }
 
 #[test]
