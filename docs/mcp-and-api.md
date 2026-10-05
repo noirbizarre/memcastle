@@ -47,6 +47,38 @@ and `full` reads it again from the beginning.
 Mining, checkpoint, audit and repair return the submitted job immediately;
 poll it with `memcastle_job_get` to see its progress and result.
 
+### Tool annotations
+
+Every tool advertises a `title` and all four [MCP behaviour hints](https://modelcontextprotocol.io/specification/2025-06-18/schema#toolannotations)
+as explicit booleans, so a host can warn before it runs one.
+The protocol's defaults assume the worst (destructive, open-world, not idempotent),
+and some directories reject a tool whose hint is missing.
+
+| Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
+|---|---|---|---|---|
+| `memcastle_status`, `memcastle_history`, `memcastle_wake_up`, `memcastle_diary_read`, `memcastle_job_list`, `memcastle_job_get` | true | false | true | false |
+| `memcastle_search`, `memcastle_recall` | true | false | true | true |
+| `memcastle_set_mode` | false | false | true | false |
+| `memcastle_mine` | false | false | true | true |
+| `memcastle_checkpoint`, `memcastle_repair` | false | true | false | false |
+| `memcastle_audit`, `memcastle_diary_write` | false | false | false | false |
+| `memcastle_job_pause`, `memcastle_job_resume`, `memcastle_job_retry` | false | false | true | false |
+| `memcastle_job_cancel` | false | true | true | false |
+
+A few of these are judgement calls:
+
+- Search and recall are open-world because a configured embedding provider (a command or an HTTP endpoint)
+  receives the query text.
+- `memcastle_mine` is open-world because it reads the local filesystem and an installed source may be granted the network.
+  It is idempotent because mining skips unchanged documents.
+- `memcastle_checkpoint` is destructive because a fact can supersede or invalidate an earlier one.
+  `memcastle_repair` is destructive because `dry_run=false` removes orphan drawers, though it defaults to a dry run.
+- The job-control tools are idempotent because repeating one is refused and leaves the job as it was.
+  Cancelling drops the work, so it is destructive.
+- `memcastle_audit` and `memcastle_diary_write` are not idempotent because each call adds a job record or a drawer.
+
+A test pins this table, and fails for a tool that has no row.
+
 The instructions an MCP client receives at `initialize` are generated from this list of tools,
 and a test compares the two, so what a client is told cannot drift from what the daemon offers.
 

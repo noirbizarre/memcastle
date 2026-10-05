@@ -461,6 +461,12 @@ fn tool_result<T: serde::Serialize>(
     })
 }
 
+// Every tool declares a title and all four behaviour hints, explicitly. The MCP
+// defaults are the worst case (destructive, open-world, not idempotent), so an
+// omitted hint makes a host warn about a harmless read, and some directories
+// reject a tool with a missing or non-boolean hint. The table in
+// `every_tool_declares_its_title_and_all_four_hints` pins each value, so a new
+// tool cannot ship unannotated.
 #[tool_router]
 impl McpTools {
     /// Wrap `app` as an MCP tool surface.
@@ -537,6 +543,13 @@ impl McpTools {
     }
 
     #[tool(
+        title = "Set memory mode",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
         description = "Set this MCP session's memory mode (full/read_only/disabled); call once \
                         at session start — every other tool call on this session uses whatever \
                         was set here, defaulting to full until this is called"
@@ -550,6 +563,13 @@ impl McpTools {
     }
 
     #[tool(
+        title = "Daemon status",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
         description = "Report daemon health: version, uptime, pid, listen address, palace name and path, datastore health and migration state, drawer and job counts"
     )]
     async fn memcastle_status(
@@ -561,6 +581,13 @@ impl McpTools {
     }
 
     #[tool(
+        title = "Search memory",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        ),
         description = "Search palace drawer content. By default the ranking is hybrid (word \
                         match plus meaning) when the daemon can embed the query, and word match \
                         alone otherwise; `ranking` forces lexical, semantic or hybrid. Word matching \
@@ -590,6 +617,13 @@ impl McpTools {
     }
 
     #[tool(
+        title = "Recall memory",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        ),
         description = "Retrieve palace content matching a query, returned verbatim — the \
                         recall-oriented counterpart to memcastle_search (see \
                         AppServices::recall's doc comment for why both exist). Takes the same \
@@ -610,6 +644,13 @@ impl McpTools {
     }
 
     #[tool(
+        title = "Drawer history",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
         description = "Show how one piece of knowledge evolved: every version of a drawer's \
                         supersession chain, oldest first, each verbatim with its id, validity \
                         period (`valid_from`, `valid_to`, absent while still true), provenance \
@@ -630,6 +671,13 @@ impl McpTools {
     }
 
     #[tool(
+        title = "Wake up context",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
         description = "Build an agent identity's session-start context: its most recent diary \
                         entry (when a wing is given) plus recent checkpoint-originated \
                         highlights, bounded by a deterministic item/byte budget"
@@ -649,6 +697,13 @@ impl McpTools {
     }
 
     #[tool(
+        title = "Mine a source",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        ),
         description = "Submit a mining job for a directory (`path`) or a source adapter (`source`); \
                         returns the job id immediately. Mining is incremental: a source remembers where \
                         the last run stopped and unchanged documents are not filed again"
@@ -682,6 +737,13 @@ impl McpTools {
     }
 
     #[tool(
+        title = "Write checkpoint",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        ),
         description = "Persist a pre-classified checkpoint payload (see the `payload` \
                         argument's own description for its exact JSON shape); set \
                         emergency=true to preempt all other queued work"
@@ -708,6 +770,13 @@ impl McpTools {
     }
 
     #[tool(
+        title = "Audit palace",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        ),
         description = "Submit a read-only palace consistency audit; returns the job id \
                         immediately — poll memcastle_job_get for the \
                         report, which lands in the job's `result` field once completed"
@@ -723,6 +792,13 @@ impl McpTools {
     }
 
     #[tool(
+        title = "Write diary entry",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        ),
         description = "Write a diary entry for an agent identity, filed in a wing's fixed diary room"
     )]
     async fn memcastle_diary_write(
@@ -745,6 +821,13 @@ impl McpTools {
     }
 
     #[tool(
+        title = "Read diary entries",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
         description = "Read back an agent identity's most recent diary entries in a wing, newest first"
     )]
     async fn memcastle_diary_read(
@@ -761,6 +844,13 @@ impl McpTools {
     }
 
     #[tool(
+        title = "Repair palace",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        ),
         description = "Submit a repair job that removes orphan drawers (drawers whose room no \
                         longer exists). Dry-run by default: it only reports what it would \
                         remove, in the job's `result`. Pass dry_run=false to apply it, which is a \
@@ -787,6 +877,13 @@ impl McpTools {
     }
 
     #[tool(
+        title = "List jobs",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
         description = "List jobs known to the daemon, newest first, optionally only those in one \
                         status (queued, running, paused, completed, failed or cancelled)"
     )]
@@ -809,6 +906,13 @@ impl McpTools {
     }
 
     #[tool(
+        title = "Get job",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
         description = "Show one job: its status, progress, attempt counts and, once finished, \
                         its result (an audit's or repair's report) or error"
     )]
@@ -823,6 +927,13 @@ impl McpTools {
     }
 
     #[tool(
+        title = "Pause job",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
         description = "Ask a running job to pause at its next checkpoint. It is a request: the \
                         job stops at its next check, not instantly. Resume it with memcastle_job_resume"
     )]
@@ -834,7 +945,16 @@ impl McpTools {
         tool_result("memcastle_job_pause", result)
     }
 
-    #[tool(description = "Resume a paused job; it continues from where it stopped")]
+    #[tool(
+        title = "Resume job",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
+        description = "Resume a paused job; it continues from where it stopped"
+    )]
     async fn memcastle_job_resume(
         &self,
         Parameters(args): Parameters<JobIdArgs>,
@@ -844,6 +964,13 @@ impl McpTools {
     }
 
     #[tool(
+        title = "Cancel job",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
         description = "Cancel a queued, paused or running job. For a running one it is a \
                         request: the job stops at its next check. A cancelled job is not re-run"
     )]
@@ -856,6 +983,13 @@ impl McpTools {
     }
 
     #[tool(
+        title = "Retry job",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
         description = "Retry a failed job: it goes back to the queue and resumes from its checkpoint"
     )]
     async fn memcastle_job_retry(
@@ -1322,6 +1456,83 @@ mod tests {
 
     fn id_args(id: &str) -> Parameters<JobIdArgs> {
         Parameters(JobIdArgs { id: id.to_string() })
+    }
+
+    #[tokio::test]
+    async fn every_tool_declares_its_title_and_all_four_hints() {
+        // (name, read-only, destructive, idempotent, open-world): the behaviour
+        // each handler actually has, so a wrong hint fails here, not in a host.
+        let expected: [(&str, bool, bool, bool, bool); 18] = [
+            ("memcastle_set_mode", false, false, true, false),
+            ("memcastle_status", true, false, true, false),
+            ("memcastle_search", true, false, true, true),
+            ("memcastle_recall", true, false, true, true),
+            ("memcastle_history", true, false, true, false),
+            ("memcastle_wake_up", true, false, true, false),
+            ("memcastle_mine", false, false, true, true),
+            ("memcastle_checkpoint", false, true, false, false),
+            ("memcastle_audit", false, false, false, false),
+            ("memcastle_diary_write", false, false, false, false),
+            ("memcastle_diary_read", true, false, true, false),
+            ("memcastle_repair", false, true, false, false),
+            ("memcastle_job_list", true, false, true, false),
+            ("memcastle_job_get", true, false, true, false),
+            ("memcastle_job_pause", false, false, true, false),
+            ("memcastle_job_resume", false, false, true, false),
+            ("memcastle_job_cancel", false, true, true, false),
+            ("memcastle_job_retry", false, false, true, false),
+        ];
+        let listed = tools().await.tool_router.list_all();
+
+        // A tool missing from the table is a tool nobody classified.
+        let registered: std::collections::BTreeSet<&str> =
+            listed.iter().map(|tool| tool.name.as_ref()).collect();
+        let classified: std::collections::BTreeSet<&str> =
+            expected.iter().map(|row| row.0).collect();
+        assert_eq!(
+            registered, classified,
+            "every registered tool needs a row in this table, and every row a tool"
+        );
+
+        for (name, read_only, destructive, idempotent, open_world) in expected {
+            let tool = listed
+                .iter()
+                .find(|tool| tool.name == name)
+                .expect("registered, checked above");
+            assert!(
+                tool.title.as_deref().is_some_and(|title| !title.is_empty()),
+                "{name} has no title"
+            );
+            let annotations = tool
+                .annotations
+                .as_ref()
+                .unwrap_or_else(|| panic!("{name} has no annotations"));
+            assert_eq!(
+                annotations.read_only_hint,
+                Some(read_only),
+                "{name} readOnlyHint"
+            );
+            assert_eq!(
+                annotations.destructive_hint,
+                Some(destructive),
+                "{name} destructiveHint"
+            );
+            assert_eq!(
+                annotations.idempotent_hint,
+                Some(idempotent),
+                "{name} idempotentHint"
+            );
+            assert_eq!(
+                annotations.open_world_hint,
+                Some(open_world),
+                "{name} openWorldHint"
+            );
+            // A read-only tool that is also destructive contradicts itself.
+            assert!(
+                !(read_only && destructive),
+                "{name} is read-only and destructive"
+            );
+        }
     }
 
     #[tokio::test]

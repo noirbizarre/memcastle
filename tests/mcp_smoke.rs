@@ -256,6 +256,7 @@ async fn the_mcp_surface_serves_a_migrated_palace_and_survives_a_daemon_restart(
         .expect("tools/list succeeds");
     let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
     for expected in [
+        "memcastle_set_mode",
         "memcastle_status",
         "memcastle_search",
         "memcastle_recall",
@@ -269,11 +270,32 @@ async fn the_mcp_surface_serves_a_migrated_palace_and_survives_a_daemon_restart(
         "memcastle_repair",
         "memcastle_job_list",
         "memcastle_job_get",
+        "memcastle_job_pause",
+        "memcastle_job_resume",
+        "memcastle_job_cancel",
+        "memcastle_job_retry",
     ] {
         assert!(
             names.contains(&expected),
             "{expected} missing from {names:?}"
         );
+    }
+    // The hints must survive the wire as explicit booleans: a host (or a directory scanning the server)
+    // reads them from `tools/list`, and a missing one falls back to the worst-case default.
+    for tool in &tools {
+        let wire = serde_json::to_value(tool).expect("tool serializes");
+        for hint in [
+            "readOnlyHint",
+            "destructiveHint",
+            "idempotentHint",
+            "openWorldHint",
+        ] {
+            assert!(
+                wire["annotations"][hint].is_boolean(),
+                "{} advertises no boolean {hint}: {wire}",
+                tool.name
+            );
+        }
     }
 
     // The first client to get an answer already sees a migrated palace: nothing served it before migrations ran.
