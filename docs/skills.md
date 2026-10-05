@@ -60,7 +60,10 @@ session whose mode is `disabled`.
 
 The skills use the Agent Skills layout, `skills/<name>/SKILL.md` with a `name` and a `description`,
 so any client that discovers skills from a directory can use them.
-There is no MemCastle command to install them, and no package manager: copying the directories is the whole installation.
+There is no package manager, and copying the directories is the whole installation.
+If you use the Pi or OpenCode integration, you do not need to: `memcastle integration install` copies the skills beside
+the integration, which reads them from there ([Agent integrations](integrations.md)).
+The steps below are for a client without an integration, or for skills you want the client itself to discover.
 
 1. Get the skills of the release you run.
    The repository at a release tag holds the skills written for that release:

@@ -20,7 +20,9 @@ mise run sources:test -- directory   # the same for one source, which is what ea
 mise run lint       # cargo clippy --all-targets --all-features -- -D warnings
 mise run format     # cargo fmt --all
 mise run guards     # the architecture guard hooks, described below
-mise run integrations:check # typecheck and test each package under integrations/ (needs bun, fetched on demand)
+mise run integrations:check # typecheck and test each package under integrations/, and install the bundles (needs bun)
+mise run integrations:build # bundle integrations/*/src into integrations/*/dist, for `--assets-dir "$PWD"`
+mise run integrations:package # lay out what a release ships in target/bundled-integrations
 mise run check      # every lint, the guards, both test suites, the sources and the integrations, without modifying the tree
 mise run ci         # check plus the docs build: the local equivalent of CI's lint,
                     # test and docs steps
@@ -127,6 +129,15 @@ Every path, environment variable, flag and the precedence between them is in [Co
     each starts a real `memcastle serve`, finds it through its registry file and replays the same fixtures through
     the integration's own client.
     Run them with `mise run integrations:check`, see [ADR-022](adr/022-integrations-are-bun-packages-tested-against-a-real-daemon.md).
+  - `tests/integration_cli.rs` — `memcastle integration list|install|update|remove` through the real binary, with fake
+    `pi` and `opencode` programs and a throwaway home: the lifecycle, idempotence, compatibility refusals,
+    preservation of the user's other plugins and settings,
+    and resolution from `--assets-dir`, the environment and the binary's own prefix.
+    The installer's unit tests are in `src/integration/` (manifest, discovery, adapters, install, update, remove, rollback).
+  - `tests/integration_bundle.rs` — builds the bundles with `packaging/integrations/build.sh`, checks the package tree
+    (manifests accepted by this MemCastle, no sources or `node_modules`, the skills) and runs the same lifecycle from the
+    packaged tree and from the checkout.
+    It needs bun, so it is `#[ignore]`d in the basic suite and `mise run integrations:check` runs it.
   - `integrations/common/test/` — what needs two integrations at once: sessions in every memory mode against one
     daemon, and the proof, from the requests on the wire, that an `off` session receives nothing.
     It is test-only and imports the integrations' sources, see
@@ -253,6 +264,12 @@ daemon's environment, standard streams, arguments or a writable directory.
 Building the reference WebAssembly sources needs the `wasm32-wasip2` target (`rustup target add wasm32-wasip2`, which
 `rust-toolchain.toml` requests); `mise run sources:check` builds and tests every source under `sources/`.
 `tests/source_isolation.rs` builds nothing and runs in the basic suite on every OS.
+
+The integration installer is local tooling like the source tooling, and is held to the same rule in the same way.
+`tests/integration_isolation.rs` fails when `src/integration/` mentions the store, the jobs, the daemon client, the
+network or an agent's settings file or a credential, and when anything under `src/mcp`, `src/api`, `src/app` or
+`src/server` (or any module but the binary) calls it.
+`tests/integration_docs.rs` holds [Agent integrations](integrations.md) to the manifest parser and the error codes.
 
 Two more hooks guard the remaining invariants.
 `job-status-only-via-apply` fails on any `.status =` assignment outside `src/domain/job.rs`,

@@ -20,7 +20,8 @@
 //! (everything else), with two narrow exceptions: `migrate` connects to
 //! storage itself, and `daemon start`/`daemon restart` also manage the daemon
 //! process (registry file plus spawning `serve`) — see `docs/architecture.md`
-//! for the full rationale.
+//! for the full rationale. The local tooling (`source init|build|test|package|index|keygen` through [`source`], and
+//! `integration` through [`integration`]) works on files with no daemon and touches neither `store` nor `jobs`.
 
 #![allow(clippy::result_large_err)]
 #![warn(missing_docs)]
@@ -39,6 +40,7 @@ pub mod domain;
 pub mod embed;
 pub mod error;
 pub mod extract;
+pub mod integration;
 pub mod jobs;
 pub mod mcp;
 pub mod migrate;

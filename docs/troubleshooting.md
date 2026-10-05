@@ -313,6 +313,16 @@ installed again; one that is incompatible needs rebuilding against this MemCastl
 cannot read a file it expects probably lacks a `filesystem.read` permission.
 The full list is in [Writing a mining source](writing-sources.md#troubleshooting).
 
+### `memcastle::integration::*`
+
+These come from `memcastle integration` and its installation of the [Pi and OpenCode integrations](integrations.md).
+Every one is raised before anything is changed on your machine, except `validation_failed`, which means the copy was
+made but does not check out.
+`incompatible` names the version it found of MemCastle or the agent and the range the integration supports;
+`agent_not_found` means the agent's command is not on the `PATH` of this shell; `conflict` means a plugin file of your own
+is in the way and was left alone; and `assets_missing` means this MemCastle has no assets root with integrations in it.
+The full table, with what to do about each, is in [Agent integrations](integrations.md#troubleshooting).
+
 ### Search returns nothing for a query that should match
 
 Without an [embedding provider](configuration.md#embeddings) search is lexical: it matches words in the stored text, not

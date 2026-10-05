@@ -533,8 +533,8 @@ What else a release may carry falls into three kinds, kept apart on purpose:
 
 - **Embedded** in the binary: anything small that must match its version exactly.
   The SurrealDB schema (`surrealkit::embed_schema!`) and the data migrations (`crate::migrate`) are of this kind.
-- **Installed** by a package manager under `share/memcastle`: the sources bundled with MemCastle today, a web UI
-  perhaps later.
+- **Installed** by a package manager under `share/memcastle`: the sources bundled with MemCastle, the agent integrations
+  and the skills they read, a web UI perhaps later.
 - **User data and configuration**, under the XDG directories and never treated as assets.
 
 `assets::Assets::resolve` picks one source for the run, in this order:
@@ -551,7 +551,10 @@ flowchart TD
 ```
 
 The resolver only reads directories, so startup never needs the network.
-Its one consumer so far is the bundle of sources (`sources/`); a web UI would be the next.
+Its consumers are the bundle of sources (`sources/`) and the integration installer (`integrations/`, `skills/`); a web UI
+would be the next.
+The assets root is a directory with that layout, so a checkout of the repository is a valid one,
+which is how a developer installs the integrations as built in their worktree (see below).
 The module is pure and the daemon's composition root calls it once, before binding the listener,
 so a mistyped override fails a start that has changed nothing.
 [ADR-013](adr/013-release-packaging-and-asset-resolution.md) records the layout, the order and what was rejected;
@@ -597,6 +600,23 @@ and every integration is held to the same conformance matrix with the same fixtu
 The core stays a memory runtime:
 it has no scheduler for an integration's timers and no session of its own beyond the MCP session.
 See the [Integration contract](integration-contract.md) and [ADR-019](adr/019-shared-integration-contract.md).
+
+**Installing an integration is local tooling, not a daemon operation.**
+`memcastle integration` finds an integration under the assets root, checks it against the running MemCastle and the
+agent's version, copies it to the user's data directory, and registers it through the agent's own mechanism:
+`pi install` for Pi, one marked plugin file for OpenCode.
+It lives in `crate::integration`, which like `crate::source` touches neither the store nor the jobs and opens no network,
+needs no daemon, and has no MCP tool or REST route, so an agent cannot change the code it runs.
+
+```mermaid
+flowchart LR
+    root["assets root<br/>--assets-dir / package share/memcastle"] --> catalog[integration::catalog]
+    catalog --> install[integration::install]
+    install -->|copy + receipt| data["~/.local/share/memcastle/agents/id"]
+    install -->|register| agent["agent adapter:<br/>pi install / plugins/memcastle.ts"]
+```
+
+See [Agent integrations](integrations.md) and [ADR-034](adr/034-agent-integration-distribution.md).
 
 **The database console is opt-in.**
 `memcastle serve` opens one listener and nothing else.

@@ -56,7 +56,8 @@ opencode mcp list
 
 !!! warning
     This is the plain MCP setup.
-    If you use the OpenCode integration (the plugin in `integrations/opencode`), do **not** also add
+    If you use the OpenCode integration (`memcastle integration install opencode`, see
+    [Agent integrations](integrations.md)), do **not** also add
     `mcp.memcastle`: the plugin opens its own connection per session, and enabling both shows the model two copies of every
     tool.
 

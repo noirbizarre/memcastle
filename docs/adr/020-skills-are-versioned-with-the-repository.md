@@ -4,7 +4,9 @@
 
 Accepted, builds on [ADR-019](019-shared-integration-contract.md) (the contract's `skills` capability has no daemon
 operation) and [ADR-013](013-release-packaging-and-asset-resolution.md) (a package asset needs a consumer, and there is
-none for skills)
+none for skills).
+Amended by [ADR-034](034-agent-integration-distribution.md): an installed integration now reads the skills, so releases
+package them under `share/memcastle/skills/` and the integration installer copies them beside the integration.
 
 ## Context
 

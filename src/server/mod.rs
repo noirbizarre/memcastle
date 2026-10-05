@@ -96,7 +96,7 @@ pub async fn run(config: Config) -> Result<()> {
     let mut scheduler = Scheduler::new(store.clone(), config.jobs.max_concurrency)
         .with_embeddings(embeddings.clone())
         .with_extraction(extraction.clone())
-        .with_mining(config.mining.clone())
+        .with_mining(config.effective_mining())
         .with_dedup(config.dedup.clone())
         .with_drain_timeout(Duration::from_secs(config.jobs.drain_timeout_secs))
         .with_lease_ttl(Duration::from_secs(config.jobs.lease_ttl_secs));
@@ -129,7 +129,7 @@ pub async fn run(config: Config) -> Result<()> {
     let backend_info = backend.describe();
     let backend_info_kind = backend_info.kind.to_string();
     let app = AppServices::new(store, Arc::clone(&scheduler))
-        .with_mining(config.mining.clone())
+        .with_mining(config.effective_mining())
         .with_embeddings(embeddings)
         .with_extraction(extraction)
         .with_dedup(config.dedup.clone())

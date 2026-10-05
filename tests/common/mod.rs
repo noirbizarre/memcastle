@@ -16,6 +16,10 @@ use std::time::Duration;
 // can use them, but only `integration_contract.rs` does today.
 pub mod mcp;
 
+// A throwaway machine with fake `pi` and `opencode` programs, for the `memcastle integration` tests.
+#[cfg(unix)]
+pub mod agents;
+
 // Building WebAssembly components for the `wasm_*` binaries: the shared target directory and lockfile.
 pub mod wasm;
 

@@ -184,6 +184,18 @@ impl Assets {
         &self.source
     }
 
+    /// The directory the assets come from, or `None` when only the embedded ones exist.
+    ///
+    /// This is the one data root: `sources/`, `integrations/` and `skills/` are all found beneath it, in a packaged
+    /// installation and in a development worktree alike (docs/adr/034).
+    #[must_use]
+    pub fn root(&self) -> Option<&Path> {
+        match &self.source {
+            AssetSource::Override(dir) | AssetSource::Installed(dir) => Some(dir),
+            AssetSource::Embedded => None,
+        }
+    }
+
     /// Find one asset by its path relative to the asset root.
     ///
     /// The chosen directory is searched first, then the embedded table, so an
@@ -245,6 +257,18 @@ mod tests {
             system_dirs: Vec::new(),
             user_data_dir: None,
         }
+    }
+
+    #[test]
+    fn the_root_is_the_chosen_directory_and_absent_for_the_embedded_assets() {
+        let root = tempfile::tempdir().unwrap();
+        let (bin, share) = prefix(root.path(), true);
+
+        let installed = Assets::resolve(None, &search(Some(bin))).unwrap();
+        let embedded = Assets::resolve(None, &search(None)).unwrap();
+
+        assert_eq!(installed.root(), Some(share.as_path()));
+        assert_eq!(embedded.root(), None);
     }
 
     #[test]

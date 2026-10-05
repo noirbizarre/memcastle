@@ -67,11 +67,24 @@ pub fn resolve(
     lookup: impl Fn(&str) -> Option<String>,
     home: Option<&Path>,
 ) -> Option<PathBuf> {
-    let base = lookup(dir.variable())
+    base(dir, lookup, home).map(|base| base.join(APP_DIR))
+}
+
+/// The XDG base directory itself (`~/.config`), for a file that belongs to another program and so is not under
+/// `memcastle/`: an agent's own configuration directory, which an integration installs into.
+///
+/// Resolved exactly as [`resolve`] does, a relative variable included, so MemCastle and the agents it configures agree
+/// about where the base is.
+#[must_use]
+pub fn base(
+    dir: XdgDir,
+    lookup: impl Fn(&str) -> Option<String>,
+    home: Option<&Path>,
+) -> Option<PathBuf> {
+    lookup(dir.variable())
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
-        .or_else(|| home.map(|home| home.join(dir.home_relative_default())))?;
-    Some(base.join(APP_DIR))
+        .or_else(|| home.map(|home| home.join(dir.home_relative_default())))
 }
 
 /// [`resolve`] against the real process environment and home directory.
@@ -113,6 +126,18 @@ pub fn default_sources_dir() -> PathBuf {
     resolve_from_process(XdgDir::Data)
         .unwrap_or_else(|| PathBuf::from(APP_DIR))
         .join("sources")
+}
+
+/// The default directory for installed agent integrations: `$XDG_DATA_HOME/memcastle/agents`.
+///
+/// User data, not package content: an integration is copied here so that it keeps working when a package upgrade
+/// replaces the shipped files, and a receipt beside it records what was installed. Relative when nothing resolves, for
+/// the same reason as [`default_palace_dir`].
+#[must_use]
+pub fn default_agents_dir() -> PathBuf {
+    resolve_from_process(XdgDir::Data)
+        .unwrap_or_else(|| PathBuf::from(APP_DIR))
+        .join("agents")
 }
 
 /// The directory holding per-daemon runtime files: `$XDG_STATE_HOME/memcastle/run`.

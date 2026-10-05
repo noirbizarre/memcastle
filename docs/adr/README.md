@@ -111,3 +111,9 @@ The history is the value.
   signed with ed25519 under a `mining.trust` policy; bundled, registry and local sources share one lifecycle, `update`
   never widens a source's permissions without consent, and releases bundle `pi` and `opencode` as ordinary packages
   (completes ADR-026)
+- [ADR-034](034-agent-integration-distribution.md) — integrations ship with MemCastle as bundles (no npm package, no
+  `bun install`) under the one assets root beside `sources/` and `skills/`, a checkout being a valid root;
+  `memcastle integration list|install|update|remove` is local tooling that copies an integration to the user's data
+  directory, registers it through the agent's own mechanism (`pi install`, one marked OpenCode plugin file), records a
+  receipt, and refuses what its manifest does not support
+  (amends ADR-013, ADR-020 and ADR-022)
