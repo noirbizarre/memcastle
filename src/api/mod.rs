@@ -455,10 +455,10 @@ async fn submit_job(
                 .submit_checkpoint_with_urgency(payload, body.emergency, &body.requested_by, mode)
                 .await?
         }
-        JobKind::Audit { scope } => {
+        JobKind::Audit { wing } => {
             // Not gated by `mode`, unlike `Mine` above, because an audit only reads
             // (see `AppServices::submit_audit`'s doc comment).
-            state.app.submit_audit(scope, &body.requested_by).await?
+            state.app.submit_audit(wing, &body.requested_by).await?
         }
         JobKind::Embed { wing } => {
             // Gated as a write inside `submit_embed`: it fills every drawer's embedding.

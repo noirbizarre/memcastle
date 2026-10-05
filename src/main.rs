@@ -1196,7 +1196,7 @@ async fn cmd_checkpoint(
 }
 
 async fn cmd_audit(config: &Config, mode: Option<MemoryMode>, args: AuditArgs) -> Result<()> {
-    let job = client(config, mode).submit_audit(args.scope).await?;
+    let job = client(config, mode).submit_audit(args.wing).await?;
     print_json(&job)?;
     Ok(())
 }

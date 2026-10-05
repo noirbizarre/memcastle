@@ -560,7 +560,7 @@ mod tests {
     #[test]
     fn each_job_is_a_row_with_its_full_id_kind_and_status() {
         let demo = job(JobKind::Demo { steps: 3 });
-        let failed = failed_job(JobKind::Audit { scope: None }, "boom");
+        let failed = failed_job(JobKind::Audit { wing: None }, "boom");
 
         let text = render_jobs(&[demo.clone(), failed.clone()], Painter::PLAIN, None);
 

@@ -23,6 +23,7 @@
 
 mod dedup_keys;
 mod diary_provenance;
+mod renames;
 mod since_0_2;
 mod supersession_lineage;
 mod timestamps;

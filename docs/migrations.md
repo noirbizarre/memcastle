@@ -20,8 +20,10 @@ Two kinds of change are tracked separately:
 | 2 | `canonical-timestamps` | Rewrites optional timestamps into one canonical form so they compare correctly. |
 | 3 | `since-0.2` | Everything that changed the stored shape after 0.2.0, as one step (nothing between was published). It runs the pieces below in order. |
 
-Version 3 is made of these pieces:
+Version 3 is made of these pieces, run in this order:
 
+- **Renamed fields.** Moves values stored under a name this release changed to the new name.
+  An audit job's `scope` becomes `wing`, in the job and in its report, so a queued audit keeps its filter.
 - **Deduplication keys.** Fills the derived keys [deduplication](deduplication.md) reads (a drawer's fingerprint, an entity's key and aliases) on records written earlier.
   It merges nothing, so existing duplicates stay as they are.
 - **Supersession lineage.** Links a drawer closed before supersession links existed to the successor it was replaced by, when exactly one drawer qualifies (see [ADR-032](adr/032-temporal-retrieval-and-history.md)).

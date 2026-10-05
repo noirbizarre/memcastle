@@ -56,6 +56,7 @@ mod graph;
 mod jobs;
 mod migration_state;
 mod palace;
+mod renames;
 mod resolution;
 mod retrieval;
 mod source_packages;

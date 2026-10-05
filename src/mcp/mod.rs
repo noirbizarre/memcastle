@@ -373,7 +373,7 @@ struct AuditArgs {
     /// Restrict the report's embedding-count fields to one wing by name.
     /// Orphan-drawer and dangling-provenance findings are always
     /// palace-wide regardless of this (see `memcastle::audit`'s module doc).
-    scope: Option<String>,
+    wing: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -721,7 +721,7 @@ impl McpTools {
     ) -> Result<CallToolResult, McpError> {
         tool_result(
             "memcastle_audit",
-            self.app.submit_audit(args.scope, CHANNEL).await,
+            self.app.submit_audit(args.wing, CHANNEL).await,
         )
     }
 

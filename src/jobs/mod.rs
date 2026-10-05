@@ -737,8 +737,8 @@ impl Scheduler {
                 )
                 .await
             }
-            JobKind::Audit { scope } => {
-                crate::audit::run(&ctx, &mut job, crate::audit::AuditParams { scope }).await
+            JobKind::Audit { wing } => {
+                crate::audit::run(&ctx, &mut job, crate::audit::AuditParams { wing }).await
             }
             JobKind::Embed { wing } => {
                 crate::embed::job::run(&ctx, &mut job, crate::embed::job::EmbedParams { wing })

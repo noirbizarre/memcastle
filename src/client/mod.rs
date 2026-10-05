@@ -632,11 +632,11 @@ impl DaemonClient {
     /// # Errors
     ///
     /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
-    pub async fn submit_audit(&self, scope: Option<String>) -> Result<Job> {
+    pub async fn submit_audit(&self, wing: Option<String>) -> Result<Job> {
         self.send(
             self.http
                 .post(format!("{}/api/jobs", self.base_url))
-                .json(&json!({ "type": "audit", "scope": scope, "requested_by": CHANNEL })),
+                .json(&json!({ "type": "audit", "wing": wing, "requested_by": CHANNEL })),
         )
         .await
     }

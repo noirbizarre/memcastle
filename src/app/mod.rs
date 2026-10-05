@@ -875,9 +875,9 @@ impl AppServices {
     /// # Errors
     ///
     /// Returns an error if the job cannot be persisted.
-    pub async fn submit_audit(&self, scope: Option<String>, requested_by: &str) -> Result<Job> {
+    pub async fn submit_audit(&self, wing: Option<String>, requested_by: &str) -> Result<Job> {
         self.scheduler
-            .submit(JobKind::Audit { scope }, Priority::Normal, requested_by)
+            .submit(JobKind::Audit { wing }, Priority::Normal, requested_by)
             .await
     }
 

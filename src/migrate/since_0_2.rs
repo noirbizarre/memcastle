@@ -8,13 +8,14 @@
 //!
 //! The pieces are independent and idempotent, so a run that stops half-way and starts again repeats nothing harmful.
 
-use super::{MigrationFuture, dedup_keys, supersession_lineage};
+use super::{MigrationFuture, dedup_keys, renames, supersession_lineage};
 use crate::store::SurrealStore;
 
 /// This migration's step, for [`super::DATA_MIGRATIONS`].
 pub(super) fn apply(store: &SurrealStore) -> MigrationFuture<'_> {
     Box::pin(async move {
-        // Order matters: the keys deduplication reads come first, the supersession links are independent of them.
+        // Renames first: every later piece reads records through the current types, which expect the new names.
+        renames::apply(store).await?;
         dedup_keys::apply(store).await?;
         supersession_lineage::apply(store).await?;
         Ok(())

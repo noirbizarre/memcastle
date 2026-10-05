@@ -520,11 +520,11 @@ Read the result with `GET /api/entities`, see [the knowledge graph](mcp-and-api.
 ### `audit`
 
 ```sh
-memcastle audit [--scope <WING>]
+memcastle audit [--wing <WING>]
 ```
 
 Submits a read-only consistency report job.
-`--scope` restricts only the embedding counts to one wing; orphan and dangling-reference findings are always palace-wide.
+`--wing` restricts only the embedding counts to one wing; orphan and dangling-reference findings are always palace-wide.
 Read the report with `memcastle job show <id>`.
 
 ### `repair`

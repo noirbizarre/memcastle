@@ -27,7 +27,7 @@ A failure comes back as an MCP error result carrying the [error body](#errors) b
 | `memcastle_diary_read` | `agent_identity`, `wing`, `limit?` | Read an agent's newest diary entries. |
 | `memcastle_checkpoint` | `payload`, `emergency?` | Submit a durable checkpoint job. |
 | `memcastle_mine` | `path` or `source`, `locator?`, `full?`, `wing?` | Submit a job that mines a directory, or a [source](mining-sources.md) such as `pi`. |
-| `memcastle_audit` | `scope?` | Submit a read-only consistency audit job. |
+| `memcastle_audit` | `wing?` | Submit a read-only consistency audit job. |
 | `memcastle_repair` | `dry_run?`, `based_on_job?` | Submit a repair job; a dry run unless `dry_run` is `false`. |
 | `memcastle_job_list` | `status?` | List jobs, newest first. |
 | `memcastle_job_get` | `id` | Show one job. |
@@ -459,7 +459,7 @@ The reasoning is in [ADR-024](adr/024-entity-extraction-as-an-enrich-job.md).
 |---|---|
 | `mine` | `path` (absolute directory) or `provider` (a [source](mining-sources.md)) with `locator?`, then `wing?` and `full?` |
 | `checkpoint` | `payload` (see [above](#checkpoint-payload)), `emergency?` |
-| `audit` | `scope?` |
+| `audit` | `wing?` |
 | `extract` | `wing?`, see [the knowledge graph](#the-knowledge-graph) |
 | `repair` | `dry_run?` (default `true`), `based_on_job?` |
 | `demo` | `steps` |

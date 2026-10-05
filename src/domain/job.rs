@@ -164,7 +164,7 @@ pub enum JobKind {
         /// name. Orphan-drawer and dangling-provenance findings are always
         /// palace-wide regardless of this — see `crate::audit::run`'s doc
         /// comment for why a partial consistency scan would be misleading.
-        scope: Option<String>,
+        wing: Option<String>,
     },
     /// A narrow, dry-run-first set of destructive palace-consistency
     /// fixes — see `crate::repair`'s module doc for exactly what it does
