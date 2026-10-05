@@ -21,8 +21,8 @@ use memcastle::source::types::{
     Candidate, CanonicalDocument, Discovery, RawDocument, Segment, SourceError, SourceKind, SourceRef,
 };
 
-/// This source's provider name; it must match `source.name` in the manifest.
-const PROVIDER: &str = "directory-wasm";
+/// This source's name; it must match `source.name` in the manifest.
+const NAME: &str = "directory-wasm";
 
 /// Files larger than this are skipped rather than truncated into a misleading document.
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
@@ -118,7 +118,7 @@ fn path_of(source: &SourceRef, key: &str) -> PathBuf {
 }
 
 /// FNV-1a over the body, with its length: a revision must change when the content does, and nothing more is asked of
-/// it. A real source would use a stronger hash, or the provider's own etag.
+/// it. A real source would use a stronger hash, or the source's own etag.
 fn revision_of(body: &str) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in body.bytes() {
@@ -143,7 +143,7 @@ impl Guest for Directory {
             )));
         }
         Ok(SourceRef {
-            provider: PROVIDER.to_string(),
+            source: NAME.to_string(),
             account: None,
             locator,
         })

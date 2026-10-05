@@ -152,7 +152,7 @@ version = "0.1.0"
 description = "demo documents"
 
 [compatibility]
-contract = "0.1"
+contract = "0.2"
 memcastle = ">=0.1"
 
 [permissions.filesystem]
@@ -209,7 +209,7 @@ read = ["locator"]
 
     #[test]
     fn a_manifest_for_another_contract_is_valid_but_incompatible() {
-        let manifest = with(|text| text.replace("\"0.1\"", "\"0.9\"")).unwrap();
+        let manifest = with(|text| text.replace("\"0.2\"", "\"0.9\"")).unwrap();
         let error = check_compatible(&manifest).unwrap_err();
         assert!(matches!(error, Error::SourceIncompatible { .. }), "{error}");
     }
@@ -237,7 +237,7 @@ read = ["locator"]
                 "source.description",
             ),
             (
-                GOOD.replace("contract = \"0.1\"", "contract = \"x\""),
+                GOOD.replace("contract = \"0.2\"", "contract = \"x\""),
                 "compatibility.contract",
             ),
             (

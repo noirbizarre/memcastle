@@ -234,10 +234,10 @@ pub struct SourceSummary {
     /// The source's identifier.
     pub id: crate::domain::SourceId,
     /// The adapter that reads it.
-    pub provider: String,
-    /// The account on the provider, if it has accounts.
+    pub source: String,
+    /// The account on the source, if it has accounts.
     pub account: Option<String>,
-    /// The part of the provider that is read (a directory, a sessions root).
+    /// The part of the source that is read (a directory, a sessions root).
     pub locator: String,
     /// Where the last run stopped, in the adapter's own terms; `null` before the first run.
     pub cursor: serde_json::Value,
@@ -253,8 +253,8 @@ pub struct SourceSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourcesReport {
     /// The adapters this daemon ships.
-    pub providers: Vec<crate::mining::ProviderInfo>,
-    /// The sources that have been mined, by provider then locator.
+    pub adapters: Vec<crate::mining::AdapterInfo>,
+    /// The sources that have been mined, by adapter then locator.
     pub sources: Vec<SourceSummary>,
 }
 
@@ -631,11 +631,11 @@ impl AppServices {
     }
 
     /// Validate a mining source at submission, and give the `directory`
-    /// provider its one canonical form.
+    /// source adapter its one canonical form.
     async fn checked_mining_source(&self, source: MiningSource) -> Result<MiningSource> {
         let path = match source {
             MiningSource::Directory { path } => path,
-            MiningSource::Provider { provider, locator } if provider == "directory" => {
+            MiningSource::Named { source, locator } if source == "directory" => {
                 let Some(locator) = locator else {
                     return Err(Error::invalid_input(
                         "path",
@@ -644,12 +644,11 @@ impl AppServices {
                 };
                 PathBuf::from(locator)
             }
-            MiningSource::Provider { provider, locator } => {
+            MiningSource::Named { source, locator } => {
                 // Unknown, disabled and unavailable sources are refused here, as a 4xx at the request, rather
                 // than as a job that fails once it starts.
-                crate::mining::registry::ensure_minable(&self.store, &self.mining, &provider)
-                    .await?;
-                return Ok(MiningSource::Provider { provider, locator });
+                crate::mining::registry::ensure_minable(&self.store, &self.mining, &source).await?;
+                return Ok(MiningSource::Named { source, locator });
             }
         };
         // Validated here, like `submit_repair`'s `based_on_job`: a relative path
@@ -686,7 +685,7 @@ impl AppServices {
             let documents = self.store.count_source_documents(record.id).await?;
             sources.push(SourceSummary {
                 id: record.id,
-                provider: record.provider,
+                source: record.source,
                 account: record.account,
                 locator: record.locator,
                 cursor: record.cursor,
@@ -696,7 +695,7 @@ impl AppServices {
             });
         }
         Ok(SourcesReport {
-            providers: crate::mining::providers(&self.store, &self.mining).await?,
+            adapters: crate::mining::list_adapters(&self.store, &self.mining).await?,
             sources,
         })
     }
@@ -1849,8 +1848,8 @@ mod tests {
         let app = test_app().await;
         let job = app
             .submit_mine(
-                MiningSource::Provider {
-                    provider: "directory".into(),
+                MiningSource::Named {
+                    source: "directory".into(),
                     locator: Some("/tmp/anything".into()),
                 },
                 None,
@@ -1859,13 +1858,13 @@ mod tests {
                 MemoryMode::Full,
             )
             .await
-            .expect("a shipped provider is accepted");
+            .expect("a shipped source is accepted");
         assert!(matches!(job.kind, JobKind::Mine { full: true, .. }));
 
         let error = app
             .submit_mine(
-                MiningSource::Provider {
-                    provider: "carrier-pigeon".into(),
+                MiningSource::Named {
+                    source: "carrier-pigeon".into(),
                     locator: None,
                 },
                 None,
@@ -1885,12 +1884,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_directory_provider_is_the_same_as_a_directory_job_and_needs_an_absolute_path() {
+    async fn the_directory_source_is_the_same_as_a_directory_job_and_needs_an_absolute_path() {
         let app = test_app().await;
         let job = app
             .submit_mine(
-                MiningSource::Provider {
-                    provider: "directory".into(),
+                MiningSource::Named {
+                    source: "directory".into(),
                     locator: Some("/tmp/anything".into()),
                 },
                 None,
@@ -1913,8 +1912,8 @@ mod tests {
         for locator in [None, Some("relative/dir".to_string())] {
             let result = app
                 .submit_mine(
-                    MiningSource::Provider {
-                        provider: "directory".into(),
+                    MiningSource::Named {
+                        source: "directory".into(),
                         locator,
                     },
                     None,
@@ -1931,10 +1930,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn listing_sources_reports_the_providers_and_is_a_read() {
+    async fn listing_sources_reports_the_adapters_and_is_a_read() {
         let app = test_app().await;
         let report = app.list_sources(MemoryMode::ReadOnly).await.unwrap();
-        assert!(report.providers.iter().any(|p| p.name == "directory"));
+        assert!(report.adapters.iter().any(|p| p.name == "directory"));
         assert!(report.sources.is_empty());
         assert_mode_forbidden(
             &app.list_sources(MemoryMode::Disabled).await,

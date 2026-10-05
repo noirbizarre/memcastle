@@ -20,7 +20,7 @@ use super::watermark::{Entry, Watermark, mtime_ns, page};
 use crate::project::{project_wing, wing_from_directory};
 
 /// The adapter's name.
-pub const PROVIDER: &str = "directory";
+pub const NAME: &str = "directory";
 
 /// Directories never worth mining — build output, VCS metadata, dependency trees. Skipped by name at any depth,
 /// the same cheap denylist mempalace-rs's miner uses before anything fancier (gitignore-awareness) is worth the
@@ -57,8 +57,8 @@ impl DirectoryAdapter {
 }
 
 impl SourceAdapter for DirectoryAdapter {
-    fn provider(&self) -> &'static str {
-        PROVIDER
+    fn name(&self) -> &'static str {
+        NAME
     }
 
     fn description(&self) -> &'static str {
@@ -90,7 +90,7 @@ impl SourceAdapter for DirectoryAdapter {
             ));
         }
         Ok(SourceRef {
-            provider: PROVIDER.to_string(),
+            source: NAME.to_string(),
             account: None,
             locator: canonical.display().to_string(),
         })
@@ -116,7 +116,7 @@ impl SourceAdapter for DirectoryAdapter {
         cursor: &Cursor,
         limit: usize,
     ) -> Result<Discovery> {
-        let after = Watermark::parse(PROVIDER, cursor)?;
+        let after = Watermark::parse(NAME, cursor)?;
         let mut entries = Vec::new();
         collect(
             Path::new(&source.locator),

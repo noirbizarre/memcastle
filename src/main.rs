@@ -572,8 +572,8 @@ async fn cmd_mine(config: &Config, mode: Option<MemoryMode>, args: MineArgs) -> 
             path: std::path::absolute(&path)
                 .map_err(|source| Error::io(path.display().to_string(), source))?,
         },
-        (_, Some(provider)) => MiningSource::Provider {
-            provider,
+        (_, Some(source)) => MiningSource::Named {
+            source,
             locator: args.locator,
         },
         // clap requires one of the two, so this is unreachable from the command line.

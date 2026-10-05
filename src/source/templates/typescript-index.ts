@@ -9,9 +9,9 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 
-const PROVIDER = "__NAME__";
+const NAME = "__NAME__";
 
-type SourceRef = { provider: string; account?: string; locator: string };
+type SourceRef = { source: string; account?: string; locator: string };
 type Candidate = { externalId: string; cursorAfter: string; handle: string };
 
 // The contract's errors are WIT variants: throw `{ tag, val }` and `jco` turns it into the `source-error`.
@@ -36,7 +36,7 @@ const parseCursor = (cursor: string): string | undefined => {
   return after;
 };
 
-// A revision must change exactly when the content does. A real source would use the provider's etag or a strong hash.
+// A revision must change exactly when the content does. A real source would use the source's etag or a strong hash.
 const revisionOf = (body: string): string => {
   let hash = 0xcbf29ce484222325n;
   for (const byte of new TextEncoder().encode(body)) {
@@ -53,7 +53,7 @@ export const adapter = {
     } catch {
       throw failure("invalid-input", `${locator} is not a directory this source can read`);
     }
-    return { provider: PROVIDER, locator };
+    return { source: NAME, locator };
   },
 
   defaultWing(source: SourceRef): string {

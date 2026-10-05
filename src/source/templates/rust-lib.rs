@@ -21,8 +21,8 @@ use memcastle::source::types::{
     Candidate, CanonicalDocument, Discovery, RawDocument, Segment, SourceError, SourceKind, SourceRef,
 };
 
-/// This source's provider name; it must match `source.name` in `memcastle-source.toml`.
-const PROVIDER: &str = "__NAME__";
+/// This source's source name; it must match `source.name` in `memcastle-source.toml`.
+const NAME: &str = "__NAME__";
 
 struct Source;
 
@@ -55,7 +55,7 @@ fn parse_cursor(cursor: &str) -> Result<Option<String>, SourceError> {
         .ok_or_else(|| invalid("`after` is missing or not a string"))
 }
 
-/// A revision must change exactly when the content does. A real source would use the provider's etag or a strong hash.
+/// A revision must change exactly when the content does. A real source would use the source's etag or a strong hash.
 fn revision_of(body: &str) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in body.bytes() {
@@ -73,7 +73,7 @@ impl Guest for Source {
         if !Path::new(&locator).is_dir() {
             return Err(SourceError::InvalidInput(format!("{locator} is not a directory this source can read")));
         }
-        Ok(SourceRef { provider: PROVIDER.to_string(), account: None, locator })
+        Ok(SourceRef { source: NAME.to_string(), account: None, locator })
     }
 
     fn default_wing(source: SourceRef) -> String {

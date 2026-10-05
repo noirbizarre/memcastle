@@ -241,7 +241,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join(MANIFEST_FILE),
-            "[source]\nname = \"demo\"\nversion = \"0.1.0\"\ndescription = \"d\"\n[compatibility]\ncontract = \"0.1\"\nmemcastle = \">=0.1\"\n",
+            "[source]\nname = \"demo\"\nversion = \"0.1.0\"\ndescription = \"d\"\n[compatibility]\ncontract = \"0.2\"\nmemcastle = \">=0.1\"\n",
         )
         .unwrap();
         let error = Project::open(dir.path())
@@ -252,7 +252,7 @@ mod tests {
         assert!(error.contains("[build]"), "{error}");
     }
 
-    const MANIFEST: &str = "[source]\nname = \"demo\"\nversion = \"0.1.0\"\ndescription = \"d\"\n\n[compatibility]\ncontract = \"0.1\"\nmemcastle = \">=0.1\"\n";
+    const MANIFEST: &str = "[source]\nname = \"demo\"\nversion = \"0.1.0\"\ndescription = \"d\"\n\n[compatibility]\ncontract = \"0.2\"\nmemcastle = \">=0.1\"\n";
 
     fn project(extra: &str) -> (tempfile::TempDir, Project) {
         let dir = tempfile::tempdir().unwrap();

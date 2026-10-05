@@ -34,7 +34,7 @@ pub struct Discovery {
 /// One kind of source. Implementations are stateless apart from configuration, and every method may run on any
 /// run of any job.
 ///
-/// Dispatch is static (`mining::run` resolves the provider to a `registry::AnySource` and calls the generic
+/// Dispatch is static (`mining::run` resolves the source to a `registry::AnySource` and calls the generic
 /// pipeline), so the async methods are plain `impl Future` returns, with `Send` spelled out because jobs run on a
 /// multi-threaded runtime.
 ///
@@ -43,7 +43,7 @@ pub struct Discovery {
 /// `'static` so that a loaded source can own its name.
 pub trait SourceAdapter: Send + Sync {
     /// The adapter's name, as users give it (`--source`) and as it is stored on the source.
-    fn provider(&self) -> &str;
+    fn name(&self) -> &str;
 
     /// One line saying what the adapter reads, for `memcastle sources` and the API.
     fn description(&self) -> &str;
@@ -73,7 +73,7 @@ pub trait SourceAdapter: Send + Sync {
     ///
     /// # Errors
     ///
-    /// [`crate::Error::SourceCursorInvalid`] when `cursor` is not one this adapter produced, or an I/O or provider
+    /// [`crate::Error::SourceCursorInvalid`] when `cursor` is not one this adapter produced, or an I/O or source
     /// error when the listing fails.
     fn discover(
         &self,
@@ -87,7 +87,7 @@ pub trait SourceAdapter: Send + Sync {
     ///
     /// # Errors
     ///
-    /// An I/O or provider error that should fail the job.
+    /// An I/O or source error that should fail the job.
     fn read(
         &self,
         source: &SourceRef,

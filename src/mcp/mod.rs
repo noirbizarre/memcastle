@@ -664,8 +664,8 @@ impl McpTools {
         let mode = self.mode_for(&parts);
         let source = match (args.path, args.source) {
             (Some(path), None) => Ok(MiningSource::Directory { path: path.into() }),
-            (None, Some(provider)) => Ok(MiningSource::Provider {
-                provider,
+            (None, Some(source)) => Ok(MiningSource::Named {
+                source,
                 locator: args.locator,
             }),
             _ => Err(crate::Error::invalid_input(

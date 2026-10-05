@@ -48,10 +48,10 @@ pub struct Source {
 /// which version of it the drawer was cut from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Origin {
-    /// The source the document was acquired from.
-    pub source: super::SourceId,
+    /// The mined place the document was acquired from.
+    pub source_id: super::SourceId,
     /// The adapter that acquired it (`directory`, `pi`, ...).
-    pub provider: String,
+    pub source: String,
     /// The document's identity within the source (a relative path, a session file, a message id).
     pub document: String,
     /// Zero-based position of this chunk within the document.

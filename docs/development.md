@@ -247,7 +247,7 @@ so bump all three together.
 Invariant 9 (source-specific code stays out of the pipeline) and invariant 10 (a source package has no ambient authority)
 have no hook, because what they forbid is not something a grep over the whole tree can recognise.
 `tests/source_isolation.rs` reads the source text instead: the pipeline, the chunker and the adapter contract name no
-provider, no file access and no WebAssembly runtime; adapters, the WebAssembly host and `src/source/` never reach the store
+adapter, no file access and no WebAssembly runtime; adapters, the WebAssembly host and `src/source/` never reach the store
 or the jobs (at any depth); only `src/mining/wasm/` names the engine; and the host calls nothing that hands a guest the
 daemon's environment, standard streams, arguments or a writable directory.
 Building the reference WebAssembly sources needs the `wasm32-wasip2` target (`rustup target add wasm32-wasip2`, which

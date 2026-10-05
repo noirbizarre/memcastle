@@ -1,8 +1,8 @@
-//! Which sources exist, and how a provider name becomes an adapter.
+//! Which sources exist, and how a source name becomes an adapter.
 //!
 //! There are two kinds of source behind the one [`SourceAdapter`] contract (docs/adr/026): the adapters compiled
 //! into MemCastle (`directory`), and the packages a user installed, each a WebAssembly component. A
-//! provider name is looked up here and nowhere else; the pipeline is handed an [`AnySource`] and cannot tell which
+//! source name is looked up here and nowhere else; the pipeline is handed an [`AnySource`] and cannot tell which
 //! kind it got.
 //!
 //! The registry reads which packages are installed and in what state, but never writes: installing, enabling and
@@ -23,11 +23,11 @@ use crate::store::SurrealStore;
 use super::adapter::{Discovery, SourceAdapter};
 use super::adapters::directory::{self, DirectoryAdapter};
 use super::wasm::WasmAdapter;
-use super::{ProviderInfo, SourceOrigin};
+use super::{AdapterInfo, SourceOrigin};
 
 /// The names an installed source may not take: they are the built-in adapters', and a package called `directory`
 /// would otherwise silently replace what `memcastle mine <path>` means.
-pub const BUILTIN_NAMES: [&str; 1] = [directory::PROVIDER];
+pub const BUILTIN_NAMES: [&str; 1] = [directory::NAME];
 
 /// A source, whichever kind it is.
 ///
@@ -41,10 +41,10 @@ pub enum AnySource {
 }
 
 impl SourceAdapter for AnySource {
-    fn provider(&self) -> &str {
+    fn name(&self) -> &str {
         match self {
-            Self::Directory(a) => a.provider(),
-            Self::Wasm(a) => a.provider(),
+            Self::Directory(a) => a.name(),
+            Self::Wasm(a) => a.name(),
         }
     }
 
@@ -114,9 +114,9 @@ impl SourceAdapter for AnySource {
     }
 }
 
-fn describe(adapter: &impl SourceAdapter) -> ProviderInfo {
-    ProviderInfo {
-        name: adapter.provider().to_string(),
+fn describe(adapter: &impl SourceAdapter) -> AdapterInfo {
+    AdapterInfo {
+        name: adapter.name().to_string(),
         description: adapter.description().to_string(),
         capabilities: adapter.capabilities(),
         origin: SourceOrigin::Builtin,
@@ -131,7 +131,7 @@ fn describe(adapter: &impl SourceAdapter) -> ProviderInfo {
 
 /// The adapters compiled into MemCastle, in the order they are listed.
 #[must_use]
-pub fn builtin_providers() -> Vec<ProviderInfo> {
+pub fn builtin_adapters() -> Vec<AdapterInfo> {
     // Capabilities and descriptions do not depend on configuration, so default-configured adapters answer.
     let directory = DirectoryAdapter::new(0);
     vec![describe(&directory)]
@@ -164,9 +164,9 @@ pub fn unavailable_reason(record: &SourcePackageRecord, sources_dir: &Path) -> O
 
 /// How an installed source is described to users.
 #[must_use]
-pub fn describe_package(record: &SourcePackageRecord, sources_dir: &Path) -> ProviderInfo {
+pub fn describe_package(record: &SourcePackageRecord, sources_dir: &Path) -> AdapterInfo {
     let unavailable_reason = unavailable_reason(record, sources_dir);
-    ProviderInfo {
+    AdapterInfo {
         name: record.name.clone(),
         description: record.manifest.source.description.clone(),
         capabilities: record.manifest.capabilities,
@@ -189,16 +189,19 @@ pub fn describe_package(record: &SourcePackageRecord, sources_dir: &Path) -> Pro
 /// # Errors
 ///
 /// A store error when the installed sources cannot be read.
-pub async fn providers(store: &SurrealStore, mining: &MiningConfig) -> Result<Vec<ProviderInfo>> {
+pub async fn list_adapters(
+    store: &SurrealStore,
+    mining: &MiningConfig,
+) -> Result<Vec<AdapterInfo>> {
     let dir = mining.sources_dir();
-    let mut all = builtin_providers();
+    let mut all = builtin_adapters();
     for record in store.list_source_packages().await? {
         all.push(describe_package(&record, &dir));
     }
     Ok(all)
 }
 
-/// Check that `provider` can be mined right now, without loading it.
+/// Check that `source` can be mined right now, without loading it.
 ///
 /// What submission uses to refuse a job up front, so that a typo or a disabled source is a 4xx at the request and not
 /// a job that fails once it starts.
@@ -210,14 +213,14 @@ pub async fn providers(store: &SurrealStore, mining: &MiningConfig) -> Result<Ve
 pub async fn ensure_minable(
     store: &SurrealStore,
     mining: &MiningConfig,
-    provider: &str,
+    source: &str,
 ) -> Result<()> {
-    if BUILTIN_NAMES.contains(&provider) {
+    if BUILTIN_NAMES.contains(&source) {
         return Ok(());
     }
-    match store.get_source_package(provider).await? {
+    match store.get_source_package(source).await? {
         Some(record) => minable_package(&record, &mining.sources_dir()),
-        None => Err(unknown(store, mining, provider).await),
+        None => Err(unknown(store, mining, source).await),
     }
 }
 
@@ -237,8 +240,8 @@ fn minable_package(record: &SourcePackageRecord, sources_dir: &Path) -> Result<(
     }
 }
 
-async fn unknown(store: &SurrealStore, mining: &MiningConfig, provider: &str) -> Error {
-    let known = providers(store, mining)
+async fn unknown(store: &SurrealStore, mining: &MiningConfig, source: &str) -> Error {
+    let known = list_adapters(store, mining)
         .await
         .map(|all| {
             all.into_iter()
@@ -250,12 +253,12 @@ async fn unknown(store: &SurrealStore, mining: &MiningConfig, provider: &str) ->
     Error::invalid_input(
         "source",
         format!(
-            "unknown source `{provider}`; known sources: {known} (install one with `memcastle source install <package>`)"
+            "unknown source `{source}`; known sources: {known} (install one with `memcastle source install <package>`)"
         ),
     )
 }
 
-/// The adapter for `provider`: a built-in one, or an installed source that is enabled and intact.
+/// The adapter for `source`: a built-in one, or an installed source that is enabled and intact.
 ///
 /// # Errors
 ///
@@ -264,10 +267,10 @@ async fn unknown(store: &SurrealStore, mining: &MiningConfig, provider: &str) ->
 pub async fn resolve(
     store: &SurrealStore,
     mining: &MiningConfig,
-    provider: &str,
+    source: &str,
 ) -> Result<AnySource> {
-    match provider {
-        directory::PROVIDER => Ok(AnySource::Directory(DirectoryAdapter::new(
+    match source {
+        directory::NAME => Ok(AnySource::Directory(DirectoryAdapter::new(
             mining.max_file_bytes,
         ))),
         other => {
@@ -343,8 +346,8 @@ mod tests {
     fn an_intact_compatible_package_has_no_reason_to_be_unavailable() {
         let dir = tempfile::tempdir().unwrap();
         install_component(dir.path(), b"component");
-        assert_eq!(unavailable_reason(&record("0.1"), dir.path()), None);
-        let described = describe_package(&record("0.1"), dir.path());
+        assert_eq!(unavailable_reason(&record("0.2"), dir.path()), None);
+        let described = describe_package(&record("0.2"), dir.path());
         assert_eq!(described.state, SourceState::Enabled);
         assert_eq!(described.version.as_deref(), Some("1.0.0"));
     }
@@ -364,11 +367,11 @@ mod tests {
     #[test]
     fn a_package_whose_component_is_missing_or_altered_says_which() {
         let dir = tempfile::tempdir().unwrap();
-        let missing = unavailable_reason(&record("0.1"), dir.path()).unwrap();
+        let missing = unavailable_reason(&record("0.2"), dir.path()).unwrap();
         assert!(missing.contains("missing"), "{missing}");
 
         install_component(dir.path(), b"something else");
-        let altered = unavailable_reason(&record("0.1"), dir.path()).unwrap();
+        let altered = unavailable_reason(&record("0.2"), dir.path()).unwrap();
         assert!(altered.contains("no longer matches"), "{altered}");
     }
 
@@ -376,13 +379,13 @@ mod tests {
     fn a_disabled_package_is_not_minable_and_the_state_is_named() {
         let dir = tempfile::tempdir().unwrap();
         install_component(dir.path(), b"component");
-        let mut disabled = record("0.1");
+        let mut disabled = record("0.2");
         disabled.state = SourcePackageState::Disabled;
         let error = minable_package(&disabled, dir.path())
             .unwrap_err()
             .to_string();
         assert!(error.contains("disabled"), "{error}");
-        assert!(minable_package(&record("0.1"), dir.path()).is_ok());
+        assert!(minable_package(&record("0.2"), dir.path()).is_ok());
         let unavailable = minable_package(&record("0.9"), dir.path())
             .unwrap_err()
             .to_string();
@@ -392,7 +395,7 @@ mod tests {
     #[test]
     fn a_built_in_source_answers_for_its_name_description_and_default_room_like_the_adapter_does() {
         let directory = AnySource::Directory(DirectoryAdapter::new(1));
-        assert_eq!(directory.provider(), "directory");
+        assert_eq!(directory.name(), "directory");
         assert!(!directory.description().is_empty());
         assert_eq!(directory.default_room(), "files");
     }

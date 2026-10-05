@@ -779,16 +779,17 @@ pub enum Error {
     },
 
     /// A source's stored cursor is not one its adapter can continue from.
-    #[error("the stored cursor of the `{provider}` source cannot be continued from: {message}")]
+    #[error("the stored cursor of the `{adapter}` source cannot be continued from: {message}")]
     #[diagnostic(
         code(memcastle::mining::cursor_invalid),
         help(
-            "mine it again from the beginning (`memcastle mine --source <provider> --full`): unchanged documents are skipped, so nothing is duplicated"
+            "mine it again from the beginning (`memcastle mine --source <name> --full`): unchanged documents are skipped, so nothing is duplicated"
         )
     )]
     SourceCursorInvalid {
         /// The adapter whose cursor was rejected.
-        provider: String,
+        // Not `source`: `thiserror` reads a field of that name as the error's cause, which a name is not.
+        adapter: String,
         /// Why it was rejected.
         message: String,
     },
@@ -1431,7 +1432,7 @@ mod tests {
                 ranking: "hybrid".to_string(),
             },
             Error::SourceCursorInvalid {
-                provider: "directory".to_string(),
+                adapter: "directory".to_string(),
                 message: "not an object".to_string(),
             },
             Error::SourceManifestInvalid {

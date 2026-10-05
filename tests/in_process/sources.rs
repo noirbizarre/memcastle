@@ -2,7 +2,7 @@
 //! read incrementally and mined with no agent and no model involved, through the same unified contract
 //! (docs/adr/023) every source goes through.
 //!
-//! The source is the built-in `directory` provider named explicitly, which is the form every other source takes
+//! The source is the built-in `directory` source adapter named explicitly, which is the form every other source takes
 //! on the wire. What is specific to one source (Pi's history, `sources/pi`) is tested with that source, in
 //! `tests/wasm_pi.rs`; what is tested here is what the daemon does for any source.
 
@@ -48,7 +48,7 @@ async fn mine_source(client: &reqwest::Client, base: &str, root: &Path, full: bo
         client,
         base,
         json!({
-            "type": "mine", "provider": "directory", "locator": root, "full": full, "requested_by": "test",
+            "type": "mine", "source": "directory", "locator": root, "full": full, "requested_by": "test",
         }),
     )
     .await;
@@ -98,7 +98,7 @@ async fn a_named_source_is_discovered_read_and_mined_then_found_by_search_with_i
     .await;
     assert_eq!(hits.len(), 1, "{hits:?}");
     assert_eq!(hits[0]["source"]["kind"], "file");
-    assert_eq!(hits[0]["source"]["origin"]["provider"], "directory");
+    assert_eq!(hits[0]["source"]["origin"]["source"], "directory");
     assert_eq!(hits[0]["source"]["origin"]["document"], "notes.txt");
     daemon.shutdown().await;
 }
@@ -155,7 +155,7 @@ async fn the_sources_listing_shows_where_each_run_stopped_and_how_many_documents
     write_note(root.path(), NOTE, 1_000);
 
     let before = sources(&client, &daemon.base_url).await;
-    let names: Vec<_> = before["providers"]
+    let names: Vec<_> = before["adapters"]
         .as_array()
         .unwrap()
         .iter()
@@ -168,7 +168,7 @@ async fn the_sources_listing_shows_where_each_run_stopped_and_how_many_documents
 
     let after = sources(&client, &daemon.base_url).await;
     let source = &after["sources"][0];
-    assert_eq!(source["provider"], "directory");
+    assert_eq!(source["source"], "directory");
     assert_eq!(source["documents"], 1);
     assert_eq!(source["last_job"], json!(job.id));
     assert_eq!(source["cursor"]["mtime_ns"], 1_000_000_000_000i64);
@@ -291,7 +291,7 @@ async fn an_unknown_source_is_refused_at_submission_naming_the_known_ones() {
     let response = submit(
         &client,
         &daemon.base_url,
-        json!({"type": "mine", "provider": "carrier-pigeon", "requested_by": "test"}),
+        json!({"type": "mine", "source": "carrier-pigeon", "requested_by": "test"}),
     )
     .await;
 
@@ -313,7 +313,7 @@ async fn a_locator_that_does_not_exist_fails_the_job_instead_of_completing_empty
         &client,
         &daemon.base_url,
         json!({
-            "type": "mine", "provider": "directory", "locator": "/nonexistent/source/root", "requested_by": "test",
+            "type": "mine", "source": "directory", "locator": "/nonexistent/source/root", "requested_by": "test",
         }),
     )
     .await;
@@ -329,7 +329,7 @@ async fn mining_a_source_is_a_write_and_listing_sources_is_a_read() {
     let client = reqwest::Client::new();
     let root = tempfile::tempdir().unwrap();
     write_note(root.path(), NOTE, 1_000);
-    let body = json!({"type": "mine", "provider": "directory", "locator": root.path(), "requested_by": "test"});
+    let body = json!({"type": "mine", "source": "directory", "locator": root.path(), "requested_by": "test"});
 
     let refused = client
         .post(format!("{}/api/jobs", daemon.base_url))

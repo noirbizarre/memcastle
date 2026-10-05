@@ -293,7 +293,7 @@ async fn every_way_a_component_can_answer_becomes_the_matching_error_or_value() 
         Err(Error::InvalidInput { .. })
     ));
     assert!(
-        matches!(read("cursor").await, Err(Error::SourceCursorInvalid { ref provider, .. }) if provider == "misbehaving")
+        matches!(read("cursor").await, Err(Error::SourceCursorInvalid { ref adapter, .. }) if adapter == "misbehaving")
     );
     let failed = read("failed").await.unwrap_err();
     assert!(matches!(failed, Error::SourceFailed { .. }), "{failed}");
@@ -368,7 +368,7 @@ fn manifest_text(contract: &str) -> String {
 
 #[test]
 fn bytes_that_are_not_a_component_or_do_not_fit_the_contract_are_incompatible_not_a_panic() {
-    let manifest = memcastle::source::manifest::parse(&manifest_text("0.1"), &[]).unwrap();
+    let manifest = memcastle::source::manifest::parse(&manifest_text("0.2"), &[]).unwrap();
     let config = MiningConfig::default();
 
     // The component header, then nonsense.
@@ -569,7 +569,7 @@ async fn the_cli_installs_lists_disables_and_removes_a_source_and_never_consents
         .unwrap();
     let listed: Value = serde_json::from_slice(&listed.stdout).unwrap();
     assert!(
-        listed["providers"]
+        listed["adapters"]
             .as_array()
             .unwrap()
             .iter()
@@ -739,7 +739,7 @@ async fn the_cli_installs_a_package_that_asks_for_nothing_unasked_and_one_that_a
         .await
         .unwrap();
     let listed = json(&listed);
-    let names: Vec<_> = listed["providers"]
+    let names: Vec<_> = listed["adapters"]
         .as_array()
         .unwrap()
         .iter()

@@ -74,7 +74,7 @@ homepage = "https://example.org/my-notes"        # optional
 repository = "https://example.org/my-notes.git"  # optional: where the code is
 
 [compatibility]
-contract = "0.1"             # the WIT contract version it was built against
+contract = "0.2"             # the WIT contract version it was built against
 memcastle = ">=0.2.0, <0.3.0"  # the MemCastle versions it runs on
 
 [capabilities]               # the same three as a built-in adapter; all default to false
@@ -166,7 +166,7 @@ Built-in sources are always enabled and cannot be disabled or removed.
 
 ## Compatibility
 
-The contract has a version (`wit/memcastle-source.wit`, currently `0.1.0`), and a source declares the one it was built
+The contract has a version (`wit/memcastle-source.wit`, currently `0.2.0`), and a source declares the one it was built
 against.
 
 | Host contract | A source built for it runs on |
@@ -202,7 +202,7 @@ the same cases against its native `directory` source and against the reference c
 
 | Check | What a source must do |
 |---|---|
-| Identity | `identify` returns the source's own provider name, and the same identity for the same locator. |
+| Identity | `identify` returns the source's own name, and the same identity for the same locator. |
 | Paging | Each page has at most `limit` candidates, no candidate repeats, and resuming from a page's last cursor starts strictly after it. |
 | Foreign cursor | A cursor the source did not produce is refused as `cursor-invalid`. |
 | Incremental | After the last cursor, an incremental source finds nothing and says it is exhausted. |

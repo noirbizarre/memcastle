@@ -429,7 +429,7 @@ impl DaemonClient {
         wing: Option<String>,
         full: bool,
     ) -> Result<Job> {
-        // `MiningSource` serialises flat (`path`, or `provider` and `locator`), which is the wire shape the daemon
+        // `MiningSource` serialises flat (`path`, or `source` and `locator`), which is the wire shape the daemon
         // reads; `full` is left off when false so a plain mine sends exactly what it always did.
         let mut body = serde_json::to_value(&source)
             .map_err(|source| Error::serialization("a mining request", source))?;
@@ -585,7 +585,7 @@ impl DaemonClient {
     /// # Errors
     ///
     /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable, or [`Error::SourceNotFound`]'s body.
-    pub async fn show_source(&self, name: &str) -> Result<crate::mining::ProviderInfo> {
+    pub async fn show_source(&self, name: &str) -> Result<crate::mining::AdapterInfo> {
         self.send(
             self.http
                 .get(self.api_url(&["source-packages", name], None)?),
@@ -602,7 +602,7 @@ impl DaemonClient {
         &self,
         name: &str,
         enabled: bool,
-    ) -> Result<crate::mining::ProviderInfo> {
+    ) -> Result<crate::mining::AdapterInfo> {
         let action = if enabled { "enable" } else { "disable" };
         self.send(
             self.http

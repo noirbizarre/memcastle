@@ -196,3 +196,11 @@ a source whoever wrote it.
   None is bundled by this change.
   OpenCode's is built from `sources/opencode/` and is a candidate for bundling
   ([ADR-030](030-opencode-history-is-an-installed-webassembly-source.md)).
+
+## Note, 2026-10-05: contract 0.2.0
+
+The contract's `source-ref` record names the source's name `source`, not `provider` (see the note on
+[ADR-023](023-unified-source-model-for-mining.md)).
+That is a breaking change before 1.0, so the contract is `0.2.0`.
+An installed source built for `0.1` is `unavailable` with a reason that says to rebuild it, and the three reference
+sources are rebuilt.

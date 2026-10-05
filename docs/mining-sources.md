@@ -59,7 +59,7 @@ See [Deduplication](deduplication.md).
 
 ### Identity, cursor and documents
 
-A source is identified by `(provider, account, locator)`: the adapter, the account on it if it has accounts, and the
+A source is identified by `(source, account, locator)`: the adapter's name, the account on it if it has accounts, and the
 part of it that is read (a directory, a sessions folder, a channel).
 Two jobs that name the same place share one source, and therefore one cursor.
 
@@ -114,7 +114,7 @@ memcastle mine --source opencode         # OpenCode session history, through the
 
 `memcastle sources` (`GET /api/sources`) lists the adapters (built in and installed, with their state), then each source
 that has been mined with its document count, last job and last run.
-Over HTTP, a source job is `{"type": "mine", "provider": "pi", "locator": "...", "full": false}` on
+Over HTTP, a source job is `{"type": "mine", "source": "pi", "locator": "...", "full": false}` on
 `POST /api/jobs`, and over MCP `memcastle_mine` takes `source`, `locator` and `full` beside `path` and `wing`.
 Mining is a write, so a [read-only or disabled session](memory-modes.md) cannot start it.
 The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unchanged`, `skipped`, `similar` and `truncated`.
@@ -282,7 +282,7 @@ The contract is `mining::adapter::SourceAdapter`, one file under `src/mining/ada
 
 | Method | Contract |
 |---|---|
-| `provider`, `description`, `capabilities` | The name users give, one line about it, and whether it is incremental, keeps raw documents and needs credentials. |
+| `name`, `description`, `capabilities` | The name users give, one line about it, and whether it is incremental, keeps raw documents and needs credentials. |
 | `identify(locator)` | Validate the locator and return the source's identity. Make equivalent spellings identical (a canonical path), so they share a cursor. |
 | `default_wing`, `default_room` | Where drawers go when nobody chose. |
 | `discover(source, cursor, limit)` | Candidates strictly after the cursor, in cursor order, at most `limit`, each with the cursor to store once it is done; and whether anything is left. Cheap: a listing. |
@@ -292,11 +292,11 @@ The contract is `mining::adapter::SourceAdapter`, one file under `src/mining/ada
 A built-in adapter also needs a variant in `mining::registry::AnySource`, its name in `registry::BUILTIN_NAMES` (which
 keeps an installed package from shadowing it), and a section on this page.
 What an adapter must not do, and a test (`tests/source_isolation.rs`) enforces: touch the store or the job machinery, which
-the pipeline owns; and what the pipeline must not do: name a provider, name the WebAssembly runtime, or read a file.
+the pipeline owns; and what the pipeline must not do: name an adapter, name the WebAssembly runtime, or read a file.
 The same conformance cases (`tests/fixtures/sources/conformance/`) run against built-in and installed sources.
 A cursor is the adapter's own JSON object, opaque to MemCastle.
 An adapter whose cursor does not parse returns `memcastle::mining::cursor_invalid`, whose help says to mine with `--full`.
 
 A model that suits the planned adapters for chat and issue trackers:
-the cursor is the provider's own page token or timestamp, `external_id` is the provider's id for the message or issue,
+the cursor is the service's own page token or timestamp, `external_id` is the service's id for the message or issue,
 the revision is its `updated_at` or etag, and `needs_credentials` is set, with the credential stored as a reference.

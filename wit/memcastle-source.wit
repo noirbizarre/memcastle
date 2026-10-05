@@ -1,4 +1,4 @@
-// The MemCastle source contract, version 0.1.0 (docs/adr/026, docs/writing-sources.md).
+// The MemCastle source contract, version 0.2.0 (docs/adr/026, docs/writing-sources.md).
 //
 // A source is a WebAssembly Component implementing the `source` world. It is the same logical contract as the
 // native `SourceAdapter` trait: the host calls `identify`, `discover`, `read` and `normalize`, and does everything
@@ -6,12 +6,13 @@
 //
 // Cursors and metadata cross the boundary as JSON text, so the contract does not need to change for a source to
 // carry richer ones. `contract` in `memcastle-source.toml` names the version of this file a source was built for.
-package memcastle:source@0.1.0;
+package memcastle:source@0.2.0;
 
 interface types {
     /// The identity of a place that is mined.
     record source-ref {
-        provider: string,
+        /// The source's name, as in `memcastle-source.toml`.
+        source: string,
         account: option<string>,
         locator: string,
     }
@@ -38,7 +39,7 @@ interface types {
         /// Changes exactly when the content does.
         revision: string,
         body: string,
-        /// JSON object of provider-specific facts.
+        /// JSON object of source-specific facts.
         metadata: string,
         /// RFC 3339.
         occurred-at: option<string>,

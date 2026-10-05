@@ -430,7 +430,7 @@ A relationship says what it relates and when it holds, and where an extractor de
   "valid_from": "2026-07-14T14:27:12Z", "valid_to": null,
   "provenance": {
     "drawer": "…", "extractor": "heuristic", "job_id": "…", "extracted_at": "…",
-    "origin": {"source": "…", "provider": "directory", "document": "team.md", "chunk": 0, "revision": "…"}
+    "origin": {"source_id": "…", "source": "directory", "document": "team.md", "chunk": 0, "revision": "…"}
   }
 }
 ```
@@ -457,7 +457,7 @@ The reasoning is in [ADR-024](adr/024-entity-extraction-as-an-enrich-job.md).
 
 | `type` | Other fields |
 |---|---|
-| `mine` | `path` (absolute directory) or `provider` (a [source](mining-sources.md)) with `locator?`, then `wing?` and `full?` |
+| `mine` | `path` (absolute directory) or `source` (a [source](mining-sources.md) by name) with `locator?`, then `wing?` and `full?` |
 | `checkpoint` | `payload` (see [above](#checkpoint-payload)), `emergency?` |
 | `audit` | `wing?` |
 | `extract` | `wing?`, see [the knowledge graph](#the-knowledge-graph) |
@@ -473,22 +473,22 @@ curl -s -X POST http://127.0.0.1:8420/api/jobs \
 ```sh
 curl -s -X POST http://127.0.0.1:8420/api/jobs \
   -H 'Content-Type: application/json' \
-  -d '{"type": "mine", "provider": "pi"}'
+  -d '{"type": "mine", "source": "pi"}'
 ```
 
-An unknown `provider` is a `400` that names the known ones.
-`GET /api/sources` lists the providers and the sources that have been mined:
+An unknown `source` is a `400` that names the known ones.
+`GET /api/sources` lists the adapters and the sources that have been mined:
 
 ```json
 {
-  "providers": [{"name": "pi", "description": "...", "capabilities": {"incremental": true, "retains_raw": true, "needs_credentials": false},
+  "adapters": [{"name": "pi", "description": "...", "capabilities": {"incremental": true, "retains_raw": true, "needs_credentials": false},
                  "origin": "package", "version": "0.1.0", "state": "enabled", "permissions": {...}}],
-  "sources": [{"id": "...", "provider": "pi", "account": null, "locator": "/home/alice/.pi/agent/sessions",
+  "sources": [{"id": "...", "source": "pi", "account": null, "locator": "/home/alice/.pi/agent/sessions",
                "cursor": {"mtime_ns": 1784039240000000000, "key": "..."}, "last_job": "...", "last_run_at": "...", "documents": 12}]
 }
 ```
 
-A provider's `origin` is `builtin` or `package`; an installed one also has a `version`, and a `state` of `installed`,
+An adapter's `origin` is `builtin` or `package`; an installed one also has a `version`, and a `state` of `installed`,
 `enabled`, `disabled` or `unavailable` (with an `unavailable_reason`).
 It is a read, so a `disabled` session is refused, and it is guarded like every route but the health check.
 There is no MCP tool for it, and none for credentials or for installing sources.

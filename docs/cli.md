@@ -306,7 +306,7 @@ memcastle sources
 
 Lists the sources the daemon can mine, built in and installed, with each one's state and the permissions an installed
 one was given, and, for each one that has been mined, how many documents it holds, when it last ran and which job did.
-In a terminal this is two tables; piped, it is JSON with `providers` and `sources`.
+In a terminal this is two tables; piped, it is JSON with `adapters` and `sources`.
 `memcastle source list` is the same command.
 
 ### `source`

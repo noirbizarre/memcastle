@@ -7,7 +7,7 @@ description = "Pi coding-agent session history (JSONL files under ~/.pi/agent/se
 
 [compatibility]
 # The contract (wit/memcastle-source.wit) this component was built against, and the MemCastle versions it runs on.
-contract = "0.1"
+contract = "0.2"
 memcastle = ">=0.2"
 
 [capabilities]

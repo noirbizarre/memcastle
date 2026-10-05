@@ -58,8 +58,8 @@ mod tests {
 
     fn origin(source: SourceId, chunk: u32) -> Origin {
         Origin {
-            source,
-            provider: "directory".to_string(),
+            source_id: source,
+            source: "directory".to_string(),
             document: "notes.md".to_string(),
             chunk,
             revision: "r1".to_string(),

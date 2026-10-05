@@ -167,3 +167,13 @@ That ADR also adds the registry of installed sources that this one left for late
 The consequence above is narrowed accordingly: adding a *built-in* provider is a file, a variant in `mining::registry`
 and a docs section, while any other provider is a package.
 The pipeline, the chunker and the wire shape of a job did not change.
+
+## Note, 2026-10-05: the adapter's name is `source`, not `provider`
+
+Where this record says `provider` for the adapter that reads a source, the code, the wire and the stored records now say `source`.
+A source is identified by `(source, account, locator)`, a mining job is `{"type": "mine", "source": ..., "locator": ...}`,
+and `GET /api/sources` lists `adapters` and `sources`.
+The one name a user already typed was `--source`, and the word `provider` was left to the embedding and extraction providers,
+which it still names.
+What this record called the source's id is `source_id` wherever it sits beside the adapter's name, as in a drawer's `origin`.
+Migration 3 moved the stored records.

@@ -606,7 +606,7 @@ See [ADR-015](adr/015-database-admin-endpoint.md).
 
 **Mining sources are one contract with two kinds of implementation.**
 A built-in adapter is Rust in the binary; an installed source is a WebAssembly component the daemon runs in a sandbox,
-and `mining::registry` turns a provider name into either behind the same `SourceAdapter` trait, so the pipeline is
+and `mining::registry` turns a source name into either behind the same `SourceAdapter` trait, so the pipeline is
 identical for both.
 
 ```mermaid

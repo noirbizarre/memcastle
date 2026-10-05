@@ -235,7 +235,7 @@ impl Inner {
     fn guest_error(&self, error: wit::SourceError, denied: Option<String>) -> Error {
         match error {
             wit::SourceError::CursorInvalid(message) => Error::SourceCursorInvalid {
-                provider: self.name.clone(),
+                adapter: self.name.clone(),
                 message,
             },
             wit::SourceError::InvalidInput(message) => Error::invalid_input("locator", message),
@@ -286,7 +286,7 @@ impl Inner {
 
 fn to_wit(source: &SourceRef) -> wit::SourceRef {
     wit::SourceRef {
-        provider: source.provider.clone(),
+        source: source.source.clone(),
         account: source.account.clone(),
         locator: source.locator.clone(),
     }
@@ -294,7 +294,7 @@ fn to_wit(source: &SourceRef) -> wit::SourceRef {
 
 fn from_wit(source: wit::SourceRef) -> SourceRef {
     SourceRef {
-        provider: source.provider,
+        source: source.source,
         account: source.account,
         locator: source.locator,
     }
@@ -311,7 +311,7 @@ fn raw_to_wit(raw: &RawDocument) -> wit::RawDocument {
 }
 
 impl SourceAdapter for WasmAdapter {
-    fn provider(&self) -> &str {
+    fn name(&self) -> &str {
         &self.inner.name
     }
 
