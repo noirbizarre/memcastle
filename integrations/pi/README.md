@@ -85,7 +85,7 @@ Other Pi sessions, in this process or another, are other MCP sessions and keep t
 | `/memcastle-wake-up` | shows the briefing | shows the briefing | says MemCastle is not active |
 
 - **`read-only` skips writes instead of attempting them.**
-  The daemon would refuse them with `memcastle::app::mode_forbidden`, but only after a review had paid for a model call
+  The daemon would refuse them with `memcastle::mode::forbidden`, but only after a review had paid for a model call
   whose result must be thrown away, and a rejected call is noise a client that knows its own mode has no reason to make.
   The command reports the refusal as information, with the way out (`MEMCASTLE_MODE=full`), not as a failure.
 - **`off` is not "refused", it is absent.**

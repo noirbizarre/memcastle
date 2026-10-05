@@ -72,7 +72,7 @@ test("an unreachable daemon is reported once, as a warning that says how to star
 test("a refusal by the session's own mode is information, and any other class is a warning or an error", () => {
   const { seen, notify } = notes()
   const mcp = manager()
-  mcp.report(new MemCastleFailure("mode_rejected", "refused", "memcastle::app::mode_forbidden", "It is read-only."), notify)
+  mcp.report(new MemCastleFailure("mode_rejected", "refused", "memcastle::mode::forbidden", "It is read-only."), notify)
   mcp.report(new MemCastleFailure("unauthorized", "needs a token", null, "Set MEMCASTLE_AUTH_TOKEN."), notify)
   mcp.report(new MemCastleFailure("unexpected", "boom"), notify)
   mcp.report(new Error("plain"), notify)

@@ -305,7 +305,7 @@ fn jobs_show_rejects_a_malformed_job_id_before_ever_reaching_the_network() {
         .failure()
         // The diagnostic code, not just a non-zero exit: a malformed id must
         // be reported as such, not as a job that "was not found".
-        .stderr(contains("memcastle::jobs::invalid_id"));
+        .stderr(contains("memcastle::jobs::id_invalid"));
 }
 
 #[test]

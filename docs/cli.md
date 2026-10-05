@@ -424,7 +424,7 @@ which is why everything after the second `/` is the drawer.
 A name cannot be empty, cannot have leading or trailing whitespace, cannot contain control characters
 and cannot look like a UUID.
 A wing or room name cannot contain `/`, and no `/`-separated segment of a drawer name can be empty, `.` or `..`.
-A path that breaks these rules is refused locally, before the daemon is contacted, with `memcastle::palace::invalid_path`.
+A path that breaks these rules is refused locally, before the daemon is contacted, with `memcastle::palace::path_invalid`.
 The same rules apply to a new wing named by `mine --wing`, a checkpoint item or a diary write,
 which the daemon refuses at submission with the same code.
 A wing that already exists is always accepted, whatever its name.

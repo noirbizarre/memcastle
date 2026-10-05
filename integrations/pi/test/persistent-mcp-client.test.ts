@@ -115,7 +115,7 @@ test("every operation in the shared fixture behaves as the mode rules say, throu
       } else {
         const failure = await failureOf(() => session.call(operation.tool, args))
         expect(failure.failureClass, label_).toBe("mode_rejected")
-        expect(failure.code, label_).toBe("memcastle::app::mode_forbidden")
+        expect(failure.code, label_).toBe("memcastle::mode::forbidden")
         expect(failure.help, label_).toBeTruthy()
       }
     }

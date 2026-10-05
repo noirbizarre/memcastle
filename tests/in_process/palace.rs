@@ -167,7 +167,7 @@ async fn unknown_records_and_unusable_names_get_their_own_status_and_code() {
 
     let (status, body) = post(&daemon, "/api/wings", json!({ "name": "a/b" })).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(body["code"], "memcastle::palace::invalid_path");
+    assert_eq!(body["code"], "memcastle::palace::path_invalid");
 
     let (status, body) = post(
         &daemon,
@@ -306,7 +306,7 @@ async fn read_only_may_look_but_not_change_and_disabled_may_do_neither() {
         assert_eq!(status, StatusCode::OK, "read_only GET {path}");
         let (status, body) = call(&daemon, Method::GET, path, None, Some("disabled")).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "disabled GET {path}");
-        assert_eq!(body["code"], "memcastle::app::mode_forbidden");
+        assert_eq!(body["code"], "memcastle::mode::forbidden");
     }
 
     for (method, path, body) in [

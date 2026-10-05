@@ -68,10 +68,7 @@ async fn a_read_only_cli_is_refused_a_write_with_the_mode_error() {
         "a read-only session may not checkpoint"
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("memcastle::app::mode_forbidden"),
-        "{stderr}"
-    );
+    assert!(stderr.contains("memcastle::mode::forbidden"), "{stderr}");
 
     // The same command without the flag is a normal full-mode call.
     let output = memcastle(&daemon)
@@ -104,7 +101,7 @@ async fn the_mode_can_also_come_from_the_environment() {
         !output.status.success(),
         "a disabled session may not read jobs"
     );
-    assert!(String::from_utf8_lossy(&output.stderr).contains("memcastle::app::mode_forbidden"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("memcastle::mode::forbidden"));
 
     daemon.shutdown().await;
 }
@@ -631,7 +628,7 @@ async fn a_missing_wing_fails_with_the_daemons_own_diagnostic_and_a_bad_path_fai
         .output()
         .await
         .unwrap();
-    assert!(String::from_utf8_lossy(&output.stderr).contains("memcastle::palace::invalid_path"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("memcastle::palace::path_invalid"));
     daemon.shutdown().await;
 }
 
@@ -924,7 +921,7 @@ async fn a_read_only_cli_cannot_capture_a_note() {
         .await
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("memcastle::app::mode_forbidden"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("memcastle::mode::forbidden"));
     daemon.shutdown().await;
 }
 

@@ -1040,7 +1040,7 @@ mod tests {
 
         assert_eq!(result.is_error, Some(true));
         let body: serde_json::Value = serde_json::from_str(&text_of(&result)).expect("json body");
-        assert_eq!(body["code"], "memcastle::app::mode_forbidden");
+        assert_eq!(body["code"], "memcastle::mode::forbidden");
         assert!(
             body["help"].is_string(),
             "the body must say what to do: {body}"
@@ -1304,7 +1304,7 @@ mod tests {
         error.body().code
     }
 
-    const MODE_FORBIDDEN: &str = "memcastle::app::mode_forbidden";
+    const MODE_FORBIDDEN: &str = "memcastle::mode::forbidden";
 
     /// A tools surface whose one session `s` has chosen `mode`.
     async fn tools_in_mode(mode: &str) -> McpTools {
@@ -1415,7 +1415,7 @@ mod tests {
             let code = code_of(&result).expect("must fail");
             assert!(
                 Some(&code) == code_of_error(&Error::invalid_job_id("")).as_ref()
-                    || code == "memcastle::repair::invalid_based_on_job",
+                    || code == "memcastle::repair::based_on_job_invalid",
                 "{code}"
             );
         }

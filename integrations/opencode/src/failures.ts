@@ -61,16 +61,16 @@ export function parseErrorBody(text: string): ErrorBody | null {
  */
 const INVALID_INPUT_CODES: ReadonlySet<string> = new Set([
   "memcastle::input::invalid",
-  "memcastle::palace::invalid_path",
-  "memcastle::repair::invalid_based_on_job",
-  "memcastle::domain::empty_label",
+  "memcastle::palace::path_invalid",
+  "memcastle::repair::based_on_job_invalid",
+  "memcastle::graph::empty_label",
   "memcastle::search::semantic_unavailable",
 ])
 
 /** Classify by the public diagnostic code. Codes are stable identifiers; the message text is not. */
 function classOfCode(code: string | null, status: number | null): FailureClass {
   if (code === "memcastle::auth::unauthorized" || status === 401) return "unauthorized"
-  if (code === "memcastle::app::mode_forbidden" || status === 403) return "mode_rejected"
+  if (code === "memcastle::mode::forbidden" || status === 403) return "mode_rejected"
   if ((code !== null && INVALID_INPUT_CODES.has(code)) || status === 400) return "invalid_input"
   return "unexpected"
 }

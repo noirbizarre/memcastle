@@ -54,7 +54,7 @@ so a long query is more likely to return loose matches.
 ## Memory modes
 
 The mode of the session limits what is possible, and this skill never overrides it.
-In `disabled`, reads are refused with `memcastle::app::mode_forbidden`: stop searching, do not retry,
+In `disabled`, reads are refused with `memcastle::mode::forbidden`: stop searching, do not retry,
 and answer as if MemCastle did not exist.
 `read_only` allows searching and recalling.
 Do not call `memcastle_set_mode` to get around a refusal.

@@ -161,7 +161,7 @@ async fn a_malformed_job_id_is_a_400_with_its_own_diagnostic_code() {
     let (status, body) = get_error(&daemon.base_url, "/api/jobs/not-a-uuid").await;
 
     assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
-    assert_eq!(body["code"], "memcastle::jobs::invalid_id");
+    assert_eq!(body["code"], "memcastle::jobs::id_invalid");
     assert!(
         body["help"].is_string(),
         "an error body must say what to do: {body}"
@@ -266,10 +266,10 @@ async fn a_bad_job_id_or_checkpoint_payload_gets_the_same_diagnostic_over_rest_a
     let client = reqwest::Client::new();
 
     for (payload, code, blamed) in [
-        // The job-id parser every channel shares reports `invalid_id`...
+        // The job-id parser every channel shares reports `id_invalid`...
         (
             serde_json::json!({ "type": "repair", "based_on_job": "not-a-uuid" }),
-            "memcastle::jobs::invalid_id",
+            "memcastle::jobs::id_invalid",
             "not-a-uuid",
         ),
         // ...and a bad checkpoint payload is blamed on `payload`, not `body`.
@@ -303,7 +303,7 @@ async fn a_bad_job_id_or_checkpoint_payload_gets_the_same_diagnostic_over_rest_a
 }
 
 #[tokio::test]
-async fn pausing_a_finished_job_is_a_400_invalid_transition_not_a_404() {
+async fn pausing_a_finished_job_is_a_400_transition_invalid_not_a_404() {
     let daemon = TestDaemon::start().await;
     let client = reqwest::Client::new();
     let submitted: Job = client
@@ -334,7 +334,7 @@ async fn pausing_a_finished_job_is_a_400_invalid_transition_not_a_404() {
 
     assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
     let body: serde_json::Value = response.json().await.expect("json");
-    assert_eq!(body["code"], "memcastle::jobs::invalid_transition");
+    assert_eq!(body["code"], "memcastle::jobs::transition_invalid");
     daemon.shutdown().await;
 }
 

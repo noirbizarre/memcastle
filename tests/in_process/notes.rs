@@ -138,7 +138,7 @@ async fn a_blank_note_or_an_unusable_name_is_refused_and_nothing_is_stored() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_eq!(body["code"], "memcastle::palace::invalid_path");
+    assert_eq!(body["code"], "memcastle::palace::path_invalid");
 
     let (_, wings) = call(&daemon, Method::GET, "/api/wings", None, None).await;
     assert!(wings.as_array().unwrap().is_empty(), "{wings}");
@@ -171,7 +171,7 @@ async fn a_read_only_or_disabled_session_cannot_write_a_note() {
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{mode}: {body}");
-        assert_eq!(body["code"], "memcastle::app::mode_forbidden");
+        assert_eq!(body["code"], "memcastle::mode::forbidden");
     }
     let (_, wings) = call(&daemon, Method::GET, "/api/wings", None, None).await;
     assert!(wings.as_array().unwrap().is_empty(), "{wings}");

@@ -4,7 +4,7 @@ Every MemCastle failure carries a diagnostic code of the form `memcastle::<modul
 what to do.
 Codes are stable, so it is safe to search for or match on them.
 When the daemon rejects a CLI request, the CLI reports it as `memcastle::client::remote_rejected`
-and shows the daemon's own code in parentheses, such as `(403, memcastle::app::mode_forbidden)`;
+and shows the daemon's own code in parentheses, such as `(403, memcastle::mode::forbidden)`;
 that inner code is the one to look up below.
 Add `-v` for the full cause chain of an error, and see [Logging](daemon.md#logging) for the daemon's own log.
 
@@ -144,7 +144,7 @@ Nothing answers to that name or UUID.
 exists.
 A room is looked up inside the wing you named, so a room's UUID from another wing is not found there.
 
-### `memcastle::palace::invalid_path`
+### `memcastle::palace::path_invalid`
 
 The path or a name in it cannot be used: a part is empty, a wing or room name contains `/`,
 a drawer name has an empty, `.` or `..` segment,
@@ -250,7 +250,7 @@ The default file, `~/.config/memcastle/config.toml`, is optional.
 
 ## Using memory
 
-### `memcastle::app::mode_forbidden`
+### `memcastle::mode::forbidden`
 
 The session or request is in a [memory mode](memory-modes.md) that forbids the operation:
 `read_only` rejects writes, and `disabled` rejects reads too.
@@ -268,12 +268,12 @@ Use `full`, `read_only` or `disabled`.
 The request did not belong to an MCP session, so a mode cannot be remembered for later calls.
 Use a client that keeps an MCP session open, or send `X-MemCastle-Mode` over REST.
 
-### `memcastle::jobs::invalid_id` or `not_found`
+### `memcastle::jobs::id_invalid` or `not_found`
 
 Job ids are UUIDs, as printed by `memcastle job list`.
 A well-formed id the daemon does not know may belong to a different palace.
 
-### `memcastle::jobs::invalid_transition`
+### `memcastle::jobs::transition_invalid`
 
 The job is not in a state the action applies to:
 only a failed job can be retried, only a paused one resumed, and only a queued, paused or running one cancelled.
@@ -291,7 +291,7 @@ The path given to `mine`, and the sessions directory of `pi`, are read by the da
 daemon's machine.
 Over MCP and REST it must be absolute; the CLI makes it absolute for you.
 
-### `memcastle::mining::cursor_invalid`
+### `memcastle::source::cursor_invalid`
 
 A source's stored cursor is not one its adapter can continue from, for example after a change to how that adapter keeps
 its place.
@@ -351,12 +351,12 @@ These are rarer, and each one's `help:` line names the fix.
 shared by several daemons.
 If the first daemon was merely slow, raise `jobs.lease_ttl_secs`.
 
-### `memcastle::repair::invalid_based_on_job`
+### `memcastle::repair::based_on_job_invalid`
 
 `repair` needs the id of a completed `audit` job to plan from.
 Give it one that exists, is an audit, and has finished.
 
-### `memcastle::graph::relationship_not_found` and `memcastle::domain::empty_label`
+### `memcastle::graph::relationship_not_found` and `memcastle::graph::empty_label`
 
 A checkpoint item's `fact` named a relationship the palace does not hold (`relationship_not_found`),
 or gave a blank entity kind or predicate (`empty_label`).

@@ -271,7 +271,7 @@ The label is translated to the daemon's wire value (`off` is `disabled`, `read-o
 | `memcastle_checkpoint` tool and `/memcastle-checkpoint` | review or save | refuse, with the way out; no write is sent, even for a payload the model wrote | not registered |
 
 - **`read-only` skips writes instead of attempting them.**
-  The daemon would refuse them with `memcastle::app::mode_forbidden`, but only after a rejected call, and after a review
+  The daemon would refuse them with `memcastle::mode::forbidden`, but only after a rejected call, and after a review
   had paid for a model call whose result must be thrown away.
   The tool throws a failure of class `mode_rejected` that says to start with `MEMCASTLE_MODE=full`.
 - **`off` is absent, not refused.**

@@ -16,10 +16,11 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Diagnostic codes are `memcastle::<module>::<kind>`. A code is a public
 /// identifier users grep for, so renaming one is a breaking change.
 ///
-/// `<module>` names the part of the system the user is dealing with, and
+/// `<module>` names the part of the system the user is dealing with, never a layer of the implementation, and
 /// `<kind>` says what is wrong with it: a condition (`invalid`, `malformed`,
 /// `not_found`, `locked`, `pending`, `forbidden`-style words), or `failed` /
-/// `<thing>_failed` when an operation itself broke. The
+/// `<thing>_failed` when an operation itself broke. A condition on a named thing puts the thing first
+/// (`id_invalid`, `manifest_invalid`), never `invalid_<thing>`. The
 /// `every_error_variant_has_a_well_shaped_unique_code_and_a_help_line` test
 /// is the enforced reference: it checks every variant's code against this
 /// shape.
@@ -70,7 +71,7 @@ pub enum Error {
     /// no job has ([`Error::JobNotFound`]).
     #[error("`{raw}` is not a job id")]
     #[diagnostic(
-        code(memcastle::jobs::invalid_id),
+        code(memcastle::jobs::id_invalid),
         help("job ids are UUIDs, as printed by `memcastle job list`")
     )]
     InvalidJobId {
@@ -193,7 +194,7 @@ pub enum Error {
     /// was empty or whitespace-only after normalization.
     #[error("{field} must not be empty")]
     #[diagnostic(
-        code(memcastle::domain::empty_label),
+        code(memcastle::graph::empty_label),
         help("give the entity/relationship a short, descriptive label")
     )]
     EmptyLabel {
@@ -246,7 +247,7 @@ pub enum Error {
     /// A job transition was rejected by the state machine.
     #[error("job {id} cannot go from {from} to {event}")]
     #[diagnostic(
-        code(memcastle::jobs::invalid_transition),
+        code(memcastle::jobs::transition_invalid),
         help(
             "valid transitions: queued->running, running->paused, paused->queued, running->completed, running->failed, running->queued (crash recovery), failed->queued (retry), queued|paused|running->cancelled"
         )
@@ -277,7 +278,7 @@ pub enum Error {
     /// failure. See `crate::repair::run`'s doc comment.
     #[error("based_on_job {id}: {message}")]
     #[diagnostic(
-        code(memcastle::repair::invalid_based_on_job),
+        code(memcastle::repair::based_on_job_invalid),
         help("based_on_job must be the id of a completed `memcastle audit` job")
     )]
     InvalidBasedOnJob {
@@ -453,7 +454,7 @@ pub enum Error {
     /// allow/deny matrix). Returned before the store is ever touched.
     #[error("`{operation}` is not permitted in {mode} mode")]
     #[diagnostic(
-        code(memcastle::app::mode_forbidden),
+        code(memcastle::mode::forbidden),
         help(
             "switch the session/request to Full mode to allow writes, or to Full/ReadOnly to allow reads"
         )
@@ -646,7 +647,7 @@ pub enum Error {
     /// A `wing/room/drawer` path, or one of its names, is not usable.
     #[error("invalid path `{raw}`: {message}")]
     #[diagnostic(
-        code(memcastle::palace::invalid_path),
+        code(memcastle::palace::path_invalid),
         help(
             "paths read `<wing>`, `<wing>/<room>` or `<wing>/<room>/<drawer>`; \
              wing and room names cannot contain `/`"
@@ -781,7 +782,7 @@ pub enum Error {
     /// A source's stored cursor is not one its adapter can continue from.
     #[error("the stored cursor of the `{adapter}` source cannot be continued from: {message}")]
     #[diagnostic(
-        code(memcastle::mining::cursor_invalid),
+        code(memcastle::source::cursor_invalid),
         help(
             "mine it again from the beginning (`memcastle mine --source <name> --full`): unchanged documents are skipped, so nothing is duplicated"
         )
@@ -1596,6 +1597,18 @@ mod tests {
                 "`{code}` has a segment that is not lower snake_case"
             );
         }
+        // `<module>` is what the user is dealing with, never a layer of the implementation: a code that named
+        // `app` or `domain` would say where MemCastle noticed the problem, which no user can act on.
+        assert!(
+            !["app", "domain", "mining"].contains(&segments[1]),
+            "`{code}` names an internal layer; use the part of the system the user is dealing with"
+        );
+        // One word order for a condition, `<noun>_<condition>` (`id_invalid`, `manifest_invalid`), so that a grep
+        // for `_invalid` finds them all and a new code does not pick a third spelling.
+        assert!(
+            !segments[2].starts_with("invalid_"),
+            "`{code}` puts the condition first; write `<noun>_invalid`"
+        );
     }
 
     /// AGENTS.md: a diagnostic must say what to do. Every variant carries a
@@ -1680,7 +1693,7 @@ mod tests {
         let body = Error::invalid_job_id("nope").body();
 
         assert!(body.error.contains("nope"));
-        assert_eq!(body.code.as_deref(), Some("memcastle::jobs::invalid_id"));
+        assert_eq!(body.code.as_deref(), Some("memcastle::jobs::id_invalid"));
         assert!(body.help.is_some());
     }
 }

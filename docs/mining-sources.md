@@ -295,7 +295,7 @@ What an adapter must not do, and a test (`tests/source_isolation.rs`) enforces: 
 the pipeline owns; and what the pipeline must not do: name an adapter, name the WebAssembly runtime, or read a file.
 The same conformance cases (`tests/fixtures/sources/conformance/`) run against built-in and installed sources.
 A cursor is the adapter's own JSON object, opaque to MemCastle.
-An adapter whose cursor does not parse returns `memcastle::mining::cursor_invalid`, whose help says to mine with `--full`.
+An adapter whose cursor does not parse returns `memcastle::source::cursor_invalid`, whose help says to mine with `--full`.
 
 A model that suits the planned adapters for chat and issue trackers:
 the cursor is the service's own page token or timestamp, `external_id` is the service's id for the message or issue,

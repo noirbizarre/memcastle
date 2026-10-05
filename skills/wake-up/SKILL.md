@@ -38,7 +38,7 @@ and an item that does not fit the byte budget is dropped whole.
 
 ## Memory modes
 
-In `disabled` the call is refused with `memcastle::app::mode_forbidden`.
+In `disabled` the call is refused with `memcastle::mode::forbidden`.
 Stop there, do not retry, and behave as if MemCastle did not exist.
 `read_only` allows wake-up.
 Do not call `memcastle_set_mode` to get around a refusal.

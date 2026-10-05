@@ -73,6 +73,6 @@ Retry a failed job with `memcastle_job_retry` rather than submitting the same it
 ## When it is refused
 
 - `memcastle::input::invalid`: the payload is malformed, so fix it from the message and its `help` line.
-- `memcastle::app::mode_forbidden`: the session is `read_only` or `disabled`.
+- `memcastle::mode::forbidden`: the session is `read_only` or `disabled`.
   Stop, do not retry, and do not call `memcastle_set_mode` to get around it.
   In these modes, do not queue the content anywhere else on the user's behalf.

@@ -183,7 +183,7 @@ export function createCheckpoints(options: {
         throw new MemCastleFailure(
           "mode_rejected",
           `This session is ${settings.mode}, so it cannot write a checkpoint.`,
-          "memcastle::app::mode_forbidden",
+          "memcastle::mode::forbidden",
           "Start the session with MEMCASTLE_MODE=full to checkpoint.",
         )
       }

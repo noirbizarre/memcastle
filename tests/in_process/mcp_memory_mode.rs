@@ -387,7 +387,7 @@ async fn an_mcp_mode_rejection_carries_the_diagnostic_code_and_help() {
 
     assert!(failed, "a read-only session may not checkpoint");
     let body: serde_json::Value = serde_json::from_str(&text).expect("the error is JSON");
-    assert_eq!(body["code"], "memcastle::app::mode_forbidden");
+    assert_eq!(body["code"], "memcastle::mode::forbidden");
     assert!(body["help"].is_string(), "{body}");
     assert!(
         body["error"]
@@ -448,7 +448,7 @@ async fn an_mcp_client_can_submit_check_on_and_stop_its_own_jobs() {
     .await;
     assert!(failed);
     let body: serde_json::Value = serde_json::from_str(&text).expect("error json");
-    assert_eq!(body["code"], "memcastle::jobs::invalid_transition");
+    assert_eq!(body["code"], "memcastle::jobs::transition_invalid");
 
     client.cancel().await.expect("close session");
     daemon.shutdown().await;

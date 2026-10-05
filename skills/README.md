@@ -40,7 +40,7 @@ The split follows what an agent does over a session, not the MCP tool list: ther
 - Reference only what this release exposes: `memcastle_*` tools, `memcastle` CLI commands and documented `/api/` routes.
   `tests/in_process/skills.rs` fails when a skill names something that does not exist.
 - Never describe the database endpoint, storage internals or the credential routes.
-- A skill that calls a mode-gated tool says to stop on `memcastle::app::mode_forbidden` and never to call
+- A skill that calls a mode-gated tool says to stop on `memcastle::mode::forbidden` and never to call
   `memcastle_set_mode` to get around it.
 - A skill is self-contained: it links only to files in its own directory and names other skills by name.
 - Carry no palace content, so a skill is safe to load into a session whose memory mode is off.

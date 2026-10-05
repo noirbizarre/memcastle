@@ -161,7 +161,7 @@ async fn a_repair_based_on_an_unknown_job_is_rejected_at_submission_and_creates_
 
     assert_eq!(response.status(), 400);
     let body: serde_json::Value = response.json().await.expect("json");
-    assert_eq!(body["code"], "memcastle::repair::invalid_based_on_job");
+    assert_eq!(body["code"], "memcastle::repair::based_on_job_invalid");
     assert_eq!(
         job_count(&client, &daemon.base_url).await,
         0,
@@ -189,7 +189,7 @@ async fn a_repair_based_on_a_job_that_is_not_an_audit_is_rejected_at_submission(
 
     assert_eq!(response.status(), 400);
     let body: serde_json::Value = response.json().await.expect("json");
-    assert_eq!(body["code"], "memcastle::repair::invalid_based_on_job");
+    assert_eq!(body["code"], "memcastle::repair::based_on_job_invalid");
     assert_eq!(
         job_count(&client, &daemon.base_url).await,
         1,

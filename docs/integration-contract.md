@@ -85,7 +85,7 @@ After selecting a mode, the client can read back what the daemon believes throug
 
 Client responsibility: select the mode before any other call, and honour it.
 For `off` that means more than the daemon's refusals.
-The daemon rejects every read and write with `memcastle::app::mode_forbidden`, but it cannot stop a client from injecting
+The daemon rejects every read and write with `memcastle::mode::forbidden`, but it cannot stop a client from injecting
 memory it fetched earlier, or from loading a skill that carries it.
 A disabled session must behave as if MemCastle does not exist, and context isolation is the client's job.
 
@@ -166,7 +166,7 @@ The payload is already classified by the client into `preference`, `project`, `d
 (see [the payload](mcp-and-api.md#checkpoint-payload)).
 A checkpoint is a durable job at High priority, so it survives a daemon restart and resumes from where it stopped.
 Submission refuses an empty `items` list, blank content, a fact confidence outside 0 to 1 and a malformed name,
-before any job exists, with `memcastle::input::invalid` or `memcastle::palace::invalid_path`.
+before any job exists, with `memcastle::input::invalid` or `memcastle::palace::path_invalid`.
 Some clients send the payload as a JSON string, which is accepted.
 
 Client responsibility: decide what is worth keeping, classify it, choose between waiting for the job and not,
@@ -264,7 +264,7 @@ An integration must tell these classes apart, and say what to do about each.
 | --- | --- | --- | --- | --- |
 | `daemon_unavailable` | The connection fails, no answer | none | warning | The daemon cannot be reached and how to start it |
 | `unauthorized` | HTTP 401 | `memcastle::auth::unauthorized` | warning | A token is needed, and `help` |
-| `mode_rejected` | Tool error, HTTP 403 | `memcastle::app::mode_forbidden` | information | The session's own choice refused it, which is not a fault |
+| `mode_rejected` | Tool error, HTTP 403 | `memcastle::mode::forbidden` | information | The session's own choice refused it, which is not a fault |
 | `invalid_input` | Tool error, HTTP 400 | `memcastle::input::invalid`, or one of the more specific `also_codes` | warning | The request was malformed, and `help` |
 | `job_failed` | A job reaches `failed` | none | warning | `Job.error`, and that the job can be retried |
 
@@ -272,7 +272,7 @@ A failure that is none of these is the daemon's own fault, and is shown as an er
 
 Over MCP a tool error carries no HTTP status, so the code alone classifies it.
 The fixture lists the codes the daemon answers with a 400 for a request an integration can get wrong
-(`memcastle::palace::invalid_path` among them), and a client reads each of them as `invalid_input`
+(`memcastle::palace::path_invalid` among them), and a client reads each of them as `invalid_input`
 rather than as a fault of the daemon.
 A malformed job id is not among them, because an integration only sends job ids the daemon gave it.
 

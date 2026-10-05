@@ -12,7 +12,7 @@
     "read_only": { "read": "ok", "write": "mode_forbidden", "ungated": "ok" },
     "disabled": { "read": "mode_forbidden", "write": "mode_forbidden", "ungated": "ok" }
   },
-  "forbidden_code": "memcastle::app::mode_forbidden",
+  "forbidden_code": "memcastle::mode::forbidden",
   "operations": [
     {
       "id": "search",

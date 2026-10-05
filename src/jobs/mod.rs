@@ -1137,7 +1137,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pausing_a_job_that_is_not_running_is_an_invalid_transition_not_a_missing_job() {
+    async fn pausing_a_job_that_is_not_running_is_a_transition_invalid_not_a_missing_job() {
         let scheduler = scheduler().await;
         let done = seed(&scheduler, JobStatus::Completed, 1).await;
 

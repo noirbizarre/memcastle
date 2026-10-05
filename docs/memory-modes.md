@@ -33,7 +33,7 @@ The rule follows what an operation touches, not what it is called.
 - **Never gated:** `status`, job control (pause, resume, cancel, retry), demo jobs, `audit` and a dry-run `repair`.
   They report on the palace or steer work that was already allowed, and never expose drawer content.
 
-A rejected operation fails with `memcastle::app::mode_forbidden`, on reads as well as writes.
+A rejected operation fails with `memcastle::mode::forbidden`, on reads as well as writes.
 A disabled session never receives an empty result that could be mistaken for "nothing found".
 
 ```mermaid

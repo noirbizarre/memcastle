@@ -103,7 +103,7 @@ and `/api/status` accepts it only to report the mode
 as `full`.
 `/api/health`, job control (pause, resume, cancel, retry) and `/api/shutdown` are never gated and ignore it.
 
-A mode the daemon refuses is a `403` with the code `memcastle::app::mode_forbidden`.
+A mode the daemon refuses is a `403` with the code `memcastle::mode::forbidden`.
 A request without a valid token, on a daemon with [authentication](authentication.md) enabled,
 is a `401` with the code `memcastle::auth::unauthorized` and a `WWW-Authenticate: Bearer` header.
 Other statuses are `400` for invalid input, a transition the job's state does not allow, or a database admin endpoint
@@ -502,7 +502,7 @@ Whichever interface you use, a failure has the same three fields:
 ```json
 {
   "error": "`diary_write` is not permitted in read_only mode",
-  "code": "memcastle::app::mode_forbidden",
+  "code": "memcastle::mode::forbidden",
   "help": "switch the session/request to Full mode to allow writes, or to Full/ReadOnly to allow reads"
 }
 ```

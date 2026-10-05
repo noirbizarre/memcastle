@@ -277,6 +277,7 @@ gets its own CI job, which runs `mise run sources:test -- <name>`.
 | `memcastle::source::builtin` | Built-in sources cannot be disabled, replaced or removed. |
 | `memcastle::source::failed` | The source ran and failed, trapped or ran out of memory. The message is the source's own. |
 | `memcastle::source::timeout` | One call took longer than its limit. |
+| `memcastle::source::cursor_invalid` | The stored cursor is not one the source produced. Mine again with `--full`: unchanged documents are skipped. |
 | `memcastle::source::permission_denied` | The source ran a program its manifest does not list. |
 | `memcastle::source::build_failed` | The build command failed or did not produce a component. |
 | `memcastle::source::registry_unavailable` | A registry's index could not be read: unreachable, not an index, or a format this MemCastle does not know. Check `mining.registries`. |
