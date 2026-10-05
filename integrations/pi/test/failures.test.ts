@@ -6,6 +6,7 @@ import {
   failureFromStatus,
   failureFromTransport,
   parseErrorBody,
+  presentFailure,
 } from "../src/failures.ts"
 import { fixture } from "./support/fixtures.ts"
 
@@ -14,6 +15,8 @@ interface FailureClassFixture {
   http_status: number | null
   code: string | null
   also_codes?: string[]
+  severity: string
+  message_must_contain: string[]
 }
 const classes = fixture<{ classes: FailureClassFixture[] }>("failure-classes.json").classes
 
@@ -78,4 +81,43 @@ test("only a failed job is a failure, and it carries the job's own error and how
   expect(failure?.failureClass).toBe("job_failed")
   expect(failure?.toUserMessage()).toContain("disk full")
   expect(failure?.toUserMessage()).toContain("memcastle_job_retry")
+})
+
+/** One real failure of each fixture class, built the way the client builds it from what the daemon sends. */
+function failureOf(entry: FailureClassFixture): MemCastleFailure {
+  switch (entry.id) {
+    case "daemon_unavailable":
+      return failureFromTransport("http://127.0.0.1:1", new Error("connection refused"))
+    case "unauthorized":
+      return failureFromStatus(401, "")
+    case "job_failed":
+      return failureFromJob({ id: "j-1", status: "failed", error: "disk full", kind: { type: "mine" } }) as MemCastleFailure
+    default:
+      return failureFromBody({ error: "refused", code: entry.code, help: "do this" })
+  }
+}
+
+test("every failure class is shown with the severity and the next step the shared fixture promises", () => {
+  for (const entry of classes) {
+    const shown = presentFailure(failureOf(entry))
+    expect(shown.severity).toBe(entry.severity as never)
+    for (const text of entry.message_must_contain) expect(shown.message).toContain(text)
+  }
+})
+
+test("only a refusal by the session's own mode is shown as information, so it is never mistaken for a fault", () => {
+  const informational = classes.filter((entry) => presentFailure(failureOf(entry)).severity === "info")
+  expect(informational.map((entry) => entry.id)).toEqual(["mode_rejected"])
+})
+
+test("a fault of the daemon or of the client itself is shown as an error and keeps its message", () => {
+  expect(presentFailure(failureFromStatus(500, "internal")).severity).toBe("error")
+  const plain = presentFailure(new Error("plain"))
+  expect(plain).toEqual({ severity: "error", message: "plain" })
+})
+
+test("a failed job names the work that failed, so a checkpoint is not told apart from a mining run by its id alone", () => {
+  const failure = failureFromJob({ id: "j-1", status: "failed", error: "disk full", kind: { type: "mine" } })
+  expect(failure?.message).toBe("MemCastle mine job j-1 failed: disk full.")
+  expect(failureFromJob({ id: "j-2", status: "failed" })?.message).toBe("MemCastle job j-2 failed: no error was recorded.")
 })

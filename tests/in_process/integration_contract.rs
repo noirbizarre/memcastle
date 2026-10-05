@@ -582,6 +582,28 @@ async fn each_failure_class_is_distinguishable_with_its_code_and_help() {
             .clone()
     };
 
+    // How each class is shown is part of the contract the clients replay: a refusal by the session's own mode is
+    // information and never a fault, and every class says how loudly it is shown.
+    for class in classes["classes"].as_array().expect("a list") {
+        let id = class["id"].as_str().expect("a class id");
+        let severity = class["severity"]
+            .as_str()
+            .unwrap_or_else(|| panic!("`{id}` has no severity"));
+        assert!(
+            ["info", "warning", "error"].contains(&severity),
+            "`{id}` has an unknown severity `{severity}`"
+        );
+        assert_eq!(
+            severity == "info",
+            id == "mode_rejected",
+            "only a mode refusal is information, and `{id}` is shown as `{severity}`"
+        );
+        assert!(
+            class["message_must_contain"].is_array(),
+            "`{id}` must list the text its message carries, even if none"
+        );
+    }
+
     let daemon = TestDaemon::start().await;
     let session = connect(&daemon.base_url).await;
 

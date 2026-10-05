@@ -318,7 +318,7 @@ test("a connection that went away mid-review is reported, not read as nothing wo
   const failure = await reviewOf(null)
     .run(io)
     .catch((error: unknown) => error)
-  expect((failure as MemCastleFailure).failureClass).toBe("invalid_input")
+  expect((failure as MemCastleFailure).failureClass).toBe("daemon_unavailable")
   expect((failure as MemCastleFailure).toUserMessage()).toContain("memcastle daemon start")
 })
 

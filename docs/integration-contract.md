@@ -260,13 +260,15 @@ Client-side (to test): one trigger per scheduled event.
 An integration must tell these classes apart, and say what to do about each.
 `tests/fixtures/integration/failure-classes.json` is the machine-readable form.
 
-| Class | How it is detected | Code | The client tells the user |
-| --- | --- | --- | --- |
-| `daemon_unavailable` | The connection fails, no answer | none | The daemon cannot be reached and how to start it |
-| `unauthorized` | HTTP 401 | `memcastle::auth::unauthorized` | A token is needed, and `help` |
-| `mode_rejected` | Tool error, HTTP 403 | `memcastle::app::mode_forbidden` | The session's own choice refused it, which is not a fault |
-| `invalid_input` | Tool error, HTTP 400 | `memcastle::input::invalid`, or one of the more specific `also_codes` | The request was malformed, and `help` |
-| `job_failed` | A job reaches `failed` | none | `Job.error`, and that the job can be retried |
+| Class | How it is detected | Code | Shown as | The client tells the user |
+| --- | --- | --- | --- | --- |
+| `daemon_unavailable` | The connection fails, no answer | none | warning | The daemon cannot be reached and how to start it |
+| `unauthorized` | HTTP 401 | `memcastle::auth::unauthorized` | warning | A token is needed, and `help` |
+| `mode_rejected` | Tool error, HTTP 403 | `memcastle::app::mode_forbidden` | information | The session's own choice refused it, which is not a fault |
+| `invalid_input` | Tool error, HTTP 400 | `memcastle::input::invalid`, or one of the more specific `also_codes` | warning | The request was malformed, and `help` |
+| `job_failed` | A job reaches `failed` | none | warning | `Job.error`, and that the job can be retried |
+
+A failure that is none of these is the daemon's own fault, and is shown as an error.
 
 Over MCP a tool error carries no HTTP status, so the code alone classifies it.
 The fixture lists the codes the daemon answers with a 400 for a request an integration can get wrong
@@ -279,7 +281,9 @@ The client shows `help` because it names the next step, and never swallows a fai
 A daemon that is down is not "nothing remembered".
 
 Daemon-side (tested): each class is produced for real, and carries the documented code and a `help` line.
-Client-side (to test): each class produces a distinct, readable message, and the session continues without MemCastle.
+Client-side (tested by each integration's own suite): each class is shown with the fixture's `severity`,
+its message carries the text the fixture's `message_must_contain` lists,
+a mode refusal is information and not a fault, and the session continues without MemCastle.
 
 ### Project context
 
@@ -364,7 +368,7 @@ The fixtures are strict JSON in `tests/fixtures/integration/`, so any language c
 | `modes.json` | The label to wire mapping, every gated operation and what each mode must do with it |
 | `checkpoint-payloads.json` | Valid payloads with a token to recall them by, and invalid ones with the code they are refused with |
 | `checkpoint-classifications.json` | Model replies a client's review may meet, with the items each must become or the refusal it must get |
-| `failure-classes.json` | The failure classes, how each is detected, and the code and status |
+| `failure-classes.json` | The failure classes, how each is detected, the code and status, and how each is shown |
 | `off-isolation.json` | A marker drawer to seed, and every path by which an integration could show an `off` session MemCastle material |
 
 The project-context cases live apart, in `tests/fixtures/project-config/cases.json`, because the daemon's mining reads the

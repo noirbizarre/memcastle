@@ -201,6 +201,7 @@ submits it with `memcastle_checkpoint`.
   A job that failed carries the daemon's reason and `memcastle_job_retry`; a reply the model got wrong says nothing was
   saved and suggests a more capable model; a daemon that is down carries how to start it.
   None of them is shown as "nothing worth keeping".
+- **A failure is shown at the level it deserves** (see [Failures](#failures)).
 - A `read-only` session never reviews on its own, since the daemon would refuse the write after a paid model call.
   `/memcastle-checkpoint` there says why nothing was saved.
   An `off` session has no manager, so nothing is reviewed and the command says MemCastle is not active.
@@ -304,8 +305,26 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | `skills` | Implemented: `search-before-answer` is injected and `checkpoint-instructions` instructs the reviewing model, both read from `skills/` and never copied; `off` sessions get nothing | #25, #23, done |
 | `project-context` | Implemented: `.config/memcastle.toml` and `MEMCASTLE_WING` / `MEMCASTLE_ROOM` resolved from Pi's directory, used for the wake-up wing, checkpoint defaults and the search instruction | #183, done |
 | `background-mining` | Not yet | #26 |
-| `failure-reporting` | Foundation: the five classes with `help`, shown as Pi notifications | #30 for the rest |
+| `failure-reporting` | Implemented: the five classes plus `unexpected`, each shown as a Pi notification at the severity the shared fixture promises, with `help` | #30, done |
 | `audit-repair` | Not yet | #28 |
+
+### Failures
+
+Every failure is shown as a Pi notification that starts with `MemCastle:`, says what went wrong, and says what to do.
+The class decides the level, and `tests/fixtures/integration/failure-classes.json` is the one place both Pi and OpenCode read it from.
+
+| Class | Level | What the user reads |
+| --- | --- | --- |
+| `daemon_unavailable` | warning | The daemon cannot be reached at the endpoint tried, then `memcastle daemon start` (or `memcastle serve`) and `memcastle status` |
+| `unauthorized` | warning | A token is needed, and where to set it |
+| `mode_rejected` | info | The session's own memory mode refused the operation, which is its choice at work and not a fault |
+| `invalid_input` | warning | The request or the model's payload was malformed, with the daemon's `help` |
+| `job_failed` | warning | The kind of job and the daemon's own `Job.error`, and that `memcastle_job_retry` retries it |
+| anything else | error | The daemon's own fault, or a bug, with whatever the daemon said |
+
+A daemon that is down is reported once at session start and then each command says why it did nothing,
+so the user is not told the same thing at every prompt.
+The session always carries on without MemCastle: a failure never stops Pi from answering.
 
 ### Gaps
 

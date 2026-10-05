@@ -126,7 +126,8 @@ session may do to memory.
 - **Empty is normal.**
   A new palace, or a wing with nothing in it, injects nothing and says nothing.
 - **A down daemon never blocks the session.**
-  The failure is logged once as a warning, with the daemon's `help`, and the session carries on without it.
+  The failure is reported once, as a warning toast and log line with the daemon's `help`, and the session carries on
+  without it.
   An `off` session registers no hooks, so nothing is injected.
 - A mistyped wake-up value falls back to its default rather than breaking the session, because wake-up only reads.
 
@@ -204,20 +205,50 @@ agree on what a checkpoint is and which failures they report.
   The review is a model call the user pays for, so a cheaper model is a reasonable choice.
 - **`silent`, the default,** never makes anything wait: the review runs in the background and only a failure is logged.
   **`blocking`** makes the idle hook wait for the review and logs what was saved.
-  There is no agent to hold up at idle, and OpenCode's toasts are not wired yet (#126), so unlike Pi nothing is shown
-  on screen; failures and results go to the OpenCode log, where every other failure of this plugin goes.
+  There is no agent to hold up at idle, so a result is only logged; a failure is also shown as a toast
+  (see [Failures](#failures)).
 - **Nothing worth keeping is a result, not an error.**
   Nothing is submitted, because the daemon refuses an empty payload.
 - **A failure says what to do.**
   A failed job carries the daemon's reason and `memcastle_job_retry`, an unusable reply says nothing was saved, and a
   daemon that is down says how to start it.
   Through the tool the failure is thrown, so OpenCode marks the call failed with that text.
+  Everywhere else it is reported as described in [Failures](#failures).
 - A `read-only` session never reviews on its own and the tool says why it saved nothing; an `off` session registers no
   hooks (see [Memory modes](#memory-modes)).
 - The review never emits a fact mutation, because that needs ids no MCP tool hands out: `fact` is always `null`.
 - A mistyped checkpoint value falls back to its default rather than breaking the session.
 
 OpenCode 2 evidence is types only, as for the rest of the OpenCode 2 mapping in [the research](docs/research.md#opencode-2).
+
+### Failures
+
+A failure is logged at the level its class deserves and, where OpenCode has a screen to show it, shown as a toast titled
+`MemCastle`.
+`tests/fixtures/integration/failure-classes.json` is the one place both this plugin and Pi read the classes from.
+
+| Class | Toast and log | What the user reads |
+| --- | --- | --- |
+| `daemon_unavailable` | warning | The daemon cannot be reached at the endpoint tried, then `memcastle daemon start` (or `memcastle serve`) and `memcastle status` |
+| `unauthorized` | warning | A token is needed, and where to set it |
+| `mode_rejected` | info | The session's own memory mode refused the operation, which is its choice at work and not a fault |
+| `invalid_input` | warning | The request or the model's payload was malformed, with the daemon's `help` |
+| `job_failed` | warning | The kind of job and the daemon's own `Job.error`, and that `memcastle_job_retry` retries it |
+| anything else from the daemon | error | The daemon's own fault, with whatever it said |
+
+- **OpenCode 1** shows the toast through `client.tui.showToast`.
+  Under `opencode run` or a server there is no TUI, so the call has nowhere to go and the log line, written either way,
+  is the only record.
+- **OpenCode 2** has no toast for a server plugin: `Toast.show` belongs to the TUI plugin context, which this plugin
+  cannot reach.
+  A failure is logged to the console at its level, and the `/memcastle-checkpoint` command writes its answer, failure
+  included, into the session.
+- **The same toast is shown at most once a minute**, so a daemon that stays down is not announced at every idle event.
+  The log line is written every time.
+- **A tool call's failure is the call's own**: `memcastle_checkpoint` throws it, and OpenCode shows it on the call,
+  so it is not toasted a second time.
+- A hook that throws something that is not a classified MemCastle failure is a warning, so a bug in the plugin is
+  noticed without being mistaken for a fault of the daemon.
 
 ### Memory modes
 
@@ -331,7 +362,7 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | `skills` | Implemented: `search-before-answer` and `checkpoint-instructions` are discovered natively from `skills/`, never copied, and `checkpoint-instructions` also instructs the reviewing model | #36, #34, done |
 | `project-context` | Implemented: `.config/memcastle.toml` and `MEMCASTLE_WING` / `MEMCASTLE_ROOM` resolved per session directory, used for the wake-up wing, checkpoint defaults and the search instruction | #183, done |
 | `background-mining` | Not yet | no issue yet |
-| `failure-reporting` | Foundation: the five classes with `help`; user-facing toasts are not wired | later |
+| `failure-reporting` | Implemented: the five classes plus `unexpected`, shown as a toast on OpenCode 1 and logged at their severity on both; OpenCode 2 has no toast | #126, done |
 | `audit-repair` | Not yet | no issue yet |
 
 ### Gaps

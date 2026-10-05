@@ -2,7 +2,9 @@
 // `core.ts`.
 //
 // There is no `client.app.log` in V2's plugin context, so the plugin reports through the console, which OpenCode
-// captures in its own log.
+// captures in its own log. There is no toast either: `Toast.show` exists only on the TUI plugin context
+// (`@opencode/plugin/tui`), which a server plugin cannot reach, so a failure outside the checkpoint command is logged
+// at its severity and not shown on screen (types of `@opencode/plugin` 2.0.22).
 
 import type { Plugin } from "@opencode/plugin"
 import { CHECKPOINT_COMMAND, CHECKPOINT_TOOL, type ReviewHost, checkpointArgs } from "./checkpoint.ts"

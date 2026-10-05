@@ -8,7 +8,7 @@
 // The architectural rule it serves: MemCastle never classifies. What is worth keeping, and under which destination, is
 // decided here, client-side, by the agent's own model, and MemCastle only stores what it is handed.
 
-import { MemCastleFailure, failureFromJob } from "./failures.ts"
+import { MemCastleFailure, START_HINT, failureFromJob } from "./failures.ts"
 import type { ModeLabel } from "./modes.ts"
 import type { ProjectContext } from "./project-core.ts"
 
@@ -508,7 +508,8 @@ export class CheckpointReview {
 
     // Read now, not when the review started: the session may have been replaced while the model was thinking.
     const session = this.context.session()
-    if (!session) throw unusable("MemCastle is not connected", "Start it with `memcastle daemon start`.")
+    // The connection is gone, which is the daemon being unavailable and not a malformed request.
+    if (!session) throw new MemCastleFailure("daemon_unavailable", "MemCastle is not connected, so nothing was saved.", null, START_HINT)
     const wait = options.wait ?? !options.emergency
     const job = await submitCheckpoint(session, payload, {
       emergency: options.emergency,

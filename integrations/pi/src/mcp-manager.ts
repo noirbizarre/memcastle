@@ -6,7 +6,7 @@
 // holds for every call.
 
 import { discoverDaemon } from "./daemon-client.ts"
-import { MemCastleFailure } from "./failures.ts"
+import { type Severity, presentFailure } from "./failures.ts"
 import { McpSession } from "./persistent-mcp-client.ts"
 import type { ProjectContext } from "./project-core.ts"
 import type { Settings } from "./settings.ts"
@@ -14,7 +14,7 @@ import type { Settings } from "./settings.ts"
 type Env = Readonly<Record<string, string | undefined>>
 
 /** How a failure is shown. Pi's notification levels are `info`, `warning` and `error`. */
-export type Notify = (message: string, level: "info" | "warning" | "error") => void
+export type Notify = (message: string, level: Severity) => void
 
 /** A session for `settings`, not yet connected. `env` says where the registry file is, and exists for the tests. */
 export function createSession(settings: Settings, env: Env = process.env): McpSession {
@@ -26,12 +26,6 @@ export function createSession(settings: Settings, env: Env = process.env): McpSe
     keepAliveMs: settings.keepAliveMs,
     clientName: "memcastle-pi",
   })
-}
-
-/** The level a failure deserves: a refusal by the session's own mode is its choice at work, not a fault. */
-function levelOf(failure: MemCastleFailure): "info" | "warning" | "error" {
-  if (failure.failureClass === "mode_rejected") return "info"
-  return failure.failureClass === "unexpected" ? "error" : "warning"
 }
 
 export class McpManager {
@@ -93,10 +87,10 @@ export class McpManager {
     }
   }
 
-  /** Tell the user about a failure, with the daemon's own `help`. Anything unrecognised is shown as unexpected. */
+  /** Tell the user about a failure, with the daemon's own `help`. Anything unrecognised is shown as an error. */
   report(error: unknown, notify: Notify): void {
-    if (error instanceof MemCastleFailure) notify(`MemCastle: ${error.toUserMessage()}`, levelOf(error))
-    else notify(`MemCastle: ${error instanceof Error ? error.message : String(error)}`, "error")
+    const { severity, message } = presentFailure(error)
+    notify(`MemCastle: ${message}`, severity)
   }
 
   /** Idempotent, because cancellation, reload and process exit can all converge on the same shutdown. */
