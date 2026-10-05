@@ -625,7 +625,7 @@ named programs without a shell, named environment variables, the network all or 
 limit.
 The source never sees the store, and the core compiles no source-specific SDK.
 Installing, enabling and removing are administrative (REST and CLI, no MCP tool),
-and the `source init`, `build`, `test` and `package` commands work without a daemon.
+and the `source init`, `build`, `test`, `package`, `index` and `keygen` commands work without a daemon.
 See [Writing a mining source](writing-sources.md) and [ADR-026](adr/026-pluggable-source-adapters-as-webassembly-components.md).
 
 **Sources arrive from three places and share one lifecycle.**

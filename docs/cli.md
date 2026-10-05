@@ -20,8 +20,8 @@ Client commands print the daemon's JSON answer, so the output pipes into `jq`.
 `status`, `db start`, `db stop` and `db status` are the exceptions: they print a readable report,
 and `--json` gives the same report as JSON (`db stop` prints the report only).
 `job list`, `sources`, `note`, every daemon-side `source` command (`search`, `install`, `update`, `list`, `show`,
-`enable` and `disable`), and every `wing`, `room` and `drawer` command (`list`, `show`, `create` and `delete`),
-are the others:
+`enable` and `disable`), and the `wing`, `room` and `drawer` commands
+(`list`, `show`, `create` and `delete`, and `drawer history`) are the others:
 they print a table or a readable view when standard output is a terminal, and JSON when it is not.
 See [Output, colour and prompts](#output-colour-and-prompts).
 
@@ -382,7 +382,8 @@ A version that asks for permissions the installed one did not is not installed u
 `--check` only lists what has an update.
 `disable` keeps the files and `remove` deletes them; what a source mined stays in the palace.
 `list` and `show` are reads, so they take `--mode` and a `disabled` session cannot use them;
-the other commands are administrative and have no `--mode`, and no MCP tool exists for any of them.
+the other commands are administrative: `--mode` is accepted (it is a global flag) but ignored by them,
+and no MCP tool exists for any of them.
 
 ### `checkpoint`
 
@@ -433,8 +434,9 @@ The same rules apply to a new wing named by `mine --wing`, a checkpoint item or 
 which the daemon refuses at submission with the same code.
 A wing that already exists is always accepted, whatever its name.
 
-Every `wing`, `room` and `drawer` command prints a table or a readable view in a terminal,
-and JSON when standard output is a pipe or a file.
+The `list`, `show`, `create` and `delete` commands of `wing`, `room` and `drawer`, and `drawer history`, print a table
+or a readable view in a terminal, and JSON when standard output is a pipe or a file.
+`drawer supersede` and `drawer mention` always print JSON.
 `wing show` prints the wing's totals and its rooms.
 `drawer list` shows the newest drawers first with a preview of each, never the whole content,
 and `drawer show` prints the content verbatim after a few lines of metadata.

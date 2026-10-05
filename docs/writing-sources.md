@@ -30,7 +30,7 @@ memcastle source install dist/my-notes-0.1.0.tar.gz --enable
 memcastle mine --source my-notes --locator ~/notes
 ```
 
-`init`, `build`, `test` and `package` are local: they need no daemon and no palace.
+`init`, `build`, `test`, `package`, `index` and `keygen` are local: they need no daemon and no palace.
 `install` and the commands after it talk to the daemon.
 
 ## What a source implements
