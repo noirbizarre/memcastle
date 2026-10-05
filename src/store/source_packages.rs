@@ -6,14 +6,14 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::domain::{SourceManifest, SourcePackageRecord, SourcePackageState};
+use crate::domain::{SourceManifest, SourceOrigin, SourcePackageRecord, SourcePackageState};
 use crate::error::{Error, Result};
 
 use super::SurrealStore;
 
 /// The projection every package read shares.
 const COLUMNS: &str = "name, state, digest, manifest, <string>installed_at AS installed_at, \
-     <string>updated_at AS updated_at";
+     <string>updated_at AS updated_at, origin, registry, archive_digest, signed_by";
 
 /// A `source_package` row as stored.
 #[derive(Deserialize)]
@@ -24,6 +24,15 @@ struct Row {
     manifest: Value,
     installed_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
+    // Absent on a row written before registries existed (docs/adr/033), which was always a package from disk.
+    #[serde(default)]
+    origin: Option<SourceOrigin>,
+    #[serde(default)]
+    registry: Option<String>,
+    #[serde(default)]
+    archive_digest: Option<String>,
+    #[serde(default)]
+    signed_by: Option<String>,
 }
 
 impl Row {
@@ -38,6 +47,10 @@ impl Row {
             manifest,
             installed_at: self.installed_at,
             updated_at: self.updated_at,
+            origin: self.origin.unwrap_or(SourceOrigin::Package),
+            registry: self.registry,
+            archive_digest: self.archive_digest,
+            signed_by: self.signed_by,
         })
     }
 }
@@ -75,7 +88,9 @@ impl SurrealStore {
             .query(
                 "UPSERT type::record('source_package', $name) SET \
                  name = $name, state = $state, digest = $digest, manifest = $manifest, \
-                 installed_at = <datetime>$installed_at, updated_at = <datetime>$updated_at",
+                 installed_at = <datetime>$installed_at, updated_at = <datetime>$updated_at, \
+                 origin = $origin, registry = $registry, archive_digest = $archive_digest, \
+                 signed_by = $signed_by",
             )
             .bind(("name", record.name.clone()))
             .bind(("state", super::bindable(&record.state)?))
@@ -83,6 +98,10 @@ impl SurrealStore {
             .bind(("manifest", super::bindable(&record.manifest)?))
             .bind(("installed_at", super::stored(record.installed_at)))
             .bind(("updated_at", super::stored(record.updated_at)))
+            .bind(("origin", super::bindable(&record.origin)?))
+            .bind(("registry", record.registry.clone()))
+            .bind(("archive_digest", record.archive_digest.clone()))
+            .bind(("signed_by", record.signed_by.clone()))
             .await?
             .check()?;
         Ok(())
@@ -121,7 +140,7 @@ impl SurrealStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Compatibility, ManifestSource};
+    use crate::domain::{Compatibility, ManifestSource, SourceOrigin};
 
     fn record(name: &str) -> SourcePackageRecord {
         let now = Utc::now();
@@ -130,10 +149,14 @@ mod tests {
             state: SourcePackageState::Installed,
             digest: "d1".into(),
             manifest: SourceManifest {
+                format: 1,
                 source: ManifestSource {
                     name: name.to_string(),
                     version: "0.1.0".into(),
                     description: "demo".into(),
+                    license: None,
+                    homepage: None,
+                    repository: None,
                 },
                 compatibility: Compatibility {
                     contract: "0.1".into(),
@@ -147,6 +170,10 @@ mod tests {
             },
             installed_at: now,
             updated_at: now,
+            origin: SourceOrigin::Package,
+            registry: None,
+            archive_digest: None,
+            signed_by: None,
         }
     }
 

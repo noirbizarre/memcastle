@@ -325,3 +325,89 @@ fn the_webassembly_host_grants_nothing_beyond_what_a_manifest_lists() {
         "the network is opened only inside `if permissions.network`"
     );
 }
+
+#[test]
+fn source_distribution_reaches_neither_storage_nor_the_job_machinery_nor_the_runtime() {
+    // `crate::distribution` (docs/adr/033) fetches and verifies archives and hands back bytes: what to do with them is
+    // `crate::app`'s. If it could open a palace or run a component, a registry would be a path to either.
+    for file in rust_files_recursive("src/distribution") {
+        let source = shipped_code(&file);
+        for forbidden in [
+            "crate::store",
+            "crate::jobs",
+            "crate::app",
+            "crate::mining",
+            "SurrealStore",
+            "JobContext",
+            "surrealdb",
+            "wasmtime",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{file} mentions `{forbidden}`: distribution fetches and verifies, and decides nothing about installing"
+            );
+        }
+    }
+}
+
+#[test]
+fn only_the_application_layer_and_configuration_call_into_distribution() {
+    // Fetching a package from the network is a daemon-side, administrative act (AGENTS.md, invariants 1 and 10): the
+    // CLI asks the daemon over HTTP, and nothing in `api`, `mcp`, `mining` or `client` reaches a registry on its own.
+    // `config` may only parse a location, to refuse a bad one at load.
+    for file in rust_files_recursive("src") {
+        let allowed = file.starts_with("src/distribution/")
+            || file.starts_with("src/app/")
+            || file == "src/config/mod.rs"
+            || file == "src/lib.rs";
+        if allowed {
+            continue;
+        }
+        let source = shipped_code(&file);
+        assert!(
+            !source.contains("crate::distribution") && !source.contains("memcastle::distribution"),
+            "{file} reaches the distribution module; only `app` may, so a registry is never fetched from anywhere else"
+        );
+    }
+    for file in ["src/main.rs", "src/cli.rs"] {
+        let source = shipped_code(file);
+        assert!(
+            !source.contains("distribution::"),
+            "{file} reaches the distribution module; the CLI asks the daemon, over HTTP"
+        );
+    }
+}
+
+#[test]
+fn local_source_tooling_and_adapters_never_open_the_network_themselves() {
+    // `memcastle source init|build|test|package|index|keygen` run offline on a developer's machine, and an adapter
+    // reaches the outside world only through the sandbox its manifest declares (invariant 10). A second HTTP client in
+    // either would be an unreviewed network path.
+    for dir in ["src/source", "src/mining"] {
+        for file in rust_files_recursive(dir) {
+            let source = shipped_code(&file);
+            for forbidden in ["reqwest", "tokio::net", "std::net::TcpStream"] {
+                assert!(
+                    !source.contains(forbidden),
+                    "{file} mentions `{forbidden}`: only `distribution` and the HTTP providers talk to the network"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn every_package_arriving_from_a_registry_is_checked_against_the_trust_policy() {
+    // The signature check is one call in `Registry::fetch`; a refactor that drops it would leave every other test
+    // passing against an index that happens to be honest, so the call itself is pinned (the behaviour is held by
+    // `tests/wasm_registry.rs`).
+    let fetch = shipped_code("src/distribution/mod.rs");
+    assert!(
+        fetch.contains("policy.check(name, &archive, entry.signature.as_ref())"),
+        "`Registry::fetch` must apply the trust policy to every archive that is not bundled"
+    );
+    assert!(
+        fetch.contains("archive_digest != entry.sha256"),
+        "`Registry::fetch` must compare the archive's digest with the index's before anything reads it"
+    );
+}

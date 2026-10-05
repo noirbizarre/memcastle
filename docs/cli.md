@@ -309,8 +309,12 @@ memcastle source init <NAME> [--template rust|typescript|python|cli] [--parent <
 memcastle source build [<PATH>]
 memcastle source test [<PATH>] [--no-build]
 memcastle source package [<PATH>] [--no-build] [--output <FILE>]
+memcastle source keygen <FILE>
+memcastle source index <ARCHIVE>... [--output <FILE>] [--base-url <URL>] [--sign <KEYFILE>] [--name <NAME>]
 
-memcastle source install <PACKAGE> [--enable] [--yes | --consent <DIGEST>]
+memcastle source search [<QUERY>] [--registry <LOCATION>]
+memcastle source install <FILE | DIR | NAME[@VERSION]> [--registry <LOCATION>] [--enable] [--yes | --consent <DIGEST>]
+memcastle source update [<NAME>] [--check] [--yes]
 memcastle source list
 memcastle source show <NAME>
 memcastle source enable <NAME>
@@ -318,11 +322,13 @@ memcastle source disable <NAME>
 memcastle source remove <NAME> [--yes]
 ```
 
-Develop, package and install mining sources: WebAssembly components that read an origin and hand MemCastle documents to
-file.
-[Writing a mining source](writing-sources.md) is the guide; this is the reference.
+Develop, publish, find and install mining sources: WebAssembly components that read an origin and hand MemCastle
+documents to file.
+[Writing a mining source](writing-sources.md) is the guide to making one,
+[Publishing and installing sources](publishing-sources.md) the guide to distributing one; this is the reference.
 
-The first four are **local**: they work on a project directory, need no daemon, no palace and no configuration file.
+The first six are **local**: they work on a project directory or on archives, need no daemon, no palace and no
+configuration file, and never touch the network.
 `init` creates `<NAME>` (in the current directory, or in `--parent`) from a template and refuses to write into a
 directory that is not empty.
 The default template is `rust`; `cli` wraps a command-line program, and `typescript` and `python` need their own
@@ -331,18 +337,38 @@ toolchains (see the guide).
 the component is placed in `dist/source.wasm`.
 `test` builds, then runs the manifest's conformance cases against the component in the same sandbox the daemon uses,
 printing `PASS` or `FAIL` for each and exiting non-zero when one fails.
-`package` builds, then writes `dist/<name>-<version>.tar.gz`, or `--output`, and prints the component's digest and
-the permissions it asks for.
+`package` builds, then writes `dist/<name>-<version>.tar.gz`, or `--output`, and prints the archive's SHA-256 (also written
+to `<archive>.sha256`), the component's digest and the permissions it asks for.
 `--no-build` uses the component already in `dist/`.
+`keygen` writes a new ed25519 signing key to `<FILE>`, readable by you alone and never overwriting a file, and prints its
+id and the public key users put under `mining.trusted_keys`.
+`index` adds the archives to a registry index (`memcastle-index.json`, or `--output`), creating it or extending the one
+there.
+Each package's URL is `--base-url` plus the file name, or just the file name when the archives will sit beside the index.
+`--sign` signs each archive with a key from `keygen`.
+Publishing the same archive again refreshes its entry; a different archive under a version already listed is refused.
 
-The rest talk to the daemon.
-`install` reads a package and shows the permissions it asks for before installing it: in a terminal it asks, and without
+The rest talk to the daemon, which is the one that reads registries and downloads packages.
+`search` lists what the bundled sources and the configured registries offer, whose name or description contains
+`<QUERY>`, with the version `install` would take and what is installed already; a registry that cannot be read is a
+warning, so it does not hide the others.
+`install` takes a package file, a source project directory (it is built and packaged first), or a name,
+optionally pinned as `name@1.2.0`, resolved from the bundled sources and then the configured registries in order.
+Write `./name` for a path that looks like a name.
+`--registry` consults only that location (a URL, or an absolute path) instead of the usual ones, and the trust policy
+still applies to what it serves.
+`install` shows the permissions of the package it fetched before installing it: in a terminal it asks, and without
 one it refuses unless `--yes` agrees to them or `--consent` carries the digest of the permissions you reviewed, so a script
 never consents on your behalf.
 A package that asks for nothing is installed without asking.
 `--enable` turns the source on once installed; otherwise it is `installed` and `memcastle source enable <NAME>` is needed
 before it can be mined.
 Installing a name that is already installed replaces it and keeps its state.
+`update` installs the newest version of the sources that came from the bundle or a registry, from the same place, and
+keeps their state; a source installed from a file has no upstream and is left alone.
+A version that asks for permissions the installed one did not is not installed until you agree to them (a prompt, or
+`--yes`); without either the command says what is waiting and exits non-zero.
+`--check` only lists what has an update.
 `disable` keeps the files and `remove` deletes them; what a source mined stays in the palace.
 These are administrative and have no `--mode`, and no MCP tool exists for any of them.
 

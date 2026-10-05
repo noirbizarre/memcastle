@@ -22,6 +22,7 @@ mod resolution;
 mod search;
 mod secret;
 mod source;
+mod source_index;
 mod source_package;
 
 pub use checkpoint::{CheckpointDestination, CheckpointItem, CheckpointPayload, FactMutation};
@@ -56,11 +57,13 @@ pub use source::{
     Candidate, CanonicalDocument, ChunkRef, CredentialRef, Cursor, RawDocument, Segment,
     SourceCapabilities, SourceDocumentRecord, SourceRecord, SourceRef,
 };
+pub use source_index::{INDEX_FORMAT, IndexSignature, IndexedSource, IndexedVersion, SourceIndex};
 pub use source_package::{
-    BuildSection, CONTRACT_VERSION, Compatibility, FilesystemPermissions, ManifestSource,
-    PackageTransitionError, Permissions, ResourceLimits, SourceManifest, SourcePackageEvent,
-    SourcePackageRecord, SourcePackageState, SourceState, TestSection, contract_compatibility,
-    contract_version,
+    BuildSection, CONTRACT_VERSION, Compatibility, FilesystemPermissions, MANIFEST_FORMAT,
+    MAX_SOURCE_NAME_LEN, ManifestSource, PackageTransitionError, Permissions, ResourceLimits,
+    SourceManifest, SourceOrigin, SourcePackageEvent, SourcePackageRecord, SourcePackageState,
+    SourceState, TestSection, contract_compatibility, contract_version, is_valid_source_name,
+    version_compatibility,
 };
 
 /// The channels a write can come through, recorded as `Job::requested_by` and

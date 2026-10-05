@@ -148,6 +148,12 @@ async fn every_other_route_is_guarded_including_ones_that_do_not_exist() {
         (Method::DELETE, "/api/source-packages/x"),
         (Method::POST, "/api/source-packages/x/enable"),
         (Method::POST, "/api/source-packages/x/disable"),
+        // Registries make the daemon fetch code from elsewhere and install it (docs/adr/033): every route is guarded.
+        (Method::GET, "/api/source-registry/search"),
+        (Method::GET, "/api/source-registry/sources/x"),
+        (Method::POST, "/api/source-registry/install"),
+        (Method::GET, "/api/source-registry/updates"),
+        (Method::POST, "/api/source-registry/update"),
         (Method::POST, "/api/shutdown"),
         (Method::POST, "/api/auth/token"),
         (Method::DELETE, "/api/auth/token"),
@@ -372,6 +378,11 @@ async fn mcp_offers_no_way_to_install_or_change_a_mining_source() {
         "uninstall",
         "permission",
         "consent",
+        // Registries (docs/adr/033): an agent must not make the daemon fetch code, look for it or update it.
+        "registry",
+        "update",
+        "trust",
+        "sign",
     ];
     for name in &names {
         assert!(

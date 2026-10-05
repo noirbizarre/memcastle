@@ -48,6 +48,12 @@ for shell in bash zsh fish; do
 done
 export COMPLETIONS_DIR="${completions}"
 
+# The sources that ship with MemCastle (docs/adr/033): packages and their index, built by packaging/sources/build.sh.
+# An empty directory when the caller has none, so a package built without them is a package without them and not an
+# nfpm error about a path that does not exist.
+export SOURCES_DIR="${SOURCES_DIR:-${completions}/sources}"
+mkdir -p "${SOURCES_DIR}"
+
 for asset in linux-amd64 linux-arm64; do
   binary="${dist}/memcastle_${version}_${asset}"
   # A missing binary would otherwise surface as nfpm's glob error, which names

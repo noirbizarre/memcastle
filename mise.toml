@@ -304,6 +304,13 @@ for manifest in sources/*/memcastle-source.toml; do
 done
 """
 
+[tasks."sources:package"]
+description = "Package the sources that ship with releases, with their index, into target/bundled-sources"
+# The script `publish-release.yaml` runs: what a release bundles is what a developer can build and install from
+# (`mining.bundled_dir = target/bundled-sources`).
+depends = ["build"]
+run = "packaging/sources/build.sh target/debug/memcastle target/bundled-sources"
+
 [tasks."sources:test"]
 description = "Build and conformance-test one reference WebAssembly source: mise run sources:test -- <name>"
 # What CI runs for each directory under sources/, one job per source.

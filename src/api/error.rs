@@ -24,7 +24,9 @@ impl IntoResponse for ApiError {
             | Error::WingNotFound { .. }
             | Error::RoomNotFound { .. }
             | Error::DrawerNotFound { .. }
-            | Error::SourceNotFound { .. } => StatusCode::NOT_FOUND,
+            | Error::SourceNotFound { .. }
+            // No registry offers it, or no version of it can be installed here.
+            | Error::SourceNotInRegistry { .. } => StatusCode::NOT_FOUND,
             Error::InvalidJobTransition { .. }
             | Error::InvalidPalacePath { .. }
             | Error::InvalidInput { .. }
@@ -39,12 +41,17 @@ impl IntoResponse for ApiError {
             | Error::SourceIncompatible { .. }
             | Error::SourceConsentRequired { .. }
             | Error::SourceBuiltin { .. }
+            // The trust policy is the daemon's configuration, but the package was the caller's choice.
+            | Error::SourceUntrusted { .. }
             | Error::EmbeddingsNotConfigured
             | Error::ExtractionNotConfigured => StatusCode::BAD_REQUEST,
             // The embedding provider is an upstream, not the caller and not us.
             Error::EmbeddingFailed { .. }
             | Error::EmbeddingDimension { .. }
-            | Error::ExtractionFailed { .. } => StatusCode::BAD_GATEWAY,
+            | Error::ExtractionFailed { .. }
+            // A registry is an upstream too: unreachable, or serving something other than what it published.
+            | Error::SourceRegistryUnavailable { .. }
+            | Error::SourceIntegrity { .. } => StatusCode::BAD_GATEWAY,
             Error::ModeForbidden { .. } => StatusCode::FORBIDDEN,
             // 401, not 403: the caller is unidentified, which is different from
             // an identified caller being refused by its memory mode.

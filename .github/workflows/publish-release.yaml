@@ -194,11 +194,29 @@ jobs:
           merge-multiple: true
           path: dist
 
-      # The native-package layout (docs/adr/013): the executable under `bin/`
-      # and the documentation under `share/doc/memcastle/`, so unpacking at a
-      # prefix (`tar -xzf ... --strip-components=1 -C /usr/local`) puts each
-      # file where a package manager would. There is no `share/memcastle/`
-      # yet, because nothing in 0.1 is a package asset.
+      # The sources that ship with MemCastle (docs/adr/033): independently
+      # packaged WebAssembly components, not linked into the binary. They are
+      # portable, so one build serves every platform. The script is the one
+      # `mise run sources:package` runs, and tests/wasm_bundle.rs runs it too,
+      # so what is bundled is checked before a tag. The Linux binary is the
+      # one a runner can execute.
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: wasm32-wasip2
+      - name: Package the bundled sources
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          chmod +x "dist/memcastle_${TAG}_linux-amd64"
+          packaging/sources/build.sh "dist/memcastle_${TAG}_linux-amd64" stage-sources
+
+      # The native-package layout (docs/adr/013): the executable under `bin/`,
+      # the documentation under `share/doc/memcastle/` and the bundled sources
+      # under `share/memcastle/sources/`, so unpacking at a prefix
+      # (`tar -xzf ... --strip-components=1 -C /usr/local`) puts each file
+      # where a package manager would, and `memcastle source install <name>`
+      # finds the bundle beside the binary.
       #
       # Every flag that follows exists so the same inputs give the same bytes:
       # a fixed order, the commit time for every mtime, no owner, and `gzip -n`
@@ -217,9 +235,10 @@ jobs:
           for asset in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
             name="memcastle-${TAG}-${asset}"
             root="stage/${name}"
-            install -d -m 755 "${root}/bin" "${root}/share/doc/memcastle"
+            install -d -m 755 "${root}/bin" "${root}/share/doc/memcastle" "${root}/share/memcastle/sources"
             install -m 755 "dist/memcastle_${TAG}_${asset}" "${root}/bin/memcastle"
             install -m 644 LICENSE README.md "${root}/share/doc/memcastle/"
+            install -m 644 stage-sources/* "${root}/share/memcastle/sources/"
             tar -C stage --sort=name --format=gnu --mtime="@${epoch}" \
               --owner=0 --group=0 --numeric-owner -cf - "${name}" \
               | gzip -n -9 > "dist/memcastle_${TAG}_${asset}.tar.gz"
@@ -233,7 +252,7 @@ jobs:
       - name: Package the .deb and .rpm
         env:
           TAG: ${{ inputs.tag }}
-        run: packaging/nfpm/build.sh "${TAG}" dist
+        run: SOURCES_DIR="${PWD}/stage-sources" packaging/nfpm/build.sh "${TAG}" dist
 
       # Before upload, so a broken package never reaches the draft release.
       # arm64 has no runner: metadata only.

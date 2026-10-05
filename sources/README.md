@@ -6,8 +6,8 @@ that implements `wit/memcastle-source.wit`, and the conformance cases it is test
 | Directory | Provider | What it is |
 |---|---|---|
 | `directory/` | `directory-wasm` | The built-in `directory` source, written as a Rust component. The worked example. |
-| `pi/` | `pi` | The Pi coding agent's session history. The official Pi source: the core has no Pi-specific code. |
-| `opencode/` | `opencode` | The OpenCode coding agent's session history, acquired through its `opencode` command. Official, and a candidate to ship with releases. |
+| `pi/` | `pi` | The Pi coding agent's session history. The official Pi source: the core has no Pi-specific code. Bundled with releases. |
+| `opencode/` | `opencode` | The OpenCode coding agent's session history, acquired through its `opencode` command. Official. Bundled with releases. |
 
 They are maintained as examples and as the second implementation the conformance cases are run against, so that the
 built-in and the WebAssembly contract cannot drift apart.
@@ -18,3 +18,6 @@ on the `PATH`; run `memcastle source test` by hand with the same prefix.
 CI runs one job per directory here, found automatically, so a new source needs no workflow change.
 They are not compiled into MemCastle, and a source that ships with MemCastle's releases uses exactly the same package
 contract as one a user installs.
+`packaging/sources/build.sh` packages the bundled ones (`pi` and `opencode`) with the index that lists them, which is
+what releases put under `share/memcastle/sources/`; `mise run sources:package` runs it locally, and
+`docs/publishing-sources.md` is how a source gets from here to a user.

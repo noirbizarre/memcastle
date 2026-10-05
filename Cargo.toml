@@ -200,6 +200,13 @@ flate2 = "1"
 subtle = "2.6.1"
 getrandom = "0.4.3"
 
+# Source distribution (docs/adr/033): a registry index may carry an ed25519 signature over each package archive, and
+# `memcastle source keygen|index` produce them. `ed25519-dalek` was already in the lockfile through SurrealDB;
+# `default-features = false` drops the random-number and zeroize extras, because the seed comes from `getrandom`.
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+# Keys and signatures are written as base64 so they paste into a config file or an index.
+base64 = "0.22"
+
 [dev-dependencies]
 assert_cmd = "2"
 predicates = "3"

@@ -57,6 +57,7 @@ mining, and acquiring history is not its job.
 - **Pi history needs an install step** until the official sources are bundled with releases, which is the packaging work
   of [#159](https://github.com/noirbizarre/memcastle/issues/159).
   `docs/mining-sources.md` documents building, packaging and installing it from a checkout.
+  [ADR-033](033-source-distribution.md) now bundles it with releases, so `memcastle source install pi` needs no checkout.
 - **Installing is consented.**
   The user agrees to exactly the two readable folders and `HOME`,
   and a component altered on disk is never run (invariant 10).

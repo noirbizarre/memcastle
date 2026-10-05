@@ -626,6 +626,28 @@ Installing, enabling and removing are administrative (REST and CLI, no MCP tool)
 and the `source init`, `build`, `test` and `package` commands work without a daemon.
 See [Writing a mining source](writing-sources.md) and [ADR-026](adr/026-pluggable-source-adapters-as-webassembly-components.md).
 
+**Sources arrive from three places and share one lifecycle.**
+A built-in source is compiled in.
+A bundled source is an ordinary package shipped beside the binary, with an index that lists it.
+A registry source comes from a static `memcastle-index.json` the user configured.
+Only the daemon reaches a registry, and only `crate::distribution`, called from `app`, does the fetching:
+it reads an index, chooses the newest version that runs here, downloads the archive and proves it is the one the index
+published (a SHA-256, and optionally an ed25519 signature under a trust policy), then hands the bytes to the same install
+path a file uses, so consent, the compatibility check and the load proof are identical whatever the origin.
+
+```mermaid
+flowchart LR
+    CLI["memcastle source<br/>search, install, update"] -- REST --> APP["app::source_registry"]
+    APP --> DIST["distribution<br/>index, fetch, trust"]
+    DIST --> BUN[("bundle<br/>share/memcastle/sources")]
+    DIST --> REGS[("registries<br/>https, file, directory")]
+    APP --> INST["app::source_packages<br/>consent, compatibility, load proof"]
+    INST --> PKG[("installed packages<br/>sources_dir + source_package rows")]
+```
+
+Installing from a registry is administrative like installing from a file: REST and CLI only, no MCP tool.
+See [Publishing and installing sources](publishing-sources.md) and [ADR-033](adr/033-source-distribution.md).
+
 ## Non-goals for now
 
 Deliberately out of scope, and each is structurally possible without rework given the module boundaries above:
@@ -635,9 +657,9 @@ Deliberately out of scope, and each is structurally possible without rework give
 - Mining sources that need credentials (Slack, GitHub, Atlassian, ...): the model stores a credential *reference* and
   never a secret, and no shipped adapter needs one yet.
   An installed source can read a variable its manifest lists, but there is no credential store.
-- Restricting an installed source's network access by host name, a filesystem write permission for sources, a package
-  registry or signing, and official sources bundled with releases: the package contract and the `sources/` layout allow
-  each, and none is built.
+- Restricting an installed source's network access by host name and a filesystem write permission for sources: the package
+  contract allows each, and neither is built.
+- A hosted official registry and a registry server: an index is a static file anyone can host, and none is run for you.
 - Propagating a deletion at the source: a document that disappears is not noticed.
 - Extracting entities from a *query* to resolve its words to the graph: extraction reads drawers, and expansion starts from
   drawers already found.

@@ -239,9 +239,24 @@ pub enum SourceCommand {
     /// Build the project, then write the distributable package: a tar.gz
     /// holding the manifest and the component. Local: needs no daemon.
     Package(SourcePackageArgs),
-    /// Install a source package into the running daemon. A package that asks
+    /// Write a registry index (`memcastle-index.json`) that offers the given
+    /// packages, adding to the one already there. Local: needs no daemon.
+    Index(SourceIndexArgs),
+    /// Generate an ed25519 key for signing packages in a registry index, and
+    /// print the public key users put under `mining.trusted_keys`. Local:
+    /// needs no daemon.
+    Keygen(SourceKeygenArgs),
+    /// Search the sources shipped with MemCastle and the configured
+    /// registries.
+    Search(SourceSearchArgs),
+    /// Install a source into the running daemon: a package file, a project
+    /// directory, or a name from the bundle or a registry. A source that asks
     /// for permissions is installed only after you agree to exactly those.
     Install(SourceInstallArgs),
+    /// Update installed sources to the newest version their registry offers.
+    /// A version that asks for more permissions than the installed one needs
+    /// your agreement again.
+    Update(SourceUpdateArgs),
     /// List the sources the daemon can mine, built in and installed, with
     /// their state and the permissions each was given.
     List,
@@ -303,11 +318,64 @@ pub struct SourcePackageArgs {
     pub output: Option<PathBuf>,
 }
 
+/// Arguments for `memcastle source index`.
+#[derive(Debug, Args)]
+pub struct SourceIndexArgs {
+    /// The package archives to offer, as `memcastle source package` writes them.
+    #[arg(required = true)]
+    pub archives: Vec<PathBuf>,
+    /// The index to write, extended when it already exists.
+    #[arg(
+        long,
+        short,
+        value_name = "FILE",
+        default_value = "memcastle-index.json"
+    )]
+    pub output: PathBuf,
+    /// Where the archives will be published. Each package's URL is this plus
+    /// its file name; without it the URL is the file name, so the archives
+    /// must sit beside the index.
+    #[arg(long, value_name = "URL")]
+    pub base_url: Option<String>,
+    /// Sign each archive with this key, as `memcastle source keygen` wrote it.
+    #[arg(long, value_name = "KEYFILE")]
+    pub sign: Option<PathBuf>,
+    /// What the registry calls itself, for a new index.
+    #[arg(long)]
+    pub name: Option<String>,
+}
+
+/// Arguments for `memcastle source keygen`.
+#[derive(Debug, Args)]
+pub struct SourceKeygenArgs {
+    /// Where to write the private key. Never overwrites a file.
+    pub file: PathBuf,
+}
+
+/// Arguments for `memcastle source search`.
+#[derive(Debug, Args)]
+pub struct SourceSearchArgs {
+    /// Part of a name or description. Without it, everything on offer.
+    pub query: Option<String>,
+    /// Search only this registry (a URL or an absolute path) instead of the
+    /// bundled sources and the configured registries.
+    #[arg(long, value_name = "LOCATION")]
+    pub registry: Option<String>,
+}
+
 /// Arguments for `memcastle source install`.
 #[derive(Debug, Args)]
 pub struct SourceInstallArgs {
-    /// The package to install, as written by `memcastle source package`.
-    pub package: PathBuf,
+    /// What to install: a package file as written by `memcastle source
+    /// package`, a source project directory (it is built and packaged
+    /// first), or a name, optionally pinned as `name@1.2.0`, from the
+    /// bundled sources or a registry. Write `./name` for a path that looks
+    /// like a name.
+    pub source: String,
+    /// Install a name from this registry (a URL or an absolute path) only,
+    /// instead of the bundled sources and the configured registries.
+    #[arg(long, value_name = "LOCATION")]
+    pub registry: Option<String>,
     /// Enable the source once it is installed.
     #[arg(long)]
     pub enable: bool,
@@ -320,6 +388,22 @@ pub struct SourceInstallArgs {
     /// unattended install that reviewed them beforehand.
     #[arg(long, value_name = "DIGEST", conflicts_with = "yes")]
     pub consent: Option<String>,
+}
+
+/// Arguments for `memcastle source update`.
+#[derive(Debug, Args)]
+pub struct SourceUpdateArgs {
+    /// The source to update. Without it, every installed source that has an
+    /// update.
+    pub name: Option<String>,
+    /// Only report what has an update; change nothing.
+    #[arg(long, conflicts_with_all = ["yes"])]
+    pub check: bool,
+    /// Agree to the new permissions of an update that asks for more, without
+    /// being asked. Without this a script is refused rather than consenting on
+    /// your behalf.
+    #[arg(short, long)]
+    pub yes: bool,
 }
 
 /// A source named on the command line.

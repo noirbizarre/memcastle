@@ -14,6 +14,7 @@ mod graph;
 mod mode;
 mod palace;
 mod source_packages;
+mod source_registry;
 
 use axum::Router;
 use axum::extract::{Path, State};
@@ -81,6 +82,22 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
             "/api/source-packages/{name}/disable",
             post(source_packages::disable),
         )
+        // Registries are administrative for the same reason: they make the daemon fetch code from elsewhere, and what
+        // they install runs under the permissions the user agreed to (docs/adr/033).
+        .route("/api/source-registry/search", get(source_registry::search))
+        .route(
+            "/api/source-registry/sources/{name}",
+            get(source_registry::preview),
+        )
+        .route(
+            "/api/source-registry/install",
+            post(source_registry::install),
+        )
+        .route(
+            "/api/source-registry/updates",
+            get(source_registry::updates),
+        )
+        .route("/api/source-registry/update", post(source_registry::update))
         .route("/api/shutdown", post(shutdown_now))
         // The hierarchy. Reads and creates are open to the same callers as any
         // other palace content; deletes have no MCP tool (docs/adr/018).

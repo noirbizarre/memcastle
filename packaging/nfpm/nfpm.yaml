@@ -37,6 +37,12 @@ contents:
     expand: true
     file_info:
       mode: 0644
+  # The sources that ship with MemCastle, as ordinary packages beside the index that lists them (docs/adr/033), where
+  # `memcastle source install <name>` looks first, with no registry and no network.
+  - src: "${SOURCES_DIR}"
+    dst: /usr/share/memcastle/sources
+    type: tree
+    expand: true
   - src: packaging/systemd/memcastle.service
     dst: /usr/lib/systemd/user/memcastle.service
     file_info:

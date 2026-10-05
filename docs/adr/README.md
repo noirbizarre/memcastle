@@ -102,3 +102,8 @@ The history is the value.
   shared by every ranking and by graph expansion,
   and a superseded drawer records what replaced it so `drawer history` can return how knowledge evolved
   (amends ADR-021)
+- [ADR-033](033-source-distribution.md) — sources are distributed as versioned packages through static JSON registry
+  indexes (a URL, a `file://` URL or a directory, so offline needs no separate mechanism), pinned by SHA-256 and optionally
+  signed with ed25519 under a `mining.trust` policy; bundled, registry and local sources share one lifecycle, `update`
+  never widens a source's permissions without consent, and releases bundle `pi` and `opencode` as ordinary packages
+  (completes ADR-026)

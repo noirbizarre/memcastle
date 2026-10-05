@@ -124,6 +124,8 @@ fn describe(adapter: &impl SourceAdapter) -> ProviderInfo {
         state: SourceState::Enabled,
         unavailable_reason: None,
         permissions: Permissions::default(),
+        registry: None,
+        signed_by: None,
     }
 }
 
@@ -168,7 +170,7 @@ pub fn describe_package(record: &SourcePackageRecord, sources_dir: &Path) -> Pro
         name: record.name.clone(),
         description: record.manifest.source.description.clone(),
         capabilities: record.manifest.capabilities,
-        origin: SourceOrigin::Package,
+        origin: record.origin,
         version: Some(record.manifest.source.version.clone()),
         state: if unavailable_reason.is_some() {
             SourceState::Unavailable
@@ -177,6 +179,8 @@ pub fn describe_package(record: &SourcePackageRecord, sources_dir: &Path) -> Pro
         },
         unavailable_reason,
         permissions: record.manifest.permissions.normalized(),
+        registry: record.registry.clone(),
+        signed_by: record.signed_by.clone(),
     }
 }
 
@@ -302,10 +306,14 @@ mod tests {
             state: SourcePackageState::Enabled,
             digest: sha256_hex(b"component"),
             manifest: SourceManifest {
+                format: 1,
                 source: ManifestSource {
                     name: "demo".to_string(),
                     version: "1.0.0".to_string(),
                     description: "demo".to_string(),
+                    license: None,
+                    homepage: None,
+                    repository: None,
                 },
                 compatibility: Compatibility {
                     contract: contract.to_string(),
@@ -319,6 +327,10 @@ mod tests {
             },
             installed_at: now,
             updated_at: now,
+            origin: SourceOrigin::Package,
+            registry: None,
+            archive_digest: None,
+            signed_by: None,
         }
     }
 

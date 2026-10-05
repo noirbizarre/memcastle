@@ -25,8 +25,12 @@ An invariant nothing checks is a comment, and it will be violated.
    directly (`completions` calls neither: it prints a script locally).
    (`daemon start` and `daemon restart` also manage the daemon *process* — they read the registry file
    via `server::lifecycle` and spawn `serve` detached — but touch neither `store` nor `jobs`.
-   `source init`, `build`, `test` and `package` work on a project directory with no daemon at all, through `crate::source`,
-   which `tests/source_isolation.rs` holds to touching neither `store` nor `jobs`.
+   `source init`, `build`, `test`, `package`, `index` and `keygen` work on a project directory or on archives with no
+   daemon at all, through `crate::source`, which `tests/source_isolation.rs` holds to touching neither `store` nor `jobs`
+   nor the network, and `source install` of a file or a project directory reads it locally to show its permissions before
+   calling the daemon.
+   `source search`, `install <name>` and `update` never fetch anything themselves: the daemon does, through
+   `crate::distribution`, and the CLI calls it over REST.
    `note` also reads the project directory through `crate::project` to choose a wing and room, then calls the daemon.)
    `migrate` is a second, narrow exception alongside `serve`: it connects to storage directly (via
    `crate::migrate::run`/`status`, the same runner `serve` calls on every startup) because migration must work
@@ -89,6 +93,9 @@ An invariant nothing checks is a comment, and it will be violated.
    A source is built in or an installed WebAssembly component (`src/mining/wasm/`, the only module that names the
    runtime), behind the same contract, and the pipeline cannot tell which
    (see `docs/adr/026-pluggable-source-adapters-as-webassembly-components.md`).
+   Sources arrive from the bundle or a registry through `src/distribution/`, which only `app` calls, which touches neither
+   the store, the jobs nor the runtime, and which returns bytes that have passed the index's SHA-256 and the trust policy
+   (see `docs/adr/033-source-distribution.md`).
    Entity extraction is the stage after: it reads drawers, names no source, and only adds graph records, never writing a
    drawer (see `docs/adr/024-entity-extraction-as-an-enrich-job.md`).
    Enforced by `tests/source_isolation.rs`, which fails on a provider name or file access in `pipeline.rs`, `chunk.rs`
@@ -108,13 +115,21 @@ An invariant nothing checks is a comment, and it will be violated.
     never stored.
     Install, enable, disable and remove are REST and CLI only, with no MCP tool, so an agent cannot install code or widen
     its own reach (see `docs/adr/026-pluggable-source-adapters-as-webassembly-components.md`).
+    The same holds for searching, installing from and updating from a registry, which make the daemon fetch code:
+    `mining.registries` is empty by default, a package must match its index's SHA-256 and carry the name and version the
+    index lists, and an update that asks for permissions the installed version did not is never installed without consent
+    (see `docs/adr/033-source-distribution.md`).
     Enforced by `tests/source_isolation.rs` (the host calls nothing that inherits the environment, standard streams,
     arguments or a writable directory, and opens the network only inside the manifest's flag),
     by `tests/wasm_projects.rs` (a real source cannot read outside its grant, see the environment, outrun its time
     limit or memory, or run an unlisted program),
     by `tests/wasm_runtime.rs` (no install without the exact consent, an altered component is never run)
     and by `tests/in_process/auth.rs`
-    (every `/api/source-packages` route is guarded, no MCP tool installs or changes a source).
+    (every `/api/source-packages` and `/api/source-registry` route is guarded, no MCP tool installs, searches or changes
+    a source), by `tests/source_isolation.rs` (`distribution` reaches no store, jobs or runtime, only `app` calls it, the
+    local tooling and adapters open no network, and the digest and trust checks are in `Registry::fetch`) and by
+    `tests/wasm_registry.rs` (a tampered or substituted package is never installed, `required` trust refuses what no
+    trusted key signed, an update never widens permissions silently).
 
 ## Layout
 
@@ -137,7 +152,10 @@ src/
 ├── mining/     the mining job handler: the source adapter contract, the shared pipeline and chunker, the built-in adapters
 │               (the directory adapter alone reads a project's `.config/memcastle.toml`, for its default wing, through `project`),
 │               the registry that names them, and the WebAssembly host that runs installed sources (`wasm/`)
-├── source/     source packages: manifest, archive, scaffolding, build, and the conformance runner (no store, no jobs)
+├── source/     source packages: manifest, archive, scaffolding, build, signing, publishing an index, and the conformance runner
+│               (no store, no jobs, no network)
+├── distribution/ finding and fetching source packages: registry indexes, locations, the SHA-256 and signature checks;
+│               called only from `app`, no store, no jobs
 ├── checkpoint/ the checkpoint job handler (durable, resumable memory writes)
 ├── audit/      the audit job handler (read-only consistency report)
 ├── repair/     the repair job handler (narrow, dry-run-first fixes)
@@ -152,8 +170,8 @@ src/
 └── client/     the CLI's HTTP client for a running daemon, and the human renderings of its answers (status, tables)
 
 wit/            the source contract (`memcastle:source`), the one definition components and the host are built from
-sources/        official and reference WebAssembly sources (`directory`, `pi`), one package per directory, built and
-                tested but not compiled into MemCastle
+sources/        official and reference WebAssembly sources (`directory`, `pi`, `opencode`), one package per directory, built and
+                tested but not compiled into MemCastle; `pi` and `opencode` ship with releases (`packaging/sources/build.sh`)
 integrations/   per-agent lifecycle adapters (Pi, OpenCode, ...), in each agent's own language, over MCP and HTTP only
 skills/         reusable agent instructions shared by every integration; `tests/in_process/skills.rs` holds them to the
                 tools, commands and routes they name (docs/skills.md)

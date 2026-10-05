@@ -34,7 +34,9 @@ The daemon looks for assets in a fixed order: a directory you name with `--asset
 `share/memcastle`, then what is built in.
 See [Runtime assets](configuration.md#runtime-assets) for the rule, and
 [ADR-013](adr/013-release-packaging-and-asset-resolution.md) for why.
-In 0.1 no package installs assets yet, so a standalone binary and a package behave identically.
+The one package asset is the set of sources that ship with MemCastle, under `share/memcastle/sources/`
+(see [Publishing and installing sources](publishing-sources.md#bundled-sources)): the release tarballs and the `.deb` and
+`.rpm` carry them, and a standalone binary does not, so it installs a source from a file or a registry instead.
 
 ## Install
 

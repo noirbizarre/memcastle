@@ -1,10 +1,12 @@
 //! Reading and validating `memcastle-source.toml`.
 
-use crate::domain::{SourceManifest, contract_compatibility, contract_version};
+use crate::domain::{SourceManifest, contract_version};
 use crate::error::{Error, Result};
 
-/// The longest a source name may be: it is a path segment, a CLI argument and a column in a table.
-const MAX_NAME_LEN: usize = 48;
+use crate::domain::{
+    MANIFEST_FORMAT, MAX_SOURCE_NAME_LEN as MAX_NAME_LEN, is_valid_source_name,
+    version_compatibility,
+};
 
 /// Parse and validate a manifest.
 ///
@@ -35,15 +37,7 @@ fn invalid(message: impl Into<String>) -> Error {
 /// [`Error::SourceManifestInvalid`] naming the first thing wrong.
 pub fn validate(manifest: &SourceManifest, reserved: &[&str]) -> Result<()> {
     let name = &manifest.source.name;
-    // A name is a directory under the sources directory: restricting its alphabet is what keeps `../x` out of it.
-    let name_ok = !name.is_empty()
-        && name.len() <= MAX_NAME_LEN
-        && name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        && !name.starts_with('-')
-        && !name.ends_with('-');
-    if !name_ok {
+    if !is_valid_source_name(name) {
         return Err(invalid(format!(
             "source.name `{name}` must be 1 to {MAX_NAME_LEN} lowercase letters, digits or `-`, and not start or end with `-`"
         )));
@@ -58,6 +52,9 @@ pub fn validate(manifest: &SourceManifest, reserved: &[&str]) -> Result<()> {
             "source.version `{}` is not a semantic version like `0.1.0`",
             manifest.source.version
         )));
+    }
+    if manifest.format == 0 {
+        return Err(invalid("format must be 1 or more"));
     }
     let description = manifest.source.description.trim();
     if description.is_empty() || description.contains('\n') {
@@ -127,22 +124,21 @@ pub fn check_compatible(manifest: &SourceManifest) -> Result<()> {
         name: manifest.source.name.clone(),
         reason,
     };
-    contract_compatibility(&manifest.compatibility.contract).map_err(incompatible)?;
-    let requirement = semver::VersionReq::parse(&manifest.compatibility.memcastle)
-        .map_err(|e| incompatible(e.to_string()))?;
+    // A format this MemCastle does not know may mean something it would silently ignore, so it is refused whole.
+    if manifest.format > MANIFEST_FORMAT {
+        return Err(incompatible(format!(
+            "its manifest is format {}, and this MemCastle reads up to format {MANIFEST_FORMAT}; upgrade MemCastle",
+            manifest.format
+        )));
+    }
     let running = semver::Version::parse(env!("CARGO_PKG_VERSION"))
         .map_err(|e| incompatible(e.to_string()))?;
-    // A pre-release of the running version (`0.3.0-rc.1`) is held to the release's requirement: otherwise every
-    // release candidate would be incompatible with a source built for the release.
-    let release = semver::Version::new(running.major, running.minor, running.patch);
-    if requirement.matches(&release) {
-        Ok(())
-    } else {
-        Err(incompatible(format!(
-            "it requires MemCastle {}, and this is {running}",
-            manifest.compatibility.memcastle
-        )))
-    }
+    version_compatibility(
+        &manifest.compatibility.contract,
+        &manifest.compatibility.memcastle,
+        &running,
+    )
+    .map_err(incompatible)
 }
 
 #[cfg(test)]
@@ -280,5 +276,37 @@ read = ["locator"]
         let manifest = parse(&text, &[]).unwrap();
         assert_eq!(manifest.permissions.env, ["GITHUB_TOKEN"]);
         assert_eq!(manifest.limits.memory_mib, Some(64));
+    }
+
+    #[test]
+    fn a_manifest_without_a_format_is_format_one_and_a_newer_format_is_refused_as_incompatible() {
+        assert_eq!(parse(GOOD, &[]).unwrap().format, MANIFEST_FORMAT);
+
+        let newer = parse(&format!("format = 2\n{GOOD}"), &[]).unwrap();
+        let error = check_compatible(&newer).unwrap_err().to_string();
+        assert!(
+            error.contains("format 2") && error.contains("upgrade MemCastle"),
+            "{error}"
+        );
+
+        let error = parse(&format!("format = 0\n{GOOD}"), &[])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("format"), "{error}");
+    }
+
+    #[test]
+    fn provenance_fields_are_optional_and_kept() {
+        let text = GOOD.replace(
+            "description = \"demo documents\"",
+            "description = \"demo documents\"\nlicense = \"MIT\"\nhomepage = \"https://example.org\"\nrepository = \"https://example.org/git\"",
+        );
+        let manifest = parse(&text, &[]).unwrap();
+        assert_eq!(manifest.source.license.as_deref(), Some("MIT"));
+        assert_eq!(
+            manifest.source.repository.as_deref(),
+            Some("https://example.org/git")
+        );
+        assert!(parse(GOOD, &[]).unwrap().source.license.is_none());
     }
 }

@@ -24,6 +24,10 @@ pub const CONTRACT_VERSION: &str = "0.1.0";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SourceManifest {
+    /// The version of this manifest format (docs/publishing-sources.md). Absent means 1; a number this MemCastle does
+    /// not know is refused as incompatible, so a manifest that means something new is never half-understood.
+    #[serde(default = "default_format")]
+    pub format: u32,
     /// Identity: the name users give as `--source`, its version and a line saying what it reads.
     pub source: ManifestSource,
     /// Which contract and which MemCastle versions it was built for.
@@ -56,6 +60,41 @@ pub struct ManifestSource {
     pub version: String,
     /// One line saying what the source reads.
     pub description: String,
+    /// The SPDX identifier of the licence the source is distributed under, for people choosing what to install.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    /// A page about the source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub homepage: Option<String>,
+    /// Where its code is, so a package can be traced to what it was built from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
+}
+
+/// The longest a source name may be: it is a path segment, a CLI argument and a column in a table.
+pub const MAX_SOURCE_NAME_LEN: usize = 48;
+
+/// Whether `name` is a well-formed source name: 1 to [`MAX_SOURCE_NAME_LEN`] lowercase letters, digits or `-`, not
+/// starting or ending with `-`.
+///
+/// A name is a directory under the sources directory and a segment of a registry's package URL, so restricting its
+/// alphabet is what keeps `../x` out of both.
+#[must_use]
+pub fn is_valid_source_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= MAX_SOURCE_NAME_LEN
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && !name.starts_with('-')
+        && !name.ends_with('-')
+}
+
+/// The manifest format this MemCastle reads.
+pub const MANIFEST_FORMAT: u32 = 1;
+
+fn default_format() -> u32 {
+    MANIFEST_FORMAT
 }
 
 /// `[compatibility]`.
@@ -225,6 +264,34 @@ pub fn contract_compatibility(declared: &str) -> std::result::Result<(), String>
     }
 }
 
+/// Whether a source built for `contract` and requiring `requirement` of MemCastle runs on the MemCastle `running`.
+///
+/// The one policy behind installing, loading and choosing a version from a registry index, so they cannot disagree
+/// about what "compatible" means.
+///
+/// # Errors
+///
+/// A sentence saying why not, for the error that reports it.
+pub fn version_compatibility(
+    contract: &str,
+    requirement: &str,
+    running: &semver::Version,
+) -> std::result::Result<(), String> {
+    contract_compatibility(contract)?;
+    let parsed = semver::VersionReq::parse(requirement)
+        .map_err(|e| format!("its MemCastle requirement `{requirement}` is not valid: {e}"))?;
+    // A pre-release of the running version (`0.3.0-rc.1`) is held to the release's requirement: otherwise every
+    // release candidate would be incompatible with a source built for the release.
+    let release = semver::Version::new(running.major, running.minor, running.patch);
+    if parsed.matches(&release) {
+        Ok(())
+    } else {
+        Err(format!(
+            "it requires MemCastle {requirement}, and this is {running}"
+        ))
+    }
+}
+
 /// The policy itself, on `(major, minor)` pairs, so both halves of it can be tested whatever the host implements today.
 fn contracts_agree((host_major, host_minor): (u64, u64), (major, minor): (u64, u64)) -> bool {
     if host_major == 0 {
@@ -335,6 +402,43 @@ impl std::fmt::Display for SourceState {
     }
 }
 
+/// Where a source comes from, which is also how it was installed (docs/adr/033).
+///
+/// Every kind shares one lifecycle (list, enable, disable, remove); the origin only says what an update looks at.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceOrigin {
+    /// Compiled into MemCastle.
+    #[default]
+    Builtin,
+    /// A package archive or project directory the user installed from their own disk. It has no upstream, so
+    /// `update` leaves it alone.
+    Package,
+    /// A package shipped alongside MemCastle (`share/memcastle/sources`): independently packaged, not linked in.
+    Bundled,
+    /// A package installed from a configured registry index.
+    Registry,
+}
+
+impl std::fmt::Display for SourceOrigin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Builtin => "built in",
+            Self::Package => "local",
+            Self::Bundled => "bundled",
+            Self::Registry => "registry",
+        })
+    }
+}
+
+impl SourceOrigin {
+    /// What a record without an origin (installed before registries existed) was: a package from disk.
+    #[must_use]
+    pub const fn installed_default() -> Self {
+        Self::Package
+    }
+}
+
 /// An installed source as stored.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourcePackageRecord {
@@ -352,6 +456,18 @@ pub struct SourcePackageRecord {
     pub installed_at: DateTime<Utc>,
     /// Last change to this record.
     pub updated_at: DateTime<Utc>,
+    /// Where it was installed from.
+    #[serde(default = "SourceOrigin::installed_default")]
+    pub origin: SourceOrigin,
+    /// The index it came from, for a bundled or registry source: what `update` asks about a newer version.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry: Option<String>,
+    /// SHA-256 of the archive it was installed from, when that is known: what the index published.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive_digest: Option<String>,
+    /// The id of the key whose signature on the archive was verified at install, if there was one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed_by: Option<String>,
 }
 
 #[cfg(test)]
@@ -456,5 +572,64 @@ mod tests {
         // Before 1.0 only the identical minor does.
         assert!(contracts_agree((0, 5), (0, 5)));
         assert!(!contracts_agree((0, 5), (0, 4)) && !contracts_agree((0, 5), (1, 5)));
+    }
+
+    #[test]
+    fn one_policy_decides_whether_a_contract_and_a_requirement_run_on_a_version() {
+        let running = semver::Version::new(0, 3, 1);
+        let current = CONTRACT_VERSION;
+        assert!(version_compatibility(current, ">=0.3, <0.4", &running).is_ok());
+        let too_new = version_compatibility(current, ">=0.4", &running).unwrap_err();
+        assert!(
+            too_new.contains(">=0.4") && too_new.contains("0.3.1"),
+            "{too_new}"
+        );
+        assert!(version_compatibility("9.9", ">=0.1", &running).is_err());
+        assert!(
+            version_compatibility(current, "lots", &running)
+                .unwrap_err()
+                .contains("not valid")
+        );
+        // A release candidate is held to the release's requirement.
+        let candidate = semver::Version::parse("0.3.0-rc.1").unwrap();
+        assert!(version_compatibility(current, ">=0.3", &candidate).is_ok());
+    }
+
+    #[test]
+    fn a_source_name_is_a_safe_path_segment_or_it_is_not_a_name() {
+        for good in ["a", "claude", "pi-sessions", "x1"] {
+            assert!(is_valid_source_name(good), "{good}");
+        }
+        for bad in [
+            "",
+            "-a",
+            "a-",
+            "A",
+            "../x",
+            "a/b",
+            "a b",
+            &"a".repeat(MAX_SOURCE_NAME_LEN + 1),
+        ] {
+            assert!(!is_valid_source_name(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_record_written_before_registries_existed_reads_as_a_package_from_disk() {
+        let old = serde_json::json!({
+            "name": "x",
+            "state": "enabled",
+            "digest": "d",
+            "manifest": {
+                "source": {"name": "x", "version": "1.0.0", "description": "x"},
+                "compatibility": {"contract": "0.1", "memcastle": ">=0.1"}
+            },
+            "installed_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z"
+        });
+        let record: SourcePackageRecord = serde_json::from_value(old).unwrap();
+        assert_eq!(record.origin, SourceOrigin::Package);
+        assert_eq!(record.manifest.format, MANIFEST_FORMAT);
+        assert!(record.registry.is_none() && record.signed_by.is_none());
     }
 }

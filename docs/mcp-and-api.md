@@ -165,6 +165,11 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `POST /api/source-packages/{name}/enable` | Allow an installed source to be mined. Idempotent. | none |
 | `POST /api/source-packages/{name}/disable` | Stop an installed source from being mined. Idempotent. | none |
 | `DELETE /api/source-packages/{name}` | Remove an installed source and its files: `{"removed": name}`. | none |
+| `GET /api/source-registry/search` | Search the bundled sources and the configured registries: `{entries, warnings}`, each entry with the version an install would take and what is installed. | query string: `q`, `registry` |
+| `GET /api/source-registry/sources/{name}` | Download and verify a source and say what installing it would do, installing nothing: `{version, origin, registry, signed_by, archive_digest, permissions, consent_digest, replaces}`. | query string: `version`, `registry` |
+| `POST /api/source-registry/install` | Install a source by name from the bundle or a registry. Answers `{source, replaced}`. | JSON body: `name`, `version?`, `registry?`, `consent?`, `enable?` |
+| `GET /api/source-registry/updates` | The installed sources that have a newer version: `{updates, warnings}`. | none |
+| `POST /api/source-registry/update` | Update one source, or every source with an update. Answers a list of `{name, from, to, status}`, where `status` is `updated`, `current`, `needs_consent` (with `permissions` and `digest`) or `failed` (with `message`). | JSON body: `name?`, `consent?` |
 | `GET /api/db` | Whether the [database admin endpoint](database-access.md) is listening, and where. | none |
 | `POST /api/db` | Open the database admin endpoint, or report it when it is already open. | JSON body, all optional: `bind`, `port`, `allow_remote`, `allowed_origins` |
 | `DELETE /api/db` | Close the database admin endpoint. Succeeds when it was not open. | none |
@@ -370,6 +375,16 @@ They are guarded by [authentication](authentication.md) like every other route, 
 and have no MCP tool: an agent must not be able to install code or widen its own reach
 ([ADR-026](adr/026-pluggable-source-adapters-as-webassembly-components.md)).
 They are not gated by a memory mode, which guards access to memory; `GET .../{name}` is a read, like `GET /api/sources`.
+
+The `/api/source-registry` routes find sources in the bundle and in the registries configured under `mining.registries`,
+and install or update them by name ([Publishing and installing sources](publishing-sources.md)).
+They are the only routes through which the daemon reaches out for code, so they are held to the same rules:
+guarded by authentication, no MCP tool, and the same consent to the permissions of exactly the package that was fetched
+([ADR-033](adr/033-source-distribution.md)).
+Searching and previewing are reads of an index and an archive, and nothing is installed until `install` or `update`.
+A package that fails verification is `502` with `memcastle::source::integrity`, an unreadable registry is `502` with
+`memcastle::source::registry_unavailable`, a name or version nobody offers is `404` with
+`memcastle::source::not_in_registry`, and one the trust policy refuses is `400` with `memcastle::source::untrusted`.
 A package that asks for permissions is refused with `memcastle::source::consent_required` (a `400`) unless `consent`
 carries the digest of exactly those permissions, which the refusal's `help` names.
 A built-in source cannot be disabled or removed (`memcastle::source::builtin`, `400`); an unknown name is a `404`

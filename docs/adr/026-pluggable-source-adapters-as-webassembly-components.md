@@ -123,7 +123,8 @@ a source whoever wrote it.
   One directory per source, each a complete package.
   They are maintained as examples and as the second implementation the conformance suite runs against.
   A source that ships with MemCastle's releases, without being compiled into the binary, uses exactly the package
-  contract a user installs; none is bundled yet.
+  contract a user installs; none was bundled by this decision, and
+  [ADR-033](033-source-distribution.md) bundles `pi` and `opencode` and defines how packages are found and updated.
 - **Enforcement is tests and a lockfile check.**
   `tests/source_isolation.rs`: only `src/mining/wasm/` names the engine;
   the host and the adapters never reach the store or the jobs (recursively);

@@ -12,7 +12,9 @@ pub mod build;
 pub mod conformance;
 pub mod manifest;
 pub mod package;
+pub mod publish;
 pub mod scaffold;
+pub mod signing;
 
 /// The manifest's file name, at the top of a package directory and of a package archive.
 pub const MANIFEST_FILE: &str = "memcastle-source.toml";
