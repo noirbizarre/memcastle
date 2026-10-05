@@ -20,6 +20,9 @@ export const CHECKPOINT_SKILL = "checkpoint-instructions"
 /** Names this extension's footer status while a review is visible. */
 export const CHECKPOINT_STATUS = "memcastle-checkpoint"
 
+/** How long a compaction waits for an emergency review before carrying on without it. */
+export const EMERGENCY_DEADLINE_MS = 30_000
+
 /** The most a review's reply may run to: a payload of a handful of items is far below it. */
 const MAX_REPLY_TOKENS = 4096
 
@@ -110,7 +113,12 @@ export function piReviewIo(ctx: ExtensionContext, manager: McpManager): ReviewIo
   }
 }
 
-export function registerCheckpointAgent(pi: ExtensionAPI, manager: () => McpManager | null, sessions: CheckpointSessions): void {
+export function registerCheckpointAgent(
+  pi: ExtensionAPI,
+  manager: () => McpManager | null,
+  sessions: CheckpointSessions,
+  deadlineMs: number = EMERGENCY_DEADLINE_MS,
+): void {
   // A new Pi session starts counting from zero and with nothing reviewed.
   pi.on("session_start", async () => {
     sessions.drop()
@@ -135,6 +143,42 @@ export function registerCheckpointAgent(pi: ExtensionAPI, manager: () => McpMana
     if (checkpoint.mode === "blocking") await review
     else void review
   })
+
+  // Compaction replaces the transcript with a summary, so whatever has not been kept yet is about to be lost.
+  pi.on("session_before_compact", async (_event, ctx) => {
+    const current = manager()
+    // An `off` session has no manager, and a `read-only` one cannot write: neither may pay for a model call.
+    // `checkpoint.enabled` is deliberately not read: it switches the interval review off, and losing the conversation
+    // is the one moment a save is wanted even from a user who turned that off.
+    if (!current || current.settings.mode !== "full") return
+    const state = sessions.for(current)
+    // What this review keeps must not count towards the next interval too.
+    state.counter.reset()
+
+    const review = emergency(current, state, ctx)
+    // Pi awaits this handler before it compacts, so a slow model must not hold the compaction up for ever. Once queued the
+    // job is Critical priority, and a review still running at the deadline carries on and reports for itself.
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<void>((resolve) => (timer = setTimeout(resolve, deadlineMs)))
+    await Promise.race([review, deadline])
+    clearTimeout(timer)
+    // Nothing is returned on purpose: `{ cancel: true }` would stop the compaction, which is never this extension's call.
+  })
+}
+
+/** One emergency review, reporting its own failures: it may outlive the handler, and a throw there would be lost. */
+async function emergency(current: McpManager, state: SessionCheckpoints, ctx: ExtensionContext): Promise<void> {
+  const notify = (message: string, level: "info" | "warning" | "error") => ctx.ui.notify(message, level)
+  try {
+    // A daemon that could not be reached has been reported by the start, and reviewing would only repeat that.
+    if (!(await current.ready)) return
+    // Not waited for: the job is queued at Critical priority and compaction must not sit behind the daemon's work.
+    await state.review.run(piReviewIo(ctx, current), { emergency: true })
+  } catch (error) {
+    // The session may have ended while the model was thinking, and a failure about it is no longer anyone's to read.
+    if (state.manager.session === null) return
+    current.report(error, notify)
+  }
 }
 
 /** One interval review, reporting its own failures: it runs unawaited in `silent` mode, where a throw would be lost. */

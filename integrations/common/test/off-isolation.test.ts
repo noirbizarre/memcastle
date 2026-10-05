@@ -103,6 +103,13 @@ const pi: Record<string, Driver> = {
         return [...session.asked, ...withoutNotice(session.notes)]
       }),
     ),
+  "emergency-checkpoint": (mode, actor) =>
+    as(actor, () =>
+      withPi(mode, {}, async (session) => {
+        await session.fire("session_before_compact", { reason: "threshold" })
+        return session.asked
+      }),
+    ),
 }
 
 // --- OpenCode ---------------------------------------------------------------------------------------------------

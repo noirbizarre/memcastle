@@ -4,8 +4,8 @@
 // checkpoint is. It works whatever `checkpoint.enabled` says, because asking for it is the opt-in, and it is always
 // visible: the user is waiting for it.
 //
-// The emergency checkpoint before compaction (#24) is not here yet: it is the same review submitted with `emergency`,
-// triggered from `session_before_compact`.
+// The emergency checkpoint before compaction is the same review submitted with `emergency`; it lives in
+// `checkpoint-agent.ts`, triggered from `session_before_compact`.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { describeOutcome } from "./checkpoint-core.ts"

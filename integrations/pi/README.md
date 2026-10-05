@@ -6,7 +6,7 @@ admin endpoint (AGENTS.md invariant 8, enforced by the `integrations-http-only` 
 
 **Status: scaffold.**
 The connection, memory-mode, discovery and failure foundations are real and tested against a real daemon.
-Wake-up, search-before-answer and checkpointing (interval and manual) are implemented; the other capability modules are
+Wake-up, search-before-answer and checkpointing (interval, manual and emergency) are implemented; the other capability modules are
 registered but empty, and each names the issue that fills it in.
 
 It deliberately does **not** port `pi-palace`'s workaround of routing every write through a daemon queue to avoid
@@ -208,7 +208,24 @@ submits it with `memcastle_checkpoint`.
   so `fact` is always `null`, as the shared skill says.
 - A mistyped checkpoint value falls back to its default rather than breaking the session.
 
-The emergency checkpoint before a compaction is a separate capability (#24).
+### Emergency checkpoint
+
+Pi compacts a conversation by replacing it with a summary, so whatever was not kept yet is about to be lost.
+The extension reviews the conversation at `session_before_compact` and submits it with `emergency: true`,
+which makes the daemon's job Critical priority: it is claimed before any queued background work, such as mining.
+
+- **It runs whatever `MEMCASTLE_CHECKPOINT` says.**
+  That setting switches the interval review off, and losing the conversation is the one moment a save is still wanted.
+- **It does not wait for the job.**
+  The review's own model call is awaited, because Pi runs the handler before it compacts, but the job is only queued.
+- **It never holds the compaction up for long.**
+  After 30 seconds the compaction carries on, and a review still running submits and reports for itself.
+- **It never cancels or replaces the compaction.**
+  A failure is shown as a notification, and Pi compacts as it would have anyway.
+- **A successful save is silent.**
+  It postpones the next interval review, so the same exchanges are not reviewed twice.
+- **A `read-only` session, an `off` session and a daemon that never connected do nothing**,
+  and cost no model call.
 
 ### Connection lifecycle
 
@@ -247,8 +264,8 @@ src/recall-core.ts            search-before-answer without a host: the level and
 src/skill-text.ts             reads a shared skill from `skills/` and strips its frontmatter (the same file as OpenCode's)
 src/search-before-answer.ts   injects that skill into the system prompt at every `before_agent_start`
 src/checkpoint-core.ts        checkpointing without a host: settings, the review, the payload, submission (the same file as OpenCode's)
-src/checkpoint-agent.ts       the interval review: counts `agent_end`, reads Pi's transcript, asks Pi's model
-src/checkpoint-tool.ts        `/memcastle-checkpoint`: the manual save; the pre-compaction one (#24) is not here yet
+src/checkpoint-agent.ts       the interval review (counts `agent_end`) and the emergency one (`session_before_compact`): reads Pi's transcript, asks Pi's model
+src/checkpoint-tool.ts        `/memcastle-checkpoint`: the manual save
 src/daily-mine.ts             background mining on the extension's own schedule (#26, scheduling only), empty
 test/                         bun tests against a real `memcastle serve`; they read tests/fixtures/integration/
 ```
@@ -282,7 +299,7 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | `wake-up` | Implemented: fetched at session start, injected as a message before the first (`sync`) or first-ready (`async`) response, never blocks on a down daemon | #22, done |
 | `recall` | Implemented: the shared `search-before-answer` skill is appended to the system prompt every turn, at the `forceMemoryRecall` level | #25, done |
 | `checkpoint` | Implemented: an interval review by Pi's own model and `/memcastle-checkpoint`, both submitting a classified payload and reporting a failed job with how to retry it | #23, done |
-| `emergency-checkpoint` | Not yet | #24 |
+| `emergency-checkpoint` | Implemented: the same review submitted with `emergency: true` at `session_before_compact`, whatever the interval setting says, bounded by a 30 second deadline, never cancelling the compaction; a `read-only` or `off` session does nothing | #24, done |
 | `persistent-session` | Implemented: one connection per Pi session, kept alive, replaced with its mode re-selected when the daemon forgets it | #29, done |
 | `skills` | Implemented: `search-before-answer` is injected and `checkpoint-instructions` instructs the reviewing model, both read from `skills/` and never copied; `off` sessions get nothing | #25, #23, done |
 | `project-context` | Implemented: `.config/memcastle.toml` and `MEMCASTLE_WING` / `MEMCASTLE_ROOM` resolved from Pi's directory, used for the wake-up wing, checkpoint defaults and the search instruction | #183, done |
@@ -293,6 +310,6 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 ### Gaps
 
 None are declared yet.
-Only `emergency-checkpoint`, `background-mining` and `audit-repair` may be gaps, each recorded as three lines:
+Only `background-mining` and `audit-repair` may be gaps, each recorded as three lines:
 **Missing**, **Fallback** and **Effect**.
-Pi has a `session_before_compact` event, so a gap is not expected for `emergency-checkpoint`.
+`emergency-checkpoint` is not one: Pi has a `session_before_compact` event.

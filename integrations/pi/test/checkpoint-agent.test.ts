@@ -68,7 +68,10 @@ function fakePi(options: HostOptions = {}) {
     },
   } as unknown as ExtensionCommandContext
   const fire = async (event: string, payload: object = {}) => {
-    for (const handler of handlers.get(event) ?? []) await handler({ type: event, ...payload }, ctx)
+    let result: unknown
+    for (const handler of handlers.get(event) ?? []) result = await handler({ type: event, ...payload }, ctx)
+    // Pi reads a `session_before_*` handler's answer, so a test must be able to see that there was none to cancel with.
+    return result
   }
   return { pi, ctx, notes, statuses, asked, commands, handlers, fire }
 }
@@ -96,10 +99,10 @@ function fakeManager(checkpoint: Partial<CheckpointSettings> = {}, options: { mo
   return { manager, calls, reports }
 }
 
-function setup(manager: McpManager | null, options: HostOptions = {}) {
+function setup(manager: McpManager | null, options: HostOptions = {}, deadlineMs?: number) {
   const host = fakePi(options)
   const sessions = new CheckpointSessions()
-  registerCheckpointAgent(host.pi, () => manager, sessions)
+  registerCheckpointAgent(host.pi, () => manager, sessions, deadlineMs)
   registerCheckpointTool(host.pi, () => manager, sessions)
   return { ...host, sessions }
 }
@@ -287,6 +290,88 @@ test("a new session counts from zero again", async () => {
   expect(asked).toEqual([])
 })
 
+// --- emergency -------------------------------------------------------------------------------------------------
+
+const COMPACT = { reason: "threshold", willRetry: false }
+
+test("a compaction submits what has not been kept as an emergency, and does not wait for the job", async () => {
+  const { manager, calls } = fakeManager({}, { job: { status: "queued" } })
+  const { fire, asked } = setup(manager)
+  await fire("session_before_compact", COMPACT)
+
+  expect(asked).toHaveLength(1)
+  expect(submissions(calls)).toHaveLength(1)
+  expect(submissions(calls)[0]?.args.emergency).toBe(true)
+  // A queued job would be polled until it ended if the review waited, and `calls` would hold the job-status reads.
+  expect(calls.filter((call) => call.tool !== "memcastle_checkpoint")).toEqual([])
+})
+
+test("a compaction is never cancelled or replaced by the extension", async () => {
+  const { manager } = fakeManager()
+  const { fire } = setup(manager)
+  expect(await fire("session_before_compact", COMPACT)).toBeUndefined()
+})
+
+test("a compaction is saved even when the interval review is switched off, and no notice is shown", async () => {
+  const { manager, calls } = fakeManager({ enabled: false, mode: "blocking" })
+  const { fire, notes, statuses } = setup(manager)
+  await fire("session_before_compact", COMPACT)
+  expect(submissions(calls)).toHaveLength(1)
+  expect(notes).toEqual([])
+  expect(statuses).toEqual([])
+})
+
+test("a read-only session, an off session and an unreachable daemon spend no model call on a compaction", async () => {
+  for (const [manager, name] of [
+    [fakeManager({}, { mode: "read-only" }).manager, "read-only"],
+    [null, "off"],
+    [fakeManager({}, { ready: false }).manager, "unreachable"],
+  ] as const) {
+    const { fire, asked, notes } = setup(manager)
+    await fire("session_before_compact", COMPACT)
+    expect(asked, name).toEqual([])
+    expect(notes, name).toEqual([])
+  }
+})
+
+test("a compaction postpones the next interval review, since what it kept must not be reviewed twice", async () => {
+  const { manager } = fakeManager({ interval: 2, mode: "blocking" })
+  const { fire, asked } = setup(manager)
+  await fire("agent_end")
+  await fire("session_before_compact", COMPACT)
+  const reviewed = asked.length
+  await fire("agent_end")
+  expect(asked).toHaveLength(reviewed)
+})
+
+test("a failing emergency review is reported and never stops the compaction", async () => {
+  const { manager, reports } = fakeManager()
+  const { fire } = setup(manager, { answer: "I have no idea" })
+  expect(await fire("session_before_compact", COMPACT)).toBeUndefined()
+  expect(reports[0]?.failureClass).toBe("invalid_input")
+})
+
+test("a slow model does not hold the compaction up past the deadline, and the late review still submits", async () => {
+  let release!: (reply: string) => void
+  const slow = new Promise<string>((resolve) => (release = resolve))
+  const { manager, calls } = fakeManager()
+  const { fire, asked } = setup(manager, { answer: () => slow }, 20)
+
+  await fire("session_before_compact", COMPACT) // resolves while the model is still thinking
+  expect(asked).toHaveLength(1)
+  expect(calls).toEqual([])
+
+  release(REPLY)
+  await until(() => submissions(calls).length === 1, "the late submission")
+  expect(submissions(calls)[0]?.args.emergency).toBe(true)
+})
+
+test("loading the extension registers the emergency handler", () => {
+  const host = fakePi()
+  memcastle(host.pi)
+  expect(host.handlers.has("session_before_compact")).toBe(true)
+})
+
 // --- manual ----------------------------------------------------------------------------------------------------
 
 const command = (host: ReturnType<typeof setup>) => host.commands.get(CHECKPOINT_COMMAND) as Command
@@ -413,6 +498,24 @@ test("a real read-only session never reviews on its own, and tells the user why 
     expect(asked).toEqual([])
     expect(notes.at(-1)?.level).toBe("info")
     expect(notes.at(-1)?.message).toContain("read-only")
+  } finally {
+    await fire("session_shutdown", { reason: "quit" })
+    restore()
+  }
+})
+
+test("a real compaction queues a Critical checkpoint even with the interval review off, and the daemon reports its priority", async () => {
+  const reply = JSON.stringify({ items: [{ destination: "general", content: "piemergencytoken before compaction.", tags: [] }] })
+  const { fire, restore } = await realSession({ MEMCASTLE_CHECKPOINT: "false" }, { answer: reply })
+  try {
+    await fire("session_start", { reason: "startup" })
+    await fire("session_before_compact", { reason: "threshold", willRetry: false })
+
+    const reader = daemon.session("full")
+    const jobs = await reader.call<{ id: string; priority: number; kind: unknown }[]>("memcastle_job_list", {})
+    const mine = jobs.filter((job) => JSON.stringify(job.kind).includes("piemergencytoken"))
+    expect(mine.map((job) => job.priority)).toEqual([100])
+    await reader.close()
   } finally {
     await fire("session_shutdown", { reason: "quit" })
     restore()

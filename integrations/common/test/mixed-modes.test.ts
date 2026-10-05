@@ -79,6 +79,7 @@ test("three modes across two integrations share one daemon, and each behaves exa
       const first = await piReadOnly.fire("before_agent_start", { prompt: "hello" })
       await piReadOnly.fire("agent_end")
       await piReadOnly.command("memcastle-checkpoint")
+      await piReadOnly.fire("session_before_compact", { reason: "threshold" })
       return { first, asked: piReadOnly.asked, notes: piReadOnly.notes }
     }),
     // Pi, off: as if MemCastle were not installed.
@@ -87,6 +88,7 @@ test("three modes across two integrations share one daemon, and each behaves exa
       await piOff.fire("agent_end")
       await piOff.command("memcastle-checkpoint")
       await piOff.command("memcastle-wake-up")
+      await piOff.fire("session_before_compact", { reason: "threshold" })
       return { first, asked: piOff.asked, notes: piOff.notes }
     }),
     // OpenCode, full: briefed, reminded, and the model's own checkpoint is saved.
