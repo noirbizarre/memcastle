@@ -129,6 +129,7 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `GET /api/diary` | Read diary entries. | `agent_identity`, `wing`, `limit` |
 | `POST /api/diary` | Write a diary entry. | JSON body: `agent_identity`, `wing`, `content`, `requested_by?` |
 | `POST /api/notes` | Capture a note: an unnamed drawer of source kind `note`. `201` when stored, `200` when an identical note was already in the room. There is no MCP tool: agents write memory through `memcastle_checkpoint` and the diary. | JSON body: `wing`, `room`, `content`, `uri?`, `requested_by?` |
+| `GET /api/sources` | The mining adapters this daemon can run and the sources that have been mined: `{adapters, sources}`. A read. | none |
 | `GET /api/jobs` | List jobs. | `status` |
 | `POST /api/jobs` | Submit a job. | JSON body, see [below](#submitting-jobs) |
 | `GET /api/jobs/{id}` | Show one job. | none |
@@ -167,7 +168,7 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `POST /api/source-packages/{name}/disable` | Stop an installed source from being mined. Idempotent. | none |
 | `DELETE /api/source-packages/{name}` | Remove an installed source and its files: `{"removed": name}`. | none |
 | `GET /api/source-registry/search` | Search the bundled sources and the configured registries: `{entries, warnings}`, each entry with the version an install would take and what is installed. | query string: `q`, `registry` |
-| `GET /api/source-registry/sources/{name}` | Download and verify a source and say what installing it would do, installing nothing: `{version, origin, registry, signed_by, archive_digest, permissions, consent_digest, replaces}`. | query string: `version`, `registry` |
+| `GET /api/source-registry/sources/{name}` | Download and verify a source and say what installing it would do, installing nothing: `{name, version, description, origin, registry, signed_by, archive_digest, permissions, consent_digest, replaces}`. | query string: `version`, `registry` |
 | `POST /api/source-registry/install` | Install a source by name from the bundle or a registry. Answers `{source, replaced}`. | JSON body: `name`, `version?`, `registry?`, `consent?`, `enable?` |
 | `GET /api/source-registry/updates` | The installed sources that have a newer version: `{updates, warnings}`. | none |
 | `POST /api/source-registry/update` | Update one source, or every source with an update. Answers a list of `{name, from, to, status}`, where `status` is `updated`, `current`, `needs_consent` (with `permissions` and `digest`) or `failed` (with `message`). | JSON body: `name?`, `consent?` |
