@@ -327,22 +327,35 @@ pub enum SourcePackageEvent {
     Disable,
 }
 
+impl std::fmt::Display for SourcePackageState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The wire names, like `SourceState`'s: a message that said `Enabled` would not match what `source list` shows.
+        f.write_str(match self {
+            Self::Installed => "installed",
+            Self::Enabled => "enabled",
+            Self::Disabled => "disabled",
+        })
+    }
+}
+
+impl std::fmt::Display for SourcePackageEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Enable => "enable",
+            Self::Disable => "disable",
+        })
+    }
+}
+
 /// An event the source's state does not allow.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("a source that is {state} cannot be asked to {event}")]
 pub struct PackageTransitionError {
     /// Where the source was.
     pub state: SourcePackageState,
     /// What was attempted.
     pub event: SourcePackageEvent,
 }
-
-impl std::fmt::Display for PackageTransitionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "a {:?} source cannot {:?}", self.state, self.event)
-    }
-}
-
-impl std::error::Error for PackageTransitionError {}
 
 impl SourcePackageState {
     /// The state after `event`, or why not.
@@ -496,7 +509,11 @@ mod tests {
     fn a_refused_transition_names_the_state_and_the_event() {
         let error = Enabled.apply(Enable).unwrap_err();
         assert_eq!(error.state, Enabled);
-        assert!(error.to_string().contains("Enabled"));
+        // The names `source list` shows, not the Rust variant names.
+        assert_eq!(
+            error.to_string(),
+            "a source that is enabled cannot be asked to enable"
+        );
     }
 
     #[test]
