@@ -48,7 +48,7 @@ The wake-up and checkpoint variables, and `MEMCASTLE_FORCE_MEMORY_RECALL`, belon
 | `MEMCASTLE_WAKE_UP_WING` | none | The wing for `custom` |
 | `MEMCASTLE_WING`, `MEMCASTLE_ROOM` | none | The project's wing and room, overriding `.config/memcastle.toml` (see [Project context](#project-context)) |
 | `MEMCASTLE_FORCE_MEMORY_RECALL` | `sometimes` | `off`, `sometimes` or `always`: how hard to push the model to search first |
-| `MEMCASTLE_CHECKPOINT` | `true` | Whether the interval review runs; `/memcastle-checkpoint` works either way |
+| `MEMCASTLE_CHECKPOINT` | `true` | Whether the interval review runs; `/memcastle-checkpoint` and the emergency save before compaction work either way |
 | `MEMCASTLE_CHECKPOINT_INTERVAL` | `10` | How many exchanges separate two interval reviews |
 | `MEMCASTLE_CHECKPOINT_MODE` | `silent` | `silent` reviews in the background; `blocking` makes the agent wait and shows the result |
 | `MEMCASTLE_CHECKPOINT_MODEL` | none | `provider/id` of the model that reviews the conversation; none means the session's own |
@@ -267,6 +267,7 @@ src/wake-up-core.ts           wake-up without a host: settings, wing, rendering,
 src/wake-up.ts                wake-up on session start: fetch at `session_start`, inject at `before_agent_start`
 src/wake-up-cli.ts            `/memcastle-wake-up`: show what a session start would inject
 src/recall-core.ts            search-before-answer without a host: the level and the text to inject (the same file as OpenCode's)
+src/project-core.ts           the project context: `.config/memcastle.toml`, `MEMCASTLE_WING` and `MEMCASTLE_ROOM` (the same file as OpenCode's)
 src/skill-text.ts             reads a shared skill from `skills/` and strips its frontmatter (the same file as OpenCode's)
 src/search-before-answer.ts   injects that skill into the system prompt at every `before_agent_start`
 src/checkpoint-core.ts        checkpointing without a host: settings, the review, the payload, submission (the same file as OpenCode's)
@@ -277,7 +278,7 @@ test/                         bun tests against a real `memcastle serve`; they r
 ```
 
 `modes`, `failures`, `settings`, `daemon-client`, `persistent-mcp-client`, `wake-up-core`, `recall-core`,
-`checkpoint-core` and `skill-text` are a deliberate copy of the small client
+`project-core`, `checkpoint-core` and `skill-text` are a deliberate copy of the small client
 the OpenCode integration carries, not a shared package: the two ecosystems differ in how many sessions share a process.
 Both suites replay the same fixtures, which is what keeps the copies honest
 (see [ADR-022](../../docs/adr/022-integrations-are-bun-packages-tested-against-a-real-daemon.md)).
@@ -297,7 +298,6 @@ The tests never skip when the binary is missing, because a suite that passes wit
 ## Conformance matrix
 
 The contract is [`docs/integration-contract.md`](../../docs/integration-contract.md).
-**Foundation** means the building block exists and is tested, but the lifecycle behaviour is not wired yet.
 
 | Capability | Status | Where it lands |
 | --- | --- | --- |
@@ -334,6 +334,7 @@ The session always carries on without MemCastle: a failure never stops Pi from a
 ### Gaps
 
 None are declared yet.
-Only `background-mining` and `audit-repair` may be gaps, each recorded as three lines:
+Only `emergency-checkpoint`, `background-mining` and `audit-repair` may be gaps, each recorded as three lines:
 **Missing**, **Fallback** and **Effect**.
-`emergency-checkpoint` is not one: Pi has a `session_before_compact` event.
+`emergency-checkpoint` is not one here, because Pi has a `session_before_compact` event.
+The other two are "Not yet" in the matrix: nothing is built, and no gap is declared until a decision says there will not be.

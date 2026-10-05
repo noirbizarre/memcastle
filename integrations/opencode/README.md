@@ -329,6 +329,7 @@ src/session.ts    one MCP session; selects the mode on every (re)connect before 
 src/registry.ts   one session per OpenCode sessionID, connected lazily
 src/recall-core.ts   search-before-answer without a host: the level and the text to inject (the same file as Pi's)
 src/skill-text.ts    reads a shared skill from `skills/` and strips its frontmatter (the same file as Pi's)
+src/project-core.ts  the project context: `.config/memcastle.toml`, `MEMCASTLE_WING` and `MEMCASTLE_ROOM` (the same file as Pi's)
 src/skills.ts        the shared skills as OpenCode registers them: a `skills.paths` entry (V1), a skill list (V2)
 src/checkpoint-core.ts  checkpointing without a host: settings, the review, the payload, submission (the same file as Pi's)
 src/checkpoint.ts    checkpoints per OpenCode session: interval counting, emergency before compaction, the tool, the command
@@ -354,7 +355,6 @@ The tests never skip when the binary is missing, because a suite that passes wit
 ## Conformance matrix
 
 The contract is [`docs/integration-contract.md`](../../docs/integration-contract.md).
-**Foundation** means the building block exists and is tested, but the lifecycle behaviour is not wired yet.
 
 | Capability | Status | Where it lands |
 | --- | --- | --- |

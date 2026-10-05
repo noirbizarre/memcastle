@@ -40,8 +40,9 @@ export interface Settings {
    */
   forceMemoryRecall: RecallSettings
   /**
-   * Interval and manual checkpoints. Nested because its `mode` (`silent` or `blocking`) is whether the agent waits for
-   * a review, a different thing from the memory mode above.
+   * Interval, manual and emergency checkpoints. Nested because its `mode` (`silent` or `blocking`) is whether the agent waits for
+   * a review, a different thing from the memory mode above. `enabled` switches the interval review off only; the
+   * manual and emergency saves work either way.
    */
   checkpoint: CheckpointSettings
 }

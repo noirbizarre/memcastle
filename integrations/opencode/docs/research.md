@@ -247,5 +247,7 @@ Two differences matter to the follow-up issues.
 2. V1's `experimental.*` hooks have V2 destinations that are not experimental, which narrows the
    "Pre-compaction" gap above for OpenCode 2.
 
-The plugin holds each hook as an empty stub in both majors, so these mappings are wiring, and the behaviour lands once in
-`src/core.ts`.
+When this was written the plugin held each hook as an empty stub in both majors, so these mappings were wiring, and the
+behaviour landed once in `src/core.ts`.
+Since then wake-up, search-before-answer, checkpointing (interval, manual and emergency) and the project context have
+landed there; background mining and audit/repair have not.
