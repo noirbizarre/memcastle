@@ -22,8 +22,17 @@ use crate::error::Error;
 /// check poll it, and it answers only `{"status":"ok"}`. Keeping it open also
 /// keeps "the daemon is down" (no answer) distinct from "you are not
 /// authenticated" (a 401).
-fn is_public(request: &Request) -> bool {
-    request.method() == Method::GET && request.uri().path() == "/api/health"
+///
+/// With the dashboard enabled, its static files are the second exception: a browser cannot send a header when it
+/// navigates, so it could never load the page that then asks the user for a token. The files hold no data and every
+/// call the page makes to `/api` is guarded as before (docs/adr/035). Only `GET` and `HEAD`, only under `/ui`, and
+/// only when `web.enable` is set, so a daemon without a dashboard still answers `/ui` with a refusal.
+fn is_public(request: &Request, web_enabled: bool) -> bool {
+    let path = request.uri().path();
+    (request.method() == Method::GET && path == "/api/health")
+        || (web_enabled
+            && matches!(*request.method(), Method::GET | Method::HEAD)
+            && super::is_ui_path(path))
 }
 
 /// The bearer token in `headers`, `Ok(None)` when there is no `Authorization`
@@ -59,7 +68,7 @@ pub async fn require_auth(
     request: Request,
     next: Next,
 ) -> Response {
-    if !app.auth_enabled() || is_public(&request) {
+    if !app.auth_enabled() || is_public(&request, app.web_enabled()) {
         return next.run(request).await;
     }
     let outcome = match bearer_token(request.headers()) {

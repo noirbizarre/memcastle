@@ -45,6 +45,31 @@ pub(super) async fn list_entities(
 }
 
 #[derive(Debug, Deserialize)]
+pub(super) struct GraphParams {
+    /// The entity to draw the neighbourhood of. Without it, the first entities by name.
+    entity: Option<String>,
+    /// Hops to follow from `entity`, 1 to 3. Default 1.
+    depth: Option<u32>,
+    /// The most entities in the answer (default 50, at most 200).
+    limit: Option<u32>,
+}
+
+/// `GET /api/graph`: entities and the facts between them in one answer, for drawing.
+pub(super) async fn graph(
+    State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
+    ApiQuery(params): ApiQuery<GraphParams>,
+) -> Result<impl IntoResponse, ApiError> {
+    let entity = params.entity.as_deref().map(parse_entity_id).transpose()?;
+    Ok(Json(
+        state
+            .app
+            .graph(entity, params.depth, params.limit, mode)
+            .await?,
+    ))
+}
+
+#[derive(Debug, Deserialize)]
 pub(super) struct RelationshipsParams {
     /// Also return superseded and retracted facts.
     #[serde(default)]

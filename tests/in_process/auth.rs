@@ -184,6 +184,15 @@ async fn every_other_route_is_guarded_including_ones_that_do_not_exist() {
         (Method::GET, "/api/drawers/x/history"),
         // The knowledge graph: read-only apart from settling a name by hand.
         (Method::GET, "/api/entities"),
+        // The dashboard's additions: the graph in one answer and the configuration in effect.
+        (Method::GET, "/api/graph"),
+        (Method::GET, "/api/config"),
+        (Method::GET, "/api/jobs?kind=mine&limit=5"),
+        // `/ui` is guarded unless the dashboard is enabled (see `web.rs` for the enabled case): a daemon with no
+        // dashboard must not answer it anonymously, nor reveal that it has none.
+        (Method::GET, "/ui"),
+        (Method::GET, "/ui/"),
+        (Method::GET, "/ui/index.html"),
         (Method::GET, "/api/entities/x/relationships"),
         (Method::GET, "/api/entities/x/mentions"),
         (Method::GET, "/api/entities/x/candidates"),

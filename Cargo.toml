@@ -119,7 +119,7 @@ uuid = { version = "1.26.1", features = ["v4", "serde"] }
 # Async runtime. `signal` backs the daemon's graceful shutdown, `net` the listeners; the rest is the
 # baseline every module needs. `process` runs the `command` embedding provider (`embed::command`) with a
 # timeout and kill-on-drop; `daemon start` and `daemon restart` respawn through `std::process`.
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net", "process", "io-util"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net", "process", "io-util", "fs"] }
 tokio-util = "0.7.19"
 
 # Storage. `kv-surrealkv` is the embedded engine — pure Rust, so the storage

@@ -9,6 +9,7 @@
 mod auth;
 mod db_endpoint;
 mod graph;
+mod info;
 mod palace;
 mod source_packages;
 mod source_registry;
@@ -35,6 +36,8 @@ use crate::store::SurrealStore;
 
 pub use auth::{AuthPolicy, GeneratedToken, RevokeResult};
 pub use db_endpoint::{DbEndpoint, DbEndpointRequest, DbEndpointStatus};
+pub use graph::GraphView;
+pub use info::{AssetsInfo, ConfigReport, JobsInfo, MiningInfo, ProviderInfo, WebInfo};
 pub use palace::{
     Created, DEFAULT_LIST_LIMIT, DrawerReplacement, EntityLink, Superseded, WingDetail,
 };
@@ -133,6 +136,8 @@ pub struct RuntimeContext {
     pub backend: String,
     /// Directory or credential-free URL of the datastore.
     pub location: String,
+    /// The non-secret settings in effect, for `GET /api/config` and for deciding whether `/ui` is served.
+    pub config: ConfigReport,
 }
 
 /// Bounds `AppServices::wake_up`'s output — deterministic and testable, no
@@ -164,6 +169,9 @@ pub const DEFAULT_SEARCH_LIMIT: u32 = 10;
 /// How many entries `diary_read` returns when the caller does not say —
 /// shared by every interface for the same reason as [`DEFAULT_SEARCH_LIMIT`].
 pub const DEFAULT_DIARY_LIMIT: u32 = 20;
+
+/// How many jobs a bounded listing returns when the caller does not say.
+pub const DEFAULT_JOB_LIMIT: u32 = 50;
 
 /// The most hits or entries a search, recall, diary read, drawer listing or
 /// entity listing returns, whatever the caller asks for. Without a ceiling
@@ -996,6 +1004,27 @@ impl AppServices {
     pub async fn list_jobs(&self, status: Option<JobStatus>, mode: MemoryMode) -> Result<Vec<Job>> {
         Self::require_read(mode, "job_list")?;
         self.store.list_jobs(status).await
+    }
+
+    /// A bounded page of jobs, newest first, optionally narrowed to a status and to a kind (`mine`, `audit`, ...).
+    /// `limit` follows the shared read rule ([`effective_limit`]), so `0` or none means [`DEFAULT_JOB_LIMIT`] and
+    /// nothing exceeds [`MAX_READ_LIMIT`]. Gated as a **read** for the same reason as [`Self::list_jobs`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the store query fails, or [`Error::ModeForbidden`] if `mode` doesn't permit reads.
+    pub async fn list_jobs_page(
+        &self,
+        status: Option<JobStatus>,
+        kind: Option<&str>,
+        limit: Option<u32>,
+        mode: MemoryMode,
+    ) -> Result<Vec<Job>> {
+        Self::require_read(mode, "job_list")?;
+        let kind = kind.map(str::trim).filter(|kind| !kind.is_empty());
+        self.store
+            .list_jobs_page(status, kind, effective_limit(limit, DEFAULT_JOB_LIMIT))
+            .await
     }
 
     /// Fetch one job by id. Gated as a **read** for the same reason as
@@ -2361,6 +2390,7 @@ mod tests {
             palace_path: "/palace".into(),
             backend: "embedded".into(),
             location: "/palace/db".into(),
+            config: ConfigReport::default(),
         });
 
         let report = app.status(MemoryMode::Full).await.expect("status");
