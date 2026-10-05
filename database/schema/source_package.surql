@@ -19,3 +19,14 @@ DEFINE FIELD IF NOT EXISTS digest ON TABLE source_package TYPE string;
 DEFINE FIELD IF NOT EXISTS manifest ON TABLE source_package TYPE object FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS installed_at ON TABLE source_package TYPE datetime;
 DEFINE FIELD IF NOT EXISTS updated_at ON TABLE source_package TYPE datetime;
+
+-- Where the package came from (docs/adr/033), so `update` knows which index to ask. All optional and additive: a row
+-- written before registries existed has none of them and is read as a package installed from disk.
+-- `package`, `bundled` or `registry` (`domain::SourceOrigin`).
+DEFINE FIELD IF NOT EXISTS origin ON TABLE source_package TYPE option<string>;
+-- The index location a bundled or registry package was installed from.
+DEFINE FIELD IF NOT EXISTS registry ON TABLE source_package TYPE option<string>;
+-- SHA-256 of the archive it was installed from: what the index published and the install verified.
+DEFINE FIELD IF NOT EXISTS archive_digest ON TABLE source_package TYPE option<string>;
+-- The id of the key whose signature on the archive was verified at install.
+DEFINE FIELD IF NOT EXISTS signed_by ON TABLE source_package TYPE option<string>;

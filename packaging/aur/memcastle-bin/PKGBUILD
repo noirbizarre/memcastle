@@ -37,10 +37,15 @@ sha256sums_aarch64=('@SHA256_AARCH64@')
 # Fetched separately: the raw binary asset carries no licence file, and MIT
 # is not one of the licences Arch keeps in /usr/share/licenses/common.
 # The systemd user unit is fetched from the tag for the same reason.
+#
+# The sources bundled with MemCastle (docs/adr/033) are portable WebAssembly packages, so one release asset serves both
+# architectures. makepkg extracts it to `$srcdir/memcastle-sources-$pkgver/`.
 source=("LICENSE-$pkgver::$url/raw/$pkgver/LICENSE"
-        "memcastle-$pkgver.service::$url/raw/$pkgver/packaging/systemd/memcastle.service")
+        "memcastle-$pkgver.service::$url/raw/$pkgver/packaging/systemd/memcastle.service"
+        "memcastle-sources-$pkgver.tar.gz::$url/releases/download/$pkgver/memcastle_${pkgver}_sources.tar.gz")
 sha256sums=('@SHA256_LICENSE@'
-            '@SHA256_SERVICE@')
+            '@SHA256_SERVICE@'
+            '@SHA256_SOURCES@')
 
 package() {
 	install -Dm755 "$srcdir/memcastle-$pkgver-$CARCH" "$pkgdir/usr/bin/memcastle"
@@ -52,6 +57,10 @@ package() {
 	install -Dm644 "$srcdir/LICENSE-$pkgver" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 	# Package-owned user unit: `systemctl --user start memcastle`. Config and secrets stay user-owned.
 	install -Dm644 "$srcdir/memcastle-$pkgver.service" "$pkgdir/usr/lib/systemd/user/memcastle.service"
+	# The bundled sources, where the daemon looks for them beside `/usr/bin`: `memcastle source install pi` then needs
+	# no registry and no network.
+	install -dm755 "$pkgdir/usr/share/memcastle/sources"
+	install -m644 "$srcdir/memcastle-sources-$pkgver"/* "$pkgdir/usr/share/memcastle/sources/"
 }
 
 # --- project-specific ---------------------------------------------------

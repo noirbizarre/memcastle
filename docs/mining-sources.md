@@ -124,14 +124,16 @@ The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unc
 | Source | Kind | Reads | Cursor | Keeps raw | Credentials |
 |---|---|---|---|---|---|
 | `directory` | built in | the text files under a directory | modification time | no | no |
-| `pi` | package, `sources/pi/` | Pi coding-agent session history | modification time | yes | no |
-| `opencode` | package, `sources/opencode/` | OpenCode coding-agent session history | `time_updated` of the session | yes | no |
+| `pi` | bundled package, `sources/pi/` | Pi coding-agent session history | modification time | yes | no |
+| `opencode` | bundled package, `sources/opencode/` | OpenCode coding-agent session history | `time_updated` of the session | yes | no |
 
 Only `directory` is compiled into MemCastle.
-`pi` and `opencode` are installed [WebAssembly sources](writing-sources.md), built from `sources/pi/` and
-`sources/opencode/` in the repository:
+`pi` and `opencode` are [WebAssembly sources](writing-sources.md), built from `sources/pi/` and `sources/opencode/` in
+the repository and shipped alongside each release (release archives and the `.deb` and `.rpm` carry them under
+`share/memcastle/sources/`), so `memcastle source install pi` installs one with no registry and no network:
 no Pi or OpenCode code is part of the core, and they run under the same sandbox and the same pipeline as any source a
 user writes.
+Other sources are found in [registries](publishing-sources.md).
 `directory` and `pi` have a modification-time watermark as their cursor:
 files are ordered by modification time, then by path, and the cursor is the last one done.
 A file that appears with an old modification time (restored from a backup, copied with its times preserved) is behind the
@@ -156,12 +158,19 @@ It works on sessions of any age and with no Pi process running.
 This is how Pi's *history* gets into MemCastle; the live integration (`integrations/pi/`) is a separate thing that talks
 to the daemon over MCP and decides *when* to ask for mining, and never reads these files itself.
 
-Until the official sources are packaged with MemCastle's releases, build and install it from a checkout of the repository:
+Install it from the sources bundled with your MemCastle, and mine it:
 
 ```sh
-memcastle source package sources/pi        # builds the component, writes sources/pi/dist/pi-0.1.0.tar.gz
-memcastle source install sources/pi/dist/pi-0.1.0.tar.gz --enable
+memcastle source install pi --enable
 memcastle mine --source pi
+```
+
+A build that was not installed from a release (a checkout, `cargo install`) has no bundle; install from the project
+directory instead, which builds and packages it first, or write the two steps out:
+
+```sh
+memcastle source install sources/pi --enable
+# or: memcastle source package sources/pi && memcastle source install sources/pi/dist/pi-0.1.0.tar.gz --enable
 ```
 
 Installing lists what the source asks for and needs your consent to exactly that:
@@ -202,11 +211,10 @@ thing that talks to the daemon over MCP and decides *when* to ask for mining.
 
 It needs OpenCode 1.2 or later (the version that moved history into the database) installed so that `opencode` is on the
 daemon's `PATH`; it was written against 1.18.
-Build and install it from a checkout of the repository, as for `pi`:
+Install it from the bundle, as for `pi` (or from a checkout with `memcastle source install sources/opencode`):
 
 ```sh
-memcastle source package sources/opencode  # builds the component, writes sources/opencode/dist/opencode-0.1.0.tar.gz
-memcastle source install sources/opencode/dist/opencode-0.1.0.tar.gz --enable
+memcastle source install opencode --enable
 memcastle mine --source opencode
 ```
 

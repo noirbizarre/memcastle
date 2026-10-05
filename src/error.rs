@@ -949,6 +949,80 @@ pub enum Error {
         /// What went wrong.
         message: String,
     },
+
+    /// A source registry's index could not be read: unreachable, not an index, or a format this MemCastle does not
+    /// know.
+    #[error("the source registry `{location}` cannot be used: {message}")]
+    #[diagnostic(
+        code(memcastle::source::registry_unavailable),
+        help(
+            "check the location under `mining.registries` (or `--registry`): it is an `https://` URL, a `file://` URL or a path to a `memcastle-index.json`"
+        )
+    )]
+    SourceRegistryUnavailable {
+        /// The index location as configured.
+        location: String,
+        /// What went wrong.
+        message: String,
+    },
+
+    /// No registry offers the source, or none of its versions can be installed here.
+    #[error("cannot install `{name}`: {reason}")]
+    #[diagnostic(
+        code(memcastle::source::not_in_registry),
+        help(
+            "`memcastle source search` lists what the bundled and configured registries offer; a local package installs with `memcastle source install <file>`"
+        )
+    )]
+    SourceNotInRegistry {
+        /// The source asked for.
+        name: String,
+        /// Why nothing qualifies.
+        reason: String,
+    },
+
+    /// A downloaded package is not the one the registry published.
+    #[error("the package for `{name}` failed its integrity check: {message}")]
+    #[diagnostic(
+        code(memcastle::source::integrity),
+        help(
+            "nothing was installed; retry in case the download was cut short, and if it persists the registry or the connection is serving something other than what it published"
+        )
+    )]
+    SourceIntegrity {
+        /// The source.
+        name: String,
+        /// What did not match.
+        message: String,
+    },
+
+    /// A package's signature does not satisfy the trust policy.
+    #[error("the package for `{name}` is not trusted: {message}")]
+    #[diagnostic(
+        code(memcastle::source::untrusted),
+        help(
+            "add the publisher's public key to `mining.trusted_keys` if you trust them, or set `mining.trust = \"optional\"` to allow unsigned packages"
+        )
+    )]
+    SourceUntrusted {
+        /// The source.
+        name: String,
+        /// Why the policy refuses it.
+        message: String,
+    },
+
+    /// A signing key or signature could not be made or read.
+    #[error("signing failed: {message}")]
+    #[diagnostic(
+        code(memcastle::source::signing_failed),
+        help(
+            "`memcastle source keygen <file>` writes a new signing key; a key file holds one base64-encoded 32-byte seed"
+        )
+    )]
+    SourceSigning {
+        /// What went wrong.
+        message: String,
+    },
 }
 
 /// What every interface reports about a failure: the message, and the two
@@ -1383,6 +1457,25 @@ mod tests {
             Error::SourceBuildFailed {
                 message: "no target".to_string(),
             },
+            Error::SourceRegistryUnavailable {
+                location: "https://example.test/index.json".to_string(),
+                message: "unreachable".to_string(),
+            },
+            Error::SourceNotInRegistry {
+                name: "slack".to_string(),
+                reason: "no registry offers it".to_string(),
+            },
+            Error::SourceIntegrity {
+                name: "slack".to_string(),
+                message: "digest mismatch".to_string(),
+            },
+            Error::SourceUntrusted {
+                name: "slack".to_string(),
+                message: "unsigned".to_string(),
+            },
+            Error::SourceSigning {
+                message: "bad key".to_string(),
+            },
         ]
     }
 
@@ -1453,7 +1546,12 @@ mod tests {
             | Error::SourceFailed { .. }
             | Error::SourceTimeout { .. }
             | Error::SourcePermissionDenied { .. }
-            | Error::SourceBuildFailed { .. } => {}
+            | Error::SourceBuildFailed { .. }
+            | Error::SourceRegistryUnavailable { .. }
+            | Error::SourceNotInRegistry { .. }
+            | Error::SourceIntegrity { .. }
+            | Error::SourceUntrusted { .. }
+            | Error::SourceSigning { .. } => {}
         }
     }
 

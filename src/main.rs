@@ -74,13 +74,16 @@ async fn async_main() -> ExitCode {
     }
     let verbose = args.verbose > 0 || std::env::var_os("RUST_BACKTRACE").is_some();
     install_miette_hook(verbose);
-    // Also before the configuration: developing a source (`init`, `build`, `test`, `package`) works on a project
-    // directory, needs no daemon and no palace, and a broken config must not get in its way.
+    // Also before the configuration: developing and publishing a source (`init`, `build`, `test`, `package`, `index`,
+    // `keygen`) works on a project directory and its archives, needs no daemon and no palace, and a broken config must
+    // not get in its way.
     if let Command::Source(
         command @ (SourceCommand::Init(_)
         | SourceCommand::Build(_)
         | SourceCommand::Test(_)
-        | SourceCommand::Package(_)),
+        | SourceCommand::Package(_)
+        | SourceCommand::Index(_)
+        | SourceCommand::Keygen(_)),
     ) = &args.command
     {
         return match cmd_source_local(command).await {
@@ -188,6 +191,9 @@ fn overrides_from(args: &Cli) -> Overrides {
 async fn run(args: Cli, config: Config) -> Result<ExitCode> {
     match args.command {
         Command::Status(status) => cmd_status(&config, args.mode, &status).await,
+        // Like `status`, an update has more to say than success or failure: some sources may be updated while another
+        // still waits for consent, and a script needs to tell.
+        Command::Source(SourceCommand::Update(update)) => cmd_source_update(&config, &update).await,
         command => run_command(command, args.mode, args.config.as_deref(), config)
             .await
             .map(|()| ExitCode::SUCCESS),
@@ -669,11 +675,78 @@ async fn cmd_source_local(command: &SourceCommand) -> Result<ExitCode> {
                 Painter::for_stdout().ok("Packaged"),
                 archive.display()
             );
+            // The digest a registry index pins, written beside the archive in the format `sha256sum -c` reads, so a
+            // publisher has it without a second tool.
+            let bytes =
+                std::fs::read(&archive).map_err(|e| Error::io(archive.display().to_string(), e))?;
+            let archive_digest = memcastle::domain::sha256_hex(&bytes);
+            let checksum_file = {
+                let mut name = archive.clone().into_os_string();
+                name.push(".sha256");
+                std::path::PathBuf::from(name)
+            };
+            let file_name = archive
+                .file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+            std::fs::write(&checksum_file, format!("{archive_digest}  {file_name}\n"))
+                .map_err(|e| Error::io(checksum_file.display().to_string(), e))?;
+            println!("  archive sha256   {archive_digest}");
             println!("  component sha256 {}", package.digest);
             println!(
                 "  permissions      {}",
                 package.manifest.permissions.describe()
             );
+            Ok(ExitCode::SUCCESS)
+        }
+        SourceCommand::Keygen(args) => {
+            let key = memcastle::source::signing::generate()?;
+            memcastle::source::signing::write_signing_key(&args.file, &key)?;
+            let public = key.verifying_key();
+            let paint = Painter::for_stdout();
+            println!("{} {}", paint.ok("Wrote"), args.file.display());
+            println!(
+                "  key id      {}",
+                memcastle::source::signing::key_id(&public)
+            );
+            println!(
+                "  public key  {}",
+                memcastle::source::signing::public_key_text(&public)
+            );
+            println!(
+                "\nKeep the key file private. Users who trust you add the public key to `mining.trusted_keys`;\n\
+                 sign packages with `memcastle source index --sign {}`.",
+                args.file.display()
+            );
+            Ok(ExitCode::SUCCESS)
+        }
+        SourceCommand::Index(args) => {
+            use memcastle::source::publish;
+            let key = args
+                .sign
+                .as_deref()
+                .map(memcastle::source::signing::read_signing_key)
+                .transpose()?;
+            let mut index = publish::read_index(&args.output, args.name.as_deref())?;
+            let paint = Painter::for_stdout();
+            for archive in &args.archives {
+                let bytes = std::fs::read(archive)
+                    .map_err(|e| Error::io(archive.display().to_string(), e))?;
+                let file_name = archive
+                    .file_name()
+                    .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+                let url = publish::archive_url(args.base_url.as_deref(), &file_name);
+                let (name, version) = publish::add_archive(&mut index, &bytes, &url, key.as_ref())?;
+                println!(
+                    "{} {name} {version}{}",
+                    paint.ok("Added"),
+                    if key.is_some() { " (signed)" } else { "" }
+                );
+            }
+            publish::write_index(&args.output, &mut index)?;
+            println!("{} {}", paint.ok("Wrote"), args.output.display());
+            if args.base_url.is_none() {
+                println!("  package URLs are relative: publish the archives beside the index");
+            }
             Ok(ExitCode::SUCCESS)
         }
         // Reached only through `async_main`'s check, which sends the daemon-side commands elsewhere.
@@ -700,47 +773,19 @@ async fn cmd_source(
                 &source,
             )
         }
-        SourceCommand::Install(args) => {
-            let archive = std::fs::read(&args.package)
-                .map_err(|source| Error::io(args.package.display().to_string(), source))?;
-            // Read here only to show what is being agreed to; the daemon reads it again and trusts none of this.
-            let package = memcastle::source::package::inspect(&archive)?;
-            let name = &package.manifest.source.name;
-            let permissions = package.manifest.permissions.normalized();
-            let digest = permissions.consent_digest(name);
-            let consent = if permissions.is_empty() {
-                None
-            } else if let Some(given) = args.consent {
-                Some(given)
-            } else if args.yes {
-                Some(digest)
-            } else if term::is_interactive() {
-                eprintln!(
-                    "{} {} {} asks to: {}",
-                    Painter::for_stderr().warn("Source"),
-                    name,
-                    package.manifest.source.version,
-                    permissions.describe()
-                );
-                term::confirm(
-                    "Install it with these permissions?",
-                    "installing the source",
-                    false,
-                )?;
-                Some(digest)
-            } else {
-                // A script is never asked, and never consents on its own behalf: the daemon refuses, and its error
-                // says to pass `--yes` or `--consent`.
-                None
-            };
-            let installed = client(config, None)
-                .install_source(archive, consent.as_deref(), args.enable)
+        SourceCommand::Search(args) => {
+            let registry = args.registry.as_deref().map(absolute_location);
+            let found = client(config, None)
+                .search_registry(args.query.as_deref(), registry.as_deref())
                 .await?;
             print_for_terminal_or_json(
-                |painter, _| memcastle::client::table::render_source(&installed.source, painter),
-                &installed,
+                |painter, width| {
+                    memcastle::client::table::render_registry_search(&found, painter, width)
+                },
+                &found,
             )
         }
+        SourceCommand::Install(args) => cmd_source_install(config, args).await,
         SourceCommand::Enable(args) => {
             let source = client(config, None)
                 .set_source_enabled(&args.name, true)
@@ -768,12 +813,257 @@ async fn cmd_source(
             client(config, None).remove_source(&args.name).await?;
             print_json(&serde_json::json!({ "removed": args.name }))
         }
-        // Handled before the configuration is loaded (see `async_main`).
+        // Handled before the configuration is loaded (see `async_main`), or by `run` for its exit code.
         SourceCommand::Init(_)
         | SourceCommand::Build(_)
         | SourceCommand::Test(_)
-        | SourceCommand::Package(_) => Ok(()),
+        | SourceCommand::Package(_)
+        | SourceCommand::Index(_)
+        | SourceCommand::Keygen(_)
+        | SourceCommand::Update(_) => Ok(()),
     }
+}
+
+/// What `memcastle source install` was asked to install.
+enum InstallTarget {
+    /// A package archive.
+    File(std::path::PathBuf),
+    /// A source project, to be built and packaged first.
+    Directory(std::path::PathBuf),
+    /// A name from the bundle or a registry, with the version if one was pinned.
+    Named {
+        name: String,
+        version: Option<String>,
+    },
+}
+
+/// Decide what `argument` names. Something that exists on disk is a path; anything else that is shaped like a path is
+/// treated as one (so a typo says "no such file"); the rest is a name, optionally `name@version`.
+fn classify_install(argument: &str) -> InstallTarget {
+    let path = std::path::Path::new(argument);
+    let has_separator = argument.contains(['/', '\\']);
+    if path.is_file() {
+        return InstallTarget::File(path.to_path_buf());
+    }
+    if path.is_dir() && (has_separator || path.join(memcastle::source::MANIFEST_FILE).is_file()) {
+        return InstallTarget::Directory(path.to_path_buf());
+    }
+    if has_separator || argument.starts_with(['.', '~']) || argument.ends_with(".tar.gz") {
+        return InstallTarget::File(path.to_path_buf());
+    }
+    match argument.split_once('@') {
+        Some((name, version)) => InstallTarget::Named {
+            name: name.to_string(),
+            version: Some(version.to_string()),
+        },
+        None => InstallTarget::Named {
+            name: argument.to_string(),
+            version: None,
+        },
+    }
+}
+
+/// A registry written as a path is resolved against this shell's working directory: the daemon has its own, so a
+/// relative path would name a different place there.
+fn absolute_location(location: &str) -> String {
+    if location.contains("://") {
+        return location.to_string();
+    }
+    std::path::absolute(location)
+        .map_or_else(|_| location.to_string(), |path| path.display().to_string())
+}
+
+/// The consent to send for a source that asks for `permissions`: none when it asks for nothing, the one given on the
+/// command line, the user's answer in a terminal, and otherwise none, which makes the daemon refuse. A script never
+/// consents on its own behalf.
+fn consent_for(
+    name: &str,
+    version: &str,
+    permissions: &memcastle::domain::Permissions,
+    digest: String,
+    given: Option<String>,
+    yes: bool,
+) -> Result<Option<String>> {
+    if permissions.is_empty() {
+        return Ok(None);
+    }
+    if let Some(given) = given {
+        return Ok(Some(given));
+    }
+    if yes {
+        return Ok(Some(digest));
+    }
+    if term::is_interactive() {
+        eprintln!(
+            "{} {name} {version} asks to: {}",
+            Painter::for_stderr().warn("Source"),
+            permissions.describe()
+        );
+        term::confirm(
+            "Install it with these permissions?",
+            "installing the source",
+            false,
+        )?;
+        return Ok(Some(digest));
+    }
+    Ok(None)
+}
+
+/// `memcastle source install <file|directory|name[@version]>`.
+async fn cmd_source_install(config: &Config, args: cli::SourceInstallArgs) -> Result<()> {
+    let render = |installed: &memcastle::app::InstalledSource| {
+        print_for_terminal_or_json(
+            |painter, _| memcastle::client::table::render_source(&installed.source, painter),
+            installed,
+        )
+    };
+    match classify_install(&args.source) {
+        InstallTarget::Named { name, version } => {
+            let registry = args.registry.as_deref().map(absolute_location);
+            let daemon = client(config, None);
+            // The daemon downloads and verifies the package first, so what is agreed to is what was actually
+            // fetched, not what an index claimed.
+            let preview = daemon
+                .preview_registry_source(&name, version.as_deref(), registry.as_deref())
+                .await?;
+            eprintln!(
+                "{} {} {} from {} ({}){}",
+                Painter::for_stderr().ok("Found"),
+                preview.name,
+                preview.version,
+                preview.registry,
+                preview.origin,
+                preview
+                    .signed_by
+                    .as_ref()
+                    .map_or_else(String::new, |key| format!(", signed by key {key}"))
+            );
+            let consent = consent_for(
+                &preview.name,
+                &preview.version,
+                &preview.permissions,
+                preview.consent_digest.clone(),
+                args.consent,
+                args.yes,
+            )?;
+            let installed = daemon
+                .install_registry_source(&memcastle::app::RegistryInstall {
+                    name,
+                    version: Some(preview.version),
+                    registry,
+                    consent,
+                    enable: args.enable,
+                })
+                .await?;
+            render(&installed)
+        }
+        target => {
+            let archive_path = match target {
+                InstallTarget::Directory(dir) => {
+                    use memcastle::source::build::Project;
+                    let project = Project::open(&dir)?;
+                    project.build()?;
+                    let (archive, _) = project.package(None)?;
+                    eprintln!(
+                        "{} {}",
+                        Painter::for_stderr().ok("Packaged"),
+                        archive.display()
+                    );
+                    archive
+                }
+                InstallTarget::File(path) => path,
+                InstallTarget::Named { .. } => unreachable!("handled above"),
+            };
+            let archive = std::fs::read(&archive_path)
+                .map_err(|source| Error::io(archive_path.display().to_string(), source))?;
+            // Read here only to show what is being agreed to; the daemon reads it again and trusts none of this.
+            let package = memcastle::source::package::inspect(&archive)?;
+            let name = &package.manifest.source.name;
+            let permissions = package.manifest.permissions.normalized();
+            let consent = consent_for(
+                name,
+                &package.manifest.source.version,
+                &permissions,
+                permissions.consent_digest(name),
+                args.consent,
+                args.yes,
+            )?;
+            let installed = client(config, None)
+                .install_source(archive, consent.as_deref(), args.enable)
+                .await?;
+            render(&installed)
+        }
+    }
+}
+
+/// `memcastle source update [name] [--check]`.
+///
+/// Exits non-zero when something could not be updated, or is waiting for consent to permissions it newly asks for, so
+/// a script that updates unattended notices.
+async fn cmd_source_update(config: &Config, args: &cli::SourceUpdateArgs) -> Result<ExitCode> {
+    use memcastle::app::UpdateStatus;
+    let daemon = client(config, None);
+    if args.check {
+        let check = daemon.check_source_updates().await?;
+        print_for_terminal_or_json(
+            |painter, width| memcastle::client::table::render_update_check(&check, painter, width),
+            &check,
+        )?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    let mut outcomes = daemon.update_sources(args.name.as_deref(), None).await?;
+    for outcome in &mut outcomes {
+        let UpdateStatus::NeedsConsent {
+            permissions,
+            digest,
+        } = &outcome.status
+        else {
+            continue;
+        };
+        let (permissions, digest) = (permissions.clone(), digest.clone());
+        let agreed = if args.yes {
+            true
+        } else if term::is_interactive() {
+            eprintln!(
+                "{} {} {} now asks to: {permissions}",
+                Painter::for_stderr().warn("Source"),
+                outcome.name,
+                outcome.to.as_deref().unwrap_or("?")
+            );
+            term::confirm(
+                "Update it with these permissions?",
+                "updating the source",
+                false,
+            )
+            .is_ok()
+        } else {
+            false
+        };
+        if agreed
+            && let Some(again) = daemon
+                .update_sources(Some(&outcome.name), Some(&digest))
+                .await?
+                .pop()
+        {
+            *outcome = again;
+        }
+    }
+    let healthy = outcomes.iter().all(|outcome| {
+        matches!(
+            outcome.status,
+            UpdateStatus::Updated | UpdateStatus::Current
+        )
+    });
+    print_for_terminal_or_json(
+        |painter, _| memcastle::client::table::render_updates(&outcomes, painter),
+        &outcomes,
+    )?;
+    Ok(if healthy {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
 }
 
 /// The room a note goes to when neither the command line nor the project names one.

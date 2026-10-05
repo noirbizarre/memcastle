@@ -304,7 +304,11 @@ jobs:
           echo "# stub completions for $2"
           STUB
           done
-          packaging/nfpm/build.sh 0.0.0 dist
+          # A stand-in for the bundled sources (packaging/sources/build.sh builds the real ones, which
+          # tests/wasm_bundle.rs checks): enough to prove the packages carry whatever the bundle holds.
+          mkdir bundle
+          echo '{"format":1,"sources":[]}' > bundle/memcastle-index.json
+          SOURCES_DIR="${PWD}/bundle" packaging/nfpm/build.sh 0.0.0 dist
 
       # Building without error is not enough: the binary must land where the
       # systemd unit expects it.
@@ -318,6 +322,7 @@ jobs:
                         usr/share/fish/vendor_completions.d/memcastle.fish; do
               dpkg-deb --contents "dist/memcastle_0.0.0_${asset}.deb" | grep -q " ./${file}$"
             done
+            dpkg-deb --contents "dist/memcastle_0.0.0_${asset}.deb" | grep -q ' ./usr/share/memcastle/sources/memcastle-index.json$'
           done
 
   # gh-ship runs the release. Its configuration and the workflows it names must

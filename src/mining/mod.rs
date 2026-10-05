@@ -44,16 +44,8 @@ pub struct MiningParams {
     pub full: bool,
 }
 
-/// Where a source comes from.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SourceOrigin {
-    /// Compiled into MemCastle.
-    #[default]
-    Builtin,
-    /// An installed WebAssembly package.
-    Package,
-}
+/// Where a source comes from: built in, a local package, a bundled one or one from a registry (docs/adr/033).
+pub use crate::domain::SourceOrigin;
 
 /// A source adapter the daemon can mine, as `memcastle sources` and `GET /api/sources` describe it.
 ///
@@ -82,6 +74,12 @@ pub struct ProviderInfo {
     /// What it was granted: nothing for a built-in source, which is native code under MemCastle's own authority.
     #[serde(default)]
     pub permissions: Permissions,
+    /// The index a bundled or registry source was installed from, which is what `update` asks about newer versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry: Option<String>,
+    /// The key whose signature on the package was verified when it was installed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed_by: Option<String>,
 }
 
 fn enabled() -> SourceState {

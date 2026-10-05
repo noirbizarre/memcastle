@@ -460,6 +460,41 @@ pub const DEFAULT_MINING_SOURCE_MEMORY_MIB: u32 = 256;
 /// The default ceiling on one call into a WebAssembly source, in seconds.
 pub const DEFAULT_MINING_SOURCE_TIMEOUT_SECS: u64 = 60;
 
+/// What the daemon requires of a package from a registry before installing it (docs/adr/033).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TrustMode {
+    /// A signature that is present must verify against a trusted key; an unsigned package is allowed. The package's
+    /// SHA-256 is checked against the index either way.
+    #[default]
+    Optional,
+    /// Only a package signed by a trusted key is installed from a registry.
+    Required,
+}
+
+impl std::str::FromStr for TrustMode {
+    type Err = String;
+
+    fn from_str(raw: &str) -> std::result::Result<Self, String> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "optional" => Ok(Self::Optional),
+            "required" => Ok(Self::Required),
+            other => Err(format!(
+                "unknown trust mode `{other}`; expected one of: optional, required"
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for TrustMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Optional => "optional",
+            Self::Required => "required",
+        })
+    }
+}
+
 /// Mining settings (`[mining]`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -479,6 +514,16 @@ pub struct MiningConfig {
     /// The longest, in seconds, one call into a WebAssembly source may run. A source's own `[limits]` can ask for
     /// less, never more.
     pub source_timeout_secs: u64,
+    /// The registry indexes `memcastle source search` and `install <name>` consult, in order: an `https://` URL, a
+    /// `file://` URL or a path to a `memcastle-index.json` (docs/adr/033). Empty by default, so a daemon never
+    /// reaches the network for sources unless asked to.
+    pub registries: Vec<String>,
+    /// What a package from a registry must prove before it is installed.
+    pub trust: TrustMode,
+    /// The public keys (base64, as `memcastle source keygen` prints them) whose signatures are trusted.
+    pub trusted_keys: Vec<String>,
+    /// Where the sources shipped with MemCastle live. Unset means `share/memcastle/sources` of the installed assets.
+    pub bundled_dir: Option<PathBuf>,
 }
 
 impl MiningConfig {
@@ -500,6 +545,10 @@ impl Default for MiningConfig {
             sources_dir: None,
             source_memory_mib: DEFAULT_MINING_SOURCE_MEMORY_MIB,
             source_timeout_secs: DEFAULT_MINING_SOURCE_TIMEOUT_SECS,
+            registries: Vec::new(),
+            trust: TrustMode::default(),
+            trusted_keys: Vec::new(),
+            bundled_dir: None,
         }
     }
 }
@@ -865,6 +914,19 @@ impl Config {
         if let Some(dir) = lookup("MEMCASTLE_MINING_SOURCES_DIR") {
             self.mining.sources_dir = Some(PathBuf::from(dir));
         }
+        // Comma-separated, the way an environment variable carries a list.
+        if let Some(raw) = lookup("MEMCASTLE_MINING_REGISTRIES") {
+            self.mining.registries = split_list(&raw);
+        }
+        if let Some(raw) = lookup("MEMCASTLE_MINING_TRUST") {
+            self.mining.trust = parse_override("MEMCASTLE_MINING_TRUST", &raw)?;
+        }
+        if let Some(raw) = lookup("MEMCASTLE_MINING_TRUSTED_KEYS") {
+            self.mining.trusted_keys = split_list(&raw);
+        }
+        if let Some(dir) = lookup("MEMCASTLE_MINING_BUNDLED_DIR") {
+            self.mining.bundled_dir = Some(PathBuf::from(dir));
+        }
         if let Some(n) = lookup("MEMCASTLE_MINING_SOURCE_MEMORY_MIB") {
             self.mining.source_memory_mib =
                 parse_override("MEMCASTLE_MINING_SOURCE_MEMORY_MIB", &n)?;
@@ -1141,6 +1203,33 @@ impl Config {
                 dir.display().to_string()
             )));
         }
+        if let Some(dir) = mining.bundled_dir.as_ref().filter(|dir| !dir.is_absolute()) {
+            return Err(Error::config(format!(
+                "mining.bundled_dir {:?} is not an absolute path; set an absolute one or remove it \
+                 to use the sources installed with MemCastle",
+                dir.display().to_string()
+            )));
+        }
+        // A bad registry or key fails here, at load, and not on the first `source install`.
+        for location in &mining.registries {
+            crate::distribution::Location::parse(location).map_err(|reason| {
+                Error::config(format!(
+                    "mining.registries (or MEMCASTLE_MINING_REGISTRIES) entry {location:?} is not usable: {reason}"
+                ))
+            })?;
+        }
+        for key in &mining.trusted_keys {
+            crate::source::signing::parse_public_key(key).map_err(|_| {
+                Error::config(
+                    "mining.trusted_keys (or MEMCASTLE_MINING_TRUSTED_KEYS) must be base64 public keys, as `memcastle source keygen` prints them",
+                )
+            })?;
+        }
+        if mining.trust == TrustMode::Required && mining.trusted_keys.is_empty() {
+            return Err(Error::config(
+                "mining.trust = \"required\" needs at least one key in mining.trusted_keys (or MEMCASTLE_MINING_TRUSTED_KEYS), or nothing could ever be installed from a registry",
+            ));
+        }
         if !(16..=4096).contains(&mining.source_memory_mib) {
             return Err(Error::config(
                 "mining.source_memory_mib (or MEMCASTLE_MINING_SOURCE_MEMORY_MIB) must be between 16 and 4096",
@@ -1210,6 +1299,15 @@ impl Config {
 
 /// Parse one environment override, naming the variable and the offending value
 /// on failure so the user knows which of several `MEMCASTLE_*` variables to fix.
+/// A comma-separated environment value as a list, without blanks.
+fn split_list(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 fn parse_override<T>(name: &str, raw: &str) -> Result<T>
 where
     T: std::str::FromStr,
@@ -1830,6 +1928,23 @@ mod tests {
                 |c| c.mining.source_timeout_secs = 0,
                 "mining.source_timeout_secs",
             ),
+            (
+                |c| c.mining.bundled_dir = Some(PathBuf::from("relative")),
+                "mining.bundled_dir",
+            ),
+            (
+                |c| c.mining.registries = vec!["http://example.org/index.json".into()],
+                "mining.registries",
+            ),
+            (
+                |c| c.mining.registries = vec!["relative/index.json".into()],
+                "mining.registries",
+            ),
+            (
+                |c| c.mining.trusted_keys = vec!["not a key".into()],
+                "mining.trusted_keys",
+            ),
+            (|c| c.mining.trust = TrustMode::Required, "mining.trust"),
         ] {
             let mut config = Config::default();
             config.palace.path = std::env::temp_dir();
@@ -2169,6 +2284,65 @@ mod tests {
         assert_eq!(config.mining.source_timeout_secs, 9);
         // Unset, the directory is the default under the XDG data directory.
         assert!(MiningConfig::default().sources_dir().ends_with("sources"));
+    }
+
+    #[test]
+    fn registry_settings_default_to_no_network_and_come_from_the_file_then_the_environment() {
+        let defaults = MiningConfig::default();
+        assert!(
+            defaults.registries.is_empty(),
+            "a daemon never reaches a registry unless asked to"
+        );
+        assert_eq!(defaults.trust, TrustMode::Optional);
+        assert!(defaults.trusted_keys.is_empty() && defaults.bundled_dir.is_none());
+
+        let mut config: Config = toml::from_str(
+            "[mining]\nregistries = [\"https://example.org/index.json\"]\ntrust = \"optional\"",
+        )
+        .unwrap();
+        assert_eq!(config.mining.registries, ["https://example.org/index.json"]);
+
+        let key = crate::source::signing::public_key_text(
+            &crate::source::signing::generate().unwrap().verifying_key(),
+        );
+        // Absolute on whichever platform this runs on: `/srv/a` is not absolute on Windows.
+        let root = std::env::temp_dir();
+        let (a, b) = (root.join("a"), root.join("b"));
+        let b_url = reqwest::Url::from_file_path(&b).unwrap().to_string();
+        let bundle = root.join("sources");
+        config
+            .apply_overrides_from(env(&[
+                (
+                    "MEMCASTLE_MINING_REGISTRIES",
+                    &format!("{}, {b_url} ,", a.display()),
+                ),
+                ("MEMCASTLE_MINING_TRUST", "required"),
+                ("MEMCASTLE_MINING_TRUSTED_KEYS", &key),
+                (
+                    "MEMCASTLE_MINING_BUNDLED_DIR",
+                    &bundle.display().to_string(),
+                ),
+            ]))
+            .unwrap();
+
+        assert_eq!(config.mining.registries, [a.display().to_string(), b_url]);
+        assert_eq!(config.mining.trust, TrustMode::Required);
+        assert_eq!(config.mining.trusted_keys, [key]);
+        assert_eq!(config.mining.bundled_dir, Some(bundle));
+        config.palace.path = std::env::temp_dir();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn an_unknown_trust_mode_names_the_variable_and_the_choices() {
+        let err = Config::default()
+            .apply_overrides_from(env(&[("MEMCASTLE_MINING_TRUST", "sometimes")]))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("MEMCASTLE_MINING_TRUST") && err.contains("optional, required"),
+            "{err}"
+        );
     }
 
     #[test]

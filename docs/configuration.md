@@ -135,6 +135,14 @@ max_documents = 2000        # documents one job files; the next job continues fr
 # sources_dir = "/home/alice/.local/share/memcastle/sources"
 source_memory_mib = 256     # the most memory one call into an installed source may use
 source_timeout_secs = 60    # the longest one call may run; a source's own limits can only lower these
+# Where `memcastle source search|install <name>|update` look, after the sources bundled with MemCastle: an https URL, a
+# file:// URL or an absolute path to a memcastle-index.json (or a directory holding one). Empty by default, so nothing
+# reaches the network for sources unless you ask it to.
+# registries = ["https://example.org/memcastle/index.json"]
+# "optional" installs an unsigned package and refuses a bad signature from a key you trust; "required" installs only
+# what a key in `trusted_keys` signed. Keys are the public keys `memcastle source keygen` prints.
+trust = "optional"
+# trusted_keys = ["Zm9vYmFy..."]
 
 # Only to serve assets from somewhere other than the installed or embedded ones.
 [assets]
@@ -213,6 +221,10 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `mining.sources_dir` (an absolute path) | `MEMCASTLE_MINING_SOURCES_DIR` | `$XDG_DATA_HOME/memcastle/sources` |
 | `mining.source_memory_mib` (16 to 4096) | `MEMCASTLE_MINING_SOURCE_MEMORY_MIB` | `256` |
 | `mining.source_timeout_secs` (1 to 3600) | `MEMCASTLE_MINING_SOURCE_TIMEOUT_SECS` | `60` |
+| `mining.registries` (a list of URLs or absolute paths) | `MEMCASTLE_MINING_REGISTRIES` (comma-separated) | none |
+| `mining.trust` (`optional` or `required`) | `MEMCASTLE_MINING_TRUST` | `optional` |
+| `mining.trusted_keys` (a list of base64 public keys) | `MEMCASTLE_MINING_TRUSTED_KEYS` (comma-separated) | none |
+| `mining.bundled_dir` (an absolute path) | `MEMCASTLE_MINING_BUNDLED_DIR` | `share/memcastle/sources` of the installation |
 | `store.sync` (`every`, `never` or an interval over 100ms) | `MEMCASTLE_STORE_SYNC` | `every` |
 | `store.mode` and remote settings | none | `embedded` |
 

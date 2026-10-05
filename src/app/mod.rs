@@ -11,6 +11,7 @@ mod db_endpoint;
 mod graph;
 mod palace;
 mod source_packages;
+mod source_registry;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -38,6 +39,10 @@ pub use palace::{
     Created, DEFAULT_LIST_LIMIT, DrawerReplacement, EntityLink, Superseded, WingDetail,
 };
 pub use source_packages::InstalledSource;
+pub use source_registry::{
+    InstalledVersion, RegistryEntry, RegistryInstall, RegistryPreview, RegistrySearch,
+    UpdateCandidate, UpdateCheck, UpdateOutcome, UpdateStatus,
+};
 
 /// A point-in-time summary of daemon health, for `GET /api/status`,
 /// `memcastle status`, and the `memcastle_status` MCP tool alike.

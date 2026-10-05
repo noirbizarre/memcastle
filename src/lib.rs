@@ -34,6 +34,7 @@ pub mod client;
 pub mod config;
 pub mod dbadmin;
 pub mod dedup;
+pub mod distribution;
 pub mod domain;
 pub mod embed;
 pub mod error;

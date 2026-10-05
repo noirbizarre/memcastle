@@ -26,11 +26,22 @@ class Memcastle < Formula
     end
   end
 
+  # The sources bundled with MemCastle (docs/adr/033): portable WebAssembly packages with their index, one asset for every
+  # platform. Homebrew strips the archive's single top-level directory when it stages the resource.
+  resource "sources" do
+    url "https://github.com/noirbizarre/memcastle/releases/download/#{version}/memcastle_#{version}_sources.tar.gz"
+    sha256 "@SHA256_SOURCES@"
+  end
+
   def install
     # Exactly one file lands here, whichever `url` above matched — renamed on
     # the way in because the downloaded asset's name carries the platform
     # suffix, not the command users are meant to type.
     bin.install Dir["*"].first => "memcastle"
+
+    # Beside the binary's prefix, where the daemon looks for them (`share/memcastle/sources`), so
+    # `memcastle source install pi` needs no registry and no network.
+    resource("sources").stage { (pkgshare/"sources").install Dir["*"] }
 
     # Generated from the installed binary, so the scripts always match its
     # commands and flags; `memcastle completions <shell>` needs no daemon.
@@ -39,5 +50,7 @@ class Memcastle < Formula
 
   test do
     assert_match version.to_s, shell_output("#{bin}/memcastle --version")
+    assert_path_exists pkgshare/"sources/memcastle-index.json"
+
   end
 end

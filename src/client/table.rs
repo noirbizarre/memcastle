@@ -114,6 +114,7 @@ pub fn render_sources(
     let providers = render_table(
         &[
             "SOURCE",
+            "ORIGIN",
             "STATE",
             "INCREMENTAL",
             "KEEPS RAW",
@@ -131,6 +132,7 @@ pub fn render_sources(
                         || provider.name.clone(),
                         |version| format!("{} {version}", provider.name),
                     ),
+                    provider.origin.to_string(),
                     provider.state.to_string(),
                     yes_no(provider.capabilities.incremental),
                     yes_no(provider.capabilities.retains_raw),
@@ -138,13 +140,13 @@ pub fn render_sources(
                     // Built-in sources are native code under MemCastle's own authority: nothing was granted.
                     match provider.origin {
                         crate::mining::SourceOrigin::Builtin => "built in".to_string(),
-                        crate::mining::SourceOrigin::Package => provider.permissions.describe(),
+                        _ => provider.permissions.describe(),
                     },
                     provider.description.clone(),
                 ]
             })
             .collect(),
-        6,
+        7,
         painter,
         width,
     );
@@ -220,7 +222,14 @@ pub fn render_source(provider: &crate::mining::ProviderInfo, painter: Painter) -
             yes_no(provider.capabilities.needs_credentials)
         ),
     ];
-    if provider.origin == crate::mining::SourceOrigin::Package {
+    if provider.origin != crate::mining::SourceOrigin::Builtin {
+        lines.push(format!("  origin:       {}", provider.origin));
+        if let Some(registry) = &provider.registry {
+            lines.push(format!("  registry:     {registry}"));
+        }
+        if let Some(key) = &provider.signed_by {
+            lines.push(format!("  signed by:    key {key}"));
+        }
         lines.push(format!(
             "  permissions:  {}",
             provider.permissions.describe()
@@ -233,6 +242,150 @@ pub fn render_source(provider: &crate::mining::ProviderInfo, painter: Painter) -
         ));
     }
     lines.join("\n")
+}
+
+/// Render what `memcastle source search` found: one row per source, with the version `install` would take and what is
+/// installed already.
+#[must_use]
+pub fn render_registry_search(
+    search: &crate::app::RegistrySearch,
+    painter: Painter,
+    width: Option<u16>,
+) -> String {
+    let warnings: String = search
+        .warnings
+        .iter()
+        .map(|warning| format!("\n{}", painter.warn(&format!("warning: {warning}"))))
+        .collect();
+    if search.entries.is_empty() {
+        return format!("{}{warnings}", painter.dim("No source matches."));
+    }
+    let table = render_table(
+        &["SOURCE", "VERSION", "FROM", "INSTALLED", "READS"],
+        search
+            .entries
+            .iter()
+            .map(|entry| {
+                vec![
+                    entry.name.clone(),
+                    entry
+                        .version
+                        .clone()
+                        // A source with no installable version is still listed, with why, so it is not mistaken for
+                        // a source nobody offers.
+                        .unwrap_or_else(|| "none".to_string()),
+                    entry.origin.to_string(),
+                    match (&entry.installed, entry.update_available) {
+                        (Some(installed), true) => {
+                            format!("{} (update available)", installed.version)
+                        }
+                        (Some(installed), false) => installed.version.clone(),
+                        (None, _) => "-".to_string(),
+                    },
+                    entry.description.clone(),
+                ]
+            })
+            .collect(),
+        4,
+        painter,
+        width,
+    );
+    let unavailable: String = search
+        .entries
+        .iter()
+        .filter_map(|entry| {
+            entry.unavailable_reason.as_ref().map(|reason| {
+                format!(
+                    "\n{}",
+                    painter.warn(&format!("{} cannot be installed: {reason}", entry.name))
+                )
+            })
+        })
+        .collect();
+    format!("{table}{unavailable}{warnings}")
+}
+
+/// Render the sources that have an update.
+#[must_use]
+pub fn render_update_check(
+    check: &crate::app::UpdateCheck,
+    painter: Painter,
+    width: Option<u16>,
+) -> String {
+    let warnings: String = check
+        .warnings
+        .iter()
+        .map(|warning| format!("\n{}", painter.warn(&format!("warning: {warning}"))))
+        .collect();
+    if check.updates.is_empty() {
+        return format!("{}{warnings}", painter.dim("Every source is up to date."));
+    }
+    let table = render_table(
+        &["SOURCE", "INSTALLED", "AVAILABLE", "FROM"],
+        check
+            .updates
+            .iter()
+            .map(|update| {
+                vec![
+                    update.name.clone(),
+                    update.installed.clone(),
+                    update.available.clone(),
+                    update.origin.to_string(),
+                ]
+            })
+            .collect(),
+        0,
+        painter,
+        width,
+    );
+    format!(
+        "{table}\n{}{warnings}",
+        painter.dim("Run `memcastle source update` to install them.")
+    )
+}
+
+/// Render what an update did, one line per source.
+#[must_use]
+pub fn render_updates(outcomes: &[crate::app::UpdateOutcome], painter: Painter) -> String {
+    use crate::app::UpdateStatus;
+    if outcomes.is_empty() {
+        return painter.dim("Every source is up to date.");
+    }
+    outcomes
+        .iter()
+        .map(|outcome| match &outcome.status {
+            UpdateStatus::Updated => format!(
+                "{} {} {} -> {}",
+                painter.ok("Updated"),
+                outcome.name,
+                outcome.from,
+                outcome.to.as_deref().unwrap_or("?")
+            ),
+            UpdateStatus::Current => format!(
+                "{} {} {} is the newest version",
+                painter.dim("Current"),
+                outcome.name,
+                outcome.from
+            ),
+            UpdateStatus::NeedsConsent {
+                permissions,
+                digest,
+            } => format!(
+                "{} {} {} asks for permissions you have not agreed to: {permissions}\n  \
+                 run `memcastle source update {} --yes` after reviewing them, or pass `--consent {digest}` to `install`",
+                painter.warn("Waiting"),
+                outcome.name,
+                outcome.to.as_deref().unwrap_or("?"),
+                outcome.name
+            ),
+            UpdateStatus::Failed { message } => format!(
+                "{} {}: {message}",
+                painter.error("Failed"),
+                outcome.name
+            ),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Render `wings` as a table: one row per wing, with its counts.
@@ -661,6 +814,8 @@ mod tests {
             state: crate::domain::SourceState::Enabled,
             unavailable_reason: None,
             permissions: crate::domain::Permissions::default(),
+            registry: None,
+            signed_by: None,
         }
     }
 
@@ -775,5 +930,117 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("unavailable: it no longer matches"), "{text}");
+    }
+
+    fn entry(name: &str) -> crate::app::RegistryEntry {
+        crate::app::RegistryEntry {
+            name: name.to_string(),
+            description: format!("reads {name}"),
+            origin: crate::mining::SourceOrigin::Registry,
+            registry: "https://example.org/index.json".to_string(),
+            version: Some("1.2.0".to_string()),
+            unavailable_reason: None,
+            license: None,
+            installed: None,
+            update_available: false,
+        }
+    }
+
+    #[test]
+    fn a_search_lists_the_version_to_install_and_what_is_installed_and_why_something_cannot_be() {
+        let mut updatable = entry("slack");
+        updatable.installed = Some(crate::app::InstalledVersion {
+            version: "1.0.0".to_string(),
+            state: crate::domain::SourceState::Enabled,
+        });
+        updatable.update_available = true;
+        let mut stuck = entry("old");
+        stuck.version = None;
+        stuck.unavailable_reason = Some("it requires MemCastle >=9".to_string());
+        let search = crate::app::RegistrySearch {
+            entries: vec![entry("claude"), updatable, stuck],
+            warnings: vec!["the registry `x` cannot be used".to_string()],
+        };
+
+        let text = render_registry_search(&search, Painter::PLAIN, Some(200));
+
+        assert!(text.contains("claude") && text.contains("1.2.0"), "{text}");
+        assert!(text.contains("1.0.0 (update available)"), "{text}");
+        assert!(
+            text.contains("old cannot be installed: it requires MemCastle >=9"),
+            "{text}"
+        );
+        assert!(
+            text.contains("warning: the registry `x` cannot be used"),
+            "{text}"
+        );
+        let none = render_registry_search(
+            &crate::app::RegistrySearch::default(),
+            Painter::PLAIN,
+            Some(200),
+        );
+        assert!(none.contains("No source matches."), "{none}");
+    }
+
+    #[test]
+    fn an_update_report_says_what_changed_and_what_is_waiting_for_consent() {
+        use crate::app::{UpdateOutcome, UpdateStatus};
+        let outcome = |name: &str, status| UpdateOutcome {
+            name: name.to_string(),
+            from: "1.0.0".to_string(),
+            to: Some("1.1.0".to_string()),
+            status,
+        };
+        let text = render_updates(
+            &[
+                outcome("a", UpdateStatus::Updated),
+                outcome("b", UpdateStatus::Current),
+                outcome(
+                    "c",
+                    UpdateStatus::NeedsConsent {
+                        permissions: "use the network".to_string(),
+                        digest: "abc".to_string(),
+                    },
+                ),
+                outcome(
+                    "d",
+                    UpdateStatus::Failed {
+                        message: "boom".to_string(),
+                    },
+                ),
+            ],
+            Painter::PLAIN,
+        );
+        assert!(text.contains("Updated a 1.0.0 -> 1.1.0"), "{text}");
+        assert!(text.contains("b 1.0.0 is the newest"), "{text}");
+        assert!(
+            text.contains("c 1.1.0 asks for permissions you have not agreed to: use the network"),
+            "{text}"
+        );
+        assert!(text.contains("Failed d: boom"), "{text}");
+        assert!(render_updates(&[], Painter::PLAIN).contains("up to date"));
+    }
+
+    #[test]
+    fn the_update_check_lists_each_source_with_both_versions() {
+        let check = crate::app::UpdateCheck {
+            updates: vec![crate::app::UpdateCandidate {
+                name: "slack".to_string(),
+                installed: "1.0.0".to_string(),
+                available: "1.1.0".to_string(),
+                origin: crate::mining::SourceOrigin::Bundled,
+            }],
+            warnings: vec![],
+        };
+        let text = render_update_check(&check, Painter::PLAIN, Some(200));
+        assert!(
+            text.contains("slack") && text.contains("1.0.0") && text.contains("1.1.0"),
+            "{text}"
+        );
+        assert!(text.contains("bundled"), "{text}");
+        assert!(
+            render_update_check(&crate::app::UpdateCheck::default(), Painter::PLAIN, None)
+                .contains("up to date")
+        );
     }
 }

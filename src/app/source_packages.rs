@@ -8,7 +8,10 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{SourcePackageEvent, SourcePackageRecord, SourcePackageState, SourceState};
+use crate::domain::{
+    IndexedVersion, SourceOrigin, SourcePackageEvent, SourcePackageRecord, SourcePackageState,
+    SourceState,
+};
 use crate::error::{Error, Result};
 use crate::mining::ProviderInfo;
 use crate::mining::registry::{BUILTIN_NAMES, describe_package, unavailable_reason};
@@ -25,6 +28,27 @@ pub struct InstalledSource {
     pub source: ProviderInfo,
     /// Whether it replaced an earlier install of the same name.
     pub replaced: bool,
+}
+
+/// Where an archive came from, which is kept with the installed record so an update knows where to look.
+#[derive(Debug, Clone)]
+pub(super) struct Upstream {
+    pub origin: SourceOrigin,
+    pub registry: Option<String>,
+    pub archive_digest: Option<String>,
+    pub signed_by: Option<String>,
+}
+
+impl Upstream {
+    /// An archive from the user's own disk: it has no upstream.
+    pub(super) fn local() -> Self {
+        Self {
+            origin: SourceOrigin::Package,
+            registry: None,
+            archive_digest: None,
+            signed_by: None,
+        }
+    }
 }
 
 impl AppServices {
@@ -45,11 +69,35 @@ impl AppServices {
         consent: Option<&str>,
         enable: bool,
     ) -> Result<InstalledSource> {
-        let package = tokio::task::spawn_blocking(move || package::inspect(&archive))
+        self.install_archive(archive, consent, enable, Upstream::local(), None)
+            .await
+    }
+
+    /// Read `archive` the way [`Self::install_source_package`] does, and say what it asks for, without installing it.
+    pub(super) async fn read_archive(archive: Vec<u8>) -> Result<package::SourcePackage> {
+        tokio::task::spawn_blocking(move || package::inspect(&archive))
             .await
             .map_err(|e| Error::SourcePackageInvalid {
                 message: format!("reading the package was interrupted: {e}"),
-            })??;
+            })?
+    }
+
+    /// The one way a source gets installed, whatever it came from: the checks are the same for a file the user
+    /// chose, a bundled package and a registry download, and only `upstream` differs.
+    ///
+    /// `expected` is what an index said the archive was; the package inside must agree.
+    pub(super) async fn install_archive(
+        &self,
+        archive: Vec<u8>,
+        consent: Option<&str>,
+        enable: bool,
+        upstream: Upstream,
+        expected: Option<(&str, &IndexedVersion)>,
+    ) -> Result<InstalledSource> {
+        let package = Self::read_archive(archive).await?;
+        if let Some((name, entry)) = expected {
+            crate::distribution::verify_identity(&package, name, entry)?;
+        }
         let name = package.manifest.source.name.clone();
         check_compatible(&package.manifest)?;
 
@@ -93,6 +141,10 @@ impl AppServices {
             manifest: package.manifest,
             installed_at: existing.as_ref().map_or(now, |record| record.installed_at),
             updated_at: now,
+            origin: upstream.origin,
+            registry: upstream.registry,
+            archive_digest: upstream.archive_digest,
+            signed_by: upstream.signed_by,
         };
         self.store.save_source_package(&record).await?;
         Ok(InstalledSource {
@@ -172,7 +224,7 @@ impl AppServices {
     }
 
     /// The installed source `name`, refusing built-in names with their own error.
-    async fn installed(&self, name: &str) -> Result<SourcePackageRecord> {
+    pub(super) async fn installed(&self, name: &str) -> Result<SourcePackageRecord> {
         if BUILTIN_NAMES.contains(&name) {
             return Err(Error::SourceBuiltin {
                 name: name.to_string(),

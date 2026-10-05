@@ -48,8 +48,9 @@ The JSON files OpenCode wrote before 1.2 are stale (nothing newer is ever writte
   `tests/wasm_opencode.rs` put first on the `PATH`.
 - **Bundling is a candidate, not a change.**
   The source is maintained under `sources/opencode/` so that it can ship alongside releases
-  without being linked into the binary, but no bundling mechanism exists yet
+  without being linked into the binary, but no bundling mechanism existed yet
   ([#159](https://github.com/noirbizarre/memcastle/issues/159)).
+  [ADR-033](033-source-distribution.md) added it: releases now bundle this source, and it installs by name.
 
 ## Consequences
 
@@ -67,4 +68,5 @@ The JSON files OpenCode wrote before 1.2 are stale (nothing newer is ever writte
   The 60-second call limit applies to each call, not to a job.
 - **A new OpenCode could break discovery**, and the failure is loud and quotes OpenCode.
   The legacy JSON history written before 1.2 is not mined.
-- **Pi history needs an install step, and so does this**, until the packaging work in #159 lands.
+- **Pi history needs an install step, and so does this**, though a release bundles both
+  ([ADR-033](033-source-distribution.md)), so the step is `memcastle source install opencode`.

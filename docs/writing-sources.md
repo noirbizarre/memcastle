@@ -63,10 +63,15 @@ A trap, a timeout and an out-of-memory are reported by the host as `memcastle::s
 Every table refuses unknown keys.
 
 ```toml
+format = 1                   # the manifest format; optional, and 1 is the only one so far
+
 [source]
 name = "my-notes"            # the name given as --source: lowercase letters, digits, "-"
 version = "0.1.0"            # semantic version of the package
 description = "my notes"     # one line, shown by `memcastle sources`
+license = "MIT"              # optional: SPDX identifier, shown by `memcastle source search`
+homepage = "https://example.org/my-notes"        # optional
+repository = "https://example.org/my-notes.git"  # optional: where the code is
 
 [compatibility]
 contract = "0.1"             # the WIT contract version it was built against
@@ -99,6 +104,7 @@ fixtures = "fixtures"
 
 | Key | Rule |
 |---|---|
+| `format` | A whole number, 1 or more. A format newer than this MemCastle reads is `incompatible`, with a message to upgrade. |
 | `source.name` | 1 to 48 lowercase letters, digits or `-`, not starting or ending with `-`. Not a built-in name. |
 | `compatibility.contract` | `MAJOR.MINOR` or `MAJOR.MINOR.PATCH`. |
 | `compatibility.memcastle` | A semver requirement. A pre-release of a release is held to the release's requirement. |
@@ -230,9 +236,13 @@ Only those top-level files are ever read from an archive.
 It reads the package back before reporting success, so a package that would not install is found where it is made.
 
 `memcastle source install` puts the component under `mining.sources_dir` and records the manifest the user agreed to
-and the component's SHA-256 in the palace.
+and the component's SHA-256 in the palace, with where it came from.
 Installed sources belong to one daemon: with a shared remote palace, each daemon needs the package installed, and one
 that lacks the files reports the source `unavailable`.
+
+The package is the whole of what a user needs: nobody installing a published source needs Rust, Python, Node or an SDK.
+Publishing one, finding one by name, updating it, signing it and trusting a publisher are in
+[Publishing and installing sources](publishing-sources.md).
 
 ## Reference sources
 
@@ -242,8 +252,9 @@ that lacks the files reports the source `unavailable`.
 real, evolving format, keeps raw documents and asks for two permissions (`docs/mining-sources.md#pi`).
 `sources/opencode/` is the OpenCode coding agent's session history, and the worked example of a source that wraps a
 program through `run-process` and is tested against a stand-in for it (`docs/mining-sources.md#opencode`).
-A source that ships with MemCastle's releases, without being compiled into the binary, is built from here and uses
-exactly the package contract a user installs.
+The sources that ship with MemCastle's releases, `pi` and `opencode`, are built from here and bundled without being
+compiled into the binary: they use exactly the package contract a user installs, and `memcastle source install pi`
+finds them with no registry.
 
 ## Testing your source in CI
 
@@ -268,6 +279,11 @@ gets its own CI job, which runs `mise run sources:test -- <name>`.
 | `memcastle::source::timeout` | One call took longer than its limit. |
 | `memcastle::source::permission_denied` | The source ran a program its manifest does not list. |
 | `memcastle::source::build_failed` | The build command failed or did not produce a component. |
+| `memcastle::source::registry_unavailable` | A registry's index could not be read: unreachable, not an index, or a format this MemCastle does not know. Check `mining.registries`. |
+| `memcastle::source::not_in_registry` | No bundled source or registry offers that name, or none of its versions can be installed here. `memcastle source search` lists what is offered. |
+| `memcastle::source::integrity` | A downloaded package is not the archive the index published: its SHA-256 differs, or the package inside is not the name and version listed. Nothing was installed. |
+| `memcastle::source::untrusted` | The trust policy refuses the package: a bad signature from a trusted key, or no trusted signature under `mining.trust = "required"`. |
+| `memcastle::source::signing_failed` | A signing key or signature could not be made or read. `memcastle source keygen` writes a new key. |
 
 A source that cannot read a file it expects usually lacks a `filesystem.read` permission:
 the sandbox shows a directory it was not granted as simply not there.

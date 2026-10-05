@@ -3165,6 +3165,7 @@ version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "axum",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "clap_complete",
@@ -3173,6 +3174,7 @@ dependencies = [
  "dashmap",
  "dialoguer",
  "dirs",
+ "ed25519-dalek",
  "flate2",
  "futures",
  "getrandom 0.4.3",

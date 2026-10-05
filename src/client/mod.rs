@@ -43,6 +43,10 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// [`Error::Client`]'s "a timeout" would be a failure that could not happen.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How long a call that makes the daemon reach a registry may take: the daemon's own download limit is two minutes, so
+/// the ordinary request timeout would cut a slow but healthy install short.
+const REGISTRY_TIMEOUT: Duration = Duration::from_secs(180);
+
 /// Build the one HTTP client every call goes through, optionally stamping the
 /// `X-MemCastle-Mode` and `Authorization` headers on each request.
 ///
@@ -450,6 +454,108 @@ impl DaemonClient {
             request = request.query(&[("consent", consent)]);
         }
         self.send(request).await
+    }
+
+    /// Search the bundled sources and the configured registries.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable, or the daemon's refusal.
+    pub async fn search_registry(
+        &self,
+        query: Option<&str>,
+        registry: Option<&str>,
+    ) -> Result<crate::app::RegistrySearch> {
+        let mut request = self
+            .http
+            .get(format!("{}/api/source-registry/search", self.base_url))
+            .timeout(REGISTRY_TIMEOUT);
+        if let Some(query) = query {
+            request = request.query(&[("q", query)]);
+        }
+        if let Some(registry) = registry {
+            request = request.query(&[("registry", registry)]);
+        }
+        self.send(request).await
+    }
+
+    /// Have the daemon fetch and verify a source, and report what installing it would do.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable, or the daemon's refusal.
+    pub async fn preview_registry_source(
+        &self,
+        name: &str,
+        version: Option<&str>,
+        registry: Option<&str>,
+    ) -> Result<crate::app::RegistryPreview> {
+        let mut request = self
+            .http
+            .get(format!(
+                "{}/api/source-registry/sources/{name}",
+                self.base_url
+            ))
+            .timeout(REGISTRY_TIMEOUT);
+        if let Some(version) = version {
+            request = request.query(&[("version", version)]);
+        }
+        if let Some(registry) = registry {
+            request = request.query(&[("registry", registry)]);
+        }
+        self.send(request).await
+    }
+
+    /// Install a source from the bundle or a registry.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable, or the daemon's refusal (nothing found, a
+    /// package that fails verification, consent that is missing).
+    pub async fn install_registry_source(
+        &self,
+        request: &crate::app::RegistryInstall,
+    ) -> Result<crate::app::InstalledSource> {
+        self.send(
+            self.http
+                .post(format!("{}/api/source-registry/install", self.base_url))
+                .timeout(REGISTRY_TIMEOUT)
+                .json(request),
+        )
+        .await
+    }
+
+    /// Which installed sources have a newer version available.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable, or the daemon's refusal.
+    pub async fn check_source_updates(&self) -> Result<crate::app::UpdateCheck> {
+        self.send(
+            self.http
+                .get(format!("{}/api/source-registry/updates", self.base_url))
+                .timeout(REGISTRY_TIMEOUT),
+        )
+        .await
+    }
+
+    /// Update one source, or all of them when `name` is `None`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable, or the daemon's refusal.
+    pub async fn update_sources(
+        &self,
+        name: Option<&str>,
+        consent: Option<&str>,
+    ) -> Result<Vec<crate::app::UpdateOutcome>> {
+        self.send(
+            self.http
+                .post(format!("{}/api/source-registry/update", self.base_url))
+                .timeout(REGISTRY_TIMEOUT)
+                .json(&serde_json::json!({ "name": name, "consent": consent })),
+        )
+        .await
     }
 
     /// One source, built in or installed.
