@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted.
+Accepted, amended by [ADR-031](031-note-capture.md) (the CLI now reads the project file, for `note` only:
+the statements below that the CLI does not read it describe the original decision).
 Applies [ADR-019](019-shared-integration-contract.md) (client lifecycle logic does not move into MemCastle) and
 [ADR-022](022-integrations-are-bun-packages-tested-against-a-real-daemon.md) (each integration carries its own code).
 

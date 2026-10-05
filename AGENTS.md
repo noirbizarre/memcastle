@@ -93,7 +93,8 @@ An invariant nothing checks is a comment, and it will be violated.
    A source is built in or an installed WebAssembly component (`src/mining/wasm/`, the only module that names the
    runtime), behind the same contract, and the pipeline cannot tell which
    (see `docs/adr/026-pluggable-source-adapters-as-webassembly-components.md`).
-   Sources arrive from the bundle or a registry through `src/distribution/`, which only `app` calls, which touches neither
+   Sources arrive from the bundle or a registry through `src/distribution/`, which only `app` calls
+   (and `config`, only to parse a location at load), which touches neither
    the store, the jobs nor the runtime, and which returns bytes that have passed the index's SHA-256 and the trust policy
    (see `docs/adr/033-source-distribution.md`).
    Entity extraction is the stage after: it reads drawers, names no source, and only adds graph records, never writing a
@@ -126,7 +127,8 @@ An invariant nothing checks is a comment, and it will be violated.
     by `tests/wasm_runtime.rs` (no install without the exact consent, an altered component is never run)
     and by `tests/in_process/auth.rs`
     (every `/api/source-packages` and `/api/source-registry` route is guarded, no MCP tool installs, searches or changes
-    a source), by `tests/source_isolation.rs` (`distribution` reaches no store, jobs or runtime, only `app` calls it, the
+    a source), by `tests/source_isolation.rs` (`distribution` reaches no store, jobs or runtime, only `app` calls it, and
+    `config` only to parse a location, the
     local tooling and adapters open no network, and the digest and trust checks are in `Registry::fetch`) and by
     `tests/wasm_registry.rs` (a tampered or substituted package is never installed, `required` trust refuses what no
     trusted key signed, an update never widens permissions silently).
@@ -155,7 +157,7 @@ src/
 ├── source/     source packages: manifest, archive, scaffolding, build, signing, publishing an index, and the conformance runner
 │               (no store, no jobs, no network)
 ├── distribution/ finding and fetching source packages: registry indexes, locations, the SHA-256 and signature checks;
-│               called only from `app`, no store, no jobs
+│               called only from `app` (and `config`, to parse a location), no store, no jobs
 ├── checkpoint/ the checkpoint job handler (durable, resumable memory writes)
 ├── audit/      the audit job handler (read-only consistency report)
 ├── repair/     the repair job handler (narrow, dry-run-first fixes)
@@ -200,7 +202,7 @@ The name should say what would be broken if it failed.
 **Markdown prose uses semantic linefeeds.** One sentence per line; only wrap inside a sentence, at a clause boundary,
 when it would otherwise exceed the 120-column limit `.markdownlint-cli2.yaml` enforces.
 This keeps a diff scoped to the sentence that actually changed.
-The rule applies to the linted documents (`AGENTS.md`, `CONTRIBUTING.md`, `README.md` and `docs/`);
+The rule applies to the linted documents (`AGENTS.md`, `CONTRIBUTING.md`, `README.md`, `docs/` and `skills/*/SKILL.md`);
 `PLAN.md`, `integrations/README.md` and `skills/README.md` are working documents outside that lint scope.
 
 **Documentation ships with the behaviour.**

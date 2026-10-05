@@ -632,7 +632,8 @@ See [Writing a mining source](writing-sources.md) and [ADR-026](adr/026-pluggabl
 A built-in source is compiled in.
 A bundled source is an ordinary package shipped beside the binary, with an index that lists it.
 A registry source comes from a static `memcastle-index.json` the user configured.
-Only the daemon reaches a registry, and only `crate::distribution`, called from `app`, does the fetching:
+Only the daemon reaches a registry, and only `crate::distribution`, called from `app`, does the fetching
+(`config` calls it only to parse a location, to refuse a bad one at load):
 it reads an index, chooses the newest version that runs here, downloads the archive and proves it is the one the index
 published (a SHA-256, and optionally an ed25519 signature under a trust policy), then hands the bytes to the same install
 path a file uses, so consent, the compatibility check and the load proof are identical whatever the origin.

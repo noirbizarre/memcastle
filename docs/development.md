@@ -21,7 +21,7 @@ mise run lint       # cargo clippy --all-targets --all-features -- -D warnings
 mise run format     # cargo fmt --all
 mise run guards     # the architecture guard hooks, described below
 mise run integrations:check # typecheck and test each package under integrations/ (needs bun, fetched on demand)
-mise run check      # every lint, the guards, both test suites and the sources, without modifying the tree
+mise run check      # every lint, the guards, both test suites, the sources and the integrations, without modifying the tree
 mise run ci         # check plus the docs build: the local equivalent of CI's lint,
                     # test and docs steps
 mise cli <args>      # run memcastle from source, e.g. `mise cli status`
@@ -277,7 +277,7 @@ or a user-visible behaviour updates the page that describes it, in the same comm
   GitHub and the site both render them; stick to flowcharts, sequence, state, class and entity-relationship diagrams,
   and keep them small enough to read on a phone.
 - **Prose style.** One sentence per line, wrapped at a clause boundary if a sentence would pass 120 columns
-  (`mise run lint:md` enforces the width).
+  (`mise run lint:md` enforces the width on `AGENTS.md`, `CONTRIBUTING.md`, `README.md`, `docs/` and `skills/*/SKILL.md`).
   `mise run spell` runs `typos`; a legitimate new term goes into `typos.toml`'s `extend-words`.
 
 ## This repository is generated from a template
