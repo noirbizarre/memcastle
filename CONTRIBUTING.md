@@ -92,10 +92,12 @@ Nothing to release is the normal case for step 1, and costs one workflow run rep
 - the raw executables, `memcastle_<tag>_<platform>[.exe]`, which the AUR recipe, the Homebrew formula and
   `cargo binstall` fetch by name, so renaming them breaks those;
 - a tarball for each Unix platform, `memcastle_<tag>_<platform>.tar.gz`, in the native-package layout
-  (`bin/`, `share/doc/memcastle/`, `share/memcastle/sources/`);
-- the bundled sources on their own, `memcastle_<tag>_sources.tar.gz`, which one asset serves to the AUR package;
+  (`bin/`, `share/doc/memcastle/`, `share/memcastle/{sources,integrations,skills}/`);
+- the bundled sources on their own, `memcastle_<tag>_sources.tar.gz`, and the bundled integrations with their skills,
+  `memcastle_<tag>_integrations.tar.gz`, which one asset each serves to the AUR package and the Homebrew formula;
 - `.deb` and `.rpm` packages for linux-amd64 and linux-arm64, `memcastle_<tag>_<platform>.{deb,rpm}`, built by nfpm
-  from `packaging/nfpm/nfpm.yaml` (binary, systemd user unit, shell completions, documentation and bundled sources)
+  from `packaging/nfpm/nfpm.yaml` (binary, systemd user unit, shell completions, documentation, bundled sources,
+  integrations and skills)
   and smoke-tested before upload;
   CI builds them from stub binaries on every pull request, through the same `packaging/nfpm/build.sh`,
   so a broken packaging config fails on the pull request and not mid-release;
