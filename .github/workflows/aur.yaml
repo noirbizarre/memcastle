@@ -91,6 +91,9 @@ jobs:
           license=$(curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${TAG}/LICENSE" | sha256sum | cut -d' ' -f1)
           sed -i "s/@SHA256_LICENSE@/${license}/" build/PKGBUILD
 
+          # The bundled sources are a release asset, hashed from the published file like the binaries.
+          sed -i "s/@SHA256_SOURCES@/$(checksum "memcastle_${TAG}_sources.tar.gz")/" build/PKGBUILD
+
           service=$(curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${TAG}/packaging/systemd/memcastle.service" | sha256sum | cut -d' ' -f1)
           sed -i "s/@SHA256_SERVICE@/${service}/" build/PKGBUILD
 
@@ -134,6 +137,9 @@ jobs:
           set -euo pipefail
           pacman -U --noconfirm ./*.pkg.tar.zst
           memcastle --version
+          # The bundled sources must land where the daemon looks for them, with their index.
+          test -f /usr/share/memcastle/sources/memcastle-index.json
+          ls /usr/share/memcastle/sources/*.tar.gz
 
       - name: Generate .SRCINFO
         working-directory: build

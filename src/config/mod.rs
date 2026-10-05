@@ -2305,22 +2305,30 @@ mod tests {
         let key = crate::source::signing::public_key_text(
             &crate::source::signing::generate().unwrap().verifying_key(),
         );
+        // Absolute on whichever platform this runs on: `/srv/a` is not absolute on Windows.
+        let root = std::env::temp_dir();
+        let (a, b) = (root.join("a"), root.join("b"));
+        let b_url = reqwest::Url::from_file_path(&b).unwrap().to_string();
+        let bundle = root.join("sources");
         config
             .apply_overrides_from(env(&[
-                ("MEMCASTLE_MINING_REGISTRIES", "/srv/a, file:///srv/b ,"),
+                (
+                    "MEMCASTLE_MINING_REGISTRIES",
+                    &format!("{}, {b_url} ,", a.display()),
+                ),
                 ("MEMCASTLE_MINING_TRUST", "required"),
                 ("MEMCASTLE_MINING_TRUSTED_KEYS", &key),
-                ("MEMCASTLE_MINING_BUNDLED_DIR", "/opt/sources"),
+                (
+                    "MEMCASTLE_MINING_BUNDLED_DIR",
+                    &bundle.display().to_string(),
+                ),
             ]))
             .unwrap();
 
-        assert_eq!(config.mining.registries, ["/srv/a", "file:///srv/b"]);
+        assert_eq!(config.mining.registries, [a.display().to_string(), b_url]);
         assert_eq!(config.mining.trust, TrustMode::Required);
         assert_eq!(config.mining.trusted_keys, [key]);
-        assert_eq!(
-            config.mining.bundled_dir,
-            Some(PathBuf::from("/opt/sources"))
-        );
+        assert_eq!(config.mining.bundled_dir, Some(bundle));
         config.palace.path = std::env::temp_dir();
         assert!(config.validate().is_ok());
     }

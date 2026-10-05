@@ -35,8 +35,9 @@ The daemon looks for assets in a fixed order: a directory you name with `--asset
 See [Runtime assets](configuration.md#runtime-assets) for the rule, and
 [ADR-013](adr/013-release-packaging-and-asset-resolution.md) for why.
 The one package asset is the set of sources that ship with MemCastle, under `share/memcastle/sources/`
-(see [Publishing and installing sources](publishing-sources.md#bundled-sources)): the release tarballs and the `.deb` and
-`.rpm` carry them, and a standalone binary does not, so it installs a source from a file or a registry instead.
+(see [Publishing and installing sources](publishing-sources.md#bundled-sources)): the release tarballs, the `.deb` and
+`.rpm`, the AUR package and the Homebrew formula carry them, and a standalone binary does not, so it installs a source
+from a file or a registry instead.
 
 ## Install
 
@@ -46,7 +47,8 @@ The one package asset is the set of sources that ship with MemCastle, under `sha
 brew install noirbizarre/homebrew-tap/memcastle
 ```
 
-The formula ships macOS builds only (Apple silicon and Intel).
+The formula ships macOS builds only (Apple silicon and Intel), and the sources bundled with MemCastle under its
+`share/memcastle/sources/`, so `memcastle source install pi` works with no registry.
 On Linux, use one of the other methods, including under Linuxbrew.
 
 ### Arch Linux (AUR)
@@ -57,7 +59,9 @@ paru -S memcastle-bin   # or your AUR helper of choice
 
 The `memcastle-bin` package installs the release binary for x86_64 and aarch64,
 a systemd user unit, `/usr/lib/systemd/user/memcastle.service`,
-and the bash, zsh and fish completion scripts.
+the bash, zsh and fish completion scripts,
+and the sources bundled with MemCastle under `/usr/share/memcastle/sources/`, so `memcastle source install pi` and
+`memcastle source install opencode` work with no registry.
 
 The package owns only those files and its licence under `/usr`.
 Your configuration (`~/.config/memcastle`), palace (`~/.local/share/memcastle`) and state (`~/.local/state/memcastle`)

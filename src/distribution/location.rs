@@ -46,8 +46,15 @@ impl Location {
         if raw.is_empty() {
             return Err("it is empty".to_string());
         }
-        if let Some(path) = raw.strip_prefix("file://") {
-            return Self::absolute_path(path);
+        if raw.starts_with("file://") {
+            // The URL's own conversion, because `file:///C:/x` is a Windows path and `/C:/x` is not.
+            let url =
+                reqwest::Url::parse(raw).map_err(|e| format!("it is not a valid URL: {e}"))?;
+            let path = url.to_file_path().map_err(|()| {
+                "a `file://` URL must name an absolute path on this machine, like `file:///srv/index.json`"
+                    .to_string()
+            })?;
+            return Self::absolute_path(&path.to_string_lossy());
         }
         if let Some((scheme, _)) = raw.split_once("://") {
             if scheme != "http" && scheme != "https" {
@@ -241,8 +248,18 @@ fn describe(error: reqwest::Error) -> String {
 mod tests {
     use super::*;
 
+    /// An absolute path on whatever platform the tests run on: `/srv/...` is not absolute on Windows.
+    fn absolute(tail: &str) -> PathBuf {
+        std::env::temp_dir().join("memcastle-location").join(tail)
+    }
+
+    fn file_url(path: &Path) -> String {
+        reqwest::Url::from_file_path(path).unwrap().to_string()
+    }
+
     #[test]
     fn the_four_forms_of_a_location_are_read_and_the_unsafe_ones_refused() {
+        let index = absolute("index.json");
         assert!(matches!(
             Location::parse("https://example.org/index.json"),
             Ok(Location::Http(_))
@@ -255,14 +272,14 @@ mod tests {
             Location::parse("http://127.0.0.1/i.json"),
             Ok(Location::Http(_))
         ));
-        assert!(matches!(
-            Location::parse("file:///srv/index.json"),
-            Ok(Location::File(_))
-        ));
-        assert!(matches!(
-            Location::parse("/srv/index.json"),
-            Ok(Location::File(_))
-        ));
+        assert_eq!(
+            Location::parse(&file_url(&index)),
+            Ok(Location::File(index.clone()))
+        );
+        assert_eq!(
+            Location::parse(&index.to_string_lossy()),
+            Ok(Location::File(index))
+        );
 
         for (raw, expected) in [
             ("http://example.org/i.json", "plain `http://`"),
@@ -289,16 +306,16 @@ mod tests {
                 .to_string(),
             "https://cdn.example.org/d.tar.gz"
         );
-        let file = Location::parse("/srv/sources/index.json").unwrap();
+        let file = Location::File(absolute("sources/index.json"));
         assert_eq!(
             file.join("demo-1.0.0.tar.gz").unwrap(),
-            Location::File("/srv/sources/demo-1.0.0.tar.gz".into())
+            Location::File(absolute("sources/demo-1.0.0.tar.gz"))
         );
     }
 
     #[test]
     fn an_index_cannot_point_a_relative_url_out_of_its_own_place() {
-        let file = Location::parse("/srv/sources/index.json").unwrap();
+        let file = Location::File(absolute("sources/index.json"));
         for bad in ["../secret", "/etc/passwd", "a/../../b"] {
             assert!(file.join(bad).is_err(), "{bad} was accepted");
         }

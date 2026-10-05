@@ -244,6 +244,16 @@ jobs:
               | gzip -n -9 > "dist/memcastle_${TAG}_${asset}.tar.gz"
           done
 
+          # The bundled sources on their own (docs/adr/033): they are portable, so one asset serves the AUR package
+          # and the Homebrew formula, whose recipes fetch a single raw binary and would otherwise ship none. One
+          # top-level directory, which makepkg extracts as it is and Homebrew strips.
+          name="memcastle-sources-${TAG}"
+          install -d -m 755 "stage/${name}"
+          install -m 644 stage-sources/* "stage/${name}/"
+          tar -C stage --sort=name --format=gnu --mtime="@${epoch}" \
+            --owner=0 --group=0 --numeric-owner -cf - "${name}" \
+            | gzip -n -9 > "dist/memcastle_${TAG}_sources.tar.gz"
+
       # `.deb` and `.rpm` from the staged binaries. The same install and the
       # same script run in CI on every pull request (see ci.yaml), so a broken
       # nfpm config fails there rather than here.

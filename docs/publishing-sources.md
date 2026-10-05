@@ -219,7 +219,10 @@ on disk after install is never run.
 ## Bundled sources
 
 Releases ship `pi` and `opencode` as packages, with an index, under `share/memcastle/sources/`:
-in the release tarballs, and as `/usr/share/memcastle/sources/` in the `.deb` and `.rpm`.
+in the release tarballs, as `/usr/share/memcastle/sources/` in the `.deb`, `.rpm` and AUR package, and under the formula's
+`share/memcastle/sources/` with Homebrew.
+The release also publishes them alone as `memcastle_<version>_sources.tar.gz`, which is what the AUR and Homebrew recipes
+fetch, since they install the raw binary asset and not a tarball.
 The daemon finds them beside the binary (the same search as other [runtime assets](configuration.md#runtime-assets)),
 or in `mining.bundled_dir`, so `memcastle source install pi` needs no registry and no network.
 They are not linked into the binary and are installed, updated and removed like any other source.
