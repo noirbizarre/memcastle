@@ -1329,48 +1329,34 @@ async fn cmd_job(config: &Config, mode: Option<MemoryMode>, command: JobCommand)
 /// `--assets-dir` has already been folded into `config.assets.dir` (see [`overrides_from`]), so a flag, the environment
 /// and the config file all choose the same root.
 fn cmd_integration(config: &Config, command: &IntegrationCommand) -> Result<()> {
-    use memcastle::integration::{self, Catalog, Context, Locations, SystemRunner, render};
+    use memcastle::assets::InstallSearch;
+    use memcastle::integration::{Context, Locations, Operation, SystemRunner};
 
+    let (operation, json) = match command {
+        IntegrationCommand::List(args) => (Operation::List, args.common.json),
+        IntegrationCommand::Install(args) => {
+            (Operation::Install(args.agent.clone()), args.common.json)
+        }
+        IntegrationCommand::Update(args) => {
+            (Operation::Update(args.agent.clone()), args.common.json)
+        }
+        IntegrationCommand::Remove(args) => {
+            (Operation::Remove(args.agent.clone()), args.common.json)
+        }
+    };
     let locations = Locations::from_process();
     let runner = SystemRunner;
     let ctx = Context::for_process(&locations, &runner);
-    let painter = Painter::for_stdout();
-    let (json, outcome) = match command {
-        IntegrationCommand::List(args) => {
-            let catalog = Catalog::open(config.assets.dir.as_deref())?;
-            let report = render::list(&catalog, &ctx)?;
-            if args.common.json {
-                print_json(&report)?;
-            } else {
-                println!("{}", render::render_list(&report, painter));
-            }
-            return Ok(());
-        }
-        IntegrationCommand::Install(args) => {
-            let catalog = Catalog::open(config.assets.dir.as_deref())?;
-            (
-                args.common.json,
-                integration::install(catalog.get(&args.agent)?, &catalog, &ctx)?,
-            )
-        }
-        IntegrationCommand::Update(args) => {
-            let catalog = Catalog::open(config.assets.dir.as_deref())?;
-            (
-                args.common.json,
-                integration::update(catalog.get(&args.agent)?, &catalog, &ctx)?,
-            )
-        }
-        // Needs no assets: an integration must stay removable after the package that shipped it is gone.
-        IntegrationCommand::Remove(args) => {
-            (args.common.json, integration::remove(&args.agent, &ctx)?)
-        }
-    };
-    if json {
-        print_json(&outcome)
-    } else {
-        println!("{}", render::render_outcome(&outcome, painter));
-        Ok(())
-    }
+    let text = memcastle::integration::execute(
+        &operation,
+        config.assets.dir.as_deref(),
+        &InstallSearch::from_process(),
+        &ctx,
+        json,
+        Painter::for_stdout(),
+    )?;
+    println!("{text}");
+    Ok(())
 }
 
 /// Print `human` when stdout is a terminal, `json` otherwise: the same rule

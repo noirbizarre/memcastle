@@ -413,6 +413,12 @@ pub(crate) mod fake {
         pub refuse_install: RefCell<Option<&'static str>>,
         /// Pretend the program is not on `PATH`.
         pub missing: RefCell<bool>,
+        /// Make this subcommand exit 1 with this message.
+        pub exit_on: RefCell<Option<(&'static str, &'static str)>>,
+        /// Make this subcommand fail to start at all, as if the program vanished halfway.
+        pub io_error_on: RefCell<Option<&'static str>>,
+        /// Accept `pi install` without remembering the package, so the agent never lists it.
+        pub forget_installs: RefCell<bool>,
     }
 
     impl FakeAgents {
@@ -424,6 +430,9 @@ pub(crate) mod fake {
                 calls: RefCell::new(Vec::new()),
                 refuse_install: RefCell::new(None),
                 missing: RefCell::new(false),
+                exit_on: RefCell::new(None),
+                io_error_on: RefCell::new(None),
+                forget_installs: RefCell::new(false),
             }
         }
     }
@@ -448,7 +457,16 @@ pub(crate) mod fake {
             if *self.missing.borrow() {
                 return Err(std::io::Error::from(std::io::ErrorKind::NotFound));
             }
-            Ok(match (program, args.first().map(String::as_str)) {
+            let subcommand = args.first().map(String::as_str);
+            if *self.io_error_on.borrow() == subcommand && subcommand.is_some() {
+                return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+            }
+            if let Some((failing, message)) = *self.exit_on.borrow()
+                && subcommand == Some(failing)
+            {
+                return Ok(output(1, "", message));
+            }
+            Ok(match (program, subcommand) {
                 ("pi", Some("--version")) => output(0, &format!("{}\n", self.pi_version), ""),
                 ("opencode", Some("--version")) => {
                     output(0, &format!("{}\n", self.opencode_version), "")
@@ -458,7 +476,7 @@ pub(crate) mod fake {
                         return Ok(output(1, "", message));
                     }
                     let mut installed = self.installed.borrow_mut();
-                    if !installed.contains(&args[1]) {
+                    if !*self.forget_installs.borrow() && !installed.contains(&args[1]) {
                         installed.push(args[1].clone());
                     }
                     output(0, "", "")
@@ -513,6 +531,158 @@ to = "."
             agents_dir: root.join("agents"),
             opencode_config_dir: root.join("opencode"),
         }
+    }
+
+    #[test]
+    fn what_a_failed_program_said_is_the_error_and_silence_is_reported_as_its_exit_status() {
+        let said = |stdout: &str, stderr: &str, code: i32| {
+            failure_text(&Output {
+                status: std::os::unix::process::ExitStatusExt::from_raw(code << 8),
+                stdout: stdout.as_bytes().to_vec(),
+                stderr: stderr.as_bytes().to_vec(),
+            })
+        };
+
+        assert_eq!(said("out", "err\n", 1), "err");
+        assert_eq!(said(" out \n", "", 1), "out");
+        assert!(
+            said("", "", 3).contains("exited with"),
+            "{}",
+            said("", "", 3)
+        );
+    }
+
+    #[test]
+    fn the_system_runner_runs_a_real_program_and_reports_one_that_does_not_exist() {
+        let output = SystemRunner
+            .run("sh", &[OsStr::new("-c"), OsStr::new("echo hi")])
+            .unwrap();
+        assert_eq!(text(&output.stdout), "hi");
+
+        let error = SystemRunner
+            .run("memcastle-no-such-program", &[])
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn the_locations_of_the_process_end_in_the_names_the_docs_promise() {
+        let locations = Locations::from_process();
+
+        assert!(
+            locations.agents_dir.ends_with("memcastle/agents"),
+            "{locations:?}"
+        );
+        assert!(
+            locations.opencode_config_dir.ends_with("opencode")
+                || std::env::var_os("OPENCODE_CONFIG_DIR").is_some(),
+            "{locations:?}"
+        );
+    }
+
+    #[test]
+    fn the_fake_agent_rejects_a_command_nobody_uses() {
+        let fake = FakeAgents::new();
+
+        let output = fake.run("pi", &[OsStr::new("bogus")]).unwrap();
+
+        assert!(!output.status.success());
+    }
+
+    #[test]
+    fn an_agent_whose_version_command_fails_is_reported_with_what_it_said() {
+        let fake = FakeAgents::new();
+        *fake.exit_on.borrow_mut() = Some(("--version", "broken install"));
+        let agent = for_kind(AgentKind::Opencode, &fake, &locations(Path::new("/x")));
+
+        let error = agent.detect("opencode").unwrap_err();
+
+        assert!(
+            matches!(error, Error::IntegrationAgentNotFound { .. }),
+            "{error}"
+        );
+        assert!(error.to_string().contains("broken install"), "{error}");
+    }
+
+    #[test]
+    fn pi_failing_to_remove_or_list_is_reported_and_leaves_the_registration_in_place() {
+        let fake = FakeAgents::new();
+        let agent = for_kind(AgentKind::Pi, &fake, &locations(Path::new("/x")));
+        let registration = agent.registration(Path::new("/data/agents/pi"), &manifest_for("pi"));
+        agent.register("pi", &registration).unwrap();
+
+        *fake.exit_on.borrow_mut() = Some(("remove", "locked"));
+        let refused = agent.unregister("pi", &registration).unwrap_err();
+        assert!(
+            matches!(refused, Error::IntegrationRegistrationFailed { .. }),
+            "{refused}"
+        );
+        assert!(refused.to_string().contains("locked"), "{refused}");
+
+        *fake.exit_on.borrow_mut() = None;
+        *fake.io_error_on.borrow_mut() = Some("remove");
+        let vanished = agent.unregister("pi", &registration).unwrap_err();
+        assert!(
+            vanished.to_string().contains("`pi remove` could not run"),
+            "{vanished}"
+        );
+
+        *fake.io_error_on.borrow_mut() = None;
+        *fake.exit_on.borrow_mut() = Some(("list", "settings unreadable"));
+        let listing = agent.is_registered("pi", &registration).unwrap_err();
+        assert!(
+            matches!(listing, Error::IntegrationAgentNotFound { .. }),
+            "{listing}"
+        );
+        assert!(
+            listing.to_string().contains("settings unreadable"),
+            "{listing}"
+        );
+        assert_eq!(fake.installed.borrow().len(), 1);
+    }
+
+    #[test]
+    fn pi_failing_to_start_for_install_or_list_is_reported_as_that_command() {
+        let fake = FakeAgents::new();
+        let agent = for_kind(AgentKind::Pi, &fake, &locations(Path::new("/x")));
+        let registration = agent.registration(Path::new("/data/agents/pi"), &manifest_for("pi"));
+
+        *fake.io_error_on.borrow_mut() = Some("install");
+        assert!(
+            agent
+                .register("pi", &registration)
+                .unwrap_err()
+                .to_string()
+                .contains("`pi install` could not run")
+        );
+        *fake.io_error_on.borrow_mut() = Some("list");
+        assert!(
+            agent
+                .is_registered("pi", &registration)
+                .unwrap_err()
+                .to_string()
+                .contains("`pi list` could not run")
+        );
+    }
+
+    #[test]
+    fn a_plugin_path_that_cannot_be_read_is_an_io_error_and_not_a_missing_file() {
+        let root = tempfile::tempdir().unwrap();
+        let fake = FakeAgents::new();
+        let agent = for_kind(AgentKind::Opencode, &fake, &locations(root.path()));
+        let registration = agent.registration(Path::new("/d/opencode"), &manifest_for("opencode"));
+        // A directory where the file should be: reading it fails with something other than "not found".
+        std::fs::create_dir_all(root.path().join("opencode/plugins/memcastle.ts")).unwrap();
+
+        assert!(matches!(
+            agent.register("opencode", &registration).unwrap_err(),
+            Error::Io { .. }
+        ));
+        assert!(matches!(
+            agent.unregister("opencode", &registration).unwrap_err(),
+            Error::Io { .. }
+        ));
+        assert!(!agent.is_registered("opencode", &registration).unwrap());
     }
 
     #[test]

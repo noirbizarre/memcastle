@@ -254,11 +254,11 @@ install = true
         parse(&edit(GOOD))
     }
 
+    /// The refusal as text; every refusal here is a manifest error, which the `invalid manifest` prefix proves.
     fn message(result: Result<IntegrationManifest>) -> String {
-        match result.unwrap_err() {
-            Error::IntegrationManifestInvalid { message } => message,
-            other => panic!("expected a manifest error, got {other}"),
-        }
+        let text = result.unwrap_err().to_string();
+        assert!(text.starts_with("invalid integration manifest: "), "{text}");
+        text
     }
 
     #[test]
@@ -317,6 +317,19 @@ to = "dist"
         for bad in ["Demo", "-demo", "de mo", "../x", ""] {
             let text = with(|t| t.replace("id = \"demo\"", &format!("id = \"{bad}\"")));
             assert!(message(text).contains("integration.id"), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_description_that_is_empty_or_spans_lines_is_refused() {
+        for bad in ["", "two\\nlines"] {
+            let text = with(|t| {
+                t.replace(
+                    "description = \"demo integration\"",
+                    &format!("description = \"{bad}\""),
+                )
+            });
+            assert!(message(text).contains("integration.description"), "{bad:?}");
         }
     }
 

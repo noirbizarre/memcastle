@@ -9,6 +9,7 @@
 //! already on this machine, in the package or the checkout the assets root names.
 //!
 //! - [`manifest`] reads `memcastle-integration.toml`.
+//! - [`command`] turns a request into the text to print.
 //! - [`catalog`] does discovery under the assets root, the same for a package and a checkout.
 //! - [`agent`] holds what differs between agents.
 //! - [`install`] installs, updates and removes, and works out the state `list` shows.
@@ -16,12 +17,14 @@
 
 pub mod agent;
 pub mod catalog;
+pub mod command;
 pub mod install;
 pub mod manifest;
 pub mod render;
 
 pub use agent::{Locations, SystemRunner};
 pub use catalog::{Catalog, Shipped};
+pub use command::{Operation, execute};
 pub use install::{
     Action, Change, ChangeKind, Context, Outcome, State, Status, inspect, install, remove, update,
 };

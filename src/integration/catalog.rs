@@ -55,22 +55,16 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    /// Open the catalog of the running process: `override_dir`, else the installed package.
+    /// Open the catalog: `override_dir`, else the installed package found by `search`.
+    ///
+    /// The search is passed in so tests cover every layout without depending on where the test binary lives; the
+    /// binary passes [`InstallSearch::from_process`].
     ///
     /// # Errors
     ///
     /// [`Error::AssetsNotFound`] when `override_dir` is not a directory, [`Error::IntegrationAssetsMissing`] when
     /// there is no assets directory at all (a binary run on its own ships nothing).
-    pub fn open(override_dir: Option<&Path>) -> Result<Self> {
-        Self::open_with(override_dir, &InstallSearch::from_process())
-    }
-
-    /// [`Catalog::open`] against explicit search inputs, for tests.
-    ///
-    /// # Errors
-    ///
-    /// As [`Catalog::open`].
-    pub fn open_with(override_dir: Option<&Path>, search: &InstallSearch) -> Result<Self> {
+    pub fn open(override_dir: Option<&Path>, search: &InstallSearch) -> Result<Self> {
         let assets = Assets::resolve(override_dir, search)?;
         let Some(root) = assets.root() else {
             return Err(Error::IntegrationAssetsMissing {
@@ -302,7 +296,7 @@ to = "."
         let root = tree(&["pi"]);
         let search = InstallSearch::default();
 
-        let catalog = Catalog::open_with(Some(root.path()), &search).unwrap();
+        let catalog = Catalog::open(Some(root.path()), &search).unwrap();
 
         assert_eq!(catalog.root(), root.path());
         assert_eq!(
@@ -328,7 +322,7 @@ to = "."
             ..InstallSearch::default()
         };
 
-        let catalog = Catalog::open_with(None, &search).unwrap();
+        let catalog = Catalog::open(None, &search).unwrap();
 
         assert_eq!(catalog.integrations().len(), 1);
         assert_eq!(catalog.source(), &AssetSource::Installed(share));
@@ -336,7 +330,7 @@ to = "."
 
     #[test]
     fn a_binary_with_no_package_and_no_override_says_how_to_get_integrations() {
-        let error = Catalog::open_with(None, &InstallSearch::default()).unwrap_err();
+        let error = Catalog::open(None, &InstallSearch::default()).unwrap_err();
 
         assert!(
             matches!(error, Error::IntegrationAssetsMissing { .. }),
@@ -346,7 +340,7 @@ to = "."
 
     #[test]
     fn an_override_that_is_not_a_directory_is_an_error_and_never_falls_through() {
-        let error = Catalog::open_with(
+        let error = Catalog::open(
             Some(Path::new("/nonexistent-assets")),
             &InstallSearch::default(),
         )

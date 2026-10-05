@@ -156,6 +156,7 @@ pub fn render_outcome(outcome: &Outcome, painter: Painter) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::integration::install::Change;
     use crate::integration::manifest::AgentKind;
 
     fn status(id: &str, state: State, installed: Option<&str>) -> Status {
@@ -222,6 +223,96 @@ mod tests {
 
         assert!(text.contains("No integrations are shipped"), "{text}");
         assert!(!text.contains("INTEGRATION"), "{text}");
+    }
+
+    #[test]
+    fn every_state_is_coloured_by_what_it_means_and_plain_output_has_no_escape_codes() {
+        let all = [
+            State::NotInstalled,
+            State::Installed,
+            State::Outdated,
+            State::Modified,
+            State::Incompatible,
+            State::Unavailable,
+        ];
+        let integrations: Vec<_> = all
+            .iter()
+            .map(|s| status(&format!("a-{s:?}").to_lowercase(), *s, Some("0.1.0")))
+            .collect();
+        let mut with_problem = integrations;
+        with_problem[1].problems.push("something".to_string());
+        let mut r = report(with_problem);
+        r.broken.push(Broken {
+            id: "bad".to_string(),
+            message: "unreadable".to_string(),
+        });
+
+        let coloured = render_list(&r, Painter::forced());
+        let plain = render_list(&r, Painter::PLAIN);
+
+        assert!(coloured.contains('\u{1b}'), "{coloured}");
+        assert!(!plain.contains('\u{1b}'), "{plain}");
+        assert!(plain.contains("bad: unreadable"), "{plain}");
+    }
+
+    #[test]
+    fn each_action_has_its_own_headline_and_each_change_its_own_label() {
+        let change = |kind| Change {
+            kind,
+            target: "t".to_string(),
+        };
+        let kinds = [
+            ChangeKind::Copied,
+            ChangeKind::Replaced,
+            ChangeKind::Registered,
+            ChangeKind::Unregistered,
+            ChangeKind::Deleted,
+            ChangeKind::LeftAlone,
+        ];
+        let outcome = |action| Outcome {
+            id: "pi".to_string(),
+            action,
+            version: Some("0.1.0".to_string()),
+            directory: "/d".to_string(),
+            changes: kinds.iter().map(|k| change(*k)).collect(),
+        };
+
+        let headlines: Vec<_> = [
+            Action::Installed,
+            Action::Updated,
+            Action::Removed,
+            Action::AlreadyAbsent,
+        ]
+        .into_iter()
+        .map(|a| {
+            render_outcome(&outcome(a), Painter::PLAIN)
+                .lines()
+                .next()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+
+        assert_eq!(
+            headlines,
+            [
+                "Installed pi 0.1.0",
+                "Updated pi to 0.1.0",
+                "Removed pi 0.1.0",
+                "pi is not installed; nothing changed"
+            ]
+        );
+        let body = render_outcome(&outcome(Action::Installed), Painter::forced());
+        for label in [
+            "copied",
+            "replaced",
+            "registered",
+            "unregistered",
+            "deleted",
+            "left alone",
+        ] {
+            assert!(body.contains(label), "{label}: {body}");
+        }
     }
 
     #[test]

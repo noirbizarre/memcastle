@@ -156,6 +156,37 @@ pub fn run_dir() -> PathBuf {
 mod tests {
     use super::*;
 
+    #[test]
+    fn the_base_directory_is_the_xdg_variable_or_the_home_default_without_the_application_name() {
+        let home = Path::new("/home/u");
+        let none = |_: &str| None;
+        let set = |name: &str| (name == "XDG_CONFIG_HOME").then(|| "/cfg".to_string());
+        let relative = |name: &str| (name == "XDG_CONFIG_HOME").then(|| "cfg".to_string());
+
+        assert_eq!(
+            base(XdgDir::Config, set, Some(home)),
+            Some(PathBuf::from("/cfg"))
+        );
+        assert_eq!(
+            base(XdgDir::Config, none, Some(home)),
+            Some(PathBuf::from("/home/u/.config"))
+        );
+        assert_eq!(
+            base(XdgDir::Config, relative, Some(home)),
+            Some(PathBuf::from("/home/u/.config"))
+        );
+        assert_eq!(base(XdgDir::Config, none, None), None);
+    }
+
+    #[test]
+    fn installed_agent_integrations_live_in_an_agents_directory_beside_the_palace() {
+        assert!(
+            default_agents_dir().ends_with("memcastle/agents")
+                || default_agents_dir().ends_with("agents")
+        );
+        assert_eq!(default_agents_dir().parent(), default_palace_dir().parent());
+    }
+
     fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
         move |name| {
             pairs

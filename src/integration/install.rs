@@ -875,8 +875,325 @@ install = true
         }
     }
 
+    fn plan_error(machine: &Machine, id: &str) -> Error {
+        machine.install(id).unwrap_err()
+    }
+
     #[test]
-    fn installing_copies_the_files_and_the_skills_registers_with_pi_and_reports_what_changed() {
+    fn the_context_of_the_process_checks_against_the_version_this_binary_was_built_as() {
+        let machine = Machine::new();
+
+        let ctx = Context::for_process(&machine.locations, &machine.fake);
+
+        assert_eq!(ctx.memcastle_version.to_string(), env!("CARGO_PKG_VERSION"));
+        assert_eq!(
+            ctx.install_dir("pi"),
+            machine.locations.agents_dir.join("pi")
+        );
+    }
+
+    #[test]
+    fn every_state_has_the_words_list_prints() {
+        let words: Vec<_> = [
+            State::NotInstalled,
+            State::Installed,
+            State::Outdated,
+            State::Modified,
+            State::Incompatible,
+            State::Unavailable,
+        ]
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+
+        assert_eq!(
+            words,
+            [
+                "not installed",
+                "installed",
+                "outdated",
+                "modified",
+                "incompatible",
+                "unavailable"
+            ]
+        );
+    }
+
+    #[test]
+    fn an_integration_with_no_agent_requirement_accepts_any_agent_and_one_with_a_requirement_needs_a_readable_version()
+     {
+        let open =
+            manifest("pi", "pi", "0.1.0", ">=0.1", ">=1.0").replace("agent = \">=1.0\"\n", "");
+        let open = crate::integration::manifest::parse(&open).unwrap();
+        let gibberish = agent::AgentInfo {
+            raw: "no numbers".to_string(),
+            version: None,
+        };
+        let running = Version::parse("0.2.0").unwrap();
+        assert!(check_compatible(&open, &running, Some(&gibberish)).is_ok());
+
+        let strict =
+            crate::integration::manifest::parse(&manifest("pi", "pi", "0.1.0", ">=0.1", ">=1.0"))
+                .unwrap();
+        let error = check_compatible(&strict, &running, Some(&gibberish)).unwrap_err();
+        assert!(error.to_string().contains("holds no version"), "{error}");
+        assert!(error.to_string().contains("no numbers"), "{error}");
+    }
+
+    #[test]
+    fn a_file_asset_installs_under_its_own_name_or_the_name_the_manifest_gives() {
+        let machine = Machine::new();
+        let extra = machine.assets().join("integrations/pi/dist/extra.json");
+        std::fs::write(&extra, "{}").unwrap();
+        let text = manifest("pi", "pi", "0.1.0", ">=0.1", ">=1.0")
+            + "[[assets]]\nfrom = \"dist/extra.json\"\nto = \".\"\n[[assets]]\nfrom = \"dist/package.json\"\nto = \"conf/pkg.json\"\n";
+        machine.rewrite_manifest("pi", text);
+
+        machine.install("pi").unwrap();
+
+        let dir = machine.locations.agents_dir.join("pi");
+        assert!(dir.join("extra.json").is_file() && dir.join("conf/pkg.json").is_file());
+    }
+
+    #[test]
+    fn two_assets_that_land_on_one_file_are_refused_rather_than_resolved_by_copy_order() {
+        let machine = Machine::new();
+        let text = manifest("pi", "pi", "0.1.0", ">=0.1", ">=1.0")
+            + "[[assets]]\nfrom = \"dist/package.json\"\nto = \"dist/index.js\"\n";
+        machine.rewrite_manifest("pi", text);
+
+        let error = plan_error(&machine, "pi");
+
+        assert!(
+            error
+                .to_string()
+                .contains("two different files to `dist/index.js`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn an_asset_that_would_overwrite_the_receipt_is_refused() {
+        let machine = Machine::new();
+        std::fs::write(
+            machine
+                .assets()
+                .join("integrations/pi/dist/.memcastle-install.json"),
+            "{}",
+        )
+        .unwrap();
+        let text = manifest("pi", "pi", "0.1.0", ">=0.1", ">=1.0")
+            + "[[assets]]\nfrom = \"dist/package.json\"\nto = \".memcastle-install.json\"\n";
+        machine.rewrite_manifest("pi", text);
+
+        let error = plan_error(&machine, "pi");
+
+        assert!(
+            error.to_string().contains("which is the receipt's"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn an_integration_that_reads_skills_needs_the_skills_directory_to_exist() {
+        let machine = Machine::new();
+        std::fs::remove_dir_all(machine.assets().join("skills")).unwrap();
+
+        let error = plan_error(&machine, "pi");
+
+        assert!(
+            matches!(error, Error::IntegrationAssetsMissing { .. }),
+            "{error}"
+        );
+        assert!(error.to_string().contains("shared skills"), "{error}");
+    }
+
+    #[test]
+    fn a_failure_while_copying_removes_the_staging_directory_and_touches_nothing_installed() {
+        // `a` is a file in the plan and `a/b` is below it: the second copy cannot create its directory.
+        let machine = Machine::new();
+        let text = manifest("pi", "pi", "0.1.0", ">=0.1", ">=1.0")
+            + "[[assets]]\nfrom = \"dist/package.json\"\nto = \"a\"\n[[assets]]\nfrom = \"dist/index.js\"\nto = \"a/b\"\n";
+        machine.rewrite_manifest("pi", text);
+
+        let error = plan_error(&machine, "pi");
+
+        assert!(matches!(error, Error::Io { .. }), "{error}");
+        assert!(!machine.locations.agents_dir.join(".pi.staging").exists());
+        assert!(!machine.locations.agents_dir.join("pi").exists());
+        assert!(machine.fake.installed.borrow().is_empty());
+    }
+
+    #[test]
+    fn an_agent_that_accepts_the_registration_but_does_not_list_it_fails_validation() {
+        let machine = Machine::new();
+        *machine.fake.forget_installs.borrow_mut() = true;
+
+        let error = plan_error(&machine, "pi");
+
+        assert!(
+            matches!(error, Error::IntegrationValidationFailed { .. }),
+            "{error}"
+        );
+        assert!(error.to_string().contains("does not list"), "{error}");
+    }
+
+    #[test]
+    fn validation_names_a_missing_entry_and_an_agent_that_cannot_be_asked() {
+        let machine = Machine::new();
+        let catalog = machine.catalog();
+        let manifest = &catalog.get("pi").unwrap().manifest;
+        let agent = agent::for_kind(AgentKind::Pi, &machine.fake, &machine.locations);
+        let registration = agent.registration(Path::new("/d/pi"), manifest);
+        let empty = machine.root.path().join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+
+        let missing = validate(manifest, &empty, &*agent, "pi", &registration).unwrap_err();
+        assert!(
+            missing.contains("is missing from the installed copy"),
+            "{missing}"
+        );
+
+        std::fs::create_dir_all(empty.join("dist")).unwrap();
+        std::fs::write(empty.join("dist/index.js"), "x").unwrap();
+        *machine.fake.missing.borrow_mut() = true;
+        let unreachable = validate(manifest, &empty, &*agent, "pi", &registration).unwrap_err();
+        assert!(unreachable.contains("could not run"), "{unreachable}");
+    }
+
+    #[test]
+    fn a_receipt_path_that_is_not_readable_is_reported_by_list_and_by_install() {
+        let machine = Machine::new();
+        let dir = machine.locations.agents_dir.join("pi");
+        std::fs::create_dir_all(dir.join(RECEIPT_FILE)).unwrap();
+
+        let status = machine.status("pi");
+
+        assert_eq!(status.state, State::Modified);
+        assert!(status.problems[0].contains(RECEIPT_FILE), "{status:?}");
+        // And installing treats it as no previous installation, replacing the junk.
+        assert_eq!(machine.install("pi").unwrap().action, Action::Installed);
+    }
+
+    #[test]
+    fn a_deleted_file_is_reported_missing_and_a_rebuilt_bundle_as_outdated_at_the_same_version() {
+        let machine = Machine::new();
+        machine.install("pi").unwrap();
+        std::fs::remove_file(machine.locations.agents_dir.join("pi/dist/index.js")).unwrap();
+        let status = machine.status("pi");
+        assert_eq!(status.state, State::Modified);
+        assert!(
+            status.problems[0].contains("dist/index.js is missing"),
+            "{status:?}"
+        );
+
+        machine.install("pi").unwrap();
+        std::fs::write(
+            machine.assets().join("integrations/pi/dist/index.js"),
+            "export default { v: 3 }\n",
+        )
+        .unwrap();
+        let status = machine.status("pi");
+        assert_eq!(status.state, State::Outdated);
+        assert!(
+            status.problems[0].contains("shipped files differ"),
+            "{status:?}"
+        );
+    }
+
+    #[test]
+    fn list_reports_an_agent_that_cannot_be_asked_instead_of_failing() {
+        let machine = Machine::new();
+        machine.install("pi").unwrap();
+        *machine.fake.missing.borrow_mut() = true;
+
+        let status = machine.status("pi");
+
+        assert_eq!(status.state, State::Modified);
+        assert_eq!(status.agent_version, None);
+        assert!(
+            status.problems.iter().any(|p| p.contains("could not run")),
+            "{status:?}"
+        );
+    }
+
+    #[test]
+    fn removing_leaves_a_plugin_file_the_user_replaced_and_says_so() {
+        let machine = Machine::new();
+        machine.install("opencode").unwrap();
+        std::fs::write(machine.plugin_file(), "// mine now\n").unwrap();
+
+        let outcome = remove("opencode", &machine.ctx()).unwrap();
+
+        assert_eq!(outcome.action, Action::Removed);
+        assert!(
+            outcome
+                .changes
+                .iter()
+                .any(|c| c.kind == ChangeKind::LeftAlone),
+            "{outcome:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(machine.plugin_file()).unwrap(),
+            "// mine now\n"
+        );
+        assert!(!machine.locations.agents_dir.join("opencode").exists());
+    }
+
+    #[test]
+    fn an_agent_that_refuses_to_forget_the_copy_keeps_the_files_so_removal_can_be_retried() {
+        let machine = Machine::new();
+        machine.install("pi").unwrap();
+        *machine.fake.exit_on.borrow_mut() = Some(("remove", "busy"));
+
+        let error = remove("pi", &machine.ctx()).unwrap_err();
+
+        assert!(
+            matches!(error, Error::IntegrationRegistrationFailed { .. }),
+            "{error}"
+        );
+        assert!(machine.locations.agents_dir.join("pi").is_dir());
+        *machine.fake.exit_on.borrow_mut() = None;
+        assert_eq!(
+            remove("pi", &machine.ctx()).unwrap().action,
+            Action::Removed
+        );
+    }
+
+    #[test]
+    fn a_directory_without_a_receipt_is_deleted_by_remove_and_nothing_is_reported_when_absent() {
+        let machine = Machine::new();
+        let stray = machine.locations.agents_dir.join("pi");
+        std::fs::create_dir_all(&stray).unwrap();
+        std::fs::write(stray.join("junk"), "x").unwrap();
+
+        let outcome = remove("pi", &machine.ctx()).unwrap();
+
+        assert_eq!(outcome.action, Action::Removed);
+        assert!(!stray.exists());
+        assert_eq!(
+            remove("pi", &machine.ctx()).unwrap().action,
+            Action::AlreadyAbsent
+        );
+    }
+
+    #[test]
+    fn deleting_a_directory_that_is_not_one_is_an_error_with_its_path() {
+        let machine = Machine::new();
+        let file = machine.root.path().join("a-file");
+        std::fs::write(&file, "x").unwrap();
+
+        let result = remove_dir(&file);
+
+        // Some platforms delete a plain file here and others refuse; what must hold is that a refusal names the path.
+        if let Err(error) = result {
+            assert!(error.to_string().contains("a-file"), "{error}");
+        }
+        assert!(remove_dir(&machine.root.path().join("never-existed")).is_ok());
+    }
+
+    #[test]
+    fn installing_twice_changes_nothing_registers_with_pi_and_reports_what_changed() {
         let machine = Machine::new();
 
         let outcome = machine.install("pi").unwrap();
@@ -1332,6 +1649,23 @@ install = true
             receipt.registration.target,
             machine.plugin_file().display().to_string()
         );
+    }
+
+    #[test]
+    fn the_listing_names_how_the_assets_were_chosen_whatever_the_source() {
+        let machine = Machine::new();
+        for (source, expected) in [
+            (AssetSource::Override(machine.assets()), "override"),
+            (AssetSource::Installed(machine.assets()), "installed"),
+            (AssetSource::Embedded, "embedded"),
+        ] {
+            let catalog = Catalog::read(machine.assets(), source).unwrap();
+
+            let report = crate::integration::render::list(&catalog, &machine.ctx()).unwrap();
+
+            assert_eq!(report.assets_source, expected);
+            assert_eq!(report.integrations.len(), 2);
+        }
     }
 
     #[test]
