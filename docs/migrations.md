@@ -19,6 +19,7 @@ Two kinds of change are tracked separately:
 | 1 | `diary-provenance` | Rewrites legacy diary drawers so `provenance.requested_by` names the channel (`unknown` when it was never recorded) rather than the agent. |
 | 2 | `canonical-timestamps` | Rewrites optional timestamps into one canonical form so they compare correctly. |
 | 3 | `dedup-keys` | Fills the derived keys [deduplication](deduplication.md) reads (a drawer's fingerprint, an entity's key and aliases) on records written earlier. It merges nothing, so existing duplicates stay as they are. |
+| 4 | `supersession-lineage` | Links a drawer closed before supersession links existed to the successor it was replaced by, when exactly one drawer qualifies (see [ADR-032](adr/032-temporal-retrieval-and-history.md)). An ambiguous or unmatched close is left alone. |
 
 Adding the `source` and `source_document` tables ([Mining sources](mining-sources.md)) needed no data migration:
 they are schema, created empty by the next start, and nothing existing is reshaped.
@@ -70,8 +71,8 @@ Both report flags print JSON:
 
 ```json
 {
-  "current_version": 3,
-  "latest_version": 3,
+  "current_version": 4,
+  "latest_version": 4,
   "pending": []
 }
 ```
@@ -82,8 +83,8 @@ Applying prints what happened:
 
 ```json
 {
-  "from_version": 3,
-  "to_version": 3,
+  "from_version": 4,
+  "to_version": 4,
   "applied": []
 }
 ```
@@ -91,7 +92,7 @@ Applying prints what happened:
 An embedded palace can only be opened by one process, so **stop the daemon before running `memcastle migrate`**;
 otherwise it fails with `memcastle::store::backend_failed`.
 While a daemon is running, `memcastle status` shows the same information under its datastore line
-(`migrations 3/3`), and lists any pending steps.
+(`migrations 4/4`), and lists any pending steps.
 
 ## Upgrading MemCastle
 

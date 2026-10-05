@@ -31,7 +31,7 @@ MemCastle is running
   endpoint   http://127.0.0.1:8420 (from the daemon's registry file)
   mcp        http://127.0.0.1:8420/mcp
   palace     default (/home/alice/.local/share/memcastle/default)
-  datastore  ok - embedded /home/alice/.local/share/memcastle/default/db, migrations 3/3
+  datastore  ok - embedded /home/alice/.local/share/memcastle/default/db, migrations 4/4
   drawers    0
   jobs       0 queued, 0 running, 0 paused
   mode       full
