@@ -90,7 +90,7 @@ A client that can only launch a local command (stdio) cannot connect to MemCastl
 
 ## Use it
 
-The client discovers 17 tools, all named `memcastle_*`, and the daemon sends it instructions on how to use them.
+The client discovers 18 tools, all named `memcastle_*`, and the daemon sends it instructions on how to use them.
 The [tool reference](mcp-and-api.md#mcp-tools) lists each one.
 Typical use is to ask the agent to search the palace before answering, and to save decisions with `memcastle_checkpoint`
 or `memcastle_diary_write`.

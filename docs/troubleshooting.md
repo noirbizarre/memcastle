@@ -201,7 +201,8 @@ The REST API answers `409`.
 ### `memcastle::cli::aborted`
 
 You answered "no" (or just pressed Enter, which means no) to a confirmation, and nothing was changed.
-`repair --apply`, `auth generate`, `auth revoke`, `job cancel` and the `delete` commands of `wing`, `room` and `drawer`
+`repair --apply`, `auth generate`, `auth revoke`, `job cancel`, `source remove`, the `delete` commands of `wing`, `room`
+and `drawer`, and `source install` and `source update` when a package asks for permissions,
 ask before they act when run in a terminal.
 Run the command again and answer `y`, or pass `--yes` to skip the question.
 In a script, CI job or pipe they never ask, so this error only appears at a keyboard.

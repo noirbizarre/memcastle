@@ -192,7 +192,7 @@ memcastle --version
 ```
 
 ```text
-memcastle 0.1.0
+memcastle 0.2.0
 ```
 
 `memcastle --help` lists every command; the [CLI reference](cli.md) describes them.

@@ -78,8 +78,9 @@ Nothing in `domain` knows SurrealDB exists, and nothing in `cli`, `mcp` or `api`
 The dotted line is the important one: the CLI is an HTTP client of the daemon, exactly as a script or dashboard would be.
 
 **The CLI has no business logic MCP/HTTP can't reuse.**
-Every subcommand except `serve`/`daemon start`/`daemon restart`/`migrate` and the local `completions`
-is a thin `client::DaemonClient` call —
+Every subcommand except `serve`/`daemon start`/`daemon restart`/`migrate`, the local `completions` and the local
+`source init`/`build`/`test`/`package`/`index`/`keygen` is a thin `client::DaemonClient` call
+(`note` also reads the project directory through `crate::project` to choose a wing and room, then calls the daemon) —
 `memcastle mine ./project` submits a job over HTTP the way an MCP tool call would, rather than mining anything itself.
 `daemon stop` is one of them: it only asks the daemon to shut down.
 `daemon start` and `daemon restart` add only process management:
@@ -473,13 +474,13 @@ Two fields mean "where do I read progress from" and "where do I read what it fou
   The database is its cursor: each pass asks for the next unembedded drawers, so pausing, crashing or running it again
   loses and repeats nothing, and only the `embedding` field is ever written.
   It is queued automatically after drawer-writing jobs and writes, and at startup.
-- **`Extract`** (`src/extract/job.rs`) reads every current mined drawer with no marker in `drawer_extraction`
+- **`Extract`** (`src/extract/job.rs`) reads every current mined drawer and note with no marker in `drawer_extraction`
   and writes the entities, `mentions` links and `relates_to` edges its provider finds, then the marker.
   Like `Embed` the database is its cursor, and every write is idempotent, so a crash or a retry repeats nothing.
   It first closes the open facts whose evidence drawer has since been superseded.
   The provider (`heuristic`, a `command`, or an OpenAI-compatible `http` endpoint) sits behind the `Extractor` trait,
   and `Extraction::extract` holds every answer to the closed vocabulary and its bounds.
-  It is queued after a mining job completes and at startup, when a provider is configured.
+  It is queued after a mining job completes, after a note is written and at startup, when a provider is configured.
 - **`Audit`** (`src/audit`) is a read-only consistency report, scoped to what is structurally possible
   with a single database.
   It checks for orphan drawers (a `room` reference that no longer resolves), dangling `provenance.job_id` references,
@@ -675,7 +676,7 @@ Deliberately out of scope, and each is structurally possible without rework give
 - TLS on the daemon's own listener (use a TLS-terminating proxy).
 - A read-only mode, live queries or transactions on the database admin endpoint
   ([ADR-015](adr/015-database-admin-endpoint.md)).
-- OAuth/OIDC, users, roles and scopes: 0.1 has one optional shared bearer token,
+- OAuth/OIDC, users, roles and scopes: there is one optional shared bearer token,
   and the authentication layer is where those would attach ([ADR-014](adr/014-optional-token-authentication.md)).
 - Robust cross-platform process supervision for `memcastle daemon start` and `daemon restart`
   (they are a best-effort detached spawn; use a real supervisor in production).
