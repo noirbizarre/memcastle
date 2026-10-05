@@ -4,6 +4,123 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0](https://github.com/noirbizarre/memcastle/compare/0.2.0..0.3.0) - 2026-10-05
+
+### 💫 Features
+
+- **audit**  🚨 **breaking** Name the audit job's wing `wing`, not `scope` - ([64c074c](https://github.com/noirbizarre/memcastle/commit/64c074c32539f3cae696a9fe41d467c4cac5f8c6))
+- **cli** Add `memcastle note` to capture a thought under the current project ([#193](https://github.com/noirbizarre/memcastle/issues/193)) - ([4e583a5](https://github.com/noirbizarre/memcastle/commit/4e583a57702e76c1307f18c56888ad925906492e))
+- **dedup** Deduplicate memories and resolve entity variants ([#179](https://github.com/noirbizarre/memcastle/issues/179)) - ([e019943](https://github.com/noirbizarre/memcastle/commit/e01994342cdf1b25d28defb88da412532d8da451))
+- **extract** Extract entities and relationships from mined content ([#156](https://github.com/noirbizarre/memcastle/issues/156)) - ([8a030f3](https://github.com/noirbizarre/memcastle/commit/8a030f325c8476279e6c547daea6c10f1321882f))
+- **integration** Add memcastle integration list|install|update|remove - ([13151d0](https://github.com/noirbizarre/memcastle/commit/13151d063f6c98e69849ebb9cc493f92a2ebacbf))
+- **integrations** Bundle Pi and OpenCode and ship them with releases - ([74b13b6](https://github.com/noirbizarre/memcastle/commit/74b13b6b23dbc901012e69eb5eb34ab94bb2491d))
+- **integrations** Show classified failures to the user in Pi and OpenCode ([#199](https://github.com/noirbizarre/memcastle/issues/199)) - ([a653d10](https://github.com/noirbizarre/memcastle/commit/a653d10c7c5f87ff7fc3358e7c2bb1cdc3b9ba14))
+- **integrations** Scope Pi and OpenCode memory to the project's wing and room - ([fa52437](https://github.com/noirbizarre/memcastle/commit/fa524373ddaae2f43905ed37716eb0c0ba851ad3))
+- **integrations** Prove memory modes across Pi and OpenCode - ([86e0fa7](https://github.com/noirbizarre/memcastle/commit/86e0fa78d8230c8146574973ca8e76b3d1a1f46c))
+- **mcp** Annotate every tool with a title and the four behaviour hints ([#205](https://github.com/noirbizarre/memcastle/issues/205)) - ([8facbf7](https://github.com/noirbizarre/memcastle/commit/8facbf75819ec514b3fd7210b5041b5da3463950))
+- **mining**  🚨 **breaking** Name the source adapter `source`, not `provider` - ([e1266c6](https://github.com/noirbizarre/memcastle/commit/e1266c684c0852121908a66bb7bbf170c19554c4))
+- **mining** Mine a directory into the wing its project file declares - ([17b0b67](https://github.com/noirbizarre/memcastle/commit/17b0b671dba0bb6ab400f085613b84fafc392d3c))
+- **mining**  🚨 **breaking** Pi history is an installed WebAssembly source ([#191](https://github.com/noirbizarre/memcastle/issues/191)) - ([f302d0e](https://github.com/noirbizarre/memcastle/commit/f302d0e73b3187d12b794c116c5cd4f581a8b68e))
+- **mining** Pluggable source adapters as WebAssembly components ([#178](https://github.com/noirbizarre/memcastle/issues/178)) - ([db65907](https://github.com/noirbizarre/memcastle/commit/db659078a4d32ee425a021b97efa19af790e49bd))
+- **mining** Unified Source model with incremental mining and a Pi sessions adapter ([#154](https://github.com/noirbizarre/memcastle/issues/154)) - ([4a7fe28](https://github.com/noirbizarre/memcastle/commit/4a7fe28aa8d01a16c08b6d76ec2fef17d9c8cde1))
+- **opencode** Never attempt a write in a read-only session - ([705e09e](https://github.com/noirbizarre/memcastle/commit/705e09eff3849bedf4865ea6d22376e33dfc5486))
+- **opencode** Checkpoint on an interval, on demand and before compaction - ([c9d931e](https://github.com/noirbizarre/memcastle/commit/c9d931e949d1ebbc8efa68a8f93df49e97054d4e))
+- **opencode** Reuse the shared search-before-answer and checkpoint skills - ([840f013](https://github.com/noirbizarre/memcastle/commit/840f0139e8448c0f0d2a378a59ceb9ebae0749b4))
+- **opencode** Wake up on session start - ([76d4619](https://github.com/noirbizarre/memcastle/commit/76d4619a7453f70686201dc6abb45b0604ece28a))
+- **opencode** Support OpenCode 1 and OpenCode 2 from one package ([#153](https://github.com/noirbizarre/memcastle/issues/153)) - ([9b1b864](https://github.com/noirbizarre/memcastle/commit/9b1b86497069b028e38154b5cf5599d0dedd5c76))
+- **opencode** Keep each session's MCP connection alive and replace it when the daemon forgets it - ([5664a48](https://github.com/noirbizarre/memcastle/commit/5664a48266d9994f64c57ab627aa3a0537ffe476))
+- **opencode** Scaffold the OpenCode integration plugin - ([02b89b1](https://github.com/noirbizarre/memcastle/commit/02b89b1bd43ba0deeb9856e061e2b06836d08777))
+- **pi** Save an emergency checkpoint before context compaction ([#198](https://github.com/noirbizarre/memcastle/issues/198)) - ([f2f7ff7](https://github.com/noirbizarre/memcastle/commit/f2f7ff7955dbd501a7877c105fea0c2f46ca12fb))
+- **pi** Checkpoint on an interval and on demand - ([e1c8c21](https://github.com/noirbizarre/memcastle/commit/e1c8c21c56cfbfeb71b81904065e5b3531db6472))
+- **pi** Inject the search-before-answer skill every turn - ([5fe5349](https://github.com/noirbizarre/memcastle/commit/5fe53499bd9ff4cce64deb12eb42b4b98f19dd8b))
+- **pi** Wake up on session start - ([bc7413f](https://github.com/noirbizarre/memcastle/commit/bc7413fc19efec2092f34278d59502c271cda7d6))
+- **pi** Keep the MCP session alive and replace it when the daemon forgets it - ([b0fe088](https://github.com/noirbizarre/memcastle/commit/b0fe088a79c71f3876fb3d4208d26b470f108f44))
+- **pi** Scaffold the Pi integration package - ([6f273c9](https://github.com/noirbizarre/memcastle/commit/6f273c95e586e712c2a3520058483f7205e6a85f))
+- **search** Add temporal interval retrieval and drawer history ([#195](https://github.com/noirbizarre/memcastle/issues/195)) - ([c529763](https://github.com/noirbizarre/memcastle/commit/c52976359b74a0641193ea8da63676d26eb1ed35))
+- **search** SurrealDB-native semantic, hybrid, temporal and graph-aware retrieval ([#149](https://github.com/noirbizarre/memcastle/issues/149)) - ([645539d](https://github.com/noirbizarre/memcastle/commit/645539df58e476012dc3fca8f474fcaec9ad2881))
+- **skills** Distribute reusable agent skills with the repository ([#148](https://github.com/noirbizarre/memcastle/issues/148)) - ([0e1ca74](https://github.com/noirbizarre/memcastle/commit/0e1ca74a5dcb52b241f2b814400cfe0c3cace559))
+- **sources** Distribute sources through registries and bundle the official ones ([#196](https://github.com/noirbizarre/memcastle/issues/196)) - ([0fb3c18](https://github.com/noirbizarre/memcastle/commit/0fb3c18d134d214ab1c925aaf0db8c467314d8d9))
+- **sources** Add the OpenCode history source ([#194](https://github.com/noirbizarre/memcastle/issues/194)) - ([01369ad](https://github.com/noirbizarre/memcastle/commit/01369ad78d3a1309962457d7795ac4e472cadf50))
+
+### 🐛 Bug Fixes
+
+- **api** Accept `query` for the text of a POST /api/search body - ([2353d13](https://github.com/noirbizarre/memcastle/commit/2353d1391ea7b9343584c24a24b0b95aadcaa385))
+- **app** Apply one limit rule to every read - ([d9db326](https://github.com/noirbizarre/memcastle/commit/d9db326654fa81bd46313263cdd1ea5aae31e3fc))
+- **ci** List the package once before checking it, and gate the Unix-path test - ([868651c](https://github.com/noirbizarre/memcastle/commit/868651cef60a4b2893711355dc0514bc736a0d4a))
+- **ci** Restore the pinned Rust toolchain in the release workflow ([#145](https://github.com/noirbizarre/memcastle/issues/145)) - ([0c6e4c5](https://github.com/noirbizarre/memcastle/commit/0c6e4c5b2ade2a91060ed1f601e42585bdb6a1cc))
+- **cli** Stop `integration remove` accepting an --assets-dir it never reads - ([0b61f44](https://github.com/noirbizarre/memcastle/commit/0b61f441786234c3dd7ff3ebb9c1d0035d971f5a))
+- **client** Report a malformed daemon address as a configuration error, not a retryable request failure - ([83f91ac](https://github.com/noirbizarre/memcastle/commit/83f91ac9288f85fb715becc8a96b2a765012b911))
+- **integration** Build the installer's tests on Windows - ([1b2569f](https://github.com/noirbizarre/memcastle/commit/1b2569fa9ea80fa7f610fe04935e90ae55c4bac3))
+- **integrations** Keep the invalid-input code list clear of the integrations guard - ([64dedc2](https://github.com/noirbizarre/memcastle/commit/64dedc2a93e10181c4e039490d212beae111ecaf))
+- **integrations** Classify every invalid-input code as invalid input - ([a1f0ccd](https://github.com/noirbizarre/memcastle/commit/a1f0ccd6ad3a5e615050148f7990cdb3a53262d6))
+- **mcp** Advertise every checkpoint item field - ([c3f9d70](https://github.com/noirbizarre/memcastle/commit/c3f9d70d1ec9301281e06a7947acbcc339981e20))
+- **mining** Sanitise and validate the default wing like note does - ([1a7f93c](https://github.com/noirbizarre/memcastle/commit/1a7f93cc2ae8cd20d6b1c0b4090e7c97b337afb6))
+- **source** Stop the bundle script deleting a component the wasm tests are reading ([#207](https://github.com/noirbizarre/memcastle/issues/207)) - ([5dc379f](https://github.com/noirbizarre/memcastle/commit/5dc379fe55ef733673e0fca115b3edd206ad53b5))
+- **store** Retry drawer writes that lose a write conflict to index compaction ([#152](https://github.com/noirbizarre/memcastle/issues/152)) - ([98cb747](https://github.com/noirbizarre/memcastle/commit/98cb7475f535655671cdc0dd7278c3acaa2fb880))
+- Name the right room, operation and URL segments in small API inconsistencies - ([97f0e4a](https://github.com/noirbizarre/memcastle/commit/97f0e4a9ffc98356d4e08fe4d92612c2cdeb54c4))
+
+### 🔨 Refactor
+
+- **domain** Derive thiserror for PackageTransitionError and word it with the names source list shows - ([7c0128c](https://github.com/noirbizarre/memcastle/commit/7c0128cfa203dede7f1d9cd07862ba8117762c55))
+- **error** Share one drawer and entity id parser between REST and MCP - ([dfda49b](https://github.com/noirbizarre/memcastle/commit/dfda49b4dac4c5e56165ce07139b47b33827971c))
+- **error**  🚨 **breaking** One word order and no implementation layers in diagnostic codes - ([f568cbd](https://github.com/noirbizarre/memcastle/commit/f568cbdb78c62a2d5d7c9637e24f37f64f8bead1))
+- **migrate** Squash the unreleased data migrations into one version 3 step - ([347c67b](https://github.com/noirbizarre/memcastle/commit/347c67b4a0b5314ca30e772b0d82e7356143a83e))
+
+### 📚 Documentation
+
+- **adr** Carry every amendment in the index and cross-reference ADR-024, 031 and 033 - ([8a3f180](https://github.com/noirbizarre/memcastle/commit/8a3f1806e9acdb4134a742263cff0340a9bc8489))
+- **agents** Add scope and cost rules for agents ([#180](https://github.com/noirbizarre/memcastle/issues/180)) - ([84973a3](https://github.com/noirbizarre/memcastle/commit/84973a3a3514dc34bd8422ced5eafb37e400fbb4))
+- **api** Correct comments that overstated MCP coverage and the header casing, and complete the memory-mode matrix - ([e58d2be](https://github.com/noirbizarre/memcastle/commit/e58d2be8933a240babca9ef073a82100c1ec283b))
+- **api** Add GET /api/sources and the full registry preview shape - ([f1d0997](https://github.com/noirbizarre/memcastle/commit/f1d0997732583b67c0935e9ae6559a228f6469d7))
+- **api** List the embed job type in POST /api/jobs - ([a4ab65e](https://github.com/noirbizarre/memcastle/commit/a4ab65e4ee0f2cfd6afa20c7a44c681c1f9147fa))
+- **cli** Correct which source commands are local, which print JSON, and what --mode does - ([3517039](https://github.com/noirbizarre/memcastle/commit/3517039ac21d97d88d20977e8807550287693056))
+- **cli** Source install and update refuse without a terminal instead of proceeding - ([f14eb11](https://github.com/noirbizarre/memcastle/commit/f14eb110bd86cd43f366b9b97c2742e8372bb518))
+- **daemon** Daemon start never replaces a degraded daemon - ([f2bb155](https://github.com/noirbizarre/memcastle/commit/f2bb15525eacc34691b26af1f212b750cafdf3e5))
+- **integrations** Drop the unused Foundation status and stale scaffold wording, list project-core - ([b90f5e1](https://github.com/noirbizarre/memcastle/commit/b90f5e14eaaf2d3b0d5178ae8b800cb60f3e4adf))
+- **integrations** MEMCASTLE_MODE takes different labels in the CLI and in Pi and OpenCode - ([d7529c5](https://github.com/noirbizarre/memcastle/commit/d7529c5092fe34c8125fc59b57cf5679d996c9cb))
+- **integrations** Document the MCP session lifetime and recovery - ([8f8f854](https://github.com/noirbizarre/memcastle/commit/8f8f854784c7c304d0e14ddd19b4718e38aed608))
+- **integrations** Define the shared Pi/OpenCode integration contract ([#147](https://github.com/noirbizarre/memcastle/issues/147)) - ([c937e0f](https://github.com/noirbizarre/memcastle/commit/c937e0fc3fa3be89b0315bdaf2ddd0281408c615))
+- **mcp-clients** Warn against adding mcp.memcastle next to the OpenCode plugin - ([f101364](https://github.com/noirbizarre/memcastle/commit/f101364313fca8b2d96ed9a0910ff0bd013b7d0e))
+- **migrations** Describe the renamed-fields piece and wrap long lines - ([4f2222a](https://github.com/noirbizarre/memcastle/commit/4f2222a7b0e833f82027512ac156219d1bc91558))
+- **opencode** Map OpenCode extension mechanisms to MemCastle operations - ([b9e3026](https://github.com/noirbizarre/memcastle/commit/b9e3026f43bc488ee9a8507c1cbec5bb93d16d8d))
+- **plan** Say the platform adapters are planned as WebAssembly sources, and #42 is done - ([572c17a](https://github.com/noirbizarre/memcastle/commit/572c17a3b67520e2ad3fd851f29992c28fbd2b40))
+- **project-config** An explicit wake-up source outranks the project file - ([8cfedf4](https://github.com/noirbizarre/memcastle/commit/8cfedf4abb8be750c7987a60c765a28eccec3783))
+- **skills** Name memcastle_history and qualify lexical matching - ([b8632b6](https://github.com/noirbizarre/memcastle/commit/b8632b6c6c68523061a7f9237cccac4d50247221))
+- **test** Record the CI timings after merging the in-process binaries - ([c946d7b](https://github.com/noirbizarre/memcastle/commit/c946d7b3e5fbf665cc66ca2b56a6a60b0620e94f))
+- **test** Record the CI timings after the shared build - ([1eb7228](https://github.com/noirbizarre/memcastle/commit/1eb7228c09a54f0be33f3c47bdc2b36e2a19a9db))
+- **test** Use the warm-cache timings in the CI table - ([47e5f26](https://github.com/noirbizarre/memcastle/commit/47e5f263c9e40aed865256d9d7fd97730fb37fca))
+- **test** Record the CI timings of the basic and wasm suites - ([2ea20fc](https://github.com/noirbizarre/memcastle/commit/2ea20fcc2656156ab7bbfd003e940f57155fba8d))
+- Bring the README, skills README, ADR index, task table and layout up to date - ([464c559](https://github.com/noirbizarre/memcastle/commit/464c5590f99fc10ce1c652a4a9b67015d6366c9b))
+- Correct the comments on audit gating and on what extraction reads - ([20600d2](https://github.com/noirbizarre/memcastle/commit/20600d24b163d5d52d85e2345c74a9686ac51de2))
+- Name the integration commands among those that need no daemon - ([ba84d60](https://github.com/noirbizarre/memcastle/commit/ba84d60f38f0f1b98a55e3e8918f1069090f2a1d))
+- Stop calling the bundled sources the only package asset - ([6a3dd1b](https://github.com/noirbizarre/memcastle/commit/6a3dd1bf50c2695e12aaae27ce7dfa3fa10f30a8))
+- List integrations and skills in the release package layout - ([91925ea](https://github.com/noirbizarre/memcastle/commit/91925ea5cdc8d3729bcdf22224dbc8bb6ce23241))
+- Show 3/3 migrations in the status samples - ([2646e17](https://github.com/noirbizarre/memcastle/commit/2646e17c3312fc8f46619a69f81660d479fc5397))
+- Say what mise run ci runs, list the missing mise tasks and the pages the indexes skipped - ([e6a9370](https://github.com/noirbizarre/memcastle/commit/e6a9370a1745eecdf23d456d864b39f0040aa8a8))
+- Correct stale code comments and module docs - ([7eaaa3f](https://github.com/noirbizarre/memcastle/commit/7eaaa3f2a0df8e1c3bdd41764827e3cefa2b24eb))
+- Complete the contributor guides and add the missing ADR amendment notes - ([7ba4cc5](https://github.com/noirbizarre/memcastle/commit/7ba4cc566ad3a01dd07f5cbad3c58340a5574a87))
+- Align the CLI, mode and extraction pages with the code - ([af70cc1](https://github.com/noirbizarre/memcastle/commit/af70cc16420d52e2536576a7a65fceaa8b0ff81a))
+- List the supersession-lineage migration - ([5c8c57b](https://github.com/noirbizarre/memcastle/commit/5c8c57b1f29f156a2e0814437e48a3f7de335ba2))
+- Describe the bundled sources in the install tree - ([25860e1](https://github.com/noirbizarre/memcastle/commit/25860e1f4f0df6f2bdc85e8d5b8d2923e6013fc0))
+
+### 🧪 Tests
+
+- **auth** Guard the drawer history route - ([f8bb332](https://github.com/noirbizarre/memcastle/commit/f8bb332b82b25ecdcc34c70aef012f3d39ebab28))
+- **integration** Cover the installer's failure paths and move the command into the library - ([3d8963f](https://github.com/noirbizarre/memcastle/commit/3d8963f949693e372367814f2932fc5e62daf575))
+- **integrations** Hold the failure and mode copies to be identical - ([13cb942](https://github.com/noirbizarre/memcastle/commit/13cb942ceded43e737b832588c1c2e638d2b948b))
+- **wasm** Build components into one shared target and lockfile - ([ec15471](https://github.com/noirbizarre/memcastle/commit/ec154716d6ad02a3f1c4284013c99d784239131d))
+- Forbid the source names that exist today in the pipeline and the domain model - ([22a4830](https://github.com/noirbizarre/memcastle/commit/22a4830b5f20a0b67c5120478f08b954723828d2))
+- Run the in-process daemon tests as one binary - ([be09c14](https://github.com/noirbizarre/memcastle/commit/be09c147be532541dace824c301f9a10310b5437))
+
+### 🏗️ Build
+
+- **deps** Bump surrealkit ([#190](https://github.com/noirbizarre/memcastle/issues/190)) - ([9aa7d97](https://github.com/noirbizarre/memcastle/commit/9aa7d97f4ea57576f13b2e12e60985ad25cb0ecf))
+
+### 🔧 CI
+
+- **test** Build only the wasm test binaries in the wasm suite - ([a5d4cd5](https://github.com/noirbizarre/memcastle/commit/a5d4cd5c9453410ef6cbec742812525b2c304368))
+- **test** Split the WebAssembly tests into their own suite and CI jobs ([#184](https://github.com/noirbizarre/memcastle/issues/184)) - ([384048b](https://github.com/noirbizarre/memcastle/commit/384048b77c43645271b5eeeeca1bdc756b4580dc))
+
 ## [0.2.0](https://github.com/noirbizarre/memcastle/compare/0.1.0..0.2.0) - 2026-10-03
 
 ### 💫 Features
