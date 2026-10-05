@@ -156,6 +156,8 @@ pub fn run_dir() -> PathBuf {
 mod tests {
     use super::*;
 
+    // Absolute paths are spelled the Unix way; a Windows `/cfg` has no drive and so is not absolute there.
+    #[cfg(unix)]
     #[test]
     fn the_base_directory_is_the_xdg_variable_or_the_home_default_without_the_application_name() {
         let home = Path::new("/home/u");

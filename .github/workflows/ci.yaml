@@ -321,16 +321,19 @@ jobs:
       - name: Check the package contents
         run: |
           for asset in linux-amd64 linux-arm64; do
-            dpkg-deb --contents "dist/memcastle_0.0.0_${asset}.deb" | grep -q ' ./usr/bin/memcastle$'
-            dpkg-deb --contents "dist/memcastle_0.0.0_${asset}.deb" | grep -q ' ./usr/lib/systemd/user/memcastle.service$'
-            for file in usr/share/bash-completion/completions/memcastle \
+            # Listed once: `grep -q` quits at its first match, and with `pipefail` the producer's broken pipe then
+            # fails the step as the listing grows.
+            dpkg-deb --contents "dist/memcastle_0.0.0_${asset}.deb" > contents.txt
+            for file in usr/bin/memcastle \
+                        usr/lib/systemd/user/memcastle.service \
+                        usr/share/bash-completion/completions/memcastle \
                         usr/share/zsh/site-functions/_memcastle \
-                        usr/share/fish/vendor_completions.d/memcastle.fish; do
-              dpkg-deb --contents "dist/memcastle_0.0.0_${asset}.deb" | grep -q " ./${file}$"
+                        usr/share/fish/vendor_completions.d/memcastle.fish \
+                        usr/share/memcastle/sources/memcastle-index.json \
+                        usr/share/memcastle/integrations/pi/memcastle-integration.toml \
+                        usr/share/memcastle/skills/wake-up/SKILL.md; do
+              grep -q " ./${file}$" contents.txt || { echo "::error::${asset}: ${file} is not in the package"; exit 1; }
             done
-            dpkg-deb --contents "dist/memcastle_0.0.0_${asset}.deb" | grep -q ' ./usr/share/memcastle/sources/memcastle-index.json$'
-            dpkg-deb --contents "dist/memcastle_0.0.0_${asset}.deb" | grep -q ' ./usr/share/memcastle/integrations/pi/memcastle-integration.toml$'
-            dpkg-deb --contents "dist/memcastle_0.0.0_${asset}.deb" | grep -q ' ./usr/share/memcastle/skills/wake-up/SKILL.md$'
           done
 
   # gh-ship runs the release. Its configuration and the workflows it names must
