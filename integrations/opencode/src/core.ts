@@ -8,7 +8,7 @@ import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { type CheckpointArgs, type Checkpoints, type ReviewHost, createCheckpoints } from "./checkpoint.ts"
 import type { Turn } from "./checkpoint-core.ts"
-import { MemCastleFailure } from "./failures.ts"
+import { MemCastleFailure, type Severity, presentFailure } from "./failures.ts"
 import { InvalidModeError } from "./modes.ts"
 import { ProjectScopes } from "./project-core.ts"
 import { recallInstruction } from "./recall-core.ts"
@@ -24,6 +24,18 @@ export type Level = "debug" | "info" | "warn" | "error"
 
 /** Where the plugin reports to; each host supplies its own, and a log must never be the reason a hook fails. */
 export type Log = (level: Level, message: string, extra?: Record<string, unknown>) => Promise<void>
+
+/**
+ * Where a failure the user should see is shown, such as OpenCode's toast. Best effort: a host without a screen to put
+ * it on (`opencode run`, a server) simply has none, and the log line is then the only record.
+ */
+export type Notify = (severity: Severity, message: string) => Promise<void>
+
+/** The same toast is not shown again within this long, so a daemon that stays down does not toast at every interval. */
+export const NOTIFY_THROTTLE_MS = 60_000
+
+/** The log level of each severity: OpenCode's log calls what the toast calls a warning `warn`. */
+const LOG_LEVEL: Record<Severity, Level> = { info: "info", warning: "warn", error: "error" }
 
 export interface Core {
   readonly sessions: SessionRegistry
@@ -65,7 +77,8 @@ export interface Core {
 /**
  * Resolve the settings and build the lifecycle handlers, or return `undefined` when the plugin must do nothing.
  *
- * Every handler is guarded: a MemCastle failure is reported through `log` and never breaks the user's OpenCode session.
+ * Every handler is guarded: a MemCastle failure is reported through `log`, and through `notify` when the host has a
+ * screen, and never breaks the user's OpenCode session.
  */
 export async function createCore(
   options: Record<string, unknown> | undefined,
@@ -77,6 +90,10 @@ export async function createCore(
   // How to read a session's conversation and ask a model about it. Without one the plugin cannot review (#34), and a
   // checkpoint can only be submitted with a payload the model wrote itself.
   host?: ReviewHost,
+  // How to put a failure on the user's screen. Without one a failure is only logged, as before.
+  notify?: Notify,
+  // The clock the toast throttle reads, so a test does not have to wait a minute.
+  now: () => number = Date.now,
 ): Promise<Core | undefined> {
   let settings
   try {
@@ -97,10 +114,30 @@ export async function createCore(
   const sessions = new SessionRegistry(settings, env)
   await log("info", "MemCastle plugin ready.", describeSettings(settings))
 
+  // When each message was last shown on screen, so a failure that repeats is told once and not at every idle event.
+  const toasted = new Map<string, number>()
+  const toast = async (severity: Severity, message: string) => {
+    if (!notify) return
+    const last = toasted.get(message)
+    if (last !== undefined && now() - last < NOTIFY_THROTTLE_MS) return
+    toasted.set(message, now())
+    // Best effort like the log: a host that cannot show a toast must not turn a reported failure into a thrown one.
+    try {
+      await notify(severity, message)
+    } catch {
+      // Nothing more can be said: the log line above already carries the failure.
+    }
+  }
+
   const report = async (name: string, error: unknown) => {
-    const message = error instanceof MemCastleFailure ? error.toUserMessage() : String(error)
+    // Only a classified failure knows how loud it is. Anything else (a string this plugin worded itself, or an error
+    // thrown from a hook) is something that went wrong beside the user's work, so it is a warning and never an error.
+    const { severity, message } =
+      error instanceof MemCastleFailure ? presentFailure(error) : { severity: "warning" as const, message: String(error) }
+    // The log keeps the hook's name, which is what a bug report needs; the screen only needs what to do.
     // Logging is itself best effort: a failing host logger must not turn a reported failure into a thrown one.
-    await log("warn", `${name}: ${message}`).catch(() => undefined)
+    await log(LOG_LEVEL[severity], `${name}: ${message}`).catch(() => undefined)
+    await toast(severity, message)
   }
 
   const guarded =

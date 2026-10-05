@@ -9,6 +9,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { describeOutcome } from "./checkpoint-core.ts"
+import { START_HINT } from "./failures.ts"
 import { CHECKPOINT_STATUS, type CheckpointSessions, piReviewIo } from "./checkpoint-agent.ts"
 import type { McpManager } from "./mcp-manager.ts"
 
@@ -27,7 +28,7 @@ export function registerCheckpointTool(pi: ExtensionAPI, manager: () => McpManag
       }
       // The start has already told the user why it failed; here they only need to know why nothing happened.
       if (!(await current.ready)) {
-        notify("MemCastle is not connected, so nothing was saved. Start it with `memcastle daemon start`.", "warning")
+        notify(`MemCastle is not connected, so nothing was saved. ${START_HINT}`, "warning")
         return
       }
       const state = sessions.for(current)

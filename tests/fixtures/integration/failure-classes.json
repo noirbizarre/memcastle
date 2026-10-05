@@ -1,12 +1,14 @@
 {
   "version": 1,
-  "description": "The failure classes an integration must tell apart, and what the daemon gives it to do so. `detected_by` says where the signal comes from: `transport` means no daemon answered, `http_status` and `tool_error` mean the daemon answered with an error body of the shape {error, code, help}, `job` means a job reached `failed` and carries `error`. An integration shows the user `help` when it has one.",
+  "description": "The failure classes an integration must tell apart, and what the daemon gives it to do so. `detected_by` says where the signal comes from: `transport` means no daemon answered, `http_status` and `tool_error` mean the daemon answered with an error body of the shape {error, code, help}, `job` means a job reached `failed` and carries `error`. An integration shows the user `help` when it has one. `severity` is how loudly the client shows the class: `info` is not a fault (the session's own choice at work), `warning` is something the user can fix, `error` is a bug or a daemon fault. `message_must_contain` lists text the user-facing message of the class must carry, so the next step is always named.",
   "classes": [
     {
       "id": "daemon_unavailable",
       "detected_by": "transport",
       "http_status": null,
       "code": null,
+      "severity": "warning",
+      "message_must_contain": ["memcastle daemon start", "memcastle serve", "memcastle status"],
       "client_must": "say that the daemon cannot be reached and how to start it; never invent memory content"
     },
     {
@@ -14,6 +16,8 @@
       "detected_by": "http_status",
       "http_status": 401,
       "code": "memcastle::auth::unauthorized",
+      "severity": "warning",
+      "message_must_contain": [],
       "client_must": "say that a token is needed and relay `help`"
     },
     {
@@ -21,6 +25,8 @@
       "detected_by": "tool_error",
       "http_status": 403,
       "code": "memcastle::app::mode_forbidden",
+      "severity": "info",
+      "message_must_contain": [],
       "client_must": "treat it as the session's own choice, not as a fault, and say which operation was refused"
     },
     {
@@ -34,6 +40,8 @@
         "memcastle::domain::empty_label",
         "memcastle::search::semantic_unavailable"
       ],
+      "severity": "warning",
+      "message_must_contain": [],
       "client_must": "report it as a bug in the integration or the model's payload, with `help`"
     },
     {
@@ -41,6 +49,8 @@
       "detected_by": "job",
       "http_status": null,
       "code": null,
+      "severity": "warning",
+      "message_must_contain": ["memcastle_job_retry"],
       "client_must": "report `Job.error`, and offer a retry through memcastle_job_retry"
     }
   ]

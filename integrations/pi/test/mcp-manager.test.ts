@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test"
 import { MemCastleFailure } from "../src/failures.ts"
+import { fixture } from "./support/fixtures.ts"
 import { McpManager } from "../src/mcp-manager.ts"
 import { TestDaemon } from "./support/daemon.ts"
 
@@ -77,4 +78,35 @@ test("a refusal by the session's own mode is information, and any other class is
   mcp.report(new Error("plain"), notify)
   expect(seen.map((entry) => entry.level)).toEqual(["info", "warning", "error", "error"])
   expect(seen[0]?.message).toContain("It is read-only.")
+})
+
+test("a failure the real daemon sends is shown with the severity the shared fixture promises for its class", async () => {
+  const classes = fixture<{ classes: { id: string; severity: string }[] }>("failure-classes.json").classes
+  const severityOf = (id: string) => classes.find((entry) => entry.id === id)?.severity ?? "missing"
+  const { seen, notify } = notes()
+
+  // A read-only session asking for a write: the daemon refuses it, and that is the session's own choice at work.
+  const readOnly = manager("read-only")
+  await readOnly.start(notify)
+  const refused = await readOnly.session
+    ?.call("memcastle_checkpoint", {
+      payload: {
+        items: [{ destination: "general", content: "x", tags: [], source: { kind: "manual", uri: null, agent: "test-agent" }, fact: null }],
+      },
+    })
+    .catch((error: unknown) => error)
+  readOnly.report(refused, notify)
+  await readOnly.stop()
+
+  // A full session sending an empty payload: the daemon refuses it as malformed.
+  const full = manager("full")
+  await full.start(notify)
+  const malformed = await full.session?.call("memcastle_checkpoint", { payload: { items: [] } }).catch((error: unknown) => error)
+  full.report(malformed, notify)
+  await full.stop()
+
+  expect(seen.map((entry) => entry.level)).toEqual([severityOf("mode_rejected"), severityOf("invalid_input")])
+  // The daemon's own words reach the user, including what to do next.
+  expect(seen[0]?.message.startsWith("MemCastle: ")).toBe(true)
+  expect(seen[0]?.message).toContain("is not permitted")
 })

@@ -187,8 +187,11 @@ the integration to act in a session that is meant to have none.
 ### Failure reporting
 
 `client.tui.showToast` shows a message and `client.app.log` writes a structured log line.
-Both exist in the SDK typings.
-Neither is verified under `opencode run`, where there is no TUI, so the plugin must fall back to the log.
+Both exist in the OpenCode 1 SDK typings, and the toast takes `{ title?, message, variant }`.
+Neither is verified under `opencode run`, where there is no TUI, so the plugin always writes the log line and treats the
+toast as best effort (#126).
+OpenCode 2's server plugin context has neither: `Toast.show` is on the TUI plugin context (`@opencode/plugin/tui`),
+which a server plugin cannot reach, so OpenCode 2 reports to the console at the failure's level.
 
 ## Gaps and risks
 
@@ -198,7 +201,7 @@ Neither is verified under `opencode run`, where there is no TUI, so the plugin m
 | Pre-compaction | A stable (non-`experimental`) hook | Use `experimental.session.compacting`; else `memcastle checkpoint --emergency` | Context may be lost without a last checkpoint if the hook changes |
 | Hiding skills per session | A per-session tool or skill filter | None needed: an `off` plugin registers no skills; a copy installed by hand is out of scope | A skill the user installed under `.agents/skills` still loads |
 | Per-session mode over native MCP | One connection per session in the built-in client | A plugin-owned connection per `sessionID` | Tool names differ from the plain-MCP setup |
-| TUI-only toasts | A TUI under `opencode run` or `serve` | Structured log through `client.app.log` | The failure is in the log, not on screen |
+| TUI-only toasts | A TUI under `opencode run` or `serve`; any toast for an OpenCode 2 server plugin | Structured log through `client.app.log`, or the console on OpenCode 2 | The failure is in the log, not on screen |
 
 ## Decisions for the follow-up issues
 
@@ -212,8 +215,8 @@ Neither is verified under `opencode run`, where there is no TUI, so the plugin m
    and re-selected on every reconnect.
 5. **Foundation (#32)**: the `src/` layout follows these needs, not Pi's: a per-session connection registry, a
    mode translator, a failure classifier and the hook wiring in `src/index.ts`.
-6. **Verify first**: confirm `experimental.session.compacting`, `client.tui.showToast` and the idle timing with a probe
-   before building on them.
+6. **Verify first**: confirm `experimental.session.compacting` and the idle timing with a probe before building on them.
+   `client.tui.showToast` needs none: it is best effort, behind a log line that is always written.
 
 ## OpenCode 2
 

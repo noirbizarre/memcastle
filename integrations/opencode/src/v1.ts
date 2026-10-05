@@ -10,7 +10,7 @@ import {
   checkpointArgs,
 } from "./checkpoint.ts"
 import { type Turn, textOf, turnOf } from "./checkpoint-core.ts"
-import { createCore } from "./core.ts"
+import { type Notify, createCore } from "./core.ts"
 import { MemCastleFailure } from "./failures.ts"
 import { addSkillsPath } from "./skills.ts"
 
@@ -119,7 +119,12 @@ export const server: Plugin = async ({ client, directory }, options) => {
   const log = async (level: "debug" | "info" | "warn" | "error", message: string, extra?: Record<string, unknown>) => {
     await client.app.log({ body: { service: "memcastle", level, message, extra } }).catch(() => undefined)
   }
-  const core = await createCore(options, log, process.env, directory, v1Host(client))
+  // A toast in the TUI, so a failure is seen when it happens and not found later in a log. Under `opencode run` or a
+  // server there is no TUI to show it, which is why the log line is always written as well.
+  const notify: Notify = async (severity, message) => {
+    await client.tui.showToast({ body: { title: "MemCastle", message, variant: severity } })
+  }
+  const core = await createCore(options, log, process.env, directory, v1Host(client), notify)
   if (!core) return {}
 
   const hooks: Hooks = {
