@@ -15,8 +15,9 @@ use super::error::ApiError;
 
 /// The header name clients set to request a non-default memory mode.
 /// Header lookup is case-insensitive (`axum`'s `HeaderMap` normalizes
-/// names), so this exact casing is just the canonical spelling to
-/// document, not a requirement on callers.
+/// names), so the lowercase spelling HTTP/2 uses is just the canonical one in
+/// code; the documentation writes it `X-MemCastle-Mode`, and callers may send
+/// either.
 const HEADER_NAME: &str = MemoryMode::HEADER;
 
 /// The effective [`MemoryMode`] for one HTTP request — `Full` when the
