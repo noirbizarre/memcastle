@@ -64,7 +64,7 @@ The same issue forbids a temporal index or datastore, and requires lexical, sema
   The link is written by the store, not by a caller, so a pair cannot be half-linked and no writer can forget it.
   A drawer closed without a replacement has no `superseded_by`: that is an invalidation, not a missing link.
 - **A migration pairs history that already exists.**
-  Data migration 4, `supersession-lineage`, links a closed drawer to a successor in the same room that opened at the
+  Data migration 3 (`since-0.2`, piece `supersession-lineage`) links a closed drawer to a successor in the same room that opened at the
   instant it closed, or that came from the same mined document chunk and opened within ten seconds before.
   A link is written only when exactly one drawer qualifies, and an ambiguous or unmatched close is left alone.
 - **Mining opens the replacement at the instant it closes the old drawer.**

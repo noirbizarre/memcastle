@@ -130,7 +130,7 @@ pub struct Drawer {
     /// Set by the store in the transaction that closes the old drawer, never by
     /// a caller, so the two links of a pair cannot disagree. Absent on a first
     /// version and on drawers written before lineage was recorded that the
-    /// `supersession-lineage` migration could not pair unambiguously.
+    /// `supersession-lineage` migration piece could not pair unambiguously.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supersedes: Option<DrawerId>,
     /// The drawer that replaced this one. Absent while it is open and when it

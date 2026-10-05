@@ -23,6 +23,7 @@
 
 mod dedup_keys;
 mod diary_provenance;
+mod since_0_2;
 mod supersession_lineage;
 mod timestamps;
 
@@ -91,13 +92,8 @@ const DATA_MIGRATIONS: &[DataMigration] = &[
     },
     DataMigration {
         version: 3,
-        name: "dedup-keys",
-        apply: dedup_keys::apply,
-    },
-    DataMigration {
-        version: 4,
-        name: "supersession-lineage",
-        apply: supersession_lineage::apply,
+        name: "since-0.2",
+        apply: since_0_2::apply,
     },
 ];
 

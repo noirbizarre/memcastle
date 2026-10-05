@@ -1,4 +1,4 @@
-//! Migration 4: pair already-superseded drawers with their replacements (docs/adr/032).
+//! Piece of migration 3 (`since-0.2`): pair already-superseded drawers with their replacements (docs/adr/032).
 //!
 //! Drawers closed before supersession was recorded carry a `valid_to` but no `superseded_by`, and their
 //! replacements no `supersedes`, so a history could not be walked across them. This links the pairs that can be
@@ -32,7 +32,7 @@ mod tests {
     use crate::store::SurrealStore;
 
     const MIGRATIONS: &[DataMigration] = &[DataMigration {
-        version: 4,
+        version: 3,
         name: "supersession-lineage",
         apply: super::apply,
     }];

@@ -105,7 +105,7 @@ match any), to:
 - The extract job and the manual mention route call the entity resolver; extraction still only adds graph records.
 - Schema additions are in `database/schema/palace.surql`: `drawer.fingerprint` with indexes on it and on `content_hash`,
   `entity.key`, `aliases` and `alias_keys`, and the `similar_to` and `possibly_same_as` relations.
-  Data migration 3 (`dedup-keys`) fills the keys of existing records and merges nothing.
+  Data migration 3 (`since-0.2`, piece `dedup-keys`) fills the keys of existing records and merges nothing.
 
 ## Alternatives rejected
 
