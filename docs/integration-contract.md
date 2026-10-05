@@ -265,8 +265,13 @@ An integration must tell these classes apart, and say what to do about each.
 | `daemon_unavailable` | The connection fails, no answer | none | The daemon cannot be reached and how to start it |
 | `unauthorized` | HTTP 401 | `memcastle::auth::unauthorized` | A token is needed, and `help` |
 | `mode_rejected` | Tool error, HTTP 403 | `memcastle::app::mode_forbidden` | The session's own choice refused it, which is not a fault |
-| `invalid_input` | Tool error, HTTP 400 | `memcastle::input::invalid` | The request was malformed, and `help` |
+| `invalid_input` | Tool error, HTTP 400 | `memcastle::input::invalid`, or one of the more specific `also_codes` | The request was malformed, and `help` |
 | `job_failed` | A job reaches `failed` | none | `Job.error`, and that the job can be retried |
+
+Over MCP a tool error carries no HTTP status, so the code alone classifies it.
+The fixture lists every code the daemon answers with a 400 for a request the caller got wrong
+(`memcastle::palace::invalid_path` among them), and a client reads each of them as `invalid_input`
+rather than as a fault of the daemon.
 
 Every error body is `{error, code, help}`, and a diagnostic code is a public identifier.
 The client shows `help` because it names the next step, and never swallows a failure into an empty memory.
