@@ -225,7 +225,7 @@ jobs:
       # package content next to the sources and the integrations, and served by the daemon only when `web.enable` is
       # set. Nothing is published to npm. Vite and vue-tsc run on node. The script is the one
       # `mise run web:package` runs and tests/web_bundle.rs checks.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
       - name: Package the web dashboard
