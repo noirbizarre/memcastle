@@ -703,7 +703,7 @@ Deliberately out of scope, and each is structurally possible without rework give
   (they are a best-effort detached spawn; use a real supervisor in production).
 - A web dashboard (the API is shaped so one can be built entirely as an API client, as the CLI is).
   Its packaging is settled, in [ADR-013](adr/013-release-packaging-and-asset-resolution.md);
-  the asset directory holds only the bundled sources so far.
+  the asset directory holds the bundled sources, the agent integrations and the skills.
 - Any network-based asset download.
 
 Decisions and their rejected alternatives are collected in the [Architecture Decisions](adr/README.md).
