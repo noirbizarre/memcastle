@@ -49,7 +49,7 @@
     },
     {
       "id": "emergency-checkpoint",
-      "applies_to": ["opencode"],
+      "applies_to": ["pi", "opencode"],
       "description": "The last checkpoint before the host summarises the conversation."
     },
     {

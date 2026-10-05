@@ -87,7 +87,7 @@ native tooling, nothing more.
 The Pi and OpenCode packages are scaffolds: their connection, mode, discovery and failure foundations work and are
 tested, and wake-up on session start (#22, #33) and search-before-answer with the shared skills (#25, #36) are
 implemented in both; checkpointing is implemented in both, with interval and manual saves in Pi (#23) and interval, manual and emergency
-saves in OpenCode (#34); their other lifecycle hooks are empty.
+saves in both (#24, #34); their other lifecycle hooks are empty.
 Explicit memory modes (`full`, `read-only`, `off`) are complete in both (#27, #35): `read-only` never attempts a write
 and `off` registers nothing, proved on the wire in `common/`.
 The persistent MCP session is complete in both: one connection for the whole session, kept alive, and replaced with its

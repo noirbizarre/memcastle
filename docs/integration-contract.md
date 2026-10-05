@@ -188,7 +188,7 @@ Client responsibility: submit it at the client's last point before context is lo
 Where the client exposes no such point, this capability has a documented gap and a manual command is the fallback.
 
 Daemon-side (tested): priorities are 100 and 75.
-Client-side (tested in OpenCode): the adapter sends `emergency: true` at that lifecycle point.
+Client-side (tested in Pi and OpenCode): the adapter sends `emergency: true` at that lifecycle point.
 
 ### Persistent MCP session
 
