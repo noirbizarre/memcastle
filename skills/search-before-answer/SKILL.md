@@ -35,6 +35,10 @@ Be generous but relevant: the aim is to never miss a memory that matters, not to
    Narrow with `wing` or `room` when the topic clearly belongs to one project.
 3. Call `memcastle_recall` with the same query when the wording matters, because it returns the stored content verbatim.
 4. If nothing matches, retry once with fewer or different words before concluding that nothing is stored.
+5. When the question is about the past, add `as_of` (an instant or a date such as `2026-01-01`) to see what was believed
+   then, or `from` with `until` for a period.
+   By default only what is true now is returned.
+   To explain how a decision changed, search with `include_historical`, then call `memcastle_history` with a hit's `id`.
 
 Every query word must match first, and only when no drawer has them all does it fall back to drawers with any of them,
 so a long query is more likely to return loose matches.

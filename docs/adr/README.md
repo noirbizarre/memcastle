@@ -97,3 +97,8 @@ The history is the value.
   through a synchronous service like the diary and read for entities like mined content; the CLI resolves the project
   scope itself with the reader the mining adapter shares, and there is no MCP tool
   (amends ADR-029)
+- [ADR-032](032-temporal-retrieval-and-history.md) — temporal retrieval is one overlap rule over validity time:
+  `current`, `as_of` and an interval (`from` and `until`) are the same clause over a window,
+  shared by every ranking and by graph expansion,
+  and a superseded drawer records what replaced it so `drawer history` can return how knowledge evolved
+  (amends ADR-021)

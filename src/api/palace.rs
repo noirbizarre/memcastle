@@ -261,6 +261,17 @@ pub(super) async fn drawer_duplicates(
     ))
 }
 
+/// `GET /api/drawers/{id}/history`: every version of the knowledge this drawer belongs to, oldest first, each with
+/// its validity period, provenance and content. Any version of the chain gives the whole chain.
+pub(super) async fn drawer_history(
+    State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let id = parse_drawer_id(&id)?;
+    Ok(Json(state.app.drawer_history(id, mode).await?))
+}
+
 /// The body of `PUT /api/drawers/{id}/embedding`.
 #[derive(Debug, Deserialize)]
 pub(super) struct EmbeddingBody {

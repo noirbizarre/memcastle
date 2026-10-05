@@ -404,10 +404,32 @@ pub struct RetrievalArgs {
     /// Only drawers from this kind of source.
     #[arg(long, value_parser = PossibleValuesParser::new(["file", "manual", "transcript", "note", "other"]))]
     pub source_kind: Option<String>,
-    /// Search the memory that was valid at this RFC 3339 instant
-    /// (e.g. 2026-01-31T12:00:00Z) instead of now.
-    #[arg(long, value_name = "TIMESTAMP", conflicts_with = "include_historical")]
+    /// Search the memory that was valid at this instant instead of now: an
+    /// RFC 3339 timestamp (2026-01-31T12:00:00Z) or a date (2026-01-31, midnight UTC).
+    #[arg(
+        long,
+        value_name = "WHEN",
+        conflicts_with_all = ["include_historical", "from", "until"]
+    )]
     pub as_of: Option<String>,
+    /// Search the memory that was valid at some moment of an interval, from this
+    /// instant (inclusive, same forms as `--as-of`). Needs `--until`.
+    #[arg(
+        long,
+        value_name = "WHEN",
+        requires = "until",
+        conflicts_with = "include_historical"
+    )]
+    pub from: Option<String>,
+    /// The end of the `--from` interval (exclusive).
+    /// `--from 2026-01-01 --until 2026-02-01` is exactly January.
+    #[arg(
+        long,
+        value_name = "WHEN",
+        requires = "from",
+        conflicts_with = "include_historical"
+    )]
+    pub until: Option<String>,
     /// Also return memory that has since been superseded.
     #[arg(long)]
     pub include_historical: bool,
@@ -726,6 +748,15 @@ pub enum DrawerCommand {
         /// End the drawer's validity without a replacement.
         #[arg(long)]
         invalidate: bool,
+    },
+    /// Show how a piece of knowledge evolved: every version of the drawer's
+    /// supersession chain, oldest first, each with its validity period,
+    /// provenance and content. Works from any version of the chain. A table
+    /// in a terminal, JSON when standard output is piped or redirected.
+    History {
+        /// Any version of the chain, as `<wing>/<room>/<name or UUID>`. A
+        /// superseded version has no name any more: use its UUID.
+        drawer: String,
     },
     /// Record that a drawer mentions an entity, creating the entity if
     /// needed, so `search --expand` can reach related drawers through it.

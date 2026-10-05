@@ -59,6 +59,8 @@ mod resolution;
 mod retrieval;
 mod source_packages;
 mod sources;
+#[cfg(test)]
+mod temporal_tests;
 mod timestamps;
 mod wings;
 
@@ -780,6 +782,8 @@ mod tests {
             },
             valid_from: chrono::Utc::now(),
             valid_to: None,
+            supersedes: None,
+            superseded_by: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -926,6 +930,8 @@ mod tests {
             },
             valid_from: chrono::Utc::now(),
             valid_to: None,
+            supersedes: None,
+            superseded_by: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }

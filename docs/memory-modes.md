@@ -19,7 +19,8 @@ and disabling memory for one of them must not interrupt another's reads or runni
 The rule follows what an operation touches, not what it is called.
 
 - **Reads:** `search`, `recall`, `wake_up`, `diary_read`, listing or showing jobs,
-  listing or showing wings, rooms and drawers, and reading a drawer's likely duplicates or an entity's candidates.
+  listing or showing wings, rooms and drawers, reading a drawer's history,
+  and reading a drawer's likely duplicates or an entity's candidates.
   Jobs count because a job record carries its whole input, such as the memory a checkpoint is writing,
   and the hierarchy counts because the names and counts of a palace are themselves palace content.
 - **Writes:** `checkpoint`, `diary_write`, `mine`, `repair` when it is not a dry run,

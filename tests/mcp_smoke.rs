@@ -259,6 +259,7 @@ async fn the_mcp_surface_serves_a_migrated_palace_and_survives_a_daemon_restart(
         "memcastle_status",
         "memcastle_search",
         "memcastle_recall",
+        "memcastle_history",
         "memcastle_wake_up",
         "memcastle_mine",
         "memcastle_checkpoint",

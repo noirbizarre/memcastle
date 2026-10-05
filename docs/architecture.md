@@ -205,6 +205,9 @@ provenance, tags, an optional `embedding` (derived data, see [Search](#search)) 
 travel alongside it.
 A drawer is corrected by *superseding* it: its `valid_to` is set and a replacement opens from the same instant, so the old
 content is never rewritten.
+The two drawers record each other (`superseded_by`, `supersedes`), set in the same transaction, so the evolution of a piece
+of knowledge can be read back as a chain without guessing from names or timestamps
+([ADR-032](adr/032-temporal-retrieval-and-history.md)).
 Provenance has one meaning for every writer (diary, mining, checkpoint):
 `provenance.requested_by` is the **channel** the write came through (`cli`, `http`, `mcp`),
 and `source.agent` is the **agent identity** behind it, or absent when no agent is involved (mining).
@@ -271,8 +274,15 @@ flowchart LR
   and before the limit, including inside the vector index traversal,
   instead of MemCastle fetching candidates and filtering them.
 - **Time.**
-  A drawer or relationship is valid at an instant when `valid_from <= t` and it has no `valid_to` or `valid_to > t`.
-  Search defaults to now, and `as_of` or `include_historical` reach superseded memory.
+  Validity time (`valid_from`, `valid_to`: when it was true) is searched, and record time (`created_at`: when it was
+  learned) is not.
+  A drawer or relationship is valid at an instant when `valid_from <= t` and it has no `valid_to` or `valid_to > t`,
+  and it overlaps a window `[from, until)` when `valid_from < until` and it has no `valid_to` or `valid_to > from`.
+  A point is a one-nanosecond window, so *now*, `as_of` and an interval are one clause, `VALIDITY_WHERE`,
+  shared by every leg and by graph expansion's `relates_to` hops, with no temporal index behind it
+  ([ADR-032](adr/032-temporal-retrieval-and-history.md)).
+  Search defaults to now, `as_of` and `from` with `until` reach older memory, and `include_historical` applies no filter.
+  `drawer history` walks the supersession links to return how one piece of knowledge evolved.
 - **Graph expansion** appends drawers that share an entity with a hit, or sit one valid `relates_to` hop away,
   after the direct hits, and never reorders them.
 - **Where vectors come from.**

@@ -22,6 +22,7 @@ mod dedup;
 mod extraction;
 mod integration_contract;
 mod mcp_memory_mode;
+mod mcp_temporal;
 mod memory_mode;
 mod notes;
 mod palace;

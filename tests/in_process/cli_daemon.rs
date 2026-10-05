@@ -991,3 +991,158 @@ mod editor {
         daemon.shutdown().await;
     }
 }
+
+/// Run `memcastle <args>` and return its standard output, asserting it succeeded.
+async fn stdout_of(daemon: &TestDaemon, args: &[&str]) -> String {
+    let output = memcastle(daemon)
+        .args(args)
+        .output()
+        .await
+        .expect("run memcastle");
+    assert!(
+        output.status.success(),
+        "memcastle {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+fn hit_contents(stdout: &str) -> Vec<String> {
+    let hits: serde_json::Value = serde_json::from_str(stdout).expect("search prints JSON");
+    let mut found: Vec<String> = hits
+        .as_array()
+        .expect("hits")
+        .iter()
+        .map(|hit| hit["content"].as_str().expect("content").to_string())
+        .collect();
+    found.sort();
+    found
+}
+
+#[tokio::test]
+async fn search_takes_a_date_an_interval_and_drawer_history_follows_the_chain() {
+    let daemon = TestDaemon::start().await;
+    stdout_of(
+        &daemon,
+        &[
+            "drawer",
+            "create",
+            "w/r/db",
+            "--content",
+            "we run the database on postgres",
+        ],
+    )
+    .await;
+    stdout_of(
+        &daemon,
+        &[
+            "drawer",
+            "supersede",
+            "w/r/db",
+            "--content",
+            "we run the database on surrealdb",
+        ],
+    )
+    .await;
+
+    // The issue's own example: a date, read as midnight UTC. Long ago nothing was recorded; far ahead
+    // the open-ended latest belief is the one that is true.
+    let long_ago = stdout_of(&daemon, &["search", "database", "--as-of", "2000-01-01"]).await;
+    assert!(hit_contents(&long_ago).is_empty(), "{long_ago}");
+    let ahead = stdout_of(&daemon, &["search", "database", "--as-of", "2999-01-01"]).await;
+    assert_eq!(hit_contents(&ahead), ["we run the database on surrealdb"]);
+
+    // An interval spanning the correction sees both, through search and recall alike.
+    for command in ["search", "recall"] {
+        let across = stdout_of(
+            &daemon,
+            &[
+                command,
+                "database",
+                "--from",
+                "2000-01-01",
+                "--until",
+                "2999-01-01",
+            ],
+        )
+        .await;
+        assert_eq!(
+            hit_contents(&across),
+            [
+                "we run the database on postgres",
+                "we run the database on surrealdb"
+            ],
+            "{command}"
+        );
+    }
+
+    // History starts from the name, which now belongs to the replacement, and returns both versions oldest first.
+    let history = stdout_of(&daemon, &["drawer", "history", "w/r/db"]).await;
+    let history: serde_json::Value = serde_json::from_str(&history).expect("history prints JSON");
+    let versions = history["versions"].as_array().expect("versions");
+    assert_eq!(versions[0]["content"], "we run the database on postgres");
+    assert_eq!(versions[1]["content"], "we run the database on surrealdb");
+    assert_eq!(versions[0]["valid_to"], versions[1]["valid_from"]);
+
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_half_given_or_contradictory_interval_is_refused_before_asking_the_daemon() {
+    let daemon = TestDaemon::start().await;
+
+    for args in [
+        vec!["search", "x", "--from", "2026-01-01"],
+        vec!["search", "x", "--until", "2026-01-01"],
+        vec![
+            "search",
+            "x",
+            "--from",
+            "2026-01-01",
+            "--until",
+            "2026-02-01",
+            "--as-of",
+            "2026-01-15",
+        ],
+        vec![
+            "search",
+            "x",
+            "--from",
+            "2026-01-01",
+            "--until",
+            "2026-02-01",
+            "--include-historical",
+        ],
+    ] {
+        let output = memcastle(&daemon)
+            .args(&args)
+            .output()
+            .await
+            .expect("run memcastle");
+        assert!(!output.status.success(), "{args:?} should be refused");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("--"),
+            "{args:?} should name a flag: {stderr}"
+        );
+    }
+
+    // A reversed interval gets past the flag rules and is refused with the diagnostic code.
+    let output = memcastle(&daemon)
+        .args([
+            "search",
+            "x",
+            "--from",
+            "2026-02-01",
+            "--until",
+            "2026-01-01",
+        ])
+        .output()
+        .await
+        .expect("run memcastle");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("memcastle::input::invalid"), "{stderr}");
+
+    daemon.shutdown().await;
+}

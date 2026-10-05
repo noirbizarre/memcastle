@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use chrono::Utc;
+use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use surrealdb::engine::any::Any;
 use surrealdb::method::Query;
@@ -60,30 +60,67 @@ pub(super) const SCOPE_PRELUDE: &str = "LET $rooms = (SELECT VALUE record::id(id
        WHERE ($wing = NULL OR wing IN (SELECT VALUE record::id(id) FROM wing WHERE name = $wing)) \
          AND ($room = NULL OR name = $room)); ";
 
+/// The text of [`VALIDITY_WHERE`], as a macro so [`SCOPE_WHERE`] can `concat!`
+/// it: a `const` string cannot be spliced into another at compile time, and a
+/// second hand-copied predicate is how drawers and edges would drift apart.
+macro_rules! validity_where {
+    () => {
+        "($all_time = true OR (valid_from < <datetime>$win_until \
+         AND (!valid_to OR valid_to > $win_from)))"
+    };
+}
+
+/// The temporal predicate, shared by drawers and `relates_to` edges so both are
+/// always judged by the same rule: validity overlaps the window
+/// `[$win_from, $win_until)` (see [`Temporal`]), or every record qualifies when
+/// `$all_time` is set.
+///
+/// A point in time is the window `[t, t + 1ns)`, so as-of and interval queries
+/// run this one clause and cannot drift apart. `valid_to` is an
+/// `option<string>` holding fixed-width UTC text, so comparing it with a string
+/// compares instants (ADR-005); truthiness (`!valid_to`) is the "still open"
+/// test because `NONE` and `NULL` are both possible. `valid_from` is a native
+/// datetime, so its bound is cast. No index backs it: it is a predicate beside
+/// the full-text and vector lookups, not a second access path.
+pub(super) const VALIDITY_WHERE: &str = validity_where!();
+
 /// The scope every leg applies: room, tags, source kind and temporal validity.
 ///
 /// - **Room**: unscoped when neither wing nor room is given.
 /// - **Tags**: the drawer must carry all of them.
-/// - **Temporal**: valid at `$at` — `valid_from <= $at` and no `valid_to`, or a
-///   `valid_to` after it (exclusive end; see [`Temporal`]). `valid_to` is an
-///   `option<string>` holding fixed-width UTC text, so comparing it with a
-///   string compares instants (ADR-005); truthiness (`!valid_to`) is the
-///   "still open" test because `NONE` and `NULL` are both possible.
-pub(super) const SCOPE_WHERE: &str = "(($wing = NULL AND $room = NULL) OR room IN $rooms) \
-       AND ($tags = [] OR tags CONTAINSALL $tags) \
-       AND ($source_kind = NULL OR source.kind = $source_kind) \
-       AND ($all_time = true OR (valid_from <= <datetime>$at AND (!valid_to OR valid_to > $at)))";
+/// - **Temporal**: [`VALIDITY_WHERE`].
+pub(super) const SCOPE_WHERE: &str = concat!(
+    "(($wing = NULL AND $room = NULL) OR room IN $rooms) \
+     AND ($tags = [] OR tags CONTAINSALL $tags) \
+     AND ($source_kind = NULL OR source.kind = $source_kind) \
+     AND ",
+    validity_where!()
+);
+
+/// The window `[from, until)` a [`Temporal`] stands for, or `None` for all
+/// time. `now` is passed in so a query reads the clock once.
+fn window(temporal: Temporal, now: DateTime<Utc>) -> Option<(DateTime<Utc>, DateTime<Utc>)> {
+    // One nanosecond: the finest instant SurrealDB stores, so `[t, t + 1ns)`
+    // contains exactly `t`.
+    let instant = |at: DateTime<Utc>| (at, at + Duration::nanoseconds(1));
+    match temporal {
+        Temporal::All => None,
+        Temporal::Current => Some(instant(now)),
+        Temporal::AsOf(at) => Some(instant(at)),
+        Temporal::Between { from, until } => Some((from, until)),
+    }
+}
 
 /// Bind every parameter [`SCOPE_PRELUDE`] and [`SCOPE_WHERE`] mention.
 pub(super) fn bind_scope<'r>(
     query: Query<'r, Any>,
     filter: &SearchFilter,
 ) -> Result<Query<'r, Any>> {
-    let (all_time, at) = match filter.temporal {
-        Temporal::All => (true, Utc::now()),
-        Temporal::Current => (false, Utc::now()),
-        Temporal::AsOf(at) => (false, at),
-    };
+    let now = Utc::now();
+    let bounds = window(filter.temporal, now);
+    // Under `All` the window is never read (`$all_time` short-circuits), but
+    // every name must still be bound or the statement fails.
+    let (from, until) = bounds.unwrap_or((now, now));
     Ok(query
         // `bindable`, not a native `Option`: a native `None` binds as `NONE`,
         // which `$wing = NULL` never matches (see `list_jobs`).
@@ -91,8 +128,11 @@ pub(super) fn bind_scope<'r>(
         .bind(("room", super::bindable(&filter.room)?))
         .bind(("tags", filter.tags.clone()))
         .bind(("source_kind", super::bindable(&filter.source_kind)?))
-        .bind(("all_time", all_time))
-        .bind(("at", super::stored(at))))
+        .bind(("all_time", bounds.is_none()))
+        // Both as canonical text: `valid_to` is compared as a string, and the
+        // `valid_from` side casts `$win_until` back to a datetime.
+        .bind(("win_from", super::stored(from)))
+        .bind(("win_until", super::stored(until))))
 }
 
 /// A drawer row plus the one ranking column a leg selected.

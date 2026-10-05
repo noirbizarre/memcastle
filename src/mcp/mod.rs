@@ -89,9 +89,14 @@ struct SearchArgs {
     tags: Vec<String>,
     /// Only drawers from this kind of source: `file`, `manual`, `transcript`, `note` or `other`.
     source_kind: Option<String>,
-    /// An RFC 3339 instant, e.g. `2026-01-31T12:00:00Z`: search the memory
-    /// that was valid then instead of now.
+    /// An RFC 3339 instant (`2026-01-31T12:00:00Z`) or a date (`2026-01-31`):
+    /// search the memory that was valid then instead of now.
     as_of: Option<String>,
+    /// Start of an interval (inclusive, same forms as `as_of`): search the memory
+    /// that was valid at some moment between `from` and `until`. Needs `until`.
+    from: Option<String>,
+    /// End of an interval (exclusive). Needs `from`.
+    until: Option<String>,
     /// Also return memory that has since been superseded.
     #[serde(default)]
     include_historical: bool,
@@ -124,8 +129,13 @@ struct RecallArgs {
     tags: Vec<String>,
     /// Only drawers from this kind of source: `file`, `manual`, `transcript`, `note` or `other`.
     source_kind: Option<String>,
-    /// An RFC 3339 instant: recall the memory that was valid then.
+    /// An RFC 3339 instant or a date: recall the memory that was valid then.
     as_of: Option<String>,
+    /// Start of an interval (inclusive): recall what was valid at some moment
+    /// between `from` and `until`. Needs `until`.
+    from: Option<String>,
+    /// End of an interval (exclusive). Needs `from`.
+    until: Option<String>,
     /// Also return memory that has since been superseded.
     #[serde(default)]
     include_historical: bool,
@@ -145,6 +155,8 @@ impl RecallArgs {
             tags: self.tags,
             source_kind: self.source_kind,
             as_of: self.as_of,
+            from: self.from,
+            until: self.until,
             include_historical: self.include_historical,
             expand: self.expand,
         }
@@ -163,11 +175,21 @@ impl SearchArgs {
             tags: self.tags,
             source_kind: self.source_kind,
             as_of: self.as_of,
+            from: self.from,
+            until: self.until,
             include_historical: self.include_historical,
             expand: self.expand,
         }
         .into_query(self.query)
     }
+}
+
+/// `memcastle_history`'s arguments.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct HistoryArgs {
+    /// The id (a UUID) of any version of the knowledge, as a search hit's `id`
+    /// carries it: current or superseded, the whole chain comes back.
+    drawer_id: String,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -533,10 +555,15 @@ impl McpTools {
                         alone otherwise; `ranking` forces lexical, semantic or hybrid. Word matching \
                         is stemmed with no synonyms: drawers containing every query word are \
                         returned, and only if there are none, drawers containing any of them. \
-                        Narrow with wing, room, tags and source_kind; `as_of` or \
-                        `include_historical` reach superseded memory; `expand` adds drawers \
-                        related through the knowledge graph. Each hit is the stored drawer \
-                        verbatim plus a `score` that is comparable only within one response."
+                        Narrow with wing, room, tags and source_kind. Time is validity time, \
+                        when the knowledge was true, not when it was stored: by default only \
+                        what is true now; `as_of` (an instant or a date) what was true then; \
+                        `from` with `until` what was true at some moment of that interval \
+                        (`until` exclusive); `include_historical` every version ever. To see \
+                        how one piece of knowledge evolved, pass a hit's id to memcastle_history. \
+                        `expand` adds drawers related through the knowledge graph. Each hit is \
+                        the stored drawer verbatim plus a `score` that is comparable only within \
+                        one response."
     )]
     async fn memcastle_search(
         &self,
@@ -556,7 +583,7 @@ impl McpTools {
                         recall-oriented counterpart to memcastle_search (see \
                         AppServices::recall's doc comment for why both exist). Takes the same \
                         options as memcastle_search except `room`: ranking mode, tags, \
-                        source_kind, as_of, include_historical and expand."
+                        source_kind, as_of, from, until, include_historical and expand."
     )]
     async fn memcastle_recall(
         &self,
@@ -569,6 +596,29 @@ impl McpTools {
             Err(error) => Err(error),
         };
         tool_result("memcastle_recall", hits)
+    }
+
+    #[tool(
+        description = "Show how one piece of knowledge evolved: every version of a drawer's \
+                        supersession chain, oldest first, each verbatim with its id, validity \
+                        period (`valid_from`, `valid_to`, absent while still true), provenance \
+                        and content. Takes the id of any version, such as a hit from \
+                        memcastle_search with `include_historical`. Read-only."
+    )]
+    async fn memcastle_history(
+        &self,
+        Parameters(args): Parameters<HistoryArgs>,
+        Extension(parts): Extension<http::request::Parts>,
+    ) -> Result<CallToolResult, McpError> {
+        let mode = self.mode_for(&parts);
+        let history = match args.drawer_id.parse() {
+            Ok(id) => self.app.drawer_history(id, mode).await,
+            Err(_) => Err(crate::Error::invalid_input(
+                "drawer_id",
+                format!("`{}` is not a drawer id (a UUID)", args.drawer_id),
+            )),
+        };
+        tool_result("memcastle_history", history)
     }
 
     #[tool(

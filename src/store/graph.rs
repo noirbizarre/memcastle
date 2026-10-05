@@ -138,7 +138,9 @@ impl SurrealStore {
     /// entities and `via` names them. The same scope as every other leg
     /// (room, tags, source, validity of the *drawer*) is applied in the
     /// database before ranking and truncation, and `relates_to` edges are
-    /// filtered to those valid at the filter's point in time.
+    /// filtered to those valid at the filter's point in time, or overlapping
+    /// its interval. `mentions` edges carry no validity: whether a drawer
+    /// mentions an entity is decided by the drawer, which the scope judges.
     pub async fn expand_via_graph(
         &self,
         seeds: &[DrawerId],
@@ -149,10 +151,10 @@ impl SurrealStore {
             return Ok(Vec::new());
         }
         let seed_ids: Vec<String> = seeds.iter().map(ToString::to_string).collect();
-        // The same `$all_time`/`$at` the scope binds, so a `relates_to` edge is
-        // judged at the same instant as the drawers.
-        let edge_valid =
-            "($all_time = true OR (valid_from <= <datetime>$at AND (!valid_to OR valid_to > $at)))";
+        // The very clause the scope applies to drawers, over the same bound
+        // window, so a `relates_to` edge is judged exactly as the drawers are:
+        // an interval search follows only hops that held at some moment of it.
+        let edge_valid = super::retrieval::VALIDITY_WHERE;
         let sql = format!(
             "{prelude} \
              LET $seed_records = (SELECT VALUE id FROM drawer WHERE record::id(id) IN $seeds); \
@@ -497,5 +499,166 @@ mod tests {
             .await
             .expect("expand");
         assert!(hits.is_empty(), "{hits:?}");
+    }
+
+    /// A graph where `alice` owned the `parser` from ten days ago until two days ago, the seed mentions alice and the
+    /// neighbour mentions the parser, so the neighbour is reachable only over that one relationship.
+    async fn owned_then_released(store: &SurrealStore) -> (Drawer, Drawer) {
+        let r = room(store, "w").await;
+        let seed = drawer(store, r, "Alice owned the parser").await;
+        let neighbour = drawer(store, r, "parser backlog").await;
+        let alice = entity(store, "alice").await;
+        let parser = entity(store, "parser").await;
+        store.link_drawer_entity(seed.id, alice).await.unwrap();
+        store
+            .link_drawer_entity(neighbour.id, parser)
+            .await
+            .unwrap();
+        let edge = RelationshipId::new();
+        store
+            .create_relationship(
+                edge,
+                NewRelationship {
+                    from: alice,
+                    to: parser,
+                    predicate: "owns".into(),
+                    confidence: 1.0,
+                },
+                Utc::now() - Duration::days(10),
+            )
+            .await
+            .unwrap();
+        store
+            .invalidate_relationship(edge, Utc::now() - Duration::days(2))
+            .await
+            .unwrap();
+        (seed, neighbour)
+    }
+
+    fn between(from_days_ago: i64, until_days_ago: i64) -> SearchFilter {
+        SearchFilter {
+            temporal: Temporal::Between {
+                from: Utc::now() - Duration::days(from_days_ago),
+                until: Utc::now() - Duration::days(until_days_ago),
+            },
+            ..SearchFilter::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn expansion_over_an_interval_follows_a_relationship_that_held_during_it() {
+        let store = store().await;
+        let (seed, neighbour) = owned_then_released(&store).await;
+
+        // Inside the ownership, and a window that only partly overlaps it at either end.
+        for (from, until) in [(6, 4), (12, 8), (4, 1)] {
+            let hits = store
+                .expand_via_graph(&[seed.id], 10, &between(from, until))
+                .await
+                .expect("expand");
+            assert_eq!(ids(&hits), [neighbour.id], "{from}..{until} days ago");
+        }
+    }
+
+    #[tokio::test]
+    async fn expansion_over_an_interval_ignores_a_relationship_that_did_not_hold_during_it() {
+        let store = store().await;
+        let (seed, _) = owned_then_released(&store).await;
+
+        // Entirely before the ownership began, and entirely after it ended.
+        for (from, until) in [(20, 12), (1, 0)] {
+            let hits = store
+                .expand_via_graph(&[seed.id], 10, &between(from, until))
+                .await
+                .expect("expand");
+            assert!(hits.is_empty(), "{from}..{until} days ago: {hits:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_interval_that_starts_exactly_when_a_relationship_ended_does_not_follow_it() {
+        let store = store().await;
+        let r = room(&store, "w").await;
+        let seed = drawer(&store, r, "Alice owned the parser").await;
+        let neighbour = drawer(&store, r, "parser backlog").await;
+        let alice = entity(&store, "alice").await;
+        let parser = entity(&store, "parser").await;
+        store.link_drawer_entity(seed.id, alice).await.unwrap();
+        store
+            .link_drawer_entity(neighbour.id, parser)
+            .await
+            .unwrap();
+        let edge = RelationshipId::new();
+        let opened = Utc::now() - Duration::days(10);
+        let closed = Utc::now() - Duration::days(2);
+        store
+            .create_relationship(
+                edge,
+                NewRelationship {
+                    from: alice,
+                    to: parser,
+                    predicate: "owns".into(),
+                    confidence: 1.0,
+                },
+                opened,
+            )
+            .await
+            .unwrap();
+        store.invalidate_relationship(edge, closed).await.unwrap();
+
+        let from_the_close = SearchFilter {
+            temporal: Temporal::Between {
+                from: closed,
+                until: closed + Duration::days(1),
+            },
+            ..SearchFilter::default()
+        };
+        let hits = store
+            .expand_via_graph(&[seed.id], 10, &from_the_close)
+            .await
+            .unwrap();
+        assert!(hits.is_empty(), "the end is exclusive: {hits:?}");
+
+        let until_the_open = SearchFilter {
+            temporal: Temporal::Between {
+                from: opened - Duration::days(1),
+                until: opened,
+            },
+            ..SearchFilter::default()
+        };
+        let hits = store
+            .expand_via_graph(&[seed.id], 10, &until_the_open)
+            .await
+            .unwrap();
+        assert!(hits.is_empty(), "the window end is exclusive: {hits:?}");
+    }
+
+    #[tokio::test]
+    async fn expansion_over_an_interval_surfaces_only_drawers_valid_during_it() {
+        let store = store().await;
+        let r = room(&store, "w").await;
+        let seed = drawer(&store, r, "seed").await;
+        let early = drawer(&store, r, "early version").await;
+        let e = entity(&store, "topic").await;
+        for d in [&seed, &early] {
+            store.link_drawer_entity(d.id, e).await.unwrap();
+        }
+        // `early` was valid from thirty days ago until five days ago.
+        store
+            .supersede_drawer(early.id, None, Utc::now() - Duration::days(5))
+            .await
+            .unwrap();
+
+        let during = store
+            .expand_via_graph(&[seed.id], 10, &between(10, 6))
+            .await
+            .unwrap();
+        assert_eq!(ids(&during), [early.id]);
+
+        let after = store
+            .expand_via_graph(&[seed.id], 10, &between(4, 1))
+            .await
+            .unwrap();
+        assert!(after.is_empty(), "{after:?}");
     }
 }

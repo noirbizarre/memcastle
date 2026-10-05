@@ -360,6 +360,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_edited_files_new_drawer_opens_at_the_instant_the_old_one_closes_and_is_linked_to_it()
+     {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "a.txt", "first version");
+        touch(dir.path(), "a.txt", 1_000);
+        mine(&store, dir.path(), MiningConfig::default()).await;
+        write(dir.path(), "a.txt", "second version");
+        touch(dir.path(), "a.txt", 2_000);
+        mine(&store, dir.path(), MiningConfig::default()).await;
+
+        let all = drawers(&store).await;
+        let old = all.iter().find(|d| d.content == "first version").unwrap();
+        let new = all.iter().find(|d| d.content == "second version").unwrap();
+
+        assert_eq!(
+            old.valid_to,
+            Some(new.valid_from),
+            "no moment where both versions are valid, so a point-in-time search finds one"
+        );
+        assert_eq!(old.superseded_by, Some(new.id));
+        assert_eq!(new.supersedes, Some(old.id));
+    }
+
+    #[tokio::test]
     async fn a_file_larger_than_a_chunk_becomes_several_drawers() {
         let store = SurrealStore::connect_memory_for_tests().await;
         let dir = tempfile::tempdir().unwrap();

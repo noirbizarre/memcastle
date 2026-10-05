@@ -23,6 +23,7 @@
 
 mod dedup_keys;
 mod diary_provenance;
+mod supersession_lineage;
 mod timestamps;
 
 use std::future::Future;
@@ -92,6 +93,11 @@ const DATA_MIGRATIONS: &[DataMigration] = &[
         version: 3,
         name: "dedup-keys",
         apply: dedup_keys::apply,
+    },
+    DataMigration {
+        version: 4,
+        name: "supersession-lineage",
+        apply: supersession_lineage::apply,
     },
 ];
 

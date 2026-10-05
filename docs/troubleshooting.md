@@ -319,7 +319,10 @@ A query returns the drawers containing every word first.
 Only when there are none does it fall back to drawers containing any of the words, best match first.
 Short keyword queries therefore work best, and a drawer matching one word of a long question ranks low.
 Check the scope too: `--wing`, `--room`, `--tag` and `--source-kind` narrow the result, and a wrong one gives an empty result.
-A drawer that was corrected with `drawer supersede` is only found by `--as-of` or `--include-historical`.
+A drawer that was corrected with `drawer supersede` is only found by `--as-of`, `--from` with `--until`, or `--include-historical`,
+and `memcastle drawer history` shows how it changed.
+A date such as `2026-01-01` means midnight UTC at the start of that day,
+so a fact that became true later that day is not there yet.
 
 ### Semantic search finds nothing, or fails
 

@@ -10,7 +10,7 @@
 //! directly is that the interfaces above it never change shape as ranking
 //! grows: they hand over a [`SearchQuery`] and get hits back.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 
 use crate::domain::SourceKind;
 use crate::error::{Error, Result};
@@ -43,8 +43,13 @@ pub struct SearchOptions {
     pub tags: Vec<String>,
     /// A source kind name (`file`, `manual`, `transcript`, `note`, `other`).
     pub source_kind: Option<String>,
-    /// An RFC 3339 instant: search as the palace stood then.
+    /// An RFC 3339 instant or a `YYYY-MM-DD` date: search as the palace stood then.
     pub as_of: Option<String>,
+    /// The inclusive start of an interval (same forms as `as_of`): search what
+    /// was valid at some moment of `[from, until)`. Needs `until`.
+    pub from: Option<String>,
+    /// The exclusive end of an interval. Needs `from`.
+    pub until: Option<String>,
     /// Include superseded memory as well as current.
     pub include_historical: bool,
     /// Enrich the hits through the knowledge graph.
@@ -83,30 +88,7 @@ impl SearchOptions {
                 )),
             })
             .transpose()?;
-        let temporal = match (&self.as_of, self.include_historical) {
-            (Some(_), true) => {
-                return Err(Error::invalid_input(
-                    "as_of",
-                    "cannot be combined with include_historical: a point in time already \
-                     says which memory is valid",
-                ));
-            }
-            (Some(raw), false) => {
-                let at: DateTime<Utc> = DateTime::parse_from_rfc3339(raw.trim())
-                    .map_err(|_| {
-                        Error::invalid_input(
-                            "as_of",
-                            format!(
-                                "`{raw}` is not an RFC 3339 timestamp such as 2026-01-31T12:00:00Z"
-                            ),
-                        )
-                    })?
-                    .with_timezone(&Utc);
-                Temporal::AsOf(at)
-            }
-            (None, true) => Temporal::All,
-            (None, false) => Temporal::Current,
-        };
+        let temporal = self.temporal()?;
         Ok(SearchQuery {
             text: text.into(),
             ranking,
@@ -122,6 +104,87 @@ impl SearchOptions {
             query_embedding: None,
         })
     }
+
+    /// The temporal constraint these options ask for.
+    ///
+    /// The four ways of saying it (nothing, `as_of`, `from` and `until`,
+    /// `include_historical`) are mutually exclusive: each already says which
+    /// memory is valid, so combining two would silently let one win.
+    fn temporal(&self) -> Result<Temporal> {
+        let window = self.from.is_some() || self.until.is_some();
+        let chosen = [
+            ("as_of", self.as_of.is_some()),
+            ("from", window),
+            ("include_historical", self.include_historical),
+        ];
+        let named: Vec<&str> = chosen
+            .iter()
+            .filter(|(_, set)| *set)
+            .map(|(name, _)| *name)
+            .collect();
+        if let [first, second, ..] = named.as_slice() {
+            let (first, second) = (*first, *second);
+            return Err(Error::invalid_input(
+                first,
+                format!(
+                    "cannot be combined with {second}: each one already says which memory is \
+                     valid, so use only one of `as_of`, `from` with `until`, or `include_historical`"
+                ),
+            ));
+        }
+        if let Some(raw) = &self.as_of {
+            return Ok(Temporal::AsOf(parse_instant("as_of", raw)?));
+        }
+        match (&self.from, &self.until) {
+            (Some(from), Some(until)) => {
+                let from = parse_instant("from", from)?;
+                let until = parse_instant("until", until)?;
+                Temporal::between(from, until)
+                    .map_err(|message| Error::invalid_input("from", message))
+            }
+            (Some(_), None) => Err(Error::invalid_input(
+                "until",
+                "an interval needs both ends: add `until` (exclusive), or use `as_of` for a single \
+                 point in time",
+            )),
+            (None, Some(_)) => Err(Error::invalid_input(
+                "from",
+                "an interval needs both ends: add `from` (inclusive), or use `as_of` for a single \
+                 point in time",
+            )),
+            (None, None) if self.include_historical => Ok(Temporal::All),
+            (None, None) => Ok(Temporal::Current),
+        }
+    }
+}
+
+/// Parse a point in time: an RFC 3339 timestamp, or a bare `YYYY-MM-DD` date
+/// meaning midnight UTC at the start of that day.
+///
+/// A date is accepted so `--as-of 2026-01-01` works as written, and because
+/// midnight at the start of the day makes `--from 2026-01-01 --until 2026-02-01`
+/// exactly January. `option` names the offending input in the diagnostic.
+///
+/// # Errors
+///
+/// [`Error::InvalidInput`] naming `option` and showing both accepted forms.
+pub fn parse_instant(option: &str, raw: &str) -> Result<DateTime<Utc>> {
+    let text = raw.trim();
+    if let Ok(instant) = DateTime::parse_from_rfc3339(text) {
+        return Ok(instant.with_timezone(&Utc));
+    }
+    if let Ok(date) = NaiveDate::parse_from_str(text, "%Y-%m-%d")
+        && let Some(midnight) = date.and_hms_opt(0, 0, 0)
+    {
+        return Ok(midnight.and_utc());
+    }
+    Err(Error::invalid_input(
+        option,
+        format!(
+            "`{raw}` is not an RFC 3339 timestamp such as 2026-01-31T12:00:00Z \
+             or a date such as 2026-01-31"
+        ),
+    ))
 }
 
 /// The ranking strategy a query will actually use, once it is known whether a query
@@ -292,6 +355,101 @@ mod tests {
             options.into_query("x").unwrap().filter.temporal,
             Temporal::All
         );
+    }
+
+    fn at(raw: &str) -> DateTime<Utc> {
+        parse_instant("as_of", raw).unwrap()
+    }
+
+    #[test]
+    fn a_bare_date_means_midnight_utc_at_the_start_of_that_day() {
+        assert_eq!(at("2026-01-01"), at("2026-01-01T00:00:00Z"));
+        let options = SearchOptions {
+            as_of: Some(" 2026-01-01 ".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            options.into_query("x").unwrap().filter.temporal,
+            Temporal::AsOf(at("2026-01-01T00:00:00Z"))
+        );
+    }
+
+    #[test]
+    fn an_offset_timestamp_is_normalised_to_utc() {
+        assert_eq!(at("2026-01-01T02:00:00+02:00"), at("2026-01-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn a_from_and_until_ask_for_the_interval_between_them() {
+        let options = SearchOptions {
+            from: Some("2026-01-01".into()),
+            until: Some("2026-02-01".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            options.into_query("x").unwrap().filter.temporal,
+            Temporal::Between {
+                from: at("2026-01-01"),
+                until: at("2026-02-01"),
+            }
+        );
+    }
+
+    #[test]
+    fn an_interval_with_only_one_end_says_which_end_is_missing() {
+        let only_from = SearchOptions {
+            from: Some("2026-01-01".into()),
+            ..Default::default()
+        };
+        let error = only_from.into_query("x").unwrap_err().to_string();
+        assert!(error.contains("until"), "{error}");
+        let only_until = SearchOptions {
+            until: Some("2026-01-01".into()),
+            ..Default::default()
+        };
+        let error = only_until.into_query("x").unwrap_err().to_string();
+        assert!(error.contains("from"), "{error}");
+    }
+
+    #[test]
+    fn an_empty_or_reversed_interval_is_rejected() {
+        for (from, until) in [("2026-02-01", "2026-01-01"), ("2026-01-01", "2026-01-01")] {
+            let options = SearchOptions {
+                from: Some(from.into()),
+                until: Some(until.into()),
+                ..Default::default()
+            };
+            assert!(
+                matches!(options.into_query("x"), Err(Error::InvalidInput { .. })),
+                "{from}..{until}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_interval_cannot_be_combined_with_a_point_or_all_time() {
+        let window = |extra: fn(&mut SearchOptions)| {
+            let mut options = SearchOptions {
+                from: Some("2026-01-01".into()),
+                until: Some("2026-02-01".into()),
+                ..Default::default()
+            };
+            extra(&mut options);
+            options.into_query("x")
+        };
+        assert!(window(|o| o.as_of = Some("2026-01-15".into())).is_err());
+        assert!(window(|o| o.include_historical = true).is_err());
+    }
+
+    #[test]
+    fn a_bad_interval_end_names_the_option_that_is_wrong() {
+        let options = SearchOptions {
+            from: Some("2026-01-01".into()),
+            until: Some("soon".into()),
+            ..Default::default()
+        };
+        let error = options.into_query("x").unwrap_err().to_string();
+        assert!(error.contains("until"), "{error}");
     }
 
     #[test]

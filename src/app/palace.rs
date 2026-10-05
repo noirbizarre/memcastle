@@ -597,6 +597,32 @@ impl AppServices {
         self.store.list_similar_drawers(drawer).await
     }
 
+    /// How the knowledge `drawer` belongs to evolved: every version of its supersession chain, oldest first,
+    /// each verbatim (identity, validity period, provenance and content).
+    ///
+    /// Any version of the chain gives the whole chain, so an agent can start from a search hit, current or
+    /// historical, without reconstructing anything itself (docs/adr/032).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ModeForbidden`] unless `mode` permits reads, [`Error::DrawerNotFound`], or a store error.
+    pub async fn drawer_history(
+        &self,
+        drawer: DrawerId,
+        mode: MemoryMode,
+    ) -> Result<crate::domain::DrawerHistory> {
+        Self::require_read(mode, "drawer_history")?;
+        let versions =
+            self.store
+                .drawer_lineage(drawer)
+                .await?
+                .ok_or_else(|| Error::DrawerNotFound {
+                    room: "-".to_string(),
+                    drawer: drawer.to_string(),
+                })?;
+        Ok(crate::domain::DrawerHistory { drawer, versions })
+    }
+
     /// Delete one drawer, by name or id.
     ///
     /// # Errors

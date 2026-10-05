@@ -470,6 +470,13 @@ impl AppServices {
         mode: MemoryMode,
     ) -> Result<Vec<SearchHit>> {
         Self::require_read(mode, operation)?;
+        // `POST /api/search` takes a `SearchQuery` verbatim, so an empty
+        // interval can arrive without ever passing through `SearchOptions`.
+        query
+            .filter
+            .temporal
+            .checked()
+            .map_err(|message| Error::invalid_input("temporal", message))?;
         let limit = if query.limit == 0 {
             DEFAULT_SEARCH_LIMIT
         } else {

@@ -125,10 +125,39 @@ pub struct Drawer {
     pub valid_from: DateTime<Utc>,
     /// The end of this drawer's validity window, if it has been superseded.
     pub valid_to: Option<DateTime<Utc>>,
-    /// Creation timestamp.
+    /// The drawer this one replaced, when it is a supersession's replacement.
+    ///
+    /// Set by the store in the transaction that closes the old drawer, never by
+    /// a caller, so the two links of a pair cannot disagree. Absent on a first
+    /// version and on drawers written before lineage was recorded that the
+    /// `supersession-lineage` migration could not pair unambiguously.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supersedes: Option<DrawerId>,
+    /// The drawer that replaced this one. Absent while it is open and when it
+    /// was closed without a replacement (an invalidation).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub superseded_by: Option<DrawerId>,
+    /// Creation timestamp: when MemCastle *recorded* this drawer, which can be
+    /// long after the period `valid_from`/`valid_to` describe.
     pub created_at: DateTime<Utc>,
     /// Last-updated timestamp (metadata only — `content` itself is immutable).
     pub updated_at: DateTime<Utc>,
+}
+
+/// The successive versions of one piece of knowledge, oldest first.
+///
+/// Reconstructed from the supersession links (`Drawer::supersedes` and
+/// `Drawer::superseded_by`), so an agent asking "how did this evolve?" does not
+/// have to rebuild the chain from search hits. Each version is the drawer
+/// verbatim, so identity, validity period, provenance and content are all
+/// preserved; embeddings are left out.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrawerHistory {
+    /// The drawer the history was asked about; one of `versions`.
+    pub drawer: DrawerId,
+    /// Every version of the knowledge, oldest first. The last is the current
+    /// one unless it has a `valid_to` (the knowledge was later invalidated).
+    pub versions: Vec<Drawer>,
 }
 
 impl Drawer {
@@ -161,6 +190,8 @@ impl Drawer {
             provenance,
             valid_from: now,
             valid_to: None,
+            supersedes: None,
+            superseded_by: None,
             created_at: now,
             updated_at: now,
         }

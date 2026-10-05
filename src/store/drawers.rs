@@ -3,6 +3,8 @@
 //! Ranked retrieval (lexical, vector, hybrid) lives in `retrieval`; this
 //! module is the plain create/read/delete surface.
 
+use std::collections::HashSet;
+
 use serde::Deserialize;
 
 use crate::domain::{Drawer, DrawerId, RoomId};
@@ -10,19 +12,30 @@ use crate::error::Result;
 
 use super::SurrealStore;
 
+/// The most versions one history returns. A real chain is a handful of
+/// corrections; the bound only exists so a damaged palace cannot make one
+/// request walk the table.
+const MAX_LINEAGE: usize = 1_000;
+
+/// How long before a mined drawer's predecessor closed it may have opened, for
+/// the backfill to still pair them: the pipeline builds the replacement, then
+/// reads the clock again to close the old one, so the two instants are
+/// milliseconds apart. Far shorter than two runs over the same document.
+const MINING_GAP: chrono::Duration = chrono::Duration::seconds(10);
+
 /// The column list every drawer read projects, so a native `id`/`room`
 /// `RecordId` never has to be handled on the Rust side (see `store::mod`'s
 /// module doc) and every datetime round-trips through a plain RFC3339
 /// string that `chrono`'s default `serde` support parses directly.
 pub(super) const DRAWER_COLUMNS: &str = "record::id(id) AS id, room, name, content, content_hash, source, tags, \
-     embedding, provenance, <string>valid_from AS valid_from, valid_to, \
+     embedding, provenance, <string>valid_from AS valid_from, valid_to, supersedes, superseded_by, \
      <string>created_at AS created_at, <string>updated_at AS updated_at";
 
 /// [`DRAWER_COLUMNS`] without the embedding, for ranked retrieval: a vector is
 /// hundreds of floats the caller never asked for, and search results are
 /// serialised straight onto the wire.
 pub(super) const DRAWER_SEARCH_COLUMNS: &str = "record::id(id) AS id, room, name, content, content_hash, source, tags, \
-     provenance, <string>valid_from AS valid_from, valid_to, \
+     provenance, <string>valid_from AS valid_from, valid_to, supersedes, superseded_by, \
      <string>created_at AS created_at, <string>updated_at AS updated_at";
 
 /// The statement that writes one drawer, binding the names [`bind_drawer`] sets.
@@ -31,6 +44,7 @@ const CREATE_DRAWER: &str = "CREATE type::record('drawer', $id) SET \
      fingerprint = $fingerprint, \
      source = $source, tags = $tags, embedding = $embedding, provenance = $provenance, \
      valid_from = <datetime>$valid_from, valid_to = $valid_to, \
+     supersedes = $supersedes, superseded_by = $superseded_by, \
      created_at = <datetime>$created_at, updated_at = <datetime>$updated_at";
 
 /// Bind every parameter [`CREATE_DRAWER`] mentions, so the plain write and the
@@ -60,6 +74,13 @@ fn bind_drawer<'r>(
         .bind(("provenance", super::bindable(&drawer.provenance)?))
         .bind(("valid_from", super::stored(drawer.valid_from)))
         .bind(("valid_to", drawer.valid_to.map(super::stored)))
+        // Plain strings, like every foreign key; `None` binds as `NONE`, which
+        // is what an `option<string>` field wants.
+        .bind(("supersedes", drawer.supersedes.map(|id| id.to_string())))
+        .bind((
+            "superseded_by",
+            drawer.superseded_by.map(|id| id.to_string()),
+        ))
         .bind(("created_at", super::stored(drawer.created_at)))
         .bind(("updated_at", super::stored(drawer.updated_at))))
 }
@@ -95,16 +116,29 @@ impl SurrealStore {
     ///
     /// `(room, name)` is unique, so the superseded drawer gives up its name
     /// (it stays addressable by id) for the replacement to take over.
+    ///
+    /// The two drawers are linked in the same transaction: the old one gains
+    /// `superseded_by` and the replacement `supersedes`, set here rather than by
+    /// the caller so a pair can never be half-linked and no writer can forget
+    /// it. That link is what [`Self::drawer_history`] walks.
     pub async fn supersede_drawer(
         &self,
         old: DrawerId,
         replacement: Option<&Drawer>,
         at: chrono::DateTime<chrono::Utc>,
     ) -> Result<bool> {
+        // The replacement as stored: pointing back at what it replaced,
+        // whatever the caller left in the field.
+        let replacement = replacement.map(|drawer| Drawer {
+            supersedes: Some(old),
+            ..drawer.clone()
+        });
+        let replacement = replacement.as_ref();
         // `!valid_to` is the "still open" test (see `entities`'s module doc).
         let mut sql = String::from(
             "BEGIN TRANSACTION; \
-             LET $closed = (UPDATE drawer SET valid_to = $at, updated_at = <datetime>$at, name = NONE \
+             LET $closed = (UPDATE drawer SET valid_to = $at, updated_at = <datetime>$at, name = NONE, \
+                superseded_by = $successor \
                 WHERE id = type::record('drawer', $old) AND !valid_to RETURN record::id(id) AS id); \
              IF array::len($closed) = 0 { THROW 'drawer not open'; }; ",
         );
@@ -113,6 +147,7 @@ impl SurrealStore {
             sql.push_str("; ");
         }
         sql.push_str("COMMIT TRANSACTION;");
+        let successor = replacement.map(|drawer| drawer.id.to_string());
 
         // Retried on a write conflict (see `retrying_on_conflict`): the
         // transaction wrote nothing, so running it again is safe.
@@ -121,6 +156,7 @@ impl SurrealStore {
                 .db
                 .query(sql.as_str())
                 .bind(("old", old.to_string()))
+                .bind(("successor", successor.clone()))
                 .bind(("at", super::stored(at)));
             let query = match replacement {
                 Some(drawer) => bind_drawer(query, drawer)?,
@@ -146,6 +182,164 @@ impl SurrealStore {
                 .into())
         })
         .await
+    }
+
+    /// Every version of the knowledge `id` belongs to, oldest first, or `None`
+    /// when no drawer has that id.
+    ///
+    /// Walks the supersession links both ways from `id`, so any version of a
+    /// chain yields the whole chain. Embeddings are left out. The walk is
+    /// bounded and remembers where it has been: a corrupt link that closes a
+    /// cycle ends the walk instead of looping, and a link to a drawer that no
+    /// longer exists (deleted by `repair`) ends it too, since there is nothing
+    /// left to show.
+    pub async fn drawer_lineage(&self, id: DrawerId) -> Result<Option<Vec<Drawer>>> {
+        let Some(start) = self.lineage_member(id).await? else {
+            return Ok(None);
+        };
+        let mut seen = HashSet::from([start.id]);
+
+        // Backwards, collecting newest-first so one reversal puts it oldest-first.
+        let mut earlier = Vec::new();
+        let mut cursor = start.supersedes;
+        while let Some(previous) = cursor.filter(|_| seen.len() < MAX_LINEAGE) {
+            if !seen.insert(previous) {
+                break;
+            }
+            let Some(drawer) = self.lineage_member(previous).await? else {
+                break;
+            };
+            cursor = drawer.supersedes;
+            earlier.push(drawer);
+        }
+        earlier.reverse();
+
+        let mut later = Vec::new();
+        let mut cursor = start.superseded_by;
+        while let Some(next) = cursor.filter(|_| seen.len() < MAX_LINEAGE) {
+            if !seen.insert(next) {
+                break;
+            }
+            let Some(drawer) = self.lineage_member(next).await? else {
+                break;
+            };
+            cursor = drawer.superseded_by;
+            later.push(drawer);
+        }
+
+        let mut versions = earlier;
+        versions.push(start);
+        versions.extend(later);
+        Ok(Some(versions))
+    }
+
+    /// One drawer for a lineage walk: without its embedding, which a history
+    /// never needs and which would multiply the response by hundreds of floats.
+    async fn lineage_member(&self, id: DrawerId) -> Result<Option<Drawer>> {
+        let mut response = self
+            .db
+            .query(format!(
+                "SELECT {DRAWER_SEARCH_COLUMNS} FROM drawer \
+                 WHERE id = type::record('drawer', $id) LIMIT 1"
+            ))
+            .bind(("id", id.to_string()))
+            .await?;
+        let mut drawers: Vec<Drawer> = super::take_rows(&mut response, 0)?;
+        Ok(drawers.pop())
+    }
+
+    /// Pair drawers closed before supersession was recorded with the drawer that replaced them, so their
+    /// history can be walked. Returns how many pairs were linked.
+    ///
+    /// Only for `crate::migrate`. Conservative by design: a link is written only when exactly one drawer
+    /// qualifies as the successor, and an ambiguous or unmatched close is left alone (it reads as an
+    /// invalidation, which is true of some of them) rather than guessed at. A drawer qualifies when it is
+    /// filed in the same room, has no predecessor yet, and either opens at exactly the instant the old one
+    /// closed (what `AppServices::supersede_drawer` always did) or came from the same document chunk and
+    /// opened within [`MINING_GAP`] before it (mining read the clock twice around one write, so the two instants
+    /// differ by a few milliseconds). Idempotent: a linked drawer no longer matches.
+    pub(crate) async fn backfill_supersession_lineage(&self) -> Result<u64> {
+        #[derive(Deserialize)]
+        struct Closed {
+            id: DrawerId,
+            room: String,
+            valid_to: chrono::DateTime<chrono::Utc>,
+            source: crate::domain::Source,
+        }
+        #[derive(Deserialize)]
+        struct Opened {
+            id: DrawerId,
+            valid_from: chrono::DateTime<chrono::Utc>,
+            source: crate::domain::Source,
+        }
+
+        let mut response = self
+            .db
+            .query(
+                "SELECT record::id(id) AS id, room, valid_to, source FROM drawer \
+                 WHERE valid_to AND !superseded_by",
+            )
+            .await?;
+        let closed: Vec<Closed> = super::take_rows(&mut response, 0)?;
+
+        let mut proposals: Vec<(DrawerId, DrawerId)> = Vec::new();
+        for old in closed {
+            let mut response = self
+                .db
+                .query(
+                    "SELECT record::id(id) AS id, <string>valid_from AS valid_from, source FROM drawer \
+                     WHERE room = $room AND !supersedes AND id != type::record('drawer', $old) \
+                       AND valid_from > <datetime>$earliest AND valid_from <= <datetime>$closed_at",
+                )
+                .bind(("room", old.room.clone()))
+                .bind(("old", old.id.to_string()))
+                .bind(("earliest", super::stored(old.valid_to - MINING_GAP)))
+                .bind(("closed_at", super::stored(old.valid_to)))
+                .await?;
+            let opened: Vec<Opened> = super::take_rows(&mut response, 0)?;
+            let same_chunk =
+                |candidate: &Opened| match (&old.source.origin, &candidate.source.origin) {
+                    (Some(a), Some(b)) => {
+                        a.source == b.source && a.document == b.document && a.chunk == b.chunk
+                    }
+                    _ => false,
+                };
+            let matches: Vec<&Opened> = opened
+                .iter()
+                .filter(|candidate| candidate.valid_from == old.valid_to || same_chunk(candidate))
+                .collect();
+            if let [only] = matches.as_slice() {
+                proposals.push((old.id, only.id));
+            }
+        }
+
+        // A successor claimed by two closed drawers is ambiguous from both sides.
+        let mut claims: std::collections::HashMap<DrawerId, usize> =
+            std::collections::HashMap::new();
+        for (_, new) in &proposals {
+            *claims.entry(*new).or_default() += 1;
+        }
+        let mut linked = 0;
+        for (old, new) in proposals.into_iter().filter(|(_, new)| claims[new] == 1) {
+            super::retrying_on_conflict(|| async {
+                super::checked(
+                    self.db
+                        .query(
+                            "BEGIN TRANSACTION; \
+                             UPDATE type::record('drawer', $old) SET superseded_by = $new; \
+                             UPDATE type::record('drawer', $new) SET supersedes = $old; \
+                             COMMIT TRANSACTION;",
+                        )
+                        .bind(("old", old.to_string()))
+                        .bind(("new", new.to_string()))
+                        .await?,
+                )
+                .map(|_| ())
+            })
+            .await?;
+            linked += 1;
+        }
+        Ok(linked)
     }
 
     /// Persist `drawer` unless a drawer with that id already exists,

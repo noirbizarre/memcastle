@@ -25,7 +25,9 @@ mod source;
 mod source_package;
 
 pub use checkpoint::{CheckpointDestination, CheckpointItem, CheckpointPayload, FactMutation};
-pub use drawer::{Drawer, Origin, Provenance, Source, SourceKind, content_hash, sha256_hex};
+pub use drawer::{
+    Drawer, DrawerHistory, Origin, Provenance, Source, SourceKind, content_hash, sha256_hex,
+};
 pub use entity::{
     Entity, EntityKind, FactProvenance, Mention, NewRelationship, Observation, Predicate,
     Relationship, normalize_label, require_label,

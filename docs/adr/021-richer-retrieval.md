@@ -5,7 +5,9 @@
 Accepted, builds on [ADR-004](004-versioned-database-migrations.md) (schema is SurrealKit's, never Rust DDL),
 [ADR-005](005-timestamp-representation.md) (the validity columns this ADR finally queries),
 [ADR-007](007-memory-mode-gate-follows-data-access.md) (reads and writes are gated by what they do)
-and [ADR-008](008-replay-safe-job-resume.md) (the embedding sweep is replay-safe by construction)
+and [ADR-008](008-replay-safe-job-resume.md) (the embedding sweep is replay-safe by construction).
+Amended by [ADR-032](032-temporal-retrieval-and-history.md): the temporal rule below is now one overlap clause that also
+serves an interval, and a supersession records what replaced what
 
 ## Context
 

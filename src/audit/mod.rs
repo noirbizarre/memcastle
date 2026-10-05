@@ -370,6 +370,8 @@ mod tests {
             },
             valid_from: now,
             valid_to: None,
+            supersedes: None,
+            superseded_by: None,
             created_at: now,
             updated_at: now,
         };
@@ -422,6 +424,8 @@ mod tests {
             },
             valid_from: now,
             valid_to: None,
+            supersedes: None,
+            superseded_by: None,
             created_at: now,
             updated_at: now,
         };
@@ -565,6 +569,8 @@ mod tests {
                 },
                 valid_from: now,
                 valid_to: None,
+                supersedes: None,
+                superseded_by: None,
                 created_at: now,
                 updated_at: now,
             })

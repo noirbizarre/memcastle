@@ -270,7 +270,7 @@ async fn ingest(
             },
             _ => None,
         };
-        let drawer = Drawer::new(
+        let mut drawer = Drawer::new(
             id,
             ctx.room,
             text.clone(),
@@ -299,8 +299,13 @@ async fn ingest(
             // closed (an earlier attempt of this job did it, or a person did): fall through to a plain create,
             // which is a no-op if this drawer exists already.
             Some(old) => {
+                // The replacement opens at the very instant the old drawer closes: a `valid_from` read earlier
+                // by `Drawer::new` would leave a few milliseconds where both are valid, and a point-in-time
+                // search landing in them would return both versions.
+                let at = Utc::now();
+                drawer.valid_from = at;
                 store
-                    .supersede_drawer(old.drawer, Some(&drawer), Utc::now())
+                    .supersede_drawer(old.drawer, Some(&drawer), at)
                     .await?
             }
             None => false,
