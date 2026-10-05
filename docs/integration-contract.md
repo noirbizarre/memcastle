@@ -343,7 +343,8 @@ A gap in `session-mode`, `wake-up`, `recall`, `checkpoint`, `persistent-session`
 the integration does not conform yet.
 
 Tool names can differ by client without being a gap.
-OpenCode prefixes each MCP tool with the server name, so the tools appear there as `memcastle_memcastle_search`.
+OpenCode's native MCP client prefixes each tool with the server name, so the tools appear there as `memcastle_memcastle_search`;
+the OpenCode plugin registers its own, unprefixed names (`memcastle_search`).
 An integration maps to the daemon's names and never renames anything in MemCastle.
 
 ## Adding an integration

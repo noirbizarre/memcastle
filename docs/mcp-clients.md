@@ -54,6 +54,12 @@ Then check that it connects:
 opencode mcp list
 ```
 
+!!! warning
+    This is the plain MCP setup.
+    If you use the OpenCode integration (the plugin in `integrations/opencode`), do **not** also add
+    `mcp.memcastle`: the plugin opens its own connection per session, and enabling both shows the model two copies of every
+    tool.
+
 OpenCode prefixes each tool with the server name, so the tools appear as `memcastle_memcastle_search` and so on.
 See OpenCode's [MCP servers documentation](https://opencode.ai/docs/mcp-servers/) for more options.
 
