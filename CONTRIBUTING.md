@@ -28,6 +28,8 @@ CI uses `dtolnay/rust-toolchain` because it needs per-job components and cross-c
 | `mise run sources:test -- <name>` | Build and conformance-test one source under `sources/` |
 | `mise run sources:package` | Package the sources that ship with releases, with their index, into `target/bundled-sources` |
 | `mise run integrations:check` | Typecheck and test every package under `integrations/` against a real daemon (needs bun) |
+| `mise run integrations:build` | Bundle the Pi and OpenCode integrations into `integrations/<id>/dist`, for `--assets-dir "$PWD"` (needs bun) |
+| `mise run integrations:package` | Lay out the integrations and skills that ship with releases in `target/bundled-integrations` (needs bun) |
 | `mise run cover` | Run the tests with coverage |
 | `mise run format` | Format |
 | `mise run format:check` | Check the formatting without rewriting |

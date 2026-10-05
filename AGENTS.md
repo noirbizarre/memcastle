@@ -174,7 +174,8 @@ src/
 ├── app/        application services — the one layer mcp/api call into (the CLI reaches it over HTTP, via `client/`)
 ├── server/     the daemon composition root + lifecycle (registry file)
 ├── mcp/        MCP tool surface, over HTTP
-├── api/        the REST API (health/status/jobs/search/recall/wake-up/diary/wings/rooms/drawers/auth-token/db/shutdown)
+├── api/        the REST API (health/status/jobs/search/recall/wake-up/diary/notes/wings/rooms/drawers/entities/sources/
+│               source-packages/source-registry/auth-token/db/shutdown; `docs/mcp-and-api.md` lists every route)
 └── client/     the CLI's HTTP client for a running daemon, and the human renderings of its answers (status, tables)
 
 wit/            the source contract (`memcastle:source`), the one definition components and the host are built from

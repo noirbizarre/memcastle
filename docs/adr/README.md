@@ -49,7 +49,8 @@ The history is the value.
   the start command renamed by ADR-017)
 - [ADR-013](013-release-packaging-and-asset-resolution.md) — releases are one binary plus an optional package layout,
   and assets resolve override, installed, embedded
-  (`.deb` and `.rpm` packages and shell completions added by dated notes, bundled sources by ADR-033)
+  (`.deb` and `.rpm` packages and shell completions added by dated notes, bundled sources by ADR-033,
+  integrations and skills by ADR-034)
 - [ADR-014](014-optional-token-authentication.md) — authentication is an optional bearer token, checked at one layer,
   and never an MCP capability (commands renamed by ADR-017)
 - [ADR-015](015-database-admin-endpoint.md) — the database admin endpoint is an opt-in listener inside the daemon,
@@ -64,18 +65,19 @@ The history is the value.
   fixtures, not a framework, and reach MemCastle only over MCP and HTTP
 - [ADR-020](020-skills-are-versioned-with-the-repository.md) — agent skills are plain files versioned with the
   repository and installed by copying, and a test holds them to the tools, commands and routes they name
+  (packaged and installed with an integration by ADR-034)
 - [ADR-021](021-richer-retrieval.md) — retrieval is SurrealDB-native and derived: one HNSW index, one shared scope,
   `search::rrf` fusion, point-in-time validity, drawer supersession and graph expansion, with embeddings from a provider
   or the caller (temporal rule and supersession amended by ADR-032)
 - [ADR-022](022-integrations-are-bun-packages-tested-against-a-real-daemon.md) — integrations are self-contained bun
   packages, each with its own small client, tested against a real daemon in their own CI job
-  (cross-integration tests amended by ADR-027)
+  (cross-integration tests amended by ADR-027, bundled releases by ADR-034)
 - [ADR-023](023-unified-source-model-for-mining.md) — mining goes through one source model in three stages (acquire,
   normalize, chunk and ingest), with idempotent ingestion and a cursor MemCastle keeps per source; re-mining no longer
   duplicates (`pi-sessions` as a built-in adapter partly superseded by ADR-028)
 - [ADR-024](024-entity-extraction-as-an-enrich-job.md) — entity extraction is an enrich job that only adds graph
   records, with provenance on every edge and a closed vocabulary for extracted facts, from a built-in heuristic or
-  an external provider
+  an external provider (the drawers it reads widened to notes by ADR-031)
 - [ADR-025](025-memory-deduplication-and-entity-resolution.md) — deduplication is a conservative domain decision:
   an exact copy in a room is not stored twice, a typo or a case variant is stored and linked with its evidence, and
   entity spelling variants converge while ambiguous names stay distinct; nothing is merged and nothing needs a model
