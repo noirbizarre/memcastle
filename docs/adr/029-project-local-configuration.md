@@ -82,3 +82,12 @@ And the daemon never sees a client's working directory, so it cannot resolve a p
 - Resolution happens once per working directory, so a project file edited mid-session takes effect in the next session.
 - `off` sessions read no project file, so a broken file cannot make an `off` session do or say anything.
 - The CLI and the MCP tools are unchanged: a client that wants a project scope passes the wing and room itself.
+
+## Note, 2026-10-05: an explicit wake-up source outranks the file
+
+The order above is per field for the project context: environment, then file.
+An integration's own `wakeUp.source` is not a later fallback to that context.
+Only the default `project` source follows the project context;
+`user`, `custom` and `none` are the user's explicit choices for the client and outrank both the environment and the file.
+The integration contract and [Project configuration](../project-config.md#precedence) say so,
+and the integrations behave that way.
