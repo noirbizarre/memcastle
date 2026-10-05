@@ -45,10 +45,11 @@ The history is the value.
   bound before the daemon does anything else (non-loopback warning added by ADR-014,
   commands renamed by ADR-017)
 - [ADR-012](012-status-reports-a-stopped-daemon-and-exits-by-state.md) — `status` answers for a stopped daemon too,
-  and its exit code says which state it found (`--json` extended by ADR-015, form by stream amended by ADR-016)
+  and its exit code says which state it found (`--json` extended by ADR-015, form by stream amended by ADR-016,
+  the start command renamed by ADR-017)
 - [ADR-013](013-release-packaging-and-asset-resolution.md) — releases are one binary plus an optional package layout,
   and assets resolve override, installed, embedded
-  (`.deb` and `.rpm` packages added by a dated note)
+  (`.deb` and `.rpm` packages and shell completions added by dated notes, bundled sources by ADR-033)
 - [ADR-014](014-optional-token-authentication.md) — authentication is an optional bearer token, checked at one layer,
   and never an MCP capability (commands renamed by ADR-017)
 - [ADR-015](015-database-admin-endpoint.md) — the database admin endpoint is an opt-in listener inside the daemon,
@@ -65,12 +66,13 @@ The history is the value.
   repository and installed by copying, and a test holds them to the tools, commands and routes they name
 - [ADR-021](021-richer-retrieval.md) — retrieval is SurrealDB-native and derived: one HNSW index, one shared scope,
   `search::rrf` fusion, point-in-time validity, drawer supersession and graph expansion, with embeddings from a provider
-  or the caller
+  or the caller (temporal rule and supersession amended by ADR-032)
 - [ADR-022](022-integrations-are-bun-packages-tested-against-a-real-daemon.md) — integrations are self-contained bun
   packages, each with its own small client, tested against a real daemon in their own CI job
+  (cross-integration tests amended by ADR-027)
 - [ADR-023](023-unified-source-model-for-mining.md) — mining goes through one source model in three stages (acquire,
   normalize, chunk and ingest), with idempotent ingestion and a cursor MemCastle keeps per source; re-mining no longer
-  duplicates
+  duplicates (`pi-sessions` as a built-in adapter partly superseded by ADR-028)
 - [ADR-024](024-entity-extraction-as-an-enrich-job.md) — entity extraction is an enrich job that only adds graph
   records, with provenance on every edge and a closed vocabulary for extracted facts, from a built-in heuristic or
   an external provider
@@ -81,6 +83,7 @@ The history is the value.
 - [ADR-026](026-pluggable-source-adapters-as-webassembly-components.md) — mining sources are pluggable as
   WebAssembly components behind the same adapter contract, with explicit consented permissions, a computed lifecycle,
   a `source` command group for development and one conformance suite run against native and WebAssembly sources
+  (`pi-sessions` as a built-in adapter partly superseded by ADR-028, distribution completed by ADR-033)
 - [ADR-027](027-cross-integration-tests-live-in-a-common-package.md) — tests that need two integrations live in a
   test-only `integrations/common` package that imports their sources, and production code stays per package
   (amends ADR-022)
