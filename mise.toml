@@ -1,3 +1,12 @@
+[env]
+# Development defaults, applied to `mise run`/`mise cli` and to any shell with mise activated, from this directory down.
+# Use local assets during dev: the checkout is a valid assets root (sources/, integrations/, skills/, web/dist).
+MEMCASTLE_ASSETS_DIR = "{{ config_root }}"
+# Enable WebUI during dev
+MEMCASTLE_WEB_ENABLE = true
+# The suites that start a daemon or run the installer (`integrations:check`, `web:check`) unset every MEMCASTLE_*
+# variable first, so these defaults can never change what they test. See docs/development.md.
+
 # Toolchain and task definitions.
 #
 # Tool versions are resolved to exact builds in `mise.lock`, which is
@@ -130,10 +139,10 @@ run = "cargo insta review"
 
 [tasks.check]
 description = "Run every check that does not modify the working tree"
-# `guards`, `test:wasm`, `sources:check` and `integrations:check` are project-specific: without them `check`/`ci` pass
-# locally while the architecture hooks (which otherwise run only on commit and in CI), the WebAssembly suite, the
-# reference sources and the integration suites fail later.
-depends = ["format:check", "lint", "lint:actions", "lint:md", "spell", "guards", "test", "test:wasm", "sources:check", "integrations:check"]
+# `guards`, `test:wasm`, `sources:check`, `integrations:check` and `web:check` are project-specific: without them
+# `check`/`ci` pass locally while the architecture hooks (which otherwise run only on commit and in CI), the
+# WebAssembly suite, the reference sources, the integration suites and the dashboard fail later.
+depends = ["format:check", "lint", "lint:actions", "lint:md", "spell", "guards", "test", "test:wasm", "sources:check", "integrations:check", "web:check"]
 
 [tasks.ci]
 description = "The local equivalent of CI's lint, test and documentation steps"
@@ -241,7 +250,7 @@ git tpl diff --exit-code --stat
 description = "Run the architecture guard hooks over the whole tree"
 # The same hooks CI runs through `prek run --all-files`, minus the ones that
 # duplicate other tasks (fmt, clippy, typos, markdownlint, actionlint). These
-# enforce AGENTS.md invariants 1, 2, 4, 5 and 8, which nothing else in `check` covers.
+# enforce AGENTS.md invariants 1, 2, 4, 5, 8 and 11, which nothing else in `check` covers.
 # Invariants 9 and 10 are enforced by tests (`tests/source_isolation.rs`), not hooks: see docs/development.md.
 run = """
 #!/usr/bin/env bash
@@ -251,6 +260,7 @@ prek run --all-files single-writer
 prek run --all-files job-status-only-via-apply
 prek run --all-files no-hand-rolled-ddl
 prek run --all-files integrations-http-only
+prek run --all-files web-http-only
 """
 
 [tasks."test:wasm"]
@@ -272,6 +282,9 @@ depends = ["build"]
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
+# The development defaults in `[env]` are for running the daemon by hand. A test that inherited them would install from
+# the checkout, or serve a dashboard, because of where it was run from and not because of what it asserts.
+for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
 export MEMCASTLE_BIN="$PWD/target/debug/memcastle"
 # The bundles the release ships, built by the release's own script and installed from both the package tree and this
 # checkout (docs/adr/034). The test is `#[ignore]`d in the basic suite because it needs bun; here bun is on the PATH.
@@ -303,6 +316,53 @@ description = "Lay out the integrations and skills that ship with releases in ta
 # (`memcastle integration install pi --assets-dir target/bundled-integrations`).
 tools = { bun = "1" }
 run = "packaging/integrations/build.sh target/bundled-integrations"
+
+[tasks."web:check"]
+description = "Typecheck, test and build the web dashboard, then check its package and serve it from a real daemon"
+# bun installs and runs the scripts and node is what vite and vue-tsc run on; both are declared here and not in `[tools]`
+# for the same reason as `integrations:check`.
+tools = { bun = "1", node = "24" }
+# The suite and the bundle test start a real `memcastle serve`, so the debug binary must exist and be current.
+depends = ["build"]
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+# See `integrations:check`: the `[env]` development defaults must not reach what is tested.
+for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
+export MEMCASTLE_BIN="$PWD/target/debug/memcastle"
+# Builds `web/dist` (which is what development mode serves) and lays out the tree a release packages, with the
+# release's own script (docs/adr/035). The bundle test serves both, from an installed prefix and from this checkout; it
+# is `#[ignore]`d in the basic suite because it needs bun and node, which are on the PATH here.
+packaging/web/build.sh target/bundled-web
+cargo test --test web_bundle -- --ignored
+cd web
+# --frozen-lockfile: a lockfile that disagrees with package.json is a failure here, not a silent rewrite.
+bun install --frozen-lockfile
+bun run typecheck
+bun run test
+# Against a real daemon, serving the build made above.
+bun run test:daemon
+"""
+
+[tasks."web:build"]
+description = "Build the web dashboard into web/dist, which is all development mode needs"
+# After this, `memcastle serve --assets-dir "$PWD"` with `web.enable` serves the dashboard as built in this checkout.
+tools = { bun = "1", node = "24" }
+run = "packaging/web/build.sh"
+
+[tasks."web:dev"]
+description = "Run the dashboard's dev server (hot reload) against the running daemon"
+# The page is the dev server's and `/api` is proxied to the daemon, found through its registry file or MEMCASTLE_URL.
+tools = { bun = "1", node = "24" }
+dir = "web"
+run = "bun install --frozen-lockfile && bun run dev"
+
+[tasks."web:package"]
+description = "Lay out the dashboard that ships with releases in target/bundled-web"
+# The script `publish-release.yaml` runs: what a release bundles is what a developer can build and serve from
+# (`memcastle serve --assets-dir target/bundled-web`).
+tools = { bun = "1", node = "24" }
+run = "packaging/web/build.sh target/bundled-web"
 
 [tasks."sources:check"]
 description = "Build and conformance-test every reference WebAssembly source under sources/"

@@ -173,3 +173,15 @@ language = "system"
 entry = '''bash -c '! grep -rnP --exclude=*.md --exclude-dir=node_modules "surrealdb|surrealkv|SurrealStore|(?<![A-Za-z0-9_])(crate|memcastle)::(\{[^}]*)?(store|jobs)\b|/api/db\b" integrations' '''
 files = '^integrations/'
 pass_filenames = false
+
+# AGENTS.md invariant #11: the web dashboard is a client of the REST API and nothing else, as the CLI is. Like an
+# integration (invariant #8), it must not open the database, reach MemCastle's `store`/`jobs` code, or use the database
+# admin endpoint (`/api/db`, ADR-015), each of which would be a second path to the palace that skips the memory-mode
+# gate and the single writer. `dist` is generated, and `node_modules` and Markdown are left out as for integrations.
+[[repos.hooks]]
+id = "web-http-only"
+name = "the web dashboard reaches MemCastle only over HTTP"
+language = "system"
+entry = '''bash -c '! grep -rnP --exclude=*.md --exclude-dir=node_modules --exclude-dir=dist --exclude=bun.lock "surrealdb|surrealkv|SurrealStore|(?<![A-Za-z0-9_])(crate|memcastle)::(\{[^}]*)?(store|jobs)\b|/api/db\b" web' '''
+files = '^web/'
+pass_filenames = false

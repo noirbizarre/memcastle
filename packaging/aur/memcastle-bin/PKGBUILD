@@ -43,14 +43,18 @@ sha256sums_aarch64=('@SHA256_AARCH64@')
 #
 # The agent integrations and the shared skills (docs/adr/034) are bundled JavaScript, equally portable, and arrive the
 # same way: `$srcdir/memcastle-integrations-$pkgver/{integrations,skills}`.
+#
+# The web dashboard (docs/adr/035) is static files, portable the same way: `$srcdir/memcastle-web-$pkgver/web/dist`.
 source=("LICENSE-$pkgver::$url/raw/$pkgver/LICENSE"
         "memcastle-$pkgver.service::$url/raw/$pkgver/packaging/systemd/memcastle.service"
         "memcastle-sources-$pkgver.tar.gz::$url/releases/download/$pkgver/memcastle_${pkgver}_sources.tar.gz"
-        "memcastle-integrations-$pkgver.tar.gz::$url/releases/download/$pkgver/memcastle_${pkgver}_integrations.tar.gz")
+        "memcastle-integrations-$pkgver.tar.gz::$url/releases/download/$pkgver/memcastle_${pkgver}_integrations.tar.gz"
+        "memcastle-web-$pkgver.tar.gz::$url/releases/download/$pkgver/memcastle_${pkgver}_web.tar.gz")
 sha256sums=('@SHA256_LICENSE@'
             '@SHA256_SERVICE@'
             '@SHA256_SOURCES@'
-            '@SHA256_INTEGRATIONS@')
+            '@SHA256_INTEGRATIONS@'
+            '@SHA256_WEB@')
 
 package() {
 	install -Dm755 "$srcdir/memcastle-$pkgver-$CARCH" "$pkgdir/usr/bin/memcastle"
@@ -70,6 +74,8 @@ package() {
 	install -dm755 "$pkgdir/usr/share/memcastle"
 	cp -r "$srcdir/memcastle-integrations-$pkgver/integrations" "$srcdir/memcastle-integrations-$pkgver/skills" \
 		"$pkgdir/usr/share/memcastle/"
+	# The dashboard, at the `web/dist` a checkout has too, so one lookup finds it. Served only when `web.enable` is set.
+	cp -r "$srcdir/memcastle-web-$pkgver/web" "$pkgdir/usr/share/memcastle/"
 }
 
 # --- project-specific ---------------------------------------------------

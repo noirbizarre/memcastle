@@ -1,6 +1,6 @@
 # Builds the .deb and .rpm from the binary already staged in dist/.
 # Driven by packaging/nfpm/build.sh (run by publish-release.yaml and by CI),
-# which exports VERSION, NFPM_ARCH, BINARY and COMPLETIONS_DIR.
+# which exports VERSION, NFPM_ARCH, BINARY, COMPLETIONS_DIR, SOURCES_DIR, INTEGRATIONS_DIR and WEB_DIR.
 name: memcastle
 arch: "${NFPM_ARCH}"
 platform: linux
@@ -51,6 +51,12 @@ contents:
     expand: true
   - src: "${INTEGRATIONS_DIR}/skills"
     dst: /usr/share/memcastle/skills
+    type: tree
+    expand: true
+  # The web dashboard (docs/adr/035), at the same `web/dist/` a checkout has, so the daemon finds it through the one
+  # assets root: built by packaging/web/build.sh, with no sources and no `node_modules`. Served only when `web.enable`.
+  - src: "${WEB_DIR}/web"
+    dst: /usr/share/memcastle/web
     type: tree
     expand: true
   - src: packaging/systemd/memcastle.service

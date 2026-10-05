@@ -4,7 +4,8 @@
 # Usage: packaging/nfpm/build.sh <version> <dist-dir>
 #
 # Reads  <dist-dir>/memcastle_<version>_linux-{amd64,arm64}
-# Reads  $SOURCES_DIR (packaging/sources/build.sh) and $INTEGRATIONS_DIR (packaging/integrations/build.sh), if set
+# Reads  $SOURCES_DIR (packaging/sources/build.sh), $INTEGRATIONS_DIR (packaging/integrations/build.sh) and
+#        $WEB_DIR (packaging/web/build.sh), if set
 # Runs   the amd64 binary once, to print its shell completion scripts
 # Writes <dist-dir>/memcastle_<version>_linux-{amd64,arm64}.{deb,rpm}
 #
@@ -59,6 +60,10 @@ mkdir -p "${SOURCES_DIR}"
 # packaging/integrations/build.sh. Empty directories when the caller has none, for the same reason as above.
 export INTEGRATIONS_DIR="${INTEGRATIONS_DIR:-${completions}/integrations-tree}"
 mkdir -p "${INTEGRATIONS_DIR}/integrations" "${INTEGRATIONS_DIR}/skills"
+
+# The web dashboard (docs/adr/035): `web/dist/` built by packaging/web/build.sh. An empty tree when the caller has none.
+export WEB_DIR="${WEB_DIR:-${completions}/web-tree}"
+mkdir -p "${WEB_DIR}/web"
 
 for asset in linux-amd64 linux-arm64; do
   binary="${dist}/memcastle_${version}_${asset}"
