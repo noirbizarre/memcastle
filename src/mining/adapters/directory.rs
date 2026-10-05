@@ -17,7 +17,7 @@ use crate::error::{Error, Result};
 
 use super::super::adapter::{Discovery, SourceAdapter};
 use super::watermark::{Entry, Watermark, mtime_ns, page};
-use crate::project::project_wing;
+use crate::project::{project_wing, wing_from_directory};
 
 /// The adapter's name.
 pub const PROVIDER: &str = "directory";
@@ -99,13 +99,11 @@ impl SourceAdapter for DirectoryAdapter {
     fn default_wing(&self, source: &SourceRef) -> String {
         let root = Path::new(&source.locator);
         // A project that declares its wing is mined into it, so mining, wake-up and checkpoints meet in one wing;
-        // a directory outside any project keeps the name it always had.
-        project_wing(root).unwrap_or_else(|| {
-            root.file_name().map_or_else(
-                || "unnamed".to_string(),
-                |n| n.to_string_lossy().into_owned(),
-            )
-        })
+        // a directory outside any project takes its own name, made acceptable the way `note` makes it, so a
+        // directory named like a UUID is filed under a wing a path can address instead of one it cannot.
+        project_wing(root)
+            .or_else(|| wing_from_directory(root))
+            .unwrap_or_else(|| "unnamed".to_string())
     }
 
     fn default_room(&self) -> &'static str {
@@ -265,6 +263,16 @@ mod tests {
         assert_eq!(wing(&project), "declared");
         // A subdirectory of a project is part of it: its wing is the project's, not its own name.
         assert_eq!(wing(&project.join("docs")), "declared");
+    }
+
+    #[test]
+    fn a_directory_named_like_a_uuid_is_mined_into_a_wing_a_path_can_address() {
+        let dir = tempfile::tempdir().unwrap();
+        let uuid_named = dir.path().join("0b8c1e8e-7a52-4a1c-9d0e-6f0a3b2c1d4e");
+        std::fs::create_dir_all(&uuid_named).unwrap();
+        let wing = adapter().default_wing(&source_of(&uuid_named));
+        assert_eq!(wing, "project-0b8c1e8e-7a52-4a1c-9d0e-6f0a3b2c1d4e");
+        assert!(validate_name(NameKind::Wing, &wing).is_ok());
     }
 
     #[tokio::test]
