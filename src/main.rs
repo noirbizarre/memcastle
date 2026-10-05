@@ -526,6 +526,8 @@ fn retrieval_query(
         tags: retrieval.tags,
         source_kind: retrieval.source_kind,
         as_of: retrieval.as_of,
+        from: retrieval.from,
+        until: retrieval.until,
         include_historical: retrieval.include_historical,
         expand: retrieval.expand,
     }
@@ -1239,6 +1241,17 @@ async fn cmd_drawer(
                 .supersede_drawer(&found.id.to_string(), replacement)
                 .await?;
             print_json(&outcome)?;
+        }
+        DrawerCommand::History { drawer } => {
+            let (wing, room, name) = PalacePath::parse_drawer(&drawer)?;
+            // The REST route takes an id, so the path is resolved to it first
+            // (a superseded version has no name left: its UUID resolves too).
+            let found = daemon.show_drawer(&wing, &room, &name).await?;
+            let history = daemon.drawer_history(&found.id.to_string()).await?;
+            print_for_terminal_or_json(
+                |painter, _| view::render_history(&history, painter),
+                &history,
+            )?;
         }
         DrawerCommand::Mention { drawer, name, kind } => {
             let (wing, room, drawer_name) = PalacePath::parse_drawer(&drawer)?;

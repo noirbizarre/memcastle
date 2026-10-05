@@ -140,8 +140,12 @@ Operations: `memcastle_recall` and `memcastle_search`.
 
 Both rank lexically unless the daemon has an embedding provider, and then by meaning and words together (`ranking: auto`).
 The lexical leg matches every query word first and any word if there was none.
-Both accept optional `ranking`, `tags`, `source_kind`, `as_of`, `include_historical` and `expand` arguments, and a client
-that sends only `query` keeps working.
+Both accept optional `ranking`, `tags`, `source_kind`, `as_of`, `from`, `until`, `include_historical` and `expand`
+arguments, and a client that sends only `query` keeps working.
+The time arguments choose which memory is valid: `as_of` for a date or instant, `from` with `until` for a period,
+`include_historical` for every version.
+A client that needs to explain how a belief changed follows a hit's `id` with `memcastle_history`, which an integration
+may use but is not required to.
 Content is returned verbatim, so a client can quote it.
 No match is an empty list.
 Neither tool forces a client to search, and nothing in MemCastle enforces the habit.

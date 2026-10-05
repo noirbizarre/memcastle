@@ -413,6 +413,31 @@ async fn the_new_retrieval_operations_follow_the_memory_mode_matrix() {
         .expect("request");
     assert_eq!(disabled.status(), StatusCode::FORBIDDEN);
 
+    // History is a read: allowed read-only, refused disabled, like search.
+    for (mode, expected) in [
+        ("full", StatusCode::OK),
+        ("read_only", StatusCode::OK),
+        ("disabled", StatusCode::FORBIDDEN),
+    ] {
+        let history = client
+            .get(format!("{base}/api/drawers/{id}/history"))
+            .header(HEADER, mode)
+            .send()
+            .await
+            .expect("request");
+        assert_eq!(history.status(), expected, "history in {mode}");
+    }
+    // An interval is a read option too.
+    let interval = client
+        .get(format!(
+            "{base}/api/search?q=gated&from=2000-01-01&until=2999-01-01"
+        ))
+        .header(HEADER, "read_only")
+        .send()
+        .await
+        .expect("request");
+    assert_eq!(interval.status(), StatusCode::OK);
+
     // Writes: supersession, linking and embedding refuse read_only and disabled.
     for mode in ["read_only", "disabled"] {
         let supersede = client

@@ -4,7 +4,7 @@
 //! Like [`super::table`] these are only used on a terminal; a pipe gets JSON.
 
 use crate::app::WingDetail;
-use crate::domain::{Deleted, Drawer, RoomSummary, WingSummary};
+use crate::domain::{Deleted, Drawer, DrawerHistory, RoomSummary, WingSummary};
 use crate::term::Painter;
 
 use super::table::render_rooms;
@@ -86,6 +86,7 @@ pub fn render_drawer(drawer: &Drawer, painter: Painter) -> String {
     if let Some(name) = &drawer.name {
         lines.push(field(painter, "Name", name));
     }
+    lines.push(field(painter, "Valid", validity(drawer)));
     lines.push(field(painter, "Created", drawer.created_at.to_rfc3339()));
     if let Some(agent) = &drawer.source.agent {
         lines.push(field(painter, "Agent", agent));
@@ -99,6 +100,54 @@ pub fn render_drawer(drawer: &Drawer, painter: Painter) -> String {
     lines.push(String::new());
     lines.push(drawer.content.clone());
     lines.join("\n")
+}
+
+/// The validity of a drawer as `from -> to`, with `now` for an open end, so a
+/// version's place in the chain reads at a glance.
+fn validity(drawer: &Drawer) -> String {
+    let end = drawer
+        .valid_to
+        .map_or_else(|| "now".to_string(), |end| end.to_rfc3339());
+    format!("{} -> {end}", drawer.valid_from.to_rfc3339())
+}
+
+/// How a piece of knowledge evolved: one block per version, oldest first, each
+/// with its validity period, provenance and content. The recorded time is
+/// shown beside the validity because the two differ whenever something was
+/// learned after the fact.
+#[must_use]
+pub fn render_history(history: &DrawerHistory, painter: Painter) -> String {
+    let total = history.versions.len();
+    let blocks: Vec<String> = history
+        .versions
+        .iter()
+        .enumerate()
+        .map(|(index, version)| {
+            let current = version.valid_to.is_none();
+            let state = if current {
+                painter.ok("current")
+            } else {
+                painter.dim("superseded")
+            };
+            let mut lines = vec![format!(
+                "{} {} {state}",
+                painter.dim(&format!("Version {}/{total}", index + 1)),
+                version.id
+            )];
+            lines.push(field(painter, "Valid", validity(version)));
+            lines.push(field(painter, "Recorded", version.created_at.to_rfc3339()));
+            if let Some(agent) = &version.source.agent {
+                lines.push(field(painter, "Agent", agent));
+            }
+            if let Some(uri) = &version.source.uri {
+                lines.push(field(painter, "Source", uri));
+            }
+            lines.push(String::new());
+            lines.push(version.content.clone());
+            lines.join("\n")
+        })
+        .collect();
+    blocks.join("\n\n")
 }
 
 /// One line saying what a delete removed.

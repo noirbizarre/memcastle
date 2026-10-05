@@ -19,8 +19,9 @@ A failure comes back as an MCP error result carrying the [error body](#errors) b
 |---|---|---|
 | `memcastle_set_mode` | `mode` | Choose this session's [memory mode](memory-modes.md). |
 | `memcastle_status` | none | Daemon health: version, uptime, pid, address, palace, datastore and migration state, counts. |
-| `memcastle_search` | `query`, `limit?`, `wing?`, `room?`, `ranking?`, `tags?`, `source_kind?`, `as_of?`, `include_historical?`, `expand?` | Search drawer content: lexical, semantic or hybrid, see [Searching](#searching). |
+| `memcastle_search` | `query`, `limit?`, `wing?`, `room?`, `ranking?`, `tags?`, `source_kind?`, `as_of?`, `from?`, `until?`, `include_historical?`, `expand?` | Search drawer content: lexical, semantic or hybrid, see [Searching](#searching). |
 | `memcastle_recall` | the same, without `room` | Verbatim recall of matching content. |
+| `memcastle_history` | `drawer_id` | How one piece of knowledge evolved: every version of a drawer's supersession chain, oldest first, see [History](#history). |
 | `memcastle_wake_up` | `agent_identity`, `wing?`, `max_items?`, `max_bytes?` | Session-start context for an agent. |
 | `memcastle_diary_write` | `agent_identity`, `wing`, `content` | Write a diary entry. |
 | `memcastle_diary_read` | `agent_identity`, `wing`, `limit?` | Read an agent's newest diary entries. |
@@ -119,7 +120,7 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 |---|---|---|
 | `GET /api/health` | Liveness: `{"status": "ok"}`. Touches nothing else. | none |
 | `GET /api/status` | The full status report, also used by `memcastle status`. | none |
-| `GET /api/search` | Search drawers. | query string: `q` (or `query`), `limit`, `wing`, `room`, `ranking`, `tags`, `source_kind`, `as_of`, `include_historical`, `expand` |
+| `GET /api/search` | Search drawers. | query string: `q` (or `query`), `limit`, `wing`, `room`, `ranking`, `tags`, `source_kind`, `as_of`, `from`, `until`, `include_historical`, `expand` |
 | `POST /api/search` | The same search as a JSON [`SearchQuery`](#searching), the only way to send a `query_embedding`. | JSON body |
 | `GET /api/recall` | Recall drawers. | as `GET /api/search`, and `room` is ignored |
 | `POST /api/recall` | The JSON form of recall. | JSON body |
@@ -150,6 +151,7 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `POST /api/drawers/{id}/supersede` | End a drawer's validity now, with a replacement when `content` is given: `{superseded, replacement}`. | JSON body: `content?`, `tags?`, `requested_by?` |
 | `PUT /api/drawers/{id}/embedding` | Attach a vector you computed to a drawer. | JSON body: `embedding` (768 numbers) |
 | `GET /api/drawers/{id}/duplicates` | The drawers this one was recorded as a likely duplicate of, or that resemble it, with the evidence: `{drawer, similar}`. See [Deduplication](deduplication.md). | none |
+| `GET /api/drawers/{id}/history` | How the knowledge a drawer belongs to evolved: `{drawer, versions}`, every version of its supersession chain oldest first, from any version of it. See [History](#history). | none |
 | `POST /api/drawers/{id}/mentions` | Record that a drawer mentions an entity, for graph expansion: `201` when linked, `200` when it already was. The name converges on an entity it is a variant of. | JSON body: `name`, `kind` |
 | `GET /api/entities` | List entities of the [knowledge graph](#the-knowledge-graph), by name. | query string: `name` (contains, any case), `kind`, `limit` (default 50, at most 200) |
 | `GET /api/entities/{id}/relationships` | The relationships touching an entity, with provenance and validity. | query string: `include_expired` |
@@ -181,6 +183,7 @@ curl -s http://127.0.0.1:8420/api/jobs?status=running
 
 `memcastle_search`, `memcastle_recall`, `GET /api/search` and `GET /api/recall` take the same options.
 Only the query is required, so a plain `?q=word` means what it always did.
+`as_of`, `from` with `until`, and `include_historical` each say which memory to look at, so they cannot be combined.
 
 | Option | Meaning |
 |---|---|
@@ -188,8 +191,9 @@ Only the query is required, so a plain `?q=word` means what it always did.
 | `wing`, `room` | Restrict to a wing or room by name. `recall` ignores `room`. |
 | `tags` | Drawers carrying every one of these tags: a list over MCP, comma-separated in a query string (`tags=a,b`). |
 | `source_kind` | `file`, `manual`, `transcript`, `note` or `other`. |
-| `as_of` | An RFC 3339 instant, such as `2026-01-31T12:00:00Z`: search the memory that was valid then. |
-| `include_historical` | Also return memory that has been superseded. Cannot be combined with `as_of`. |
+| `as_of` | An RFC 3339 instant (`2026-01-31T12:00:00Z`) or a date (`2026-01-31`, midnight UTC): search the memory that was valid then. |
+| `from`, `until` | An interval, in the same forms: search the memory that was valid at some moment of `[from, until)`. Both are required together. |
+| `include_historical` | Also return memory that has been superseded. |
 | `expand` | Append drawers related to the hits through the knowledge graph. |
 | `limit` | At most this many hits, 10 by default and 200 at most. |
 
@@ -204,10 +208,44 @@ An explicit `semantic` or `hybrid` that cannot get a vector fails with `memcastl
 instead of answering lexically.
 
 **Time.**
-By default a search sees only what is valid now.
-A drawer is valid at an instant from its `valid_from` until, but not including, its `valid_to`, so a drawer superseded at
-that instant and its replacement are never both found.
-`as_of` and `include_historical` reach older memory, which is how a corrected belief is still found as it stood.
+Time here is *validity time*: `valid_from` and `valid_to` say when a piece of knowledge was true,
+and `created_at` says when MemCastle recorded it.
+Only validity is searched, so a memory discovered long after the period it describes is found by asking about that period.
+A drawer is valid from its `valid_from` until, but not including, its `valid_to`, and with no `valid_to` it stays valid.
+Four questions are asked with the same options on every interface:
+
+| You want | Ask with | Finds |
+|---|---|---|
+| What is true now? | nothing (the default) | What is valid at this moment. |
+| What was true at date X? | `as_of=X` | What was valid at the instant X. |
+| What was true during X to Y? | `from=X` and `until=Y` | Everything valid at some moment of the window `[X, Y)`, so a belief held only part of it is included. |
+| Every version ever recorded? | `include_historical` | Current and superseded alike, with no time filter. |
+
+An instant is an RFC 3339 timestamp or a `YYYY-MM-DD` date, read as midnight UTC at the start of that day:
+`as_of=2026-01-01` is the very start of the year, and `from=2026-01-01&until=2026-02-01` is exactly January.
+Both ends of an interval are required, `from` must be before `until`, and a request that breaks either rule fails with
+`memcastle::input::invalid` naming the option.
+
+The end of validity, and the end of a window, are exclusive.
+A drawer superseded at an instant and its replacement are never both valid at that instant and never both absent,
+and a window only touching a drawer's validity does not overlap it:
+a drawer closed exactly at `from` is not found, and neither is one opened exactly at `until`.
+A single instant is the window `[t, t + 1ns)`, so `as_of` and an interval are one rule and cannot disagree at a boundary.
+
+The same rule applies to every ranking (lexical, semantic and hybrid) and to `expand`:
+related drawers must be valid in the requested time too, and a `relates_to` hop is followed only when the relationship held
+then.
+For example, to learn what the database was at the start of the year and how that changed during it:
+
+```sh
+memcastle search "database we use" --as-of 2026-01-01
+memcastle search "database we use" --from 2026-01-01 --until 2027-01-01
+```
+
+The first returns the one belief that was true on 1 January.
+The second returns every belief held at some point in 2026, which is the way to notice that one changed.
+Each hit carries its `valid_from`, its `valid_to` (absent while it is still true) and its `id`, so a hit can be followed
+to its [history](#history).
 
 **Expansion.**
 With `expand`, drawers that share an entity with a hit (or sit one currently valid `relates_to` hop away) follow the direct
@@ -244,7 +282,9 @@ A hit never carries the embedding vector.
   "query_embedding": [0.01, "… 768 numbers"] }
 ```
 
-`temporal` is `"current"`, `"all"` or `{"as_of": "2026-01-31T12:00:00Z"}`.
+`temporal` is `"current"`, `"all"`, `{"as_of": "2026-01-31T12:00:00Z"}` or
+`{"between": {"from": "2026-01-01T00:00:00Z", "until": "2026-02-01T00:00:00Z"}}`.
+An interval whose `from` is not before its `until` is refused with `memcastle::input::invalid`.
 Attach a document vector with `PUT /api/drawers/{id}/embedding`, whose body is `{"embedding": [...]}`.
 Both need exactly 768 numbers: the dimension is part of the palace's schema.
 
@@ -254,7 +294,43 @@ from the same instant.
 The replacement takes over the drawer's name (the old one stays reachable by id) and its tags unless `tags` says otherwise.
 Without `content` the drawer is only invalidated.
 The old content is never rewritten.
-These three routes take a drawer id, which every search hit carries, and have no MCP tool.
+The two drawers are linked: the old one gains `superseded_by` and the replacement gains `supersedes`,
+set together in the same transaction.
+Superseding is a REST and CLI operation with no MCP tool, which is why an agent cannot rewrite what is true,
+only read how it changed.
+These routes take a drawer id, which every search hit carries.
+
+### History
+
+`memcastle_history`, `GET /api/drawers/{id}/history` and `memcastle drawer history` answer *how did this knowledge evolve?*
+Given the id of any version of a piece of knowledge, current or superseded, they return the whole chain,
+oldest first, by following the `supersedes` and `superseded_by` links in both directions:
+
+```json
+{
+  "drawer": "…the id you asked about…",
+  "versions": [
+    { "id": "…", "content": "we run the database on postgres",
+      "valid_from": "2025-01-01T00:00:00Z", "valid_to": "2025-06-01T00:00:00Z",
+      "provenance": { "requested_by": "cli", "job_id": null }, "source": { "kind": "manual" },
+      "created_at": "…", "superseded_by": "…" },
+    { "id": "…", "content": "we run the database on surrealdb",
+      "valid_from": "2025-06-01T00:00:00Z", "valid_to": null, "supersedes": "…" }
+  ]
+}
+```
+
+Each version is the drawer verbatim, so its identity, validity period, provenance and content are all kept.
+A version's `valid_to` is the next version's `valid_from`, so the periods tile the timeline.
+The last version has no `valid_to` while it is still true, and it has one when the knowledge was later invalidated
+without a replacement.
+A drawer nobody corrected is a history of one version, and an unknown id is `404` with `memcastle::palace::drawer_not_found`.
+History is a read, so a read-only session may use it and a disabled one may not.
+
+Neither `created_at` nor `updated_at` orders the chain: those are when MemCastle recorded each version,
+which can be long after the period it describes, and the order is the order of the links.
+Drawers that were superseded before MemCastle recorded the links are paired when the daemon first starts on the new version,
+when exactly one successor qualifies; an unpaired one reads as a history of one version.
 
 ### Wings, rooms and drawers
 

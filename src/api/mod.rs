@@ -129,6 +129,8 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
             "/api/drawers/{id}/duplicates",
             get(palace::drawer_duplicates),
         )
+        // How one piece of knowledge evolved across superseded drawers (docs/adr/032): read-only.
+        .route("/api/drawers/{id}/history", get(palace::drawer_history))
         // The knowledge graph: entities, what they relate to and which
         // drawers mention them, each with provenance and validity.
         .route("/api/entities", get(graph::list_entities))
@@ -191,8 +193,13 @@ struct SearchParams {
     tags: Option<String>,
     /// Restrict to drawers from one source kind: `file`, `manual`, `transcript`, `note` or `other`.
     source_kind: Option<String>,
-    /// An RFC 3339 instant: search the memory valid then.
+    /// An RFC 3339 instant or `YYYY-MM-DD` date: search the memory valid then.
     as_of: Option<String>,
+    /// The inclusive start of an interval; needs `until`. Searches the memory
+    /// valid at some moment of `[from, until)`.
+    from: Option<String>,
+    /// The exclusive end of an interval; needs `from`.
+    until: Option<String>,
     /// Include superseded memory as well as current.
     #[serde(default)]
     include_historical: bool,
@@ -222,6 +229,8 @@ impl SearchParams {
                 .collect(),
             source_kind: self.source_kind,
             as_of: self.as_of,
+            from: self.from,
+            until: self.until,
             include_historical: self.include_historical,
             expand: self.expand,
         }

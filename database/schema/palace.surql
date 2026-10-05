@@ -50,6 +50,12 @@ DEFINE FIELD IF NOT EXISTS valid_from ON TABLE drawer TYPE datetime;
 -- *optional* datetime round-trips as a plain RFC3339 string instead (see
 -- `store::mod`'s module doc on the cast convention this schema relies on).
 DEFINE FIELD IF NOT EXISTS valid_to ON TABLE drawer TYPE option<string>;
+-- Supersession lineage (docs/adr/032): which drawer replaced which. Plain drawer ids like every foreign key here,
+-- written together in the transaction that closes the old drawer, so a drawer's history can be walked without
+-- guessing from names or timestamps. `NONE` on a first version, on an open drawer and on one closed without a
+-- replacement; drawers closed before this existed are paired by the `supersession-lineage` migration.
+DEFINE FIELD IF NOT EXISTS supersedes ON TABLE drawer TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS superseded_by ON TABLE drawer TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS created_at ON TABLE drawer TYPE datetime;
 DEFINE FIELD IF NOT EXISTS updated_at ON TABLE drawer TYPE datetime;
 DEFINE INDEX IF NOT EXISTS drawer_room_idx ON TABLE drawer FIELDS room;

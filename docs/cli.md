@@ -151,7 +151,7 @@ Failures print a diagnostic with a `memcastle::<module>::<kind>` code and what t
 ```sh
 memcastle search <QUERY> [--limit <N>] [--wing <WING>] [--room <ROOM>]
                  [--ranking <auto|lexical|semantic|hybrid>] [--tag <TAG>]... [--source-kind <KIND>]
-                 [--as-of <TIMESTAMP> | --include-historical] [--expand]
+                 [--as-of <WHEN> | --from <WHEN> --until <WHEN> | --include-historical] [--expand]
 ```
 
 Search drawer content, lexically, by meaning or both.
@@ -161,8 +161,20 @@ Lexical matching returns drawers containing every word of the query and, if ther
 `--limit` defaults to 10 and is capped at 200.
 `--wing` restricts results to a wing, `--room` to a room directly, `--tag` (repeatable) to drawers carrying every tag,
 and `--source-kind` to `file`, `manual`, `transcript`, `note` or `other`.
-Only memory valid now is searched unless `--as-of` names an instant (RFC 3339, such as `2026-01-31T12:00:00Z`) or
-`--include-historical` adds superseded memory.
+Only memory valid now is searched, and four options choose another time (they cannot be combined):
+`--as-of` searches what was true at one instant, `--from` with `--until` what was true at some moment of the window
+`[from, until)`, and `--include-historical` every version, superseded ones too.
+An instant (`<WHEN>`) is an RFC 3339 timestamp such as `2026-01-31T12:00:00Z`, or a date such as `2026-01-31` meaning midnight
+UTC at the start of that day.
+
+```sh
+memcastle search "database we use" --as-of 2026-01-01
+memcastle search "database we use" --from 2026-01-01 --until 2027-01-01
+```
+
+Both ends of an interval are required, and `--until` is exclusive and must be after `--from`,
+so the second command is exactly 2026.
+The rules, and how a boundary behaves, are in [Searching](mcp-and-api.md#searching).
 `--expand` appends drawers related to the hits through the knowledge graph.
 The option is `--ranking` because `--mode` is the [memory mode](memory-modes.md).
 The output is JSON, and the fields of each hit are described in [Searching](mcp-and-api.md#searching).
@@ -171,7 +183,7 @@ The output is JSON, and the fields of each hit are described in [Searching](mcp-
 
 ```sh
 memcastle recall <QUERY> [--limit <N>] [--wing <WING>] [--ranking <…>] [--tag <TAG>]... [--source-kind <KIND>]
-                 [--as-of <TIMESTAMP> | --include-historical] [--expand]
+                 [--as-of <WHEN> | --from <WHEN> --until <WHEN> | --include-historical] [--expand]
 ```
 
 The recall-oriented counterpart to `search`.
@@ -362,6 +374,7 @@ memcastle drawer list --room <WING>/<ROOM> [--limit <N>]
 memcastle drawer show <WING>/<ROOM>/<DRAWER>
 memcastle drawer create <WING>/<ROOM>/<NAME> [--content <TEXT> | --file <PATH>]
 memcastle drawer supersede <WING>/<ROOM>/<DRAWER> (--content <TEXT> | --file <PATH> | --invalidate)
+memcastle drawer history <WING>/<ROOM>/<DRAWER>
 memcastle drawer mention <WING>/<ROOM>/<DRAWER> --name <NAME> --kind <KIND>
 memcastle drawer delete <WING>/<ROOM>/<DRAWER> [--yes]
 ```
@@ -422,8 +435,14 @@ a job submitted in the instant between the two is not caught.
 `drawer supersede` is how a drawer is corrected without rewriting history.
 It ends the drawer's validity now and files a replacement with the new content (from `--content`, `--file` or standard
 input) in the same room, taking over the old drawer's name; with `--invalidate` it only ends it.
-The old drawer keeps its content and stays reachable by id and by `--as-of` searches, but no longer appears in a current
-search, diary read or wake-up.
+The old drawer keeps its content and stays reachable by id and by `--as-of` or `--from`/`--until` searches, but no longer
+appears in a current search, diary read or wake-up, and the two drawers are linked so `drawer history` can follow the change.
+`drawer history <wing>/<room>/<name or UUID>` shows how a piece of knowledge evolved:
+every version of the drawer's supersession chain, oldest first, each with its validity period, provenance and content.
+Any version works as the starting point, and a superseded version has no name left, so give its UUID
+(a search hit carries it).
+It is a table of versions in a terminal and JSON when standard output is piped, and a read, see
+[History](mcp-and-api.md#history).
 `drawer mention` records that a drawer mentions an entity, creating the entity if needed, so `search --expand` can reach
 related drawers through it.
 A name that is only a different spelling of an entity the graph already knows (another case, other punctuation, a recorded

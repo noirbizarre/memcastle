@@ -61,12 +61,24 @@ impl FromStr for RankingMode {
     }
 }
 
-/// Which point in time a search looks at.
+/// Which time a search looks at: a point, a window, or all of it.
 ///
-/// A drawer or edge is *valid at* `t` when `valid_from <= t` and it has no
-/// `valid_to` or `valid_to > t`: the end is exclusive, so a record superseded
-/// at `t` is gone at `t` and its replacement (valid from `t`) takes over
-/// without a moment where both or neither match.
+/// Every variant is about *validity time* (`valid_from`/`valid_to`: when the
+/// knowledge was true), never *record time* (`created_at`/`updated_at`: when
+/// MemCastle learned it). A memory discovered long after the period it
+/// describes is found by asking about that period.
+///
+/// Validity is the half-open range `[valid_from, valid_to)`, with no
+/// `valid_to` meaning open-ended. A drawer or edge is *valid at* `t` when
+/// `valid_from <= t` and it has no `valid_to` or `valid_to > t`: the end is
+/// exclusive, so a record superseded at `t` is gone at `t` and its replacement
+/// (valid from `t`) takes over without a moment where both or neither match.
+///
+/// It *overlaps* the window `[from, until)` when `valid_from < until` and it
+/// has no `valid_to` or `valid_to > from`. Touching is not overlapping: a
+/// record closed exactly at `from`, or opened exactly at `until`, is excluded.
+/// A point `t` is the window `[t, t + 1ns)`, which is why one predicate serves
+/// both and they cannot drift apart.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Temporal {
@@ -76,8 +88,49 @@ pub enum Temporal {
     Current,
     /// Valid at this instant (point-in-time retrieval).
     AsOf(DateTime<Utc>),
+    /// Valid at some moment of the window `[from, until)`: its validity
+    /// overlaps the window (interval retrieval).
+    Between {
+        /// The inclusive start of the window.
+        from: DateTime<Utc>,
+        /// The exclusive end of the window; later than `from`.
+        until: DateTime<Utc>,
+    },
     /// Every record regardless of validity: current and historical.
     All,
+}
+
+impl Temporal {
+    /// The window `[from, until)`, or an explanation of why it is empty.
+    ///
+    /// # Errors
+    ///
+    /// A message when `from` is not strictly before `until`: such a window
+    /// contains no instant, so every search over it would silently match
+    /// nothing.
+    pub fn between(from: DateTime<Utc>, until: DateTime<Utc>) -> Result<Self, String> {
+        Self::Between { from, until }.checked()
+    }
+
+    /// This value, or an explanation of why it cannot be searched.
+    ///
+    /// The one check every entry point runs, including the ones that
+    /// deserialise a [`Temporal`] straight from JSON and so never pass
+    /// through [`Temporal::between`].
+    ///
+    /// # Errors
+    ///
+    /// A message when a window's `from` is not strictly before its `until`.
+    pub fn checked(self) -> Result<Self, String> {
+        match self {
+            Self::Between { from, until } if from >= until => Err(format!(
+                "the interval is empty: `from` ({}) must be before `until` ({})",
+                from.to_rfc3339(),
+                until.to_rfc3339()
+            )),
+            other => Ok(other),
+        }
+    }
 }
 
 /// The constraints every retrieval leg shares.
@@ -202,5 +255,45 @@ mod tests {
         let query: SearchQuery = serde_json::from_str(r#"{"text":"hello"}"#).expect("parses");
         assert_eq!(query, SearchQuery::new("hello"));
         assert_eq!(query.filter.temporal, Temporal::Current);
+    }
+
+    fn at(raw: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(raw)
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+
+    #[test]
+    fn an_interval_round_trips_through_its_documented_wire_form() {
+        let temporal = Temporal::between(at("2026-01-01T00:00:00Z"), at("2026-02-01T00:00:00Z"))
+            .expect("a forward window is valid");
+        let json = serde_json::to_value(temporal).expect("serialises");
+        assert_eq!(
+            json,
+            serde_json::json!({"between": {
+                "from": "2026-01-01T00:00:00Z",
+                "until": "2026-02-01T00:00:00Z",
+            }})
+        );
+        let back: Temporal = serde_json::from_value(json).expect("parses");
+        assert_eq!(back, temporal);
+    }
+
+    #[test]
+    fn an_empty_or_reversed_interval_is_refused_with_both_bounds_named() {
+        let t = at("2026-01-01T00:00:00Z");
+        let equal = Temporal::between(t, t).unwrap_err();
+        assert!(equal.contains("before"), "got: {equal}");
+        let reversed = Temporal::between(at("2026-02-01T00:00:00Z"), t).unwrap_err();
+        assert!(reversed.contains("2026-02-01"), "got: {reversed}");
+    }
+
+    #[test]
+    fn an_interval_deserialised_from_json_is_still_checked() {
+        // `POST /api/search` takes a `SearchQuery` verbatim, so the check
+        // cannot live only in the constructor.
+        let raw = r#"{"between":{"from":"2026-02-01T00:00:00Z","until":"2026-01-01T00:00:00Z"}}"#;
+        let temporal: Temporal = serde_json::from_str(raw).expect("the shape parses");
+        assert!(temporal.checked().is_err());
     }
 }

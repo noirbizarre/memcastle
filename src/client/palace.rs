@@ -4,7 +4,7 @@ use serde_json::json;
 
 use crate::app::{Created, EntityLink, Superseded, WingDetail};
 use crate::domain::channel::CLI as CHANNEL;
-use crate::domain::{Deleted, Drawer, DrawerSummary, RoomSummary, WingSummary};
+use crate::domain::{Deleted, Drawer, DrawerHistory, DrawerSummary, RoomSummary, WingSummary};
 use crate::error::{Error, Result};
 
 use super::DaemonClient;
@@ -241,6 +241,20 @@ impl DaemonClient {
             self.http
                 .post(format!("{}/api/drawers/{id}/supersede", self.base_url))
                 .json(&json!({ "content": content, "requested_by": CHANNEL })),
+        )
+        .await
+    }
+
+    /// Every version of the knowledge a drawer belongs to, oldest first
+    /// (`GET /api/drawers/{id}/history`).
+    ///
+    /// # Errors
+    ///
+    /// As for [`Self::show_wing`].
+    pub async fn drawer_history(&self, id: &str) -> Result<DrawerHistory> {
+        self.send(
+            self.http
+                .get(format!("{}/api/drawers/{id}/history", self.base_url)),
         )
         .await
     }

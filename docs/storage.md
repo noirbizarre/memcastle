@@ -93,7 +93,8 @@ There is no separate vector file or index to back up, and none can fall out of s
 The `embedding` field is derived data and is empty until an [embedding provider](configuration.md#embeddings)
 (or a vector you send) fills it, so a palace without one searches lexically.
 A drawer's content never changes: correcting it sets the old drawer's `valid_to` and files a replacement, so older memory
-stays in the database and is found by an `--as-of` search.
+stays in the database and is found by an `--as-of` or `--from`/`--until` search.
+The two drawers record each other (`superseded_by` and `supersedes`), which is what `drawer history` follows.
 
 ### Limits
 

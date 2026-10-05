@@ -167,7 +167,7 @@ async fn disabling_one_mcp_session_does_not_affect_another_session_on_the_same_d
 }
 
 #[tokio::test]
-async fn a_disabled_session_is_rejected_by_recall_wake_up_and_both_diary_tools() {
+async fn a_disabled_session_is_rejected_by_recall_history_wake_up_and_both_diary_tools() {
     let daemon = TestDaemon::start().await;
     let session = connect(&daemon.base_url).await;
     set_mode(&session, "disabled").await;
@@ -176,6 +176,10 @@ async fn a_disabled_session_is_rejected_by_recall_wake_up_and_both_diary_tools()
         (
             "memcastle_recall",
             serde_json::json!({ "query": "anything" }),
+        ),
+        (
+            "memcastle_history",
+            serde_json::json!({ "drawer_id": "00000000-0000-4000-8000-000000000001" }),
         ),
         (
             "memcastle_wake_up",
