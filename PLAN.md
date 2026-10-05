@@ -132,10 +132,13 @@ have a coherent working path.
 | [#39](https://github.com/noirbizarre/memcastle/issues/39) | Expand mining source adapters beyond the filesystem (done: shared chunker; builds on #85; Pi history is now the `pi` source, #161, [ADR-028](docs/adr/028-pi-history-is-an-installed-webassembly-source.md)) |
 | [#40](https://github.com/noirbizarre/memcastle/issues/40) | Wire real entity/relationship extraction into mining (done: the `Extract` job, [ADR-024](docs/adr/024-entity-extraction-as-an-enrich-job.md); builds on #85) |
 | [#41](https://github.com/noirbizarre/memcastle/issues/41) | Expand audit/repair coverage (data-driven) |
-| [#42](https://github.com/noirbizarre/memcastle/issues/42) | Richer retrieval: semantic/vector search, temporal + graph-aware ranking |
+| [#42](https://github.com/noirbizarre/memcastle/issues/42) | Richer retrieval: semantic/vector search, temporal + graph-aware ranking (done: [ADR-021](docs/adr/021-richer-retrieval.md), [ADR-032](docs/adr/032-temporal-retrieval-and-history.md)) |
 
 The concrete platform and agent-history adapters (Slack #86, ChatGPT #87, Claude #88, Codex #89, GitHub #91,
-Atlassian #92) are implemented on the #85 model, one file each under `src/mining/adapters/`.
+Atlassian #92) are planned on the #85 model, and delivered as installable WebAssembly sources
+([ADR-026](docs/adr/026-pluggable-source-adapters-as-webassembly-components.md)), not as files under
+`src/mining/adapters/`, where only `directory` lives.
+None of them exists yet.
 OpenCode history (#90) is the `opencode` source, a WebAssembly component built from `sources/opencode/`
 ([ADR-030](docs/adr/030-opencode-history-is-an-installed-webassembly-source.md)), like Pi's.
 
