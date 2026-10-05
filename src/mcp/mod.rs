@@ -622,12 +622,9 @@ impl McpTools {
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<CallToolResult, McpError> {
         let mode = self.mode_for(&parts);
-        let history = match args.drawer_id.parse() {
+        let history = match crate::Error::parse_drawer_id("drawer_id", &args.drawer_id) {
             Ok(id) => self.app.drawer_history(id, mode).await,
-            Err(_) => Err(crate::Error::invalid_input(
-                "drawer_id",
-                format!("`{}` is not a drawer id (a UUID)", args.drawer_id),
-            )),
+            Err(error) => Err(error),
         };
         tool_result("memcastle_history", history)
     }

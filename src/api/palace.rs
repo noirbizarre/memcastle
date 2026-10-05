@@ -6,7 +6,8 @@
 //!
 //! Like the rest of the API these are guarded by the authentication layer that
 //! wraps the whole router, and like `/api/auth` and `/api/db` they have no MCP
-//! counterpart for the destructive half: deleting is a human decision.
+//! counterpart at all: agents write memory through checkpoints and the diary,
+//! and shaping the palace (and especially deleting from it) is a human decision.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -296,9 +297,7 @@ pub(super) async fn set_drawer_embedding(
 
 /// A drawer id from a path, with the shared invalid-input diagnostic.
 fn parse_drawer_id(raw: &str) -> Result<DrawerId, crate::Error> {
-    raw.parse().map_err(|_| {
-        crate::Error::invalid_input("id", format!("`{raw}` is not a drawer id (a UUID)"))
-    })
+    crate::Error::parse_drawer_id("id", raw)
 }
 
 /// The body of `POST /api/drawers/{id}/mentions`.

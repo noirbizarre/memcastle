@@ -1101,6 +1101,29 @@ impl Error {
         raw.parse().map_err(|_| Self::invalid_job_id(raw))
     }
 
+    /// Parse a drawer id a caller supplied, raising [`Error::InvalidInput`] naming `field`, the argument that held it
+    /// (`id` in a REST path, `drawer_id` in an MCP tool). Shared by REST and MCP so the same mistake reads the same.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidInput`] if `raw` is not a drawer id.
+    pub fn parse_drawer_id(field: &str, raw: &str) -> Result<crate::domain::DrawerId> {
+        raw.parse()
+            .map_err(|_| Self::invalid_input(field, format!("`{raw}` is not a drawer id (a UUID)")))
+    }
+
+    /// Parse an entity id a caller supplied, raising [`Error::InvalidInput`] naming `field`.
+    /// The entity counterpart of [`Error::parse_drawer_id`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidInput`] if `raw` is not an entity id.
+    pub fn parse_entity_id(field: &str, raw: &str) -> Result<crate::domain::EntityId> {
+        raw.parse().map_err(|_| {
+            Self::invalid_input(field, format!("`{raw}` is not an entity id (a UUID)"))
+        })
+    }
+
     /// Parse a job status filter a caller supplied, raising
     /// [`Error::InvalidInput`] (naming `status` and the accepted values)
     /// for an unknown one. Shared by REST, MCP and the CLI for the same reason
