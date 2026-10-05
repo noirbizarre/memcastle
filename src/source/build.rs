@@ -119,9 +119,21 @@ impl Project {
         })?;
         check_is_component(&bytes, &built)?;
         let target = self.component_path();
+        // Written to a file of its own and renamed over the target, so a process reading `dist/source.wasm` while
+        // another builds (a test binary beside `packaging/sources/build.sh`) sees the old component or the new one,
+        // never an empty or half-written file. The process id keeps concurrent builders off each other's file.
+        let temporary = self
+            .dir
+            .join(DIST)
+            .join(format!(".{COMPONENT_FILE}.{}.tmp", std::process::id()));
         std::fs::create_dir_all(self.dir.join(DIST))
-            .and_then(|()| std::fs::write(&target, &bytes))
-            .map_err(|source| Error::io(target.display().to_string(), source))?;
+            .and_then(|()| std::fs::write(&temporary, &bytes))
+            .and_then(|()| std::fs::rename(&temporary, &target))
+            .map_err(|source| {
+                // A failed write or rename must not leave a stray file in a directory that gets packaged.
+                let _ = std::fs::remove_file(&temporary);
+                Error::io(target.display().to_string(), source)
+            })?;
         Ok(target)
     }
 
@@ -317,6 +329,24 @@ mod tests {
         let placed = project.build().unwrap();
         assert_eq!(placed, project.component_path());
         assert!(placed.is_file());
+    }
+
+    #[test]
+    fn building_over_an_existing_component_replaces_it_and_leaves_no_temporary_file_behind() {
+        let (dir, project) =
+            project("\n[build]\ncommand = [\"cargo\", \"--version\"]\noutput = \"c.wasm\"\n");
+        std::fs::write(dir.path().join("c.wasm"), b"\0asm\x0d\0\x01\0first").unwrap();
+        project.build().unwrap();
+        std::fs::write(dir.path().join("c.wasm"), b"\0asm\x0d\0\x01\0second").unwrap();
+
+        let placed = project.build().unwrap();
+
+        assert_eq!(std::fs::read(&placed).unwrap(), b"\0asm\x0d\0\x01\0second");
+        let left: Vec<_> = std::fs::read_dir(dir.path().join(DIST))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(left, [COMPONENT_FILE], "{left:?}");
     }
 
     #[tokio::test]
