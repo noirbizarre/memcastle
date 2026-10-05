@@ -20,7 +20,12 @@ fn shipped_code(path: &Path) -> String {
         .filter(|line| !line.trim_start().starts_with("//"))
         .collect::<Vec<_>>()
         .join("\n");
-    match code.find("#[cfg(test)]") {
+    // The test module is gated `#[cfg(test)]`, or `#[cfg(all(test, unix))]` where it needs the Unix-only fake agents.
+    match ["#[cfg(test)]", "#[cfg(all(test"]
+        .iter()
+        .filter_map(|marker| code.find(marker))
+        .min()
+    {
         Some(end) => code[..end].to_string(),
         None => code,
     }
@@ -124,7 +129,8 @@ fn only_the_binary_calls_the_installer() {
             .strip_prefix(root())
             .unwrap()
             .to_string_lossy()
-            .into_owned();
+            // Forward slashes whatever the platform, so the prefixes below match on Windows too.
+            .replace('\\', "/");
         if relative.starts_with("src/integration/")
             || relative == "src/lib.rs"
             || relative == "src/main.rs"

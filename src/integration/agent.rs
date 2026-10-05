@@ -391,7 +391,9 @@ impl Agent for OpenCode<'_> {
     }
 }
 
-#[cfg(test)]
+// The fake builds an `ExitStatus` from a raw Unix wait status, which has no Windows equivalent; the adapters
+// themselves are portable, and their behaviour is covered where the fake can run.
+#[cfg(all(test, unix))]
 pub(crate) mod fake {
     //! A stand-in for the agents' programs, shared with the lifecycle tests.
 
@@ -480,7 +482,7 @@ pub(crate) mod fake {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::fake::FakeAgents;
     use super::*;

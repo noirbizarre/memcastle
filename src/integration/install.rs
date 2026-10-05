@@ -756,7 +756,8 @@ pub fn remove(id: &str, ctx: &Context<'_>) -> Result<Outcome> {
     })
 }
 
-#[cfg(test)]
+// Needs the fake agents, which are Unix-only (see `agent::fake`).
+#[cfg(all(test, unix))]
 mod tests {
     use std::cell::RefCell;
 

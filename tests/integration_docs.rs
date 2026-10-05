@@ -11,8 +11,10 @@ fn root() -> PathBuf {
 }
 
 fn page() -> String {
+    // A checkout with CRLF line endings (Windows) must read the same as one with LF.
     std::fs::read_to_string(root().join("docs/integrations.md"))
         .expect("docs/integrations.md exists")
+        .replace("\r\n", "\n")
 }
 
 #[test]
