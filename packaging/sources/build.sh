@@ -31,7 +31,9 @@ rm -f "${out}"/*.tar.gz "${out}"/*.tar.gz.sha256 "${out}/memcastle-index.json"
 
 for source in "${BUNDLED[@]}"; do
   # Packaged where the project's own `dist/` is, so a leftover package of an older version cannot be picked up.
-  rm -rf "sources/${source}/dist"
+  # Only the archives are removed, never `dist/` itself: the `wasm_*` tests build the component into that directory
+  # from other processes while this runs, and deleting `source.wasm` under them fails them with "No such file".
+  rm -f "sources/${source}"/dist/*.tar.gz "sources/${source}"/dist/*.tar.gz.sha256
   "${binary}" source package "sources/${source}" > /dev/null
   cp "sources/${source}"/dist/*.tar.gz "sources/${source}"/dist/*.tar.gz.sha256 "${out}/"
 done
