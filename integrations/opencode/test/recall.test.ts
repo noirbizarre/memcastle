@@ -102,8 +102,18 @@ test("the reminder does not depend on the wake-up: a failing one still leaves th
 
 // --- the two integrations stay the same ---------------------------------------------------------------------------
 
-test("the Pi and OpenCode copies of the shared recall, skill-reading, wake-up, project and checkpoint code are identical", () => {
-  for (const file of ["recall-core.ts", "skill-text.ts", "checkpoint-core.ts", "wake-up-core.ts", "project-core.ts"]) {
+test("the Pi and OpenCode copies of the shared recall, skill-reading, wake-up, project, checkpoint, failure and mode code are identical", () => {
+  // `failures.ts` and `modes.ts` are the contract-critical ones: they decide what a failure or a mode label means.
+  const shared = [
+    "recall-core.ts",
+    "skill-text.ts",
+    "checkpoint-core.ts",
+    "wake-up-core.ts",
+    "project-core.ts",
+    "failures.ts",
+    "modes.ts",
+  ]
+  for (const file of shared) {
     const here = readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8")
     const pi = readFileSync(new URL(`../../pi/src/${file}`, import.meta.url), "utf8")
     expect(here).toBe(pi)

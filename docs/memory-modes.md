@@ -20,11 +20,12 @@ The rule follows what an operation touches, not what it is called.
 
 - **Reads:** `search`, `recall`, `wake_up`, `diary_read`, listing or showing jobs,
   listing or showing wings, rooms and drawers, reading a drawer's history,
-  and reading a drawer's likely duplicates or an entity's candidates.
+  reading a drawer's likely duplicates, listing or showing sources,
+  and listing entities or reading an entity's relationships, mentions or candidates.
   Jobs count because a job record carries its whole input, such as the memory a checkpoint is writing,
   and the hierarchy counts because the names and counts of a palace are themselves palace content.
-- **Writes:** `checkpoint`, `diary_write`, `mine`, `repair` when it is not a dry run,
-  `embed`, superseding a drawer, linking a drawer to an entity, adding an alias to an entity, attaching an embedding,
+- **Writes:** `checkpoint`, `diary_write`, `note`, `mine`, `repair` when it is not a dry run,
+  `embed`, `extract`, superseding a drawer, linking a drawer to an entity, adding an alias to an entity, attaching an embedding,
   and creating or deleting a wing, room or drawer.
   Mining and applied repairs count because their purpose is to file or delete drawers,
   and the derived-data writes count because they change the palace even though they never touch a drawer's content.

@@ -38,6 +38,7 @@ A failure comes back as an MCP error result carrying the [error body](#errors) b
 
 Defaults are the same as the CLI's: `limit` is 10 for `memcastle_search` and `memcastle_recall`, 20 for
 `memcastle_diary_read`, and every read limit is capped at 200.
+A `limit` of `0` means the default, on the CLI and REST as well.
 `memcastle_wake_up` defaults to 10 items and 8192 bytes.
 `memcastle_mine` (and a `mine` job over `POST /api/jobs`) needs an absolute `path`,
 because the daemon does not share your shell's working directory.
@@ -76,7 +77,7 @@ MemCastle does not decide what is worth remembering; the calling integration doe
 | `wing` | Optional wing override. Without it, the item is filed under `preferences`, `projects`, `diary` or `general`. |
 | `content` | The text to store, verbatim. |
 | `tags` | Free-form labels stored with the drawer. Required, may be empty. |
-| `source` | Where the memory came from: `kind` is `file` or `manual` (the MCP schema allows only these; REST and the CLI store any other value as `other`), `uri` and `agent` are optional. |
+| `source` | Where the memory came from: `kind` is `file` or `manual` (the MCP schema allows only these; REST and the CLI also accept `transcript` and `note`, and store any other value as `other`), `uri` and `agent` are optional. |
 | `name` | Optional name for the drawer, unique within its room, so it can be addressed as `wing/room/name`. A name held by another drawer fails the item with `memcastle::palace::drawer_name_taken`; an unusable one is refused at submission. |
 | `fact` | Optional knowledge-graph change made alongside the drawer: `{"op": "add" \| "supersede" \| "invalidate", ...}`; a `confidence` outside 0 to 1 is refused at submission. |
 
@@ -374,7 +375,8 @@ WebAssembly components that run in the daemon, in a sandbox, with only the permi
 They are guarded by [authentication](authentication.md) like every other route, accept a body up to 64 MiB,
 and have no MCP tool: an agent must not be able to install code or widen its own reach
 ([ADR-026](adr/026-pluggable-source-adapters-as-webassembly-components.md)).
-They are not gated by a memory mode, which guards access to memory; `GET .../{name}` is a read, like `GET /api/sources`.
+Installing, enabling, disabling, removing and updating are not gated by a memory mode, which guards access to memory;
+listing and showing (`GET /api/sources` and `GET .../{name}`) are reads, so a `disabled` session is refused them.
 
 The `/api/source-registry` routes find sources in the bundle and in the registries configured under `mining.registries`,
 and install or update them by name ([Publishing and installing sources](publishing-sources.md)).
@@ -410,8 +412,8 @@ A `POST` asking for another `bind`, `port` or origin than the open endpoint has 
 
 Entities and the relationships between them are derived from drawers, never the other way round.
 Three things write them: a checkpoint's `fact`, `POST /api/drawers/{id}/mentions`,
-and the `extract` job, which reads every mined drawer it has not read and adds what the text names.
-`extract` is queued after a mining job completes and at startup, and `memcastle extract` or
+and the `extract` job, which reads every mined drawer and note it has not read and adds what the text names.
+`extract` is queued after a mining job completes, after a note is written and at startup, and `memcastle extract` or
 `POST /api/jobs {"type": "extract", "wing": "docs"}` runs one by hand.
 It needs an [`[extraction]` provider](configuration.md#extraction) and is a `400` with
 `memcastle::extract::not_configured` without one; it is a write, so a read-only session is refused.

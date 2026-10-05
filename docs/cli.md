@@ -5,18 +5,23 @@ The `memcastle` binary is one daemon plus a set of thin clients.
 and `migrate` talks to storage directly.
 Every other subcommand is an HTTP call to a running daemon, so it fails with `memcastle::client::not_running`
 (and points you at `memcastle daemon start`) when none is running.
-Four things differ:
+Six things differ:
 `status` reports a stopped daemon instead of failing, `daemon restart` starts a daemon when none is running,
 `completions` prints a script locally and needs neither a daemon nor a configuration file,
+the local `source` commands (`init`, `build`, `test`, `package`, `index` and `keygen`) work on a project directory or on
+archives with no daemon at all,
+`note` reads the project directory to choose a wing and room before it calls the daemon,
 and the reserved command (see [Not implemented yet](#not-implemented-yet)) fails with `memcastle::cli::not_implemented`
 without contacting a daemon.
 Run `memcastle <command> --help` for the authoritative text of any flag.
 There is no `help` subcommand: `--help` is the one way to ask.
 
 Client commands print the daemon's JSON answer, so the output pipes into `jq`.
-`status`, `db start` and `db status` are the exceptions: they print a readable report,
-and `--json` gives the same report as JSON.
-`job list`, and every `wing`, `room` and `drawer` command (`list`, `show`, `create` and `delete`), are the others:
+`status`, `db start`, `db stop` and `db status` are the exceptions: they print a readable report,
+and `--json` gives the same report as JSON (`db stop` prints the report only).
+`job list`, `sources`, `note`, every daemon-side `source` command (`search`, `install`, `update`, `list`, `show`,
+`enable` and `disable`), and every `wing`, `room` and `drawer` command (`list`, `show`, `create` and `delete`),
+are the others:
 they print a table or a readable view when standard output is a terminal, and JSON when it is not.
 See [Output, colour and prompts](#output-colour-and-prompts).
 
@@ -40,7 +45,8 @@ queued yellow, running cyan, paused magenta, completed green, failed red and can
 Standard output and standard error are decided separately:
 with `memcastle status 2> errors.log` the report stays coloured and the log stays plain.
 
-`repair --apply`, `auth generate`, `auth revoke`, `job cancel` and the `delete` commands of `wing`, `room` and `drawer`
+`repair --apply`, `auth generate`, `auth revoke`, `job cancel`, `source remove`, the `delete` commands of `wing`, `room`
+and `drawer`, and `source install` and `source update` when a package asks for permissions (see [`source`](#source))
 ask for confirmation, with a prompt on standard error that defaults to "no".
 `--yes` (or `-y`) skips the question.
 When standard input or standard error is not a terminal, a script or CI job for instance,
@@ -282,7 +288,8 @@ source such as `pi` or `opencode`, a coding agent's session history (installed s
 [Mining sources](mining-sources.md#pi) and [`opencode`](mining-sources.md#opencode)).
 Mining is incremental and idempotent: the daemon remembers where each source's last run stopped,
 so mining it again reads only what changed and files nothing twice.
-`--wing` defaults to the directory's name, or to the source's own default.
+`--wing` defaults to the wing the directory's [project file](project-config.md#mining) declares, else the directory's
+name, or to the source's own default.
 `--full` reads the source again from the beginning; unchanged documents are still skipped, so nothing is duplicated.
 `--locator` names where within a source to read, when it needs more than its default; for `pi` it is a sessions
 directory, and it must be an absolute path.
@@ -370,7 +377,8 @@ A version that asks for permissions the installed one did not is not installed u
 `--yes`); without either the command says what is waiting and exits non-zero.
 `--check` only lists what has an update.
 `disable` keeps the files and `remove` deletes them; what a source mined stays in the palace.
-These are administrative and have no `--mode`, and no MCP tool exists for any of them.
+`list` and `show` are reads, so they take `--mode` and a `disabled` session cannot use them;
+the other commands are administrative and have no `--mode`, and no MCP tool exists for any of them.
 
 ### `checkpoint`
 
@@ -500,11 +508,11 @@ It is a write, so it is refused in `read_only` and `disabled` modes.
 memcastle extract [--wing <WING>]
 ```
 
-Submits a job that reads every mined drawer not yet read and adds the entities and relationships it names to the
+Submits a job that reads every mined drawer and note not yet read and adds the entities and relationships it names to the
 knowledge graph, see [Extraction](configuration.md#extraction).
 It needs an `[extraction]` provider and is refused with `memcastle::extract::not_configured` without one.
-You rarely run it: the daemon queues the same job after a mining job completes and once at startup, so this is for
-backfilling after you configure a provider and for forcing a sweep.
+You rarely run it: the daemon queues the same job after a mining job completes, after a note is written and once at
+startup, so this is for backfilling after you configure a provider and for forcing a sweep.
 It only adds graph records and never changes a drawer, and running it again does nothing.
 It is a write, so it is refused in `read_only` and `disabled` modes.
 Read the result with `GET /api/entities`, see [the knowledge graph](mcp-and-api.md#the-knowledge-graph).

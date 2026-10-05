@@ -83,11 +83,18 @@ pub async fn mine<A: SourceAdapter>(
     let store = ctx.store();
     let settings = ctx.mining();
     let reference = adapter.identify(request.locator)?;
-    let source = store.get_or_create_source(&reference, None).await?;
 
     let wing_name = request
         .wing
         .map_or_else(|| adapter.default_wing(&reference), str::to_string);
+    // A name that would create a wing is checked here, whoever chose it: an adapter's default (an installed source's
+    // too) is not validated anywhere else, and a UUID-shaped or `/`-bearing wing is one no path can address. An
+    // existing wing is accepted whatever its name, so a palace written before names were checked keeps mining.
+    if store.get_wing(&wing_name).await?.is_none() {
+        validate_name(NameKind::Wing, &wing_name)?;
+    }
+    // After the check, so a refused wing leaves no source record behind.
+    let source = store.get_or_create_source(&reference, None).await?;
     let wing = store.get_or_create_wing(&wing_name, None).await?;
 
     // A run that already checkpointed continues from its own cursor, whatever `full` says: `full` means "from the

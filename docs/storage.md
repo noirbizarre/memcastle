@@ -73,7 +73,7 @@ as orphans.
 Counts shown for wings and rooms are computed when asked, never stored.
 
 Entities and relationships form a knowledge-graph layer.
-A checkpoint item's `fact` can write to it, and so can the `extract` job, which reads mined drawers.
+A checkpoint item's `fact` can write to it, and so can the `extract` job, which reads mined drawers and notes.
 A `mentions` edge links a drawer to an entity it talks about, and both it and `relates_to` carry an optional `provenance`
 that names the drawer, job and extractor an extracted fact came from.
 A `drawer_extraction` row marks a drawer the job has read, beside the drawer rather than on it, so extraction never writes
@@ -187,7 +187,7 @@ so each palace has its own file and several daemons can coexist.
   "pid": 2529296,
   "bind_addr": "127.0.0.1:8420",
   "started_at": "2026-09-30T01:32:24.049797506+00:00",
-  "version": "0.1.0"
+  "version": "0.2.0"
 }
 ```
 

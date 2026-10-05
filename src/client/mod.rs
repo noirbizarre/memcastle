@@ -128,6 +128,31 @@ pub enum EndpointSource {
 }
 
 impl DaemonClient {
+    /// The URL of `/api/...`, with every segment percent-encoded.
+    ///
+    /// Segments are pushed one by one instead of formatted into a string: a name or id with a space, `?` or `#` in it
+    /// would otherwise end the path early and address something else. `trailing` is split on `/` and each part pushed
+    /// as its own segment, for the one route whose last segment is a wildcard (a drawer's name).
+    fn api_url(&self, segments: &[&str], trailing: Option<&str>) -> Result<reqwest::Url> {
+        let mut url = reqwest::Url::parse(&self.base_url).map_err(|source| Error::Client {
+            message: format!("invalid daemon address `{}`: {source}", self.base_url),
+        })?;
+        let mut path = url.path_segments_mut().map_err(|()| Error::Client {
+            message: format!("invalid daemon address `{}`", self.base_url),
+        })?;
+        path.pop_if_empty().push("api");
+        for segment in segments {
+            path.push(segment);
+        }
+        if let Some(trailing) = trailing {
+            for segment in trailing.split('/') {
+                path.push(segment);
+            }
+        }
+        drop(path);
+        Ok(url)
+    }
+
     /// Resolve the daemon's address for `palace_path` and build a client
     /// for it. Does not itself check that anything is listening — that's
     /// what [`Self::health`] is for.
@@ -492,10 +517,7 @@ impl DaemonClient {
     ) -> Result<crate::app::RegistryPreview> {
         let mut request = self
             .http
-            .get(format!(
-                "{}/api/source-registry/sources/{name}",
-                self.base_url
-            ))
+            .get(self.api_url(&["source-registry", "sources", name], None)?)
             .timeout(REGISTRY_TIMEOUT);
         if let Some(version) = version {
             request = request.query(&[("version", version)]);
@@ -566,7 +588,7 @@ impl DaemonClient {
     pub async fn show_source(&self, name: &str) -> Result<crate::mining::ProviderInfo> {
         self.send(
             self.http
-                .get(format!("{}/api/source-packages/{name}", self.base_url)),
+                .get(self.api_url(&["source-packages", name], None)?),
         )
         .await
     }
@@ -582,10 +604,10 @@ impl DaemonClient {
         enabled: bool,
     ) -> Result<crate::mining::ProviderInfo> {
         let action = if enabled { "enable" } else { "disable" };
-        self.send(self.http.post(format!(
-            "{}/api/source-packages/{name}/{action}",
-            self.base_url
-        )))
+        self.send(
+            self.http
+                .post(self.api_url(&["source-packages", name, action], None)?),
+        )
         .await
     }
 
@@ -598,7 +620,7 @@ impl DaemonClient {
         let _: serde_json::Value = self
             .send(
                 self.http
-                    .delete(format!("{}/api/source-packages/{name}", self.base_url)),
+                    .delete(self.api_url(&["source-packages", name], None)?),
             )
             .await?;
         Ok(())

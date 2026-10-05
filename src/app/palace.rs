@@ -18,7 +18,7 @@ use crate::domain::{
 };
 use crate::error::{Error, Result};
 
-use super::{AppServices, MAX_READ_LIMIT};
+use super::{AppServices, effective_limit};
 
 /// How many drawers a listing returns when the caller does not say.
 pub const DEFAULT_LIST_LIMIT: u32 = 50;
@@ -112,7 +112,7 @@ impl AppServices {
             .get_drawer(id)
             .await?
             .ok_or_else(|| Error::DrawerNotFound {
-                room: "-".to_string(),
+                room: None,
                 drawer: id.to_string(),
             })?;
         let superseded = || Error::DrawerSuperseded {
@@ -157,7 +157,7 @@ impl AppServices {
             .get_drawer(id)
             .await?
             .ok_or_else(|| Error::DrawerNotFound {
-                room: "-".to_string(),
+                room: None,
                 drawer: id.to_string(),
             })?;
         Ok(Superseded {
@@ -194,7 +194,7 @@ impl AppServices {
         }
         if !self.store.drawer_exists(drawer).await? {
             return Err(Error::DrawerNotFound {
-                room: "-".to_string(),
+                room: None,
                 drawer: drawer.to_string(),
             });
         }
@@ -360,7 +360,7 @@ impl AppServices {
         Self::require_read(mode, "drawer_list")?;
         let wing = self.resolve_wing(wing).await?;
         let room = self.resolve_room(&wing, room).await?;
-        let limit = limit.unwrap_or(DEFAULT_LIST_LIMIT).clamp(1, MAX_READ_LIMIT);
+        let limit = effective_limit(limit, DEFAULT_LIST_LIMIT);
         self.store.list_drawer_summaries(room.id, limit).await
     }
 
@@ -456,7 +456,7 @@ impl AppServices {
                     created: false,
                     item: self.store.get_drawer(existing).await?.ok_or_else(|| {
                         Error::DrawerNotFound {
-                            room: format!("{}/{}", wing.name, room.name),
+                            room: Some(format!("{}/{}", wing.name, room.name)),
                             drawer: existing.to_string(),
                         }
                     })?,
@@ -568,7 +568,7 @@ impl AppServices {
                 created: false,
                 item: self.store.get_drawer(existing).await?.ok_or_else(|| {
                     Error::DrawerNotFound {
-                        room: format!("{}/{}", wing.name, room.name),
+                        room: Some(format!("{}/{}", wing.name, room.name)),
                         drawer: existing.to_string(),
                     }
                 })?,
@@ -590,7 +590,7 @@ impl AppServices {
         Self::require_read(mode, "drawer_duplicates")?;
         if !self.store.drawer_exists(drawer).await? {
             return Err(Error::DrawerNotFound {
-                room: "-".to_string(),
+                room: None,
                 drawer: drawer.to_string(),
             });
         }
@@ -617,7 +617,7 @@ impl AppServices {
                 .drawer_lineage(drawer)
                 .await?
                 .ok_or_else(|| Error::DrawerNotFound {
-                    room: "-".to_string(),
+                    room: None,
                     drawer: drawer.to_string(),
                 })?;
         Ok(crate::domain::DrawerHistory { drawer, versions })
@@ -733,7 +733,7 @@ impl AppServices {
             return Ok(found);
         }
         Err(Error::DrawerNotFound {
-            room: format!("{}/{}", wing.name, room.name),
+            room: Some(format!("{}/{}", wing.name, room.name)),
             drawer: drawer.to_string(),
         })
     }

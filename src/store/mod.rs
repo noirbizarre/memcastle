@@ -3,8 +3,9 @@
 //! One connection type (`Surreal<Any>`, via `engine::any`) for both embedded
 //! and remote deployments — the rest of the codebase never branches on which
 //! backend is active. Repository methods live in the sibling modules
-//! (`wings`, `drawers`, `palace`, `jobs`, `entities`, `auth`, `timestamps`, `migration_state`) as `impl SurrealStore`
-//! blocks; this file only owns connecting and schema sync.
+//! (`wings`, `drawers`, `palace`, `jobs`, `entities`, `graph`, `retrieval`, `duplicates`, `resolution`, `extraction`,
+//! `sources`, `source_packages`, `auth`, `timestamps`, `migration_state`) as `impl SurrealStore` blocks;
+//! this file only owns connecting and schema sync.
 //!
 //! Method names say what they do: `get_*` reads one record, `list_*` reads
 //! many, `create_*` inserts (replay-safe `_once` forms skip an existing id),

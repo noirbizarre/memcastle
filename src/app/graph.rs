@@ -9,7 +9,7 @@ use crate::domain::{Entity, EntityId, MemoryMode, Mention, Relationship};
 use crate::error::{Error, Result};
 use crate::store::PossibleEntity;
 
-use super::{AppServices, MAX_READ_LIMIT};
+use super::{AppServices, effective_limit};
 
 /// How many entities a listing returns when the caller does not say.
 pub const DEFAULT_ENTITY_LIMIT: u32 = 50;
@@ -28,9 +28,7 @@ impl AppServices {
         mode: MemoryMode,
     ) -> Result<Vec<Entity>> {
         Self::require_read(mode, "entity_list")?;
-        let limit = limit
-            .unwrap_or(DEFAULT_ENTITY_LIMIT)
-            .clamp(1, MAX_READ_LIMIT);
+        let limit = effective_limit(limit, DEFAULT_ENTITY_LIMIT);
         let name = name.map(str::trim).filter(|name| !name.is_empty());
         self.store.list_entities(name, kind, limit).await
     }

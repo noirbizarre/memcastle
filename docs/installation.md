@@ -96,7 +96,8 @@ sudo dnf install ./memcastle_<version>_linux-amd64.rpm
 ```
 
 They install `/usr/bin/memcastle`, the systemd user unit `/usr/lib/systemd/user/memcastle.service`,
-the bash, zsh and fish completion scripts and `/usr/share/doc/memcastle/`, and nothing under your XDG directories,
+the bash, zsh and fish completion scripts, `/usr/share/doc/memcastle/` and the bundled sources under
+`/usr/share/memcastle/sources/`, and nothing under your XDG directories,
 so removing the package leaves your configuration and palace alone.
 The unit is used as on Arch: `systemctl --user start memcastle`, as described in [Arch Linux](#arch-linux-aur).
 The package does not enable or start it.
@@ -133,7 +134,9 @@ Each Unix platform also has `memcastle_<version>_<platform>.tar.gz`, laid out th
 ```text
 memcastle-<version>-<platform>/
 ├── bin/memcastle
-└── share/doc/memcastle/{LICENSE,README.md}
+└── share/
+    ├── doc/memcastle/{LICENSE,README.md}
+    └── memcastle/sources/
 ```
 
 Unpack it at a prefix to install it in the same places a package would:
@@ -142,8 +145,8 @@ Unpack it at a prefix to install it in the same places a package would:
 sudo tar -xzf memcastle_*_linux-amd64.tar.gz --strip-components=1 -C /usr/local
 ```
 
-There is no `share/memcastle/` in the tarball yet, because 0.1 has no package assets.
-Do not unpack it at `~/.local` once it has one: that would put the package's assets inside your data directory,
+The tarball carries the bundled sources under `share/memcastle/sources/`, which is a package asset.
+Do not unpack it at `~/.local`: that would put the package's assets inside your data directory,
 which MemCastle ignores as an asset location on purpose.
 Use `/usr/local`, or a directory of your own together with `--assets-dir`.
 
@@ -189,7 +192,7 @@ memcastle --version
 ```
 
 ```text
-memcastle 0.1.0
+memcastle 0.2.0
 ```
 
 `memcastle --help` lists every command; the [CLI reference](cli.md) describes them.

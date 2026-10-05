@@ -610,6 +610,25 @@ async fn each_failure_class_is_distinguishable_with_its_code_and_help() {
         .error_code(),
         expected("invalid_input")["code"].as_str().unwrap()
     );
+    // ...and the more specific codes the daemon answers with a 400 are listed too, because a tool error carries no
+    // status: a wing no path can address is refused with `invalid_path`, which a client must read as invalid input.
+    let mut unaddressable = checkpoint_of("refused");
+    unaddressable["items"][0]["wing"] = json!("0b8c1e8e-7a52-4a1c-9d0e-6f0a3b2c1d4e");
+    let code = call(
+        &invalid,
+        "memcastle_checkpoint",
+        json!({ "payload": unaddressable }),
+    )
+    .await
+    .error_code();
+    assert!(
+        expected("invalid_input")["also_codes"]
+            .as_array()
+            .expect("a list of further codes")
+            .iter()
+            .any(|also| also == code.as_str()),
+        "`{code}` is invalid input but the fixture does not list it"
+    );
 
     // job_failed: the job exists and was accepted, and the failure arrives later, on the job, with its reason.
     let failing = call(

@@ -13,6 +13,7 @@ interface FailureClassFixture {
   id: string
   http_status: number | null
   code: string | null
+  also_codes?: string[]
 }
 const classes = fixture<{ classes: FailureClassFixture[] }>("failure-classes.json").classes
 
@@ -27,6 +28,21 @@ test("an error body is classified by its public code, whatever its message says"
     expect(failure.failureClass).toBe(entry.id as never)
     expect(failure.toUserMessage()).toContain("do this")
   }
+})
+
+test("every code the daemon answers with a 400 is invalid input over MCP too, where there is no status to go by", () => {
+  const entry = classes.find((entry) => entry.id === "invalid_input")
+  const codes = [entry?.code, ...(entry?.also_codes ?? [])]
+  expect(codes.length).toBeGreaterThan(1)
+  for (const code of codes) {
+    expect(failureFromBody({ error: "refused", code: code as string, help: null }).failureClass).toBe("invalid_input")
+  }
+})
+
+test("a code that is not a caller's mistake stays unexpected when no status says otherwise", () => {
+  expect(failureFromBody({ error: "boom", code: "memcastle::migrate::failed", help: null }).failureClass).toBe(
+    "unexpected",
+  )
 })
 
 test("an HTTP status with the documented code is classified as the fixture says", () => {

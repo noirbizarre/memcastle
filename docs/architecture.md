@@ -78,8 +78,9 @@ Nothing in `domain` knows SurrealDB exists, and nothing in `cli`, `mcp` or `api`
 The dotted line is the important one: the CLI is an HTTP client of the daemon, exactly as a script or dashboard would be.
 
 **The CLI has no business logic MCP/HTTP can't reuse.**
-Every subcommand except `serve`/`daemon start`/`daemon restart`/`migrate` and the local `completions`
-is a thin `client::DaemonClient` call —
+Every subcommand except `serve`/`daemon start`/`daemon restart`/`migrate`, the local `completions` and the local
+`source init`/`build`/`test`/`package`/`index`/`keygen` is a thin `client::DaemonClient` call
+(`note` also reads the project directory through `crate::project` to choose a wing and room, then calls the daemon) —
 `memcastle mine ./project` submits a job over HTTP the way an MCP tool call would, rather than mining anything itself.
 `daemon stop` is one of them: it only asks the daemon to shut down.
 `daemon start` and `daemon restart` add only process management:
@@ -473,13 +474,13 @@ Two fields mean "where do I read progress from" and "where do I read what it fou
   The database is its cursor: each pass asks for the next unembedded drawers, so pausing, crashing or running it again
   loses and repeats nothing, and only the `embedding` field is ever written.
   It is queued automatically after drawer-writing jobs and writes, and at startup.
-- **`Extract`** (`src/extract/job.rs`) reads every current mined drawer with no marker in `drawer_extraction`
+- **`Extract`** (`src/extract/job.rs`) reads every current mined drawer and note with no marker in `drawer_extraction`
   and writes the entities, `mentions` links and `relates_to` edges its provider finds, then the marker.
   Like `Embed` the database is its cursor, and every write is idempotent, so a crash or a retry repeats nothing.
   It first closes the open facts whose evidence drawer has since been superseded.
   The provider (`heuristic`, a `command`, or an OpenAI-compatible `http` endpoint) sits behind the `Extractor` trait,
   and `Extraction::extract` holds every answer to the closed vocabulary and its bounds.
-  It is queued after a mining job completes and at startup, when a provider is configured.
+  It is queued after a mining job completes, after a note is written and at startup, when a provider is configured.
 - **`Audit`** (`src/audit`) is a read-only consistency report, scoped to what is structurally possible
   with a single database.
   It checks for orphan drawers (a `room` reference that no longer resolves), dangling `provenance.job_id` references,
@@ -532,7 +533,8 @@ What else a release may carry falls into three kinds, kept apart on purpose:
 
 - **Embedded** in the binary: anything small that must match its version exactly.
   The SurrealDB schema (`surrealkit::embed_schema!`) and the data migrations (`crate::migrate`) are of this kind.
-- **Installed** by a package manager under `share/memcastle`: a future web UI, for instance.
+- **Installed** by a package manager under `share/memcastle`: the sources bundled with MemCastle today, a web UI
+  perhaps later.
 - **User data and configuration**, under the XDG directories and never treated as assets.
 
 `assets::Assets::resolve` picks one source for the run, in this order:
@@ -548,8 +550,8 @@ flowchart TD
     installed -- no --> useEmbedded[use the embedded assets]
 ```
 
-The resolver only reads directories, so startup never needs the network, and it serves nothing yet:
-the web UI is the first consumer.
+The resolver only reads directories, so startup never needs the network.
+Its one consumer so far is the bundle of sources (`sources/`); a web UI would be the next.
 The module is pure and the daemon's composition root calls it once, before binding the listener,
 so a mistyped override fails a start that has changed nothing.
 [ADR-013](adr/013-release-packaging-and-asset-resolution.md) records the layout, the order and what was rejected;
@@ -630,7 +632,8 @@ See [Writing a mining source](writing-sources.md) and [ADR-026](adr/026-pluggabl
 A built-in source is compiled in.
 A bundled source is an ordinary package shipped beside the binary, with an index that lists it.
 A registry source comes from a static `memcastle-index.json` the user configured.
-Only the daemon reaches a registry, and only `crate::distribution`, called from `app`, does the fetching:
+Only the daemon reaches a registry, and only `crate::distribution`, called from `app`, does the fetching
+(`config` calls it only to parse a location, to refuse a bad one at load):
 it reads an index, chooses the newest version that runs here, downloads the archive and proves it is the one the index
 published (a SHA-256, and optionally an ed25519 signature under a trust policy), then hands the bytes to the same install
 path a file uses, so consent, the compatibility check and the load proof are identical whatever the origin.
@@ -674,13 +677,13 @@ Deliberately out of scope, and each is structurally possible without rework give
 - TLS on the daemon's own listener (use a TLS-terminating proxy).
 - A read-only mode, live queries or transactions on the database admin endpoint
   ([ADR-015](adr/015-database-admin-endpoint.md)).
-- OAuth/OIDC, users, roles and scopes: 0.1 has one optional shared bearer token,
+- OAuth/OIDC, users, roles and scopes: there is one optional shared bearer token,
   and the authentication layer is where those would attach ([ADR-014](adr/014-optional-token-authentication.md)).
 - Robust cross-platform process supervision for `memcastle daemon start` and `daemon restart`
   (they are a best-effort detached spawn; use a real supervisor in production).
 - A web dashboard (the API is shaped so one can be built entirely as an API client, as the CLI is).
   Its packaging is settled, in [ADR-013](adr/013-release-packaging-and-asset-resolution.md);
-  the daemon serves nothing from the asset directory yet.
+  the asset directory holds only the bundled sources so far.
 - Any network-based asset download.
 
 Decisions and their rejected alternatives are collected in the [Architecture Decisions](adr/README.md).

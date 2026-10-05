@@ -9,6 +9,8 @@ Rust DDL and no data migration),
 and [ADR-021](021-richer-retrieval.md) ("chunking is a mining decision", made here).
 It changes one consequence of [ADR-008](008-replay-safe-job-resume.md) and [ADR-018](018-palace-hierarchy-management.md):
 re-mining no longer duplicates.
+Partly superseded by [ADR-028](028-pi-history-is-an-installed-webassembly-source.md): `pi-sessions` is no longer a
+built-in adapter, so the passages below that describe it as one describe the original decision.
 
 ## Context
 

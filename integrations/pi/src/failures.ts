@@ -50,11 +50,28 @@ export function parseErrorBody(text: string): ErrorBody | null {
   }
 }
 
+/**
+ * The codes the daemon answers with HTTP 400 for a request the caller got wrong: `memcastle::input::invalid` and the
+ * more specific ones. Over MCP a tool error carries no HTTP status, so the code is the only way to tell them apart from
+ * a daemon fault. Mirrors `invalid_input` in `tests/fixtures/integration/failure-classes.json` (`code`, `also_codes`).
+ *
+ * The malformed-job-id code is deliberately absent: an integration only sends job ids the daemon gave it, so that
+ * refusal is a bug and reads as `unexpected`, and spelling a `jobs` code here would trip the `integrations-http-only`
+ * guard, which keeps integrations away from the daemon's `jobs` and `store` modules.
+ */
+const INVALID_INPUT_CODES: ReadonlySet<string> = new Set([
+  "memcastle::input::invalid",
+  "memcastle::palace::invalid_path",
+  "memcastle::repair::invalid_based_on_job",
+  "memcastle::domain::empty_label",
+  "memcastle::search::semantic_unavailable",
+])
+
 /** Classify by the public diagnostic code. Codes are stable identifiers; the message text is not. */
 function classOfCode(code: string | null, status: number | null): FailureClass {
   if (code === "memcastle::auth::unauthorized" || status === 401) return "unauthorized"
   if (code === "memcastle::app::mode_forbidden" || status === 403) return "mode_rejected"
-  if (code === "memcastle::input::invalid" || status === 400) return "invalid_input"
+  if ((code !== null && INVALID_INPUT_CODES.has(code)) || status === 400) return "invalid_input"
   return "unexpected"
 }
 

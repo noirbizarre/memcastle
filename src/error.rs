@@ -629,15 +629,16 @@ pub enum Error {
         room: String,
     },
 
-    /// The room exists but holds no drawer answering to the given name or id.
-    #[error("drawer `{drawer}` not found in `{room}`")]
+    /// No drawer answers to the given name or id: in a room when the lookup was by name or by a path, anywhere in
+    /// the palace when it was by id alone.
+    #[error("drawer `{drawer}` not found{}", drawer_scope(.room.as_deref()))]
     #[diagnostic(
         code(memcastle::palace::drawer_not_found),
-        help("list the room's drawers with `memcastle drawer list --room <wing>/<room>`")
+        help("{}", drawer_not_found_help(room.as_deref()))
     )]
     DrawerNotFound {
-        /// The `wing/room` that was searched.
-        room: String,
+        /// The `wing/room` that was searched, or `None` for a lookup by id, which is not scoped to a room.
+        room: Option<String>,
         /// The name or id that was looked up.
         drawer: String,
     },
@@ -1220,6 +1221,22 @@ impl Error {
     }
 }
 
+/// Where a missing drawer was looked for, as the tail of its message: a room, or nothing for an id, which names no room
+/// and would otherwise be reported as missing from a room the caller never mentioned.
+fn drawer_scope(room: Option<&str>) -> String {
+    room.map_or_else(String::new, |room| format!(" in `{room}`"))
+}
+
+/// What to do about a missing drawer: list a room's drawers when the lookup was in one, and otherwise check the id,
+/// because listing a room cannot help someone who asked by id alone.
+fn drawer_not_found_help(room: Option<&str>) -> &'static str {
+    if room.is_some() {
+        "list the room's drawers with `memcastle drawer list --room <wing>/<room>`"
+    } else {
+        "check the drawer id: it is printed by `memcastle search` and by `memcastle drawer list`"
+    }
+}
+
 /// The fix for a failed bind, chosen by what the OS said: each cause has a
 /// different remedy, and "check the address" would send someone whose port is
 /// simply taken to the wrong setting.
@@ -1380,7 +1397,7 @@ mod tests {
                 room: "x".to_string(),
             },
             Error::DrawerNotFound {
-                room: "work/x".to_string(),
+                room: Some("work/x".to_string()),
                 drawer: "y".to_string(),
             },
             Error::InvalidPalacePath {
@@ -1633,6 +1650,28 @@ mod tests {
             let help = error.help().unwrap().to_string();
             assert!(help.contains(expected), "{kind:?}: {help}");
         }
+    }
+
+    #[test]
+    fn a_drawer_missing_by_id_names_no_room_and_a_drawer_missing_in_a_room_names_it() {
+        let by_id = Error::DrawerNotFound {
+            room: None,
+            drawer: "abc".to_string(),
+        }
+        .body();
+        let in_room = Error::DrawerNotFound {
+            room: Some("work/x".to_string()),
+            drawer: "abc".to_string(),
+        }
+        .body();
+
+        // The same public code, so nothing that matches on it breaks.
+        assert_eq!(by_id.code, in_room.code);
+        assert_eq!(by_id.error, "drawer `abc` not found");
+        assert_eq!(in_room.error, "drawer `abc` not found in `work/x`");
+        // Listing a room cannot help someone who asked by id alone.
+        assert!(!by_id.help.unwrap().contains("<wing>/<room>"));
+        assert!(in_room.help.unwrap().contains("--room <wing>/<room>"));
     }
 
     #[test]

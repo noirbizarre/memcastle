@@ -300,6 +300,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_wing_no_path_can_address_is_refused_before_anything_is_written() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "a.txt", "one");
+        let mut job = directory_job(dir.path(), "test");
+        job.kind = JobKind::Mine {
+            source: MiningSource::Directory {
+                path: dir.path().to_path_buf(),
+            },
+            wing: Some("0b8c1e8e-7a52-4a1c-9d0e-6f0a3b2c1d4e".into()),
+            full: false,
+        };
+
+        let outcome = run_job(&store, &mut job, MiningConfig::default()).await;
+
+        assert!(
+            matches!(outcome, Err(Error::InvalidPalacePath { .. })),
+            "got {outcome:?}"
+        );
+        assert!(drawers(&store).await.is_empty());
+    }
+
+    #[tokio::test]
     async fn a_full_re_mine_reads_everything_again_and_still_files_nothing_new() {
         let store = SurrealStore::connect_memory_for_tests().await;
         let dir = tempfile::tempdir().unwrap();

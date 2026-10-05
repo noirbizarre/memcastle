@@ -1,5 +1,6 @@
-//! The HTTP API: health, status, search/recall/wake-up/diary, job inspection/control, wing/room/drawer
-//! management, authentication tokens, the database endpoint and shutdown.
+//! The HTTP API: health, status, search/recall/wake-up/diary, notes, job inspection/control, wing/room/drawer
+//! management, drawer supersession, history and duplicates, the knowledge graph (entities), mining sources, source
+//! packages and registries, authentication tokens, the database endpoint and shutdown.
 //!
 //! Every handler is a deserialize -> call one `AppServices` method ->
 //! serialize sandwich — no business logic lives here. This is also where
@@ -455,8 +456,8 @@ async fn submit_job(
                 .await?
         }
         JobKind::Audit { scope } => {
-            // Not gated by `mode` — same reasoning as `Mine` above (see
-            // `AppServices::submit_audit`'s doc comment).
+            // Not gated by `mode`, unlike `Mine` above, because an audit only reads
+            // (see `AppServices::submit_audit`'s doc comment).
             state.app.submit_audit(scope, &body.requested_by).await?
         }
         JobKind::Embed { wing } => {

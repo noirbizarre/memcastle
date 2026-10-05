@@ -27,11 +27,11 @@ memcastle status
 
 ```text
 MemCastle is running
-  version    0.1.0 (pid 2528880, up 3s)
+  version    0.2.0 (pid 2528880, up 3s)
   endpoint   http://127.0.0.1:8420 (from the daemon's registry file)
   mcp        http://127.0.0.1:8420/mcp
   palace     default (/home/alice/.local/share/memcastle/default)
-  datastore  ok - embedded /home/alice/.local/share/memcastle/default/db, migrations 3/3
+  datastore  ok - embedded /home/alice/.local/share/memcastle/default/db, migrations 4/4
   drawers    0
   jobs       0 queued, 0 running, 0 paused
   mode       full
@@ -60,7 +60,8 @@ memcastle job list
 In a terminal this is a table whose `STATUS` column reads `completed` once the job is done.
 Piped (`memcastle job list | jq`), it is JSON, where a completed job has `"status": "completed"` and a `result` such as
 `{"documents": 2, "created": 2, "unchanged": 0, "truncated": false, ...}`.
-Without `--wing`, memories are filed under a wing named after the directory.
+Without `--wing`, memories are filed under the wing the directory's project file declares, else a wing named after the
+directory.
 Mining remembers what it has read, so running it again files only what changed.
 It can also read other sources, such as your Pi session history
 (`memcastle mine --source pi`, once you have installed that source), see [Mining sources](mining-sources.md).

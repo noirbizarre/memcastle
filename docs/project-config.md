@@ -128,7 +128,8 @@ fallback: you asked for this note to be filed, and a wrong scope would put it so
 When the daemon mines a directory and no wing was given, it looks for a project file from that directory,
 with the same discovery rules.
 If one declares a wing (or a name), the files go into that wing, so mining, wake-up and checkpoints meet in one wing.
-Otherwise the wing is the directory's name, as before.
+Otherwise the wing is the directory's name, as before, made acceptable the way `memcastle note` makes it:
+a name that looks like a UUID gets a `project-` prefix, because a UUID addresses a record by id and cannot name a wing.
 A file that cannot be used is logged with its path, and mining carries on with the directory's name:
 one typo in a file nobody asked about must not stop a mine that used to work.
 Mining's room is chosen by its source, so `[memcastle] room` does not apply.

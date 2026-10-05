@@ -9,6 +9,8 @@ this decides how an implementation is loaded),
 are REST and CLI, never MCP),
 and [ADR-019](019-shared-integration-contract.md) (a conformance suite both implementations must pass).
 It adds a registry of installed sources, which ADR-023 left open ("nothing precludes a registry later").
+Partly superseded by [ADR-028](028-pi-history-is-an-installed-webassembly-source.md): `pi-sessions` is an installed
+source and no longer a built-in adapter, so the passages below that keep it built in describe the original decision.
 
 ## Context
 

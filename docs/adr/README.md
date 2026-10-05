@@ -89,7 +89,8 @@ The history is the value.
   (supersedes part of ADR-023 and ADR-026)
 - [ADR-029](029-project-local-configuration.md) — a project declares its wing and room in `.config/memcastle.toml`
   and `MEMCASTLE_WING` / `MEMCASTLE_ROOM`, read by each integration and passed as ordinary arguments; the daemon reads it
-  only to choose a mined directory's wing, and a project file cannot pick a palace
+  only to choose a mined directory's wing (and the CLI only for `note`, per ADR-031),
+  and a project file cannot pick a palace
 - [ADR-030](030-opencode-history-is-an-installed-webassembly-source.md) — OpenCode's conversation history is an
   installed WebAssembly source built from `sources/opencode/` that acquires sessions by running the `opencode` command,
   a wider permission than a file grant, so no OpenCode or SQLite code enters the core

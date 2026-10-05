@@ -193,7 +193,7 @@ pub enum Command {
     /// `fish`, `powershell` or `elvish`. Needs neither a daemon nor a
     /// configuration file.
     Completions(CompletionsArgs),
-    /// Maintenance operations (dedup, stale-data sweep, ...). Not yet implemented.
+    /// Maintenance operations (stale-data sweep, ...). Not yet implemented.
     Maintenance,
 }
 

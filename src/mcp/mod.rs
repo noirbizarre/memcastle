@@ -236,8 +236,8 @@ struct CheckpointArgs {
 /// model nothing about the argument's shape; models then guess, and some
 /// JSON-encode the payload into a string. Spelling the object out steers
 /// them to send an object. Keep it in step with
-/// `domain::CheckpointPayload` (a test checks the enum values and required
-/// fields against the real type).
+/// `domain::CheckpointPayload` (tests check the enum values, the required
+/// fields and the set of property names against the real type).
 fn checkpoint_payload_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({
         "type": "object",
@@ -257,6 +257,10 @@ fn checkpoint_payload_schema(_: &mut schemars::SchemaGenerator) -> schemars::Sch
                         "wing": {
                             "type": ["string", "null"],
                             "description": "Optional wing override; null uses the destination's default wing."
+                        },
+                        "name": {
+                            "type": ["string", "null"],
+                            "description": "Optional name, unique within the room, so the drawer can be addressed as wing/room/name."
                         },
                         "content": {
                             "type": "string",
@@ -279,9 +283,16 @@ fn checkpoint_payload_schema(_: &mut schemars::SchemaGenerator) -> schemars::Sch
                         },
                         "fact": {
                             "type": ["object", "null"],
-                            "description": "Optional knowledge-graph change: {\"op\": \"add\"|\"supersede\"|\"invalidate\", ...}.",
+                            "description": "Optional knowledge-graph change, with the ids of entities and relationships that already exist. \"add\" needs subject, predicate, object and confidence; \"supersede\" needs relationship_id, from, to, predicate and confidence; \"invalidate\" needs relationship_id.",
                             "properties": {
-                                "op": { "type": "string", "enum": ["add", "supersede", "invalidate"] }
+                                "op": { "type": "string", "enum": ["add", "supersede", "invalidate"] },
+                                "subject": { "type": "string", "description": "Entity id (add)." },
+                                "object": { "type": "string", "description": "Entity id (add)." },
+                                "relationship_id": { "type": "string", "description": "The edge to close (supersede, invalidate)." },
+                                "from": { "type": "string", "description": "Entity id of the replacement's subject (supersede)." },
+                                "to": { "type": "string", "description": "Entity id of the replacement's object (supersede)." },
+                                "predicate": { "type": "string", "description": "The relationship's label (add, supersede)." },
+                                "confidence": { "type": "number", "minimum": 0, "maximum": 1, "description": "Confidence in [0, 1] (add, supersede)." }
                             },
                             "required": ["op"]
                         }
@@ -1205,6 +1216,76 @@ mod tests {
         }
         // And the doc example (one item, every field present) is accepted.
         serde_json::from_value::<CheckpointPayload>(one_item_payload()).expect("example payload");
+    }
+
+    #[test]
+    fn the_advertised_checkpoint_properties_cover_every_field_the_domain_serialises() {
+        use crate::domain::{
+            CheckpointDestination, CheckpointItem, EntityId, FactMutation, RelationshipId, Source,
+            SourceKind,
+        };
+        use std::collections::BTreeSet;
+
+        let schema = serde_json::to_value(checkpoint_payload_schema(
+            &mut schemars::SchemaGenerator::default(),
+        ))
+        .unwrap();
+        let advertised = |value: &serde_json::Value| -> BTreeSet<String> {
+            value["properties"]
+                .as_object()
+                .expect("an object schema")
+                .keys()
+                .cloned()
+                .collect()
+        };
+        let keys_of = |value: serde_json::Value| -> BTreeSet<String> {
+            value.as_object().unwrap().keys().cloned().collect()
+        };
+        let item_schema = &schema["properties"]["items"]["items"];
+
+        // Every field set on the real type must be advertised, or a model never learns it exists
+        // (`name` once was not).
+        let item = CheckpointItem {
+            destination: CheckpointDestination::General,
+            wing: Some("w".into()),
+            name: Some("n".into()),
+            content: "c".into(),
+            tags: vec![],
+            source: Source::new(SourceKind::Manual, Some("u".into()), Some("a".into())),
+            fact: None,
+        };
+        let mut item_keys = keys_of(serde_json::to_value(&item).unwrap());
+        item_keys.insert("fact".into());
+        assert_eq!(advertised(item_schema), item_keys);
+        assert_eq!(
+            advertised(&item_schema["properties"]["source"]),
+            keys_of(serde_json::to_value(&item.source).unwrap()),
+        );
+
+        // The fact is a tagged union: the advertised properties are the union of every variant's keys.
+        let (entity, relationship) = (EntityId::new(), RelationshipId::new());
+        let mut fact_keys = BTreeSet::new();
+        for fact in [
+            FactMutation::Add {
+                subject: entity,
+                predicate: "p".into(),
+                object: entity,
+                confidence: 1.0,
+            },
+            FactMutation::Supersede {
+                relationship_id: relationship,
+                from: entity,
+                to: entity,
+                predicate: "p".into(),
+                confidence: 1.0,
+            },
+            FactMutation::Invalidate {
+                relationship_id: relationship,
+            },
+        ] {
+            fact_keys.extend(keys_of(serde_json::to_value(&fact).unwrap()));
+        }
+        assert_eq!(advertised(&item_schema["properties"]["fact"]), fact_keys);
     }
 
     /// The diagnostic code of a failed tool call, or `None` if it succeeded.
