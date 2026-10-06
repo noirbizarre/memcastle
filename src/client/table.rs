@@ -30,7 +30,7 @@ const FLEX_MIN_WIDTH: u16 = 12;
 /// `width` is the terminal's width in columns, when known. Without it
 /// (a pseudo-terminal that was never sized) there is nothing to fit against, so
 /// every column keeps its natural width.
-fn render_table(
+pub(super) fn render_table(
     headers: &[&str],
     rows: Vec<Vec<String>>,
     flex: usize,
@@ -479,7 +479,7 @@ pub fn render_drawers(drawers: &[DrawerSummary], painter: Painter, width: Option
 }
 
 /// A timestamp in the reader's timezone, to the minute.
-fn local_minute(at: chrono::DateTime<chrono::Utc>) -> String {
+pub(super) fn local_minute(at: chrono::DateTime<chrono::Utc>) -> String {
     at.with_timezone(&chrono::Local)
         .format("%Y-%m-%d %H:%M")
         .to_string()

@@ -9,6 +9,7 @@
 //! Default file locations follow the Unix XDG convention on Linux and macOS
 //! alike; see [`paths`].
 
+pub mod miners_file;
 pub mod paths;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -16,6 +17,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::domain::MinerDefinition;
 use crate::error::{Error, Result};
 use crate::store::{Backend, StoreSync};
 
@@ -743,6 +745,19 @@ pub struct Config {
     /// Memory deduplication and entity resolution settings.
     #[serde(default)]
     pub dedup: DedupConfig,
+    /// The `[[miners]]` definitions as they were when the file was loaded.
+    ///
+    /// A snapshot for startup: while the daemon runs, the miners are read from the file again (`app::miners`), since
+    /// the daemon itself rewrites that section when a miner is added or changed.
+    #[serde(default)]
+    pub miners: Vec<MinerDefinition>,
+    /// The file this configuration was read from, or would be written to: `--config`, `MEMCASTLE_CONFIG`, or the
+    /// default location (which may not exist yet).
+    ///
+    /// Never read from or written to the file itself. `None` only for a configuration built in code, where the
+    /// daemon refuses to change miners rather than guess which file to write.
+    #[serde(skip)]
+    pub config_file: Option<PathBuf>,
 }
 
 impl Config {
@@ -767,6 +782,11 @@ impl Config {
                 _ => Self::default(),
             },
         };
+        // Recorded even when the default file does not exist: the first `miner set` creates it there, and the
+        // daemon must not have to guess which file a miner belongs in.
+        config.config_file = path
+            .map(Path::to_path_buf)
+            .or_else(paths::default_config_file);
         config.apply_env_overrides()?;
         config.apply_cli_overrides(overrides);
         config.validate()?;
@@ -1137,6 +1157,7 @@ impl Config {
         self.validate_extraction()?;
         self.validate_mining()?;
         self.validate_dedup()?;
+        validate_miners(&self.miners)?;
         Ok(())
     }
 
@@ -1338,6 +1359,18 @@ impl Config {
         }
         Ok(())
     }
+}
+
+/// The `[[miners]]` invariants that need no knowledge of the sources: shapes, unique names, no secret in the file.
+///
+/// A bad entry fails startup like a bad `[embeddings]` section, so a miner is never half-active. Whether the source is
+/// installed is not checked here, because that needs the store and an installed source may legitimately arrive later.
+fn validate_miners(miners: &[MinerDefinition]) -> Result<()> {
+    crate::domain::validate_miners(miners).map_err(|reason| {
+        Error::config(format!(
+            "[[miners]]: {reason}; fix the entry in the configuration file"
+        ))
+    })
 }
 
 /// A comma-separated environment value as a list, without blanks.

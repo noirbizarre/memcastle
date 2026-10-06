@@ -16,6 +16,7 @@ mod fingerprint;
 mod ids;
 mod job;
 mod memory_mode;
+mod miner;
 mod palace;
 mod path;
 mod resolution;
@@ -45,6 +46,10 @@ pub use job::{
     TransitionError,
 };
 pub use memory_mode::MemoryMode;
+pub use miner::{
+    MAX_MINER_NAME_LEN, MinerDefinition, MinerTrigger, TriggerKind, is_valid_miner_name,
+    scope_broadening, validate_miners,
+};
 pub use resolution::{
     EntityCandidate, MIN_TYPO_KEY_CHARS, PossibleMatch, Resolution, ResolutionRule, entity_key,
     resolve,

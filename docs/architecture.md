@@ -672,6 +672,25 @@ flowchart LR
 Installing from a registry is administrative like installing from a file: REST and CLI only, no MCP tool.
 See [Publishing and installing sources](publishing-sources.md) and [ADR-033](adr/033-source-distribution.md).
 
+**What to mine is configuration the daemon keeps in the file it was started from.**
+A miner is a named `[[miners]]` entry (a source, a locator, a scope, a trigger, a credential reference), not mined data:
+the cursor stays on the source, so a miner can be renamed, disabled or re-scoped without losing where its source stopped.
+`app::miners` holds the last good copy, re-reads the file when it changes, and rewrites only that section in place through
+`config::miners_file`, so comments and everything else in the file survive.
+The CLI, REST and MCP's two read-only tools all call it; changing a miner has no MCP tool, like installing a source.
+Triggers, a scope and a `config` table are stored and validated but not yet acted on.
+See [Configuration](configuration.md#miners) and [ADR-037](adr/037-persistent-miner-configuration.md).
+
+```mermaid
+flowchart LR
+    CLI["memcastle miner"] -- REST --> APP["app::miners"]
+    MCP["MCP<br/>miner_list, miner_get"] -- read only --> APP
+    APP --> FILE[("config.toml<br/>[[miners]]")]
+    FILE -- "changed? re-read" --> APP
+    APP -- "miner run" --> JOBS["mine job<br/>source + locator"]
+    JOBS --> CUR[("source cursor<br/>keyed by source + locator")]
+```
+
 ## Non-goals for now
 
 Deliberately out of scope, and each is structurally possible without rework given the module boundaries above:

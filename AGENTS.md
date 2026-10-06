@@ -33,6 +33,8 @@ An invariant nothing checks is a comment, and it will be violated.
    through `crate::integration`, which `tests/integration_isolation.rs` holds to touching neither `store`, `jobs`, the
    client nor the network, and which nothing but `main.rs` may call, so there is no MCP tool and no route that installs
    one (see `docs/adr/034-agent-integration-distribution.md`).
+   `miner` (list, get, set, enable, disable, remove, reload, run) calls only `client::DaemonClient`, like every other
+   daemon command: the rules for a miner live in `app::miners` (see `docs/adr/037-persistent-miner-configuration.md`).
    `source search`, `install <name>` and `update` never fetch anything themselves: the daemon does, through
    `crate::distribution`, and the CLI calls it over REST.
    `note` also reads the project directory through `crate::project` to choose a wing and room, then calls the daemon.)
@@ -156,6 +158,20 @@ An invariant nothing checks is a comment, and it will be violated.
     and from the checkout through the same lookup)
     and by `web/test` (the login, the route guard and the client, with a real daemon).
 
+12. **Changing a miner is administrative, and the daemon is the only writer of the `[[miners]]` section** —
+    miner definitions live in the configuration file the daemon was started from, and adding, changing, enabling,
+    disabling, removing, reloading and running one are REST and CLI only, so an agent can read the miners
+    (`memcastle_miner_list`, `memcastle_miner_get`) but cannot decide what the daemon mines.
+    A secret is never written to the file (`credential` is a reference, and a secret-looking key is refused) nor returned
+    (a credential is shown as a kind and whether it resolves), and a change made through the daemon never widens a
+    scope without being told to.
+    The rest of the file is never rewritten, only that section, in place (see
+    `docs/adr/037-persistent-miner-configuration.md`).
+    Enforced by `tests/in_process/auth.rs` (every `/api/miners` route guarded, and the only miner MCP tools are the two
+    read-only ones), by `tests/in_process/miners.rs` (validation before anything is written, a scope never widens
+    silently, a credential never leaks, a cursor survives every change, REST, CLI and MCP agree)
+    and by `config::miners_file`'s tests (comments and other tables survive an edit, a stale write is refused).
+
 ## Layout
 
 ```text
@@ -165,7 +181,8 @@ src/
 ├── lib.rs      module wiring
 ├── error.rs    the crate's error type
 ├── term.rs     terminal presentation for the CLI: colour, TTY detection and confirmation prompts
-├── config/     typed configuration (defaults -> file -> env -> CLI -> validate) and Unix XDG paths
+├── config/     typed configuration (defaults -> file -> env -> CLI -> validate) and Unix XDG paths; `miners_file`
+│               rewrites the `[[miners]]` section of the file in place and nothing else
 ├── domain/     Palace/Wing/Room/Drawer/Job, checkpoint payloads, entities, memory modes — pure types, no I/O
 ├── store/      SurrealDB connection and repository methods (schema is applied from `database/schema/`)
 ├── migrate/    versioned data migrations and the version watermark, run before serving
@@ -190,11 +207,12 @@ src/
 ├── embed/      embedding providers (command, OpenAI-compatible HTTP) behind one trait, and the `Embed` job handler
 ├── dedup/      drawer deduplication: assess what a new drawer duplicates or resembles, link it, skip an exact copy
 ├── extract/    entity extraction providers (heuristic, command, OpenAI-compatible HTTP) behind one trait, and the `Extract` job handler
-├── app/        application services — the one layer mcp/api call into (the CLI reaches it over HTTP, via `client/`)
+├── app/        application services — the one layer mcp/api call into (the CLI reaches it over HTTP, via `client/`);
+│               `miners` reads and rewrites the configured miners
 ├── server/     the daemon composition root + lifecycle (registry file)
 ├── mcp/        MCP tool surface, over HTTP
 ├── api/        the REST API (health/status/config/jobs/search/recall/wake-up/diary/notes/wings/rooms/drawers/entities/graph/
-│               sources/source-packages/source-registry/auth-token/db/shutdown; `docs/mcp-and-api.md` lists every route),
+│               sources/source-packages/source-registry/miners/auth-token/db/shutdown; `docs/mcp-and-api.md` lists every route),
 │               and `web.rs`, the dashboard's static files under `/ui` (only when `web.enable`; no store, no jobs)
 └── client/     the CLI's HTTP client for a running daemon, and the human renderings of its answers (status, tables)
 

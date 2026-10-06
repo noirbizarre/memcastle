@@ -27,6 +27,8 @@ A failure comes back as an MCP error result carrying the [error body](#errors) b
 | `memcastle_diary_read` | `agent_identity`, `wing`, `limit?` | Read an agent's newest diary entries. |
 | `memcastle_checkpoint` | `payload`, `emergency?` | Submit a durable checkpoint job. |
 | `memcastle_mine` | `path` or `source`, `locator?`, `full?`, `wing?` | Submit a job that mines a directory, or a [source](mining-sources.md) such as `pi`. |
+| `memcastle_miner_list` | none | The configured [miners](configuration.md#miners): name, source, state, scope, trigger and last run. Read-only. |
+| `memcastle_miner_get` | `name` | One configured miner, and why it cannot run when it cannot. Read-only. |
 | `memcastle_audit` | `wing?` | Submit a read-only consistency audit job. |
 | `memcastle_repair` | `dry_run?`, `based_on_job?` | Submit a repair job; a dry run unless `dry_run` is `false`. |
 | `memcastle_job_list` | `status?` | List jobs, newest first. |
@@ -56,7 +58,7 @@ and some directories reject a tool whose hint is missing.
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
 |---|---|---|---|---|
-| `memcastle_status`, `memcastle_history`, `memcastle_wake_up`, `memcastle_diary_read`, `memcastle_job_list`, `memcastle_job_get` | true | false | true | false |
+| `memcastle_status`, `memcastle_history`, `memcastle_wake_up`, `memcastle_diary_read`, `memcastle_job_list`, `memcastle_job_get`, `memcastle_miner_list`, `memcastle_miner_get` | true | false | true | false |
 | `memcastle_search`, `memcastle_recall` | true | false | true | true |
 | `memcastle_set_mode` | false | false | true | false |
 | `memcastle_mine` | false | false | true | true |
@@ -163,6 +165,14 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `POST /api/diary` | Write a diary entry. | JSON body: `agent_identity`, `wing`, `content`, `requested_by?` |
 | `POST /api/notes` | Capture a note: an unnamed drawer of source kind `note`. `201` when stored, `200` when an identical note was already in the room. There is no MCP tool: agents write memory through `memcastle_checkpoint` and the diary. | JSON body: `wing`, `room`, `content`, `uri?`, `requested_by?` |
 | `GET /api/sources` | The mining adapters this daemon can run and the sources that have been mined: `{adapters, sources}`. A read. | none |
+| `GET /api/miners` | The configured [miners](configuration.md#miners): `{miners, config_file?, error?}`. `error` says why the configuration file cannot be read, and `miners` is then the last good copy. A read. | none |
+| `GET /api/miners/{name}` | One miner with its state (`ready`, `disabled`, `unavailable` and why), its credential as a kind and an availability, and the source it has mined. A read. | none |
+| `PUT /api/miners/{name}` | Create the miner, or change the fields the body names: `{miner, created, changed, identity_changed}`. A change that widens the scope is a `409` unless `allow_broaden` is set. | JSON body, all optional once the miner exists: `source`, `enabled`, `locator`, `wing`, `credential`, `scope`, `unset_scope`, `trigger`, `config`, `unset_config`, `unset`, `allow_broaden` |
+| `POST /api/miners/{name}/enable` | Switch a miner on, after checking that it can run. Idempotent. | none |
+| `POST /api/miners/{name}/disable` | Switch a miner off. Idempotent. | none |
+| `DELETE /api/miners/{name}` | Remove a miner's definition; what it mined stays: `{"removed": name}`. | none |
+| `POST /api/miners/reload` | Read the configuration file again now: `{miners, added, removed, changed, enabled, disabled, broadened}`. | none |
+| `POST /api/miners/{name}/run` | Submit the miner's mining job, from the cursor its source already has. Answers the job. A write, so a read-only session is refused. | optional JSON body: `full`, `requested_by` |
 | `GET /api/jobs` | List jobs, newest first. Without `kind` and `limit` it answers every job; with either it answers a bounded page. | query string: `status`, `kind` (the job's `type`, such as `mine` or `audit`), `limit` (default 50, at most 200) |
 | `POST /api/jobs` | Submit a job. | JSON body, see [below](#submitting-jobs) |
 | `GET /api/jobs/{id}` | Show one job. | none |
@@ -437,6 +447,26 @@ A built-in source cannot be disabled or removed (`memcastle::source::builtin`, `
 (`memcastle::source::not_found`); enabling a source that is `unavailable`, or mining one that is not enabled, is a `409`
 (`memcastle::source::not_enabled`).
 `POST /api/jobs` refuses a `mine` for such a source the same way, at submission.
+
+### Miners
+
+The `/api/miners` routes manage the `[[miners]]` section of the daemon's configuration file
+([Configuration](configuration.md#miners), [ADR-037](adr/037-persistent-miner-configuration.md)).
+Reading is offered to MCP (`memcastle_miner_list`, `memcastle_miner_get`), so an agent can say what is configured.
+Changing a miner is REST and CLI only, like installing a source: no MCP tool adds, changes, enables, disables, removes,
+reloads or runs one, so an agent cannot widen what the daemon mines.
+Every route is guarded by [authentication](authentication.md).
+Listing and showing are reads, so a `disabled` session is refused them (`403`); `run` is a write, because it files
+drawers; creating, changing, enabling, disabling, removing and reloading are not gated by a memory mode,
+which guards access to memory and not what the daemon is configured to do.
+
+A definition that does not validate, or an enabled miner whose source is not usable or whose credential does not resolve,
+is `400` with `memcastle::miner::invalid` and nothing is written.
+An unknown miner is `404` (`memcastle::miner::not_found`).
+A `409` is a change that would widen a scope (`memcastle::miner::scope_broadened`), a run of a disabled miner
+(`memcastle::miner::disabled`), a run of one that cannot run as configured (`memcastle::miner::not_runnable`),
+and a configuration file that cannot be read or was edited under the request (`memcastle::miner::config_file`).
+A credential is shown as `{kind, available}`: the variable's name or the file's path is not given back.
 
 ### The database admin endpoint
 

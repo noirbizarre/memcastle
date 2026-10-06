@@ -25,6 +25,7 @@ impl IntoResponse for ApiError {
             | Error::RoomNotFound { .. }
             | Error::DrawerNotFound { .. }
             | Error::SourceNotFound { .. }
+            | Error::MinerNotFound { .. }
             // No registry offers it, or no version of it can be installed here.
             | Error::SourceNotInRegistry { .. } => StatusCode::NOT_FOUND,
             Error::InvalidJobTransition { .. }
@@ -41,6 +42,8 @@ impl IntoResponse for ApiError {
             | Error::SourceIncompatible { .. }
             | Error::SourceConsentRequired { .. }
             | Error::SourceBuiltin { .. }
+            // A miner definition the caller wrote is theirs to fix.
+            | Error::MinerInvalid { .. }
             // The trust policy is the daemon's configuration, but the package was the caller's choice.
             | Error::SourceUntrusted { .. }
             | Error::EmbeddingsNotConfigured
@@ -73,6 +76,13 @@ impl IntoResponse for ApiError {
             | Error::DrawerSuperseded { .. }
             // The source exists, but its state (disabled, unavailable) conflicts with the request.
             | Error::SourceNotEnabled { .. }
+            // A name already taken, a change that needs confirming, or a miner whose state forbids the request.
+            // A hand-edited file that no longer parses is also a conflict: the request is fine, the file is not.
+            | Error::MinerExists { .. }
+            | Error::MinerScopeBroadened { .. }
+            | Error::MinerDisabled { .. }
+            | Error::MinerNotRunnable { .. }
+            | Error::MinerConfigFile { .. }
             | Error::PalaceBusy { .. } => StatusCode::CONFLICT,
             // The caller asked for something the daemon will not do (an unsafe
             // bind, or an endpoint for a database it does not embed): theirs to fix.

@@ -145,6 +145,12 @@ source_timeout_secs = 60    # the longest one call may run; a source's own limit
 trust = "optional"
 # trusted_keys = ["Zm9vYmFy..."]
 
+# What the daemon mines, by name; see "Miners". Written by `memcastle miner set`, or by hand.
+[[miners]]
+name = "docs"
+source = "directory"
+locator = "/home/alice/src/docs"
+
 # Only to serve assets from somewhere other than the installed or embedded ones: a package unpacked elsewhere, or a
 # checkout of the repository (which holds sources/, integrations/, skills/ and web/dist).
 [assets]
@@ -540,6 +546,92 @@ outranks that.
 A root with no such index, like a checkout, leaves the sources to the installed assets.
 `memcastle integration` reads the root from the same three places as the daemon; `--assets-dir` is accepted by its
 `list`, `install` and `update` commands.
+
+## Miners
+
+A miner is a named, persistent definition of what to mine and how: a source, where in it to read, a scope, a trigger.
+They are the `[[miners]]` entries of the configuration file, so they are declarative and survive a restart,
+and they are managed from the file, from [`memcastle miner`](cli.md#miner) and, read-only, from MCP
+([ADR-037](adr/037-persistent-miner-configuration.md)).
+
+```toml
+[[miners]]
+name = "signal-personal"          # unique: lowercase letters, digits, `-` and `_`; `reload` is reserved
+source = "signal"                 # the source adapter: `directory`, or an installed source's name
+enabled = true                    # default true
+locator = "+336..."               # where in the source to read; the source decides what it means
+wing = "signal"                   # the wing its drawers go to, when it should not be the source's default
+credential = { type = "env", name = "SIGNAL_TOKEN" }   # or { type = "file", path = "/run/secrets/signal" }
+
+[miners.scope]                    # a filter the source understands: strings, numbers, booleans, lists of strings
+contacts = ["+336..."]
+groups = ["MemCastle"]
+
+[miners.trigger]                  # what starts the miner
+type = "event"                    # "manual" (the default), "event" or "schedule"; other keys are kept as written
+
+[miners.config]                   # source-specific settings that are not a filter, kept as written
+window_days = 30
+```
+
+A key that is not listed is an error, not an ignored typo: `enable = false` must not leave a miner enabled.
+`scope`, `trigger` and `config` are open tables, so a source can define keys of its own.
+
+- **Identity.** A miner's cursor and documents belong to the *source* it points at, which is its `source` and `locator`,
+  and not to its name.
+  Renaming, enabling, disabling, re-scoping or changing the wing, the trigger or the credential of a miner keeps its
+  cursor.
+  Pointing it at another `source` or `locator` is a different source with its own cursor, and `miner set` says so.
+  Removing a miner, or disabling it, never deletes what it mined.
+- **Secrets.** A secret is never written in the file.
+  `credential` names where it comes from: an environment variable of the daemon, or a file.
+  A key in `scope`, `config` or `trigger` that reads like a secret (`password`, `token`, `secret`, `api_key`, ...)
+  is refused, and the daemon reports a credential only as `env` or `file` and whether it resolves,
+  never its name or path.
+  Resolving a credential and handing it to a source is the source's side of the contract, which does not take one yet;
+  today the daemon checks that it resolves, so an enabled miner whose variable is unset is `unavailable`, with the fix.
+- **Validation.** The shape of every entry is checked when the file is loaded, so a bad entry stops the daemon starting
+  like a bad `[embeddings]` section.
+  An *enabled* miner is also held to what running needs, when it is created or changed: the source is built in or
+  installed and enabled, the credential resolves, and for `directory` the `locator` is an absolute path and there is no
+  `scope` or `config`.
+  A disabled miner may name a source that is not installed yet, so a configuration can be written ahead of the install.
+- **Trigger.** Only `manual` is acted on, by `memcastle miner run <name>`.
+  `event` and `schedule` are stored and validated, and reported as not acted on, so a definition written now keeps its
+  meaning when triggers arrive.
+- **Scope.** A scope is stored and reported, but no source applies one yet,
+  so `miner run` refuses a miner that has a `scope` or `config`
+  rather than mine more than the filter says.
+
+### Changing miners while the daemon runs
+
+The file is the one source of truth, and the daemon is the one tool that rewrites it.
+`miner set`, `enable`, `disable` and `remove` edit only the `[[miners]]` section, in place:
+comments, the other tables and every entry that did not change are left exactly as they were,
+and the file is replaced atomically with its permissions kept.
+The environment and command-line overrides are not part of the file, so they are never written into it.
+
+- **Hand edits are picked up.**
+  The daemon notices that the file changed on the next request about miners, and `memcastle miner reload` reads it at
+  once and says what differs: `added`, `removed`, `changed`, `enabled`, `disabled` and `broadened`.
+  A miner is never half-applied: each entry is whole or the file is refused.
+- **An invalid edit does not take the miners away.**
+  The daemon keeps the last miners that were valid, reports the error beside them (`miner list`, `GET /api/miners`),
+  and refuses to change miners until the file is fixed, because writing would overwrite what is being repaired.
+  A file that is invalid at startup stops the daemon, like the rest of the configuration.
+- **Nothing runs because of a reload.**
+  There is nothing to start or stop: a miner runs when `miner run` submits its job.
+  A job that is already queued or running when a miner is disabled or removed finishes,
+  because a job carries the source and locator and not the miner's name.
+- **A scope never widens silently.**
+  `miner set` refuses a change that removes a filter, adds a value to a list or changes a value,
+  with `memcastle::miner::scope_broadened`, unless `--allow-broaden` says it is meant.
+  A hand edit that widens an enabled miner is applied, since the file is yours, but the daemon logs it at `warn`
+  and `miner reload` lists it under `broadened`.
+- **A daemon started without a configuration file** (one built in code, as in a test) lists miners but refuses to
+  change them: there is nowhere to keep them.
+  `memcastle` always knows the file: `--config`, `MEMCASTLE_CONFIG`, or `~/.config/memcastle/config.toml`,
+  which is created by the first `miner set`.
 
 ## Web dashboard
 

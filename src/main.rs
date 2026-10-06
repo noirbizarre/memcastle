@@ -23,11 +23,11 @@ mod cli;
 use cli::{
     AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, CompletionsArgs, DaemonCommand,
     DbCommand, DiaryCommand, DrawerCommand, EmbedArgs, ExtractArgs, IntegrationCommand, JobCommand,
-    MigrateArgs, MineArgs, NoteArgs, RecallArgs, RepairArgs, RoomCommand, SearchArgs, ServeArgs,
-    SourceCommand, StatusArgs, WakeUpArgs, WingCommand,
+    MigrateArgs, MineArgs, MinerCommand, NoteArgs, RecallArgs, RepairArgs, RoomCommand, SearchArgs,
+    ServeArgs, SourceCommand, StatusArgs, WakeUpArgs, WingCommand,
 };
 use memcastle::app::{DbEndpointRequest, DbEndpointStatus, WakeUpBudget};
-use memcastle::client::{DaemonClient, StatusView};
+use memcastle::client::{DaemonClient, SetFlags, StatusView};
 use memcastle::config::{Config, Overrides};
 use memcastle::domain::{MemoryMode, MiningSource, NameKind, PalacePath, validate_name};
 use memcastle::store::SurrealStore;
@@ -234,6 +234,7 @@ async fn run_command(
         Command::Mine(args) => cmd_mine(&config, mode, args).await,
         Command::Sources => cmd_sources(&config, mode).await,
         Command::Source(command) => cmd_source(&config, mode, command).await,
+        Command::Miner(command) => cmd_miner(&config, command).await,
         Command::Integration(command) => cmd_integration(&config, &command),
         Command::Note(args) => cmd_note(&config, mode, args).await,
         Command::Checkpoint(args) => cmd_checkpoint(&config, mode, args).await,
@@ -831,6 +832,78 @@ async fn cmd_source(
         | SourceCommand::Index(_)
         | SourceCommand::Keygen(_)
         | SourceCommand::Update(_) => Ok(()),
+    }
+}
+
+/// `memcastle miner ...`: configure what the daemon mines.
+///
+/// Every subcommand is an HTTP call to the daemon's miner routes, the same ones MCP's read-only tools sit beside, so
+/// the rules (validation, scope widening, the file's comments) live in one place. Administrative: no memory mode is
+/// sent, like `source install`, because the mode governs memory and not what the daemon is configured to mine.
+async fn cmd_miner(config: &Config, command: MinerCommand) -> Result<()> {
+    use memcastle::client::miner_view as view;
+    let daemon = client(config, None);
+    match command {
+        MinerCommand::List => {
+            let report = daemon.list_miners().await?;
+            print_for_terminal_or_json(
+                |painter, width| view::render_miners(&report, painter, width),
+                &report,
+            )
+        }
+        MinerCommand::Get(args) => {
+            let miner = daemon.show_miner(&args.name).await?;
+            print_for_terminal_or_json(|painter, _| view::render_miner(&miner, painter), &miner)
+        }
+        MinerCommand::Set(args) => {
+            let patch = SetFlags {
+                source: args.source.as_deref(),
+                locator: args.locator.as_deref(),
+                wing: args.wing.as_deref(),
+                credential_env: args.credential_env.as_deref(),
+                credential_file: args.credential_file.as_deref(),
+                scope: &args.scope,
+                unset_scope: &args.unset_scope,
+                trigger: args.trigger.as_deref(),
+                trigger_setting: &args.trigger_setting,
+                config: &args.setting,
+                unset_config: &args.unset_setting,
+                unset: &args.unset,
+                disabled: args.disabled,
+                allow_broaden: args.allow_broaden,
+            }
+            .into_patch()?;
+            let change = daemon.set_miner(&args.name, &patch).await?;
+            print_for_terminal_or_json(|painter, _| view::render_change(&change, painter), &change)
+        }
+        MinerCommand::Enable(args) => {
+            let change = daemon.set_miner_enabled(&args.name, true).await?;
+            print_for_terminal_or_json(|painter, _| view::render_change(&change, painter), &change)
+        }
+        MinerCommand::Disable(args) => {
+            let change = daemon.set_miner_enabled(&args.name, false).await?;
+            print_for_terminal_or_json(|painter, _| view::render_change(&change, painter), &change)
+        }
+        MinerCommand::Remove(args) => {
+            term::confirm(
+                &format!(
+                    "Remove the miner `{}` from the configuration file?",
+                    args.name
+                ),
+                "removing the miner",
+                args.confirm.yes,
+            )?;
+            daemon.remove_miner(&args.name).await?;
+            print_json(&serde_json::json!({ "removed": args.name }))
+        }
+        MinerCommand::Reload => {
+            let reload = daemon.reload_miners().await?;
+            print_for_terminal_or_json(|painter, _| view::render_reload(&reload, painter), &reload)
+        }
+        MinerCommand::Run(args) => {
+            let job = daemon.run_miner(&args.name, args.full).await?;
+            print_json(&job)
+        }
     }
 }
 

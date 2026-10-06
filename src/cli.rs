@@ -139,6 +139,12 @@ pub enum Command {
     /// `test` and `package` are local and need no daemon.
     #[command(subcommand)]
     Source(SourceCommand),
+    /// Configure what the daemon mines: named miners kept as `[[miners]]` in the
+    /// configuration file, each a source, a locator, a scope and a trigger.
+    /// Administrative: changing a miner is never available to MCP clients, which
+    /// can only read them.
+    #[command(subcommand)]
+    Miner(MinerCommand),
     /// Install, update and remove the integrations MemCastle ships for coding
     /// agents (Pi, OpenCode). Local: needs no daemon.
     #[command(subcommand)]
@@ -472,6 +478,117 @@ pub struct SourceUpdateArgs {
     /// your behalf.
     #[arg(short, long)]
     pub yes: bool,
+}
+
+/// `memcastle miner ...`: the configured miners.
+#[derive(Debug, Subcommand)]
+pub enum MinerCommand {
+    /// List the configured miners and whether each can run.
+    List,
+    /// Show one miner in full.
+    Get(MinerNameArgs),
+    /// Create a miner, or change the settings named: everything not named is
+    /// left as it is. Written to the configuration file, comments kept.
+    Set(Box<MinerSetArgs>),
+    /// Switch a miner on. It is checked first: its source must be usable and
+    /// its credential must resolve.
+    Enable(MinerNameArgs),
+    /// Switch a miner off. What it mined, and its cursor, stay.
+    Disable(MinerNameArgs),
+    /// Remove a miner's definition. What it mined, and its cursor, stay.
+    Remove(MinerRemoveArgs),
+    /// Read the configuration file again now, and say what changed. The daemon
+    /// also notices an edited file by itself on the next request.
+    Reload,
+    /// Submit the mining job for a miner, from where its source left off.
+    Run(MinerRunArgs),
+}
+
+/// A miner named on the command line.
+#[derive(Debug, Args)]
+pub struct MinerNameArgs {
+    /// The miner's name, as `memcastle miner list` shows it.
+    pub name: String,
+}
+
+/// Arguments for `memcastle miner remove`.
+#[derive(Debug, Args)]
+pub struct MinerRemoveArgs {
+    /// The miner's name, as `memcastle miner list` shows it.
+    pub name: String,
+    #[command(flatten)]
+    pub confirm: ConfirmArgs,
+}
+
+/// Arguments for `memcastle miner run`.
+#[derive(Debug, Args)]
+pub struct MinerRunArgs {
+    /// The miner's name, as `memcastle miner list` shows it.
+    pub name: String,
+    /// Read the source again from the beginning instead of from where the
+    /// last run stopped. Unchanged documents are still skipped.
+    #[arg(long)]
+    pub full: bool,
+}
+
+/// Arguments for `memcastle miner set`.
+#[derive(Debug, Args)]
+pub struct MinerSetArgs {
+    /// The miner's name: lowercase letters, digits, `-` and `_`.
+    pub name: String,
+    /// The source adapter to run (`memcastle sources` lists them). Needed to
+    /// create a miner.
+    #[arg(long)]
+    pub source: Option<String>,
+    /// The part of the source to read: an absolute path for `directory`, a
+    /// channel or repository for others.
+    #[arg(long)]
+    pub locator: Option<String>,
+    /// The wing the mined drawers go to, when it should not be the source's default.
+    #[arg(long)]
+    pub wing: Option<String>,
+    /// Read the source's credential from this environment variable of the
+    /// daemon. The secret itself never goes in the configuration file.
+    #[arg(long, value_name = "NAME", conflicts_with = "credential_file")]
+    pub credential_env: Option<String>,
+    /// Read the source's credential from the first line of this file.
+    #[arg(long, value_name = "PATH")]
+    pub credential_file: Option<String>,
+    /// Filter what is mined: `KEY=VALUE[,VALUE...]`, always a list of strings
+    /// (`--scope groups=MemCastle,Ops`; one value needs no comma). Repeatable;
+    /// a key given again replaces the earlier value.
+    #[arg(long, value_name = "KEY=VALUES")]
+    pub scope: Vec<String>,
+    /// Remove a scope key, which makes the miner read more.
+    #[arg(long, value_name = "KEY")]
+    pub unset_scope: Vec<String>,
+    /// What starts the miner. Only `manual` is acted on yet; the others are
+    /// stored.
+    #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(["manual", "event", "schedule"]))]
+    pub trigger: Option<String>,
+    /// A setting of the trigger: `KEY=VALUE`, JSON when it parses as JSON.
+    /// Repeatable; needs `--trigger`.
+    #[arg(long, value_name = "KEY=VALUE", requires = "trigger")]
+    pub trigger_setting: Vec<String>,
+    /// A source-specific setting: `KEY=VALUE`, JSON when it parses as JSON.
+    /// Repeatable.
+    ///
+    /// Not `--config`, which names the configuration file.
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub setting: Vec<String>,
+    /// Remove a source-specific setting.
+    #[arg(long, value_name = "KEY")]
+    pub unset_setting: Vec<String>,
+    /// Clear a field: one of `locator`, `wing`, `credential`, `trigger`.
+    #[arg(long, value_name = "FIELD", value_parser = clap::builder::PossibleValuesParser::new(["locator", "wing", "credential", "trigger"]))]
+    pub unset: Vec<String>,
+    /// Create the miner switched off (or switch it off).
+    #[arg(long)]
+    pub disabled: bool,
+    /// Allow the change to widen the scope. Without it a change that removes
+    /// a filter or adds a value to one is refused.
+    #[arg(long)]
+    pub allow_broaden: bool,
 }
 
 /// A source named on the command line.

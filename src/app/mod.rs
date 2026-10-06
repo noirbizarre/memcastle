@@ -10,6 +10,7 @@ mod auth;
 mod db_endpoint;
 mod graph;
 mod info;
+mod miners;
 mod palace;
 mod source_packages;
 mod source_registry;
@@ -38,6 +39,10 @@ pub use auth::{AuthPolicy, GeneratedToken, RevokeResult};
 pub use db_endpoint::{DbEndpoint, DbEndpointRequest, DbEndpointStatus};
 pub use graph::GraphView;
 pub use info::{AssetsInfo, ConfigReport, JobsInfo, MiningInfo, ProviderInfo, WebInfo};
+pub use miners::{
+    CredentialView, MinerChange, MinerPatch, MinerRegistry, MinerState, MinerView, MinersDiff,
+    MinersReload, MinersReport,
+};
 pub use palace::{
     Created, DEFAULT_LIST_LIMIT, DrawerReplacement, EntityLink, Superseded, WingDetail,
 };
@@ -318,6 +323,8 @@ pub struct AppServices {
     dedup: DedupConfig,
     /// The `[mining]` settings, for where installed sources live and the limits they run under.
     mining: MiningConfig,
+    /// The `[[miners]]` of the configuration file, read back from it and rewritten through it.
+    miners: Arc<MinerRegistry>,
 }
 
 impl AppServices {
@@ -335,6 +342,7 @@ impl AppServices {
             extraction: Extraction::disabled(),
             dedup: DedupConfig::default(),
             mining: MiningConfig::default(),
+            miners: Arc::new(MinerRegistry::default()),
         }
     }
 

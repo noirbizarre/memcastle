@@ -1,6 +1,6 @@
 //! The HTTP API: health, status, search/recall/wake-up/diary, notes, job inspection/control, wing/room/drawer
 //! management, drawer supersession, history and duplicates, the knowledge graph (entities), mining sources, source
-//! packages and registries, authentication tokens, the database endpoint and shutdown.
+//! packages and registries, miner configuration, authentication tokens, the database endpoint and shutdown.
 //!
 //! Every handler is a deserialize -> call one `AppServices` method ->
 //! serialize sandwich — no business logic lives here. This is also where
@@ -12,6 +12,7 @@ mod db;
 mod error;
 mod extract;
 mod graph;
+mod miners;
 mod mode;
 mod palace;
 mod source_packages;
@@ -102,6 +103,18 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
             get(source_registry::updates),
         )
         .route("/api/source-registry/update", post(source_registry::update))
+        // Reading miners is also offered to MCP; changing them is administrative and REST-only, like installing a
+        // source, so an agent can see what is configured but not widen what the daemon mines (docs/adr/037).
+        // `reload` is a fixed segment, so it wins over `{name}`, and `domain::miner` reserves it as a name.
+        .route("/api/miners", get(miners::list))
+        .route("/api/miners/reload", post(miners::reload))
+        .route(
+            "/api/miners/{name}",
+            get(miners::show).put(miners::set).delete(miners::remove),
+        )
+        .route("/api/miners/{name}/enable", post(miners::enable))
+        .route("/api/miners/{name}/disable", post(miners::disable))
+        .route("/api/miners/{name}/run", post(miners::run))
         .route("/api/shutdown", post(shutdown_now))
         // The hierarchy. REST and CLI only: no wing, room or drawer route has an MCP tool, because agents write memory
         // through `memcastle_checkpoint` and the diary, and shaping the palace is a human decision (docs/adr/018).

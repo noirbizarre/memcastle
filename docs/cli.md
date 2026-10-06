@@ -21,8 +21,9 @@ There is no `help` subcommand: `--help` is the one way to ask.
 Client commands print the daemon's JSON answer, so the output pipes into `jq`.
 `status`, `db start`, `db stop` and `db status` are the exceptions: they print a readable report,
 and `--json` gives the same report as JSON (`db stop` prints the report only).
-`job list`, `sources`, `note`, every daemon-side `source` command (`search`, `install`, `update`, `list`, `show`,
-`enable` and `disable`), and the `wing`, `room` and `drawer` commands
+`job list`, `sources`, `note`, every `miner` command except `remove` and `run`,
+every daemon-side `source` command (`search`, `install`, `update`, `list`, `show`, `enable` and `disable`),
+and the `wing`, `room` and `drawer` commands
 (`list`, `show`, `create` and `delete`, and `drawer history`) are the others:
 they print a table or a readable view when standard output is a terminal, and JSON when it is not.
 See [Output, colour and prompts](#output-colour-and-prompts).
@@ -386,6 +387,53 @@ A version that asks for permissions the installed one did not is not installed u
 `list` and `show` are reads, so they take `--mode` and a `disabled` session cannot use them;
 the other commands are administrative: `--mode` is accepted (it is a global flag) but ignored by them,
 and no MCP tool exists for any of them.
+
+### `miner`
+
+```sh
+memcastle miner list
+memcastle miner get <NAME>
+memcastle miner set <NAME> [--source <SOURCE>] [--locator <WHERE>] [--wing <WING>]
+                           [--credential-env <VAR> | --credential-file <PATH>]
+                           [--scope <KEY=VALUES>]... [--unset-scope <KEY>]...
+                           [--trigger manual|event|schedule [--trigger-setting <KEY=VALUE>]...]
+                           [--setting <KEY=VALUE>]... [--unset-setting <KEY>]...
+                           [--unset locator|wing|credential|trigger]... [--disabled] [--allow-broaden]
+memcastle miner enable <NAME>
+memcastle miner disable <NAME>
+memcastle miner remove <NAME> [--yes]
+memcastle miner reload
+memcastle miner run <NAME> [--full]
+```
+
+Manages the `[[miners]]` of the configuration file: named, persistent definitions of what to mine,
+described in [Configuration](configuration.md#miners).
+Every command is a call to the daemon's `/api/miners` routes, which are the rules MCP's read-only
+`memcastle_miner_list` and `memcastle_miner_get` follow too, so there is one model.
+
+`set` creates the miner when there is none (it needs `--source`), and otherwise changes only what it is given:
+everything not named stays as it is, and a repeated command changes nothing.
+`--scope groups=MemCastle,Ops` sets the scope key `groups` to a list of strings, always a list, even for one value;
+`--setting window=30` and `--trigger-setting every=1d` take JSON when the value parses as JSON, and a string otherwise.
+`--setting` and not `--config`, which names the configuration file.
+A field is cleared by name with `--unset`, and a scope or settings key with `--unset-scope` and `--unset-setting`.
+`--disabled` creates the miner switched off, or switches it off.
+An enabled miner is checked before anything is written (its source usable, its credential resolving, and for
+`directory` an absolute `--locator`), and a change that would widen the scope is refused unless `--allow-broaden` is
+given.
+`--credential-env` and `--credential-file` say where the credential is read from; the secret itself is never an argument.
+The file is edited in place: its comments and the other tables are kept.
+`enable` and `disable` are `set` for the enabled state alone, and `enable` runs the same checks.
+`remove` deletes the definition and asks first in a terminal, `--yes` skips it; what the miner mined and its source's
+cursor stay.
+`reload` reads the file again now and says what changed; the daemon also notices an edited file on its own.
+`run` submits the miner's mining job and prints it, like `mine`, continuing from the cursor its source has;
+it refuses a disabled miner, and one that has a scope or settings, because no source applies them yet.
+
+`list` and `get` are reads, so they take `--mode` and a `disabled` session cannot use them, and `run` is a write;
+the others are administrative: `--mode` is accepted (it is a global flag) but ignored by them,
+and no MCP tool exists for any of them.
+`miner set` and the rest print the miner as it is now when standard output is a terminal, and JSON when it is not.
 
 ### `integration`
 

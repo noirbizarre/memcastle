@@ -369,6 +369,12 @@ struct MineArgs {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct MinerNameArgs {
+    /// The miner's name, as `memcastle_miner_list` shows it.
+    name: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct AuditArgs {
     /// Restrict the report's embedding-count fields to one wing by name.
     /// Orphan-drawer and dangling-provenance findings are always
@@ -737,6 +743,50 @@ impl McpTools {
     }
 
     #[tool(
+        title = "List miners",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
+        description = "List the configured miners: for each its name, source, whether it is enabled and \
+                        can run, its scope and trigger, and when its source was last mined. Read-only: a \
+                        miner is added, changed, enabled or removed by the user with `memcastle miner`, \
+                        never through this surface. Credentials are reported as available or not, never shown"
+    )]
+    async fn memcastle_miner_list(
+        &self,
+        Extension(parts): Extension<http::request::Parts>,
+    ) -> Result<CallToolResult, McpError> {
+        let mode = self.mode_for(&parts);
+        tool_result("memcastle_miner_list", self.app.list_miners(mode).await)
+    }
+
+    #[tool(
+        title = "Get miner",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
+        description = "Show one configured miner by name, with its state and, when it is not ready, why. \
+                        Read-only, like memcastle_miner_list"
+    )]
+    async fn memcastle_miner_get(
+        &self,
+        Parameters(args): Parameters<MinerNameArgs>,
+        Extension(parts): Extension<http::request::Parts>,
+    ) -> Result<CallToolResult, McpError> {
+        let mode = self.mode_for(&parts);
+        tool_result(
+            "memcastle_miner_get",
+            self.app.show_miner(&args.name, mode).await,
+        )
+    }
+
+    #[tool(
         title = "Write checkpoint",
         annotations(
             read_only_hint = false,
@@ -1018,7 +1068,8 @@ impl McpTools {
         format!(
             "MemCastle: a shared memory palace daemon. Tools: {}. Call memcastle_set_mode once \
              at session start to switch this session to read_only or disabled memory mode \
-             (defaults to full). Submitting work (mine, checkpoint, audit, repair) returns a job \
+             (defaults to full). memcastle_miner_list and memcastle_miner_get show the configured \
+             miners and are read-only: only the user changes them, with `memcastle miner`. Submitting work (mine, checkpoint, audit, repair) returns a job \
              immediately; follow it with memcastle_job_get and control it with memcastle_job_pause, \
              memcastle_job_resume, memcastle_job_cancel and memcastle_job_retry.",
             tools.join(", ")
@@ -1462,7 +1513,7 @@ mod tests {
     async fn every_tool_declares_its_title_and_all_four_hints() {
         // (name, read-only, destructive, idempotent, open-world): the behaviour
         // each handler actually has, so a wrong hint fails here, not in a host.
-        let expected: [(&str, bool, bool, bool, bool); 18] = [
+        let expected: [(&str, bool, bool, bool, bool); 20] = [
             ("memcastle_set_mode", false, false, true, false),
             ("memcastle_status", true, false, true, false),
             ("memcastle_search", true, false, true, true),
@@ -1470,6 +1521,8 @@ mod tests {
             ("memcastle_history", true, false, true, false),
             ("memcastle_wake_up", true, false, true, false),
             ("memcastle_mine", false, false, true, true),
+            ("memcastle_miner_list", true, false, true, false),
+            ("memcastle_miner_get", true, false, true, false),
             ("memcastle_checkpoint", false, true, false, false),
             ("memcastle_audit", false, false, false, false),
             ("memcastle_diary_write", false, false, false, false),

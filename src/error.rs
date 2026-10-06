@@ -865,6 +865,101 @@ pub enum Error {
         state: String,
     },
 
+    /// No miner has this name.
+    #[error("no miner is named `{name}`")]
+    #[diagnostic(
+        code(memcastle::miner::not_found),
+        help(
+            "`memcastle miner list` shows the configured miners; `memcastle miner set <name> --source <source>` adds one"
+        )
+    )]
+    MinerNotFound {
+        /// The name asked for.
+        name: String,
+    },
+
+    /// A miner with this name already exists, and the request was to create it.
+    #[error("a miner named `{name}` already exists")]
+    #[diagnostic(
+        code(memcastle::miner::exists),
+        help("`memcastle miner get {name}` shows it; `memcastle miner set {name} ...` changes it")
+    )]
+    MinerExists {
+        /// The name that is taken.
+        name: String,
+    },
+
+    /// A miner's definition is not valid, so it was not saved or activated.
+    #[error("miner `{name}` is not valid: {reason}")]
+    #[diagnostic(
+        code(memcastle::miner::invalid),
+        help(
+            "fix the setting named above; `docs/configuration.md` describes every `[[miners]]` key"
+        )
+    )]
+    MinerInvalid {
+        /// The miner.
+        name: String,
+        /// What is wrong and how to fix it.
+        reason: String,
+    },
+
+    /// A change would make a miner's scope wider than it is.
+    #[error("changing miner `{name}` would broaden its scope: {reasons}")]
+    #[diagnostic(
+        code(memcastle::miner::scope_broadened),
+        help(
+            "a wider scope sends more into the palace; if that is intended, repeat the change with `--allow-broaden`"
+        )
+    )]
+    MinerScopeBroadened {
+        /// The miner.
+        name: String,
+        /// What gets wider, one line.
+        reasons: String,
+    },
+
+    /// The miner is disabled, so it was not run.
+    #[error("miner `{name}` is disabled")]
+    #[diagnostic(
+        code(memcastle::miner::disabled),
+        help("`memcastle miner enable {name}` enables it")
+    )]
+    MinerDisabled {
+        /// The miner.
+        name: String,
+    },
+
+    /// The miner cannot be run as configured.
+    #[error("miner `{name}` cannot be run: {reason}")]
+    #[diagnostic(
+        code(memcastle::miner::not_runnable),
+        help(
+            "`memcastle miner get {name}` shows its state; fix what it names, or mine by hand with `memcastle mine`"
+        )
+    )]
+    MinerNotRunnable {
+        /// The miner.
+        name: String,
+        /// Why not.
+        reason: String,
+    },
+
+    /// The configuration file holding the miners cannot be read or written.
+    #[error("the miner configuration in `{path}` cannot be used: {reason}")]
+    #[diagnostic(
+        code(memcastle::miner::config_file),
+        help(
+            "fix the file by hand, then `memcastle miner reload`; the daemon keeps the last miners it could read"
+        )
+    )]
+    MinerConfigFile {
+        /// The configuration file.
+        path: String,
+        /// What went wrong.
+        reason: String,
+    },
+
     /// Installing a source needs the user's explicit agreement to the permissions it asks for.
     #[error("source `{name}` asks for permissions that were not agreed to: {permissions}")]
     #[diagnostic(
@@ -1605,6 +1700,31 @@ mod tests {
                 name: "slack".to_string(),
                 state: "disabled".to_string(),
             },
+            Error::MinerNotFound {
+                name: "signal".to_string(),
+            },
+            Error::MinerExists {
+                name: "signal".to_string(),
+            },
+            Error::MinerInvalid {
+                name: "signal".to_string(),
+                reason: "`source` is empty".to_string(),
+            },
+            Error::MinerScopeBroadened {
+                name: "signal".to_string(),
+                reasons: "`groups` is no longer filtered".to_string(),
+            },
+            Error::MinerDisabled {
+                name: "signal".to_string(),
+            },
+            Error::MinerNotRunnable {
+                name: "signal".to_string(),
+                reason: "no locator".to_string(),
+            },
+            Error::MinerConfigFile {
+                path: "/etc/memcastle.toml".to_string(),
+                reason: "not valid TOML".to_string(),
+            },
             Error::SourceConsentRequired {
                 name: "slack".to_string(),
                 permissions: "network".to_string(),
@@ -1745,6 +1865,13 @@ mod tests {
             | Error::SourceIncompatible { .. }
             | Error::SourceNotFound { .. }
             | Error::SourceNotEnabled { .. }
+            | Error::MinerNotFound { .. }
+            | Error::MinerExists { .. }
+            | Error::MinerInvalid { .. }
+            | Error::MinerScopeBroadened { .. }
+            | Error::MinerDisabled { .. }
+            | Error::MinerNotRunnable { .. }
+            | Error::MinerConfigFile { .. }
             | Error::SourceConsentRequired { .. }
             | Error::SourceBuiltin { .. }
             | Error::SourceFailed { .. }
