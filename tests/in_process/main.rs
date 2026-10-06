@@ -24,6 +24,7 @@ mod integration_contract;
 mod mcp_memory_mode;
 mod mcp_temporal;
 mod memory_mode;
+mod miners;
 mod notes;
 mod palace;
 mod repair;

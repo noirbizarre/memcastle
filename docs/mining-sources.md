@@ -117,6 +117,19 @@ that has been mined with its document count, last job and last run.
 Over HTTP, a source job is `{"type": "mine", "source": "pi", "locator": "...", "full": false}` on
 `POST /api/jobs`, and over MCP `memcastle_mine` takes `source`, `locator` and `full` beside `path` and `wing`.
 Mining is a write, so a [read-only or disabled session](memory-modes.md) cannot start it.
+
+### Remembering what to mine
+
+`memcastle mine` names a place every time.
+A **miner** is a named definition of one, kept as `[[miners]]` in the configuration file:
+a source, a locator, a scope, a trigger and a reference to a credential
+([Configuration](configuration.md#miners), [`memcastle miner`](cli.md#miner)).
+`memcastle miner run <name>` submits the same job `mine` would,
+so a miner continues from the cursor its source already has.
+The cursor belongs to the source, which is the `source` and `locator`, and not to the miner:
+renaming, disabling, re-scoping or removing a miner never loses it or what it mined.
+An agent can read the miners (`memcastle_miner_list`, `memcastle_miner_get`) but only the user changes them.
+
 The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unchanged`, `skipped`, `similar` and `truncated`.
 
 ## The sources MemCastle ships

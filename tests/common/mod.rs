@@ -34,6 +34,8 @@ use tokio::task::JoinHandle;
 pub struct TestDaemon {
     pub base_url: String,
     pub palace_path: PathBuf,
+    /// The configuration file the daemon keeps its `[[miners]]` in: in the tempdir, so a test never touches a real one.
+    pub config_path: PathBuf,
     handle: JoinHandle<memcastle::Result<()>>,
     _tempdir: TempDir,
 }
@@ -69,6 +71,10 @@ impl TestDaemon {
         config.store = StoreConfig::Embedded {
             sync: StoreSync::Never,
         };
+        // A daemon built in code has no configuration file, and refuses to change miners without one; this gives each
+        // test its own, which does not exist until the first miner is written.
+        let config_path = tempdir.path().join("config.toml");
+        config.config_file = Some(config_path.clone());
         configure(&mut config);
 
         let handle = tokio::spawn(memcastle::server::run(config));
@@ -77,6 +83,7 @@ impl TestDaemon {
         Self {
             base_url: format!("http://{}", info.bind_addr),
             palace_path,
+            config_path,
             handle,
             _tempdir: tempdir,
         }

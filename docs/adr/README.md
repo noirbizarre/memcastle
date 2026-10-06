@@ -132,3 +132,8 @@ The history is the value.
   time is seeded in epochs over HTTP, timings are reported and never gated,
   and LongMemEval is a converter for a file the user downloads
   (relates to ADR-021, ADR-032)
+- [ADR-037](037-persistent-miner-configuration.md) — miners are named `[[miners]]` definitions in the configuration file
+  (source, locator, scope, trigger, a credential *reference*), edited in place by the daemon with comments kept and
+  re-read when the file changes, read-only over MCP and administrative over REST and the CLI;
+  a cursor belongs to the source a miner points at and not to its name, a scope never widens without `--allow-broaden`,
+  and triggers and scope are stored but not yet acted on

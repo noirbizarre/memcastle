@@ -143,6 +143,10 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `tests/shutdown.rs` — a stopping process lets the embedded datastore finish stopping before it exits (subprocess).
   - `tests/in_process/db_endpoint.rs` — the database admin endpoint: opt-in, loopback by default, refused origins,
     and sharing the daemon's data (in-process).
+  - `tests/in_process/miners.rs` — persistent miner configuration end to end: several miners with their own scope, creation
+    and changes validated before anything is written, a scope never widening silently, hand edits noticed and an invalid
+    one keeping the last good miners, a cursor surviving every change that keeps the source, a credential never shown, and
+    REST, the CLI and MCP agreeing (in-process, with the CLI as a subprocess client).
   - `tests/in_process/cli_daemon.rs` — CLI flags that change what the daemon is asked: `--mode`, and relative `mine` paths
     against an in-process daemon (subprocess client).
   - `tests/in_process/integration_contract.rs` — the daemon half of the [integration contract](integration-contract.md):
@@ -301,6 +305,12 @@ daemon's environment, standard streams, arguments or a writable directory.
 Building the reference WebAssembly sources needs the `wasm32-wasip2` target (`rustup target add wasm32-wasip2`, which
 `rust-toolchain.toml` requests); `mise run sources:check` builds and tests every source under `sources/`.
 `tests/source_isolation.rs` builds nothing and runs in the basic suite on every OS.
+
+Invariant 12 (changing a miner is administrative, and the daemon is the only writer of the `[[miners]]` section) has no
+hook either.
+`tests/in_process/auth.rs` guards every `/api/miners` route and fails when any MCP tool other than `memcastle_miner_list`
+and `memcastle_miner_get` mentions miners; `tests/in_process/miners.rs` holds the rest, and `config::miners_file`'s unit
+tests hold that an edit keeps the file's comments and other tables ([ADR-037](adr/037-persistent-miner-configuration.md)).
 
 The integration installer is local tooling like the source tooling, and is held to the same rule in the same way.
 `tests/integration_isolation.rs` fails when `src/integration/` mentions the store, the jobs, the daemon client, the

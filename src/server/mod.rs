@@ -16,7 +16,9 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-use crate::app::{AppServices, AuthPolicy, ConfigReport, DbEndpoint, RuntimeContext};
+use crate::app::{
+    AppServices, AuthPolicy, ConfigReport, DbEndpoint, MinerRegistry, RuntimeContext,
+};
 use crate::config::{Config, Secret};
 use crate::embed::Embeddings;
 use crate::error::{Error, Result};
@@ -135,6 +137,12 @@ pub async fn run(config: Config) -> Result<()> {
         .with_embeddings(embeddings)
         .with_extraction(extraction)
         .with_dedup(config.dedup.clone())
+        // Starts from what the file held at startup and reads the file again whenever it changes, so the daemon
+        // and a hand edit never disagree for long (`docs/adr/037`).
+        .with_miners(MinerRegistry::new(
+            config.config_file.clone(),
+            config.miners.clone(),
+        ))
         .with_runtime(RuntimeContext {
             // The real bound address, not the requested one: `status` must agree
             // with the registry file when port 0 was asked for.

@@ -313,6 +313,24 @@ installed again; one that is incompatible needs rebuilding against this MemCastl
 cannot read a file it expects probably lacks a `filesystem.read` permission.
 The full list is in [Writing a mining source](writing-sources.md#troubleshooting).
 
+### `memcastle::miner::*`
+
+These come from [configured miners](configuration.md#miners).
+`invalid` means a definition was refused before anything was written: the message names the setting.
+For an enabled miner the usual causes are a source that is not installed or enabled (`memcastle source list`),
+a credential whose environment variable is not set in the *daemon's* environment or whose file does not exist,
+a relative `locator` for `directory`, and a key in `scope` or `config` that reads like a secret
+(put the secret in an environment variable and point `credential` at it).
+`scope_broadened` means the change would make the miner read more than before; if that is meant, repeat it with
+`--allow-broaden`.
+`config_file` means the configuration file cannot be read, or changed while the daemon was editing it.
+The daemon keeps the last miners that were valid (`memcastle miner list` shows the error beside them) and will not
+write until the file is fixed: correct the entry it names, then `memcastle miner reload`.
+`not_runnable` and `disabled` come from `memcastle miner run`: `memcastle miner get <name>` says why the miner is not
+`ready`, and a miner with a `scope` or `config` is refused because no source applies them yet.
+A miner that never shows up in `memcastle miner list` after you edited the file by hand is in a file the daemon was not
+started from; `miner list` prints the path it reads.
+
 ### `memcastle::integration::*`
 
 These come from `memcastle integration` and its installation of the [Pi and OpenCode integrations](integrations.md).

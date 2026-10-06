@@ -154,6 +154,15 @@ async fn every_other_route_is_guarded_including_ones_that_do_not_exist() {
         (Method::POST, "/api/source-registry/install"),
         (Method::GET, "/api/source-registry/updates"),
         (Method::POST, "/api/source-registry/update"),
+        // Miner configuration decides what the daemon mines: reading and every change are guarded (docs/adr/037).
+        (Method::GET, "/api/miners"),
+        (Method::POST, "/api/miners/reload"),
+        (Method::GET, "/api/miners/x"),
+        (Method::PUT, "/api/miners/x"),
+        (Method::DELETE, "/api/miners/x"),
+        (Method::POST, "/api/miners/x/enable"),
+        (Method::POST, "/api/miners/x/disable"),
+        (Method::POST, "/api/miners/x/run"),
         (Method::POST, "/api/shutdown"),
         (Method::POST, "/api/auth/token"),
         (Method::DELETE, "/api/auth/token"),
@@ -399,6 +408,40 @@ async fn mcp_offers_no_way_to_install_or_change_a_mining_source() {
         assert!(
             !forbidden.iter().any(|word| name.contains(word)),
             "`{name}` looks like source management, which must never be an MCP tool"
+        );
+    }
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn mcp_can_read_miners_but_offers_no_way_to_change_one() {
+    let daemon = TestDaemon::start().await;
+
+    let names = tool_names(&daemon, None).await;
+
+    // What the daemon mines is the user's decision, like what code it runs (`docs/adr/037`): an agent may read the
+    // miners, so it can say what is configured, but nothing it can call adds, changes, enables, removes or runs one.
+    let mut miner_tools: Vec<&String> = names.iter().filter(|n| n.contains("miner")).collect();
+    miner_tools.sort();
+    assert_eq!(
+        miner_tools,
+        ["memcastle_miner_get", "memcastle_miner_list"],
+        "only the two read-only miner tools may exist"
+    );
+    for name in &names {
+        assert!(
+            ![
+                "miner_set",
+                "miner_add",
+                "miner_enable",
+                "miner_disable",
+                "miner_remove",
+                "miner_run",
+                "miner_reload"
+            ]
+            .iter()
+            .any(|word| name.contains(word)),
+            "`{name}` looks like miner management, which must never be an MCP tool"
         );
     }
     daemon.shutdown().await;
