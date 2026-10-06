@@ -28,6 +28,7 @@ mod notes;
 mod palace;
 mod repair;
 mod retrieval;
+mod retrieval_eval;
 mod server;
 mod skills;
 mod sources;

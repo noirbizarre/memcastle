@@ -56,6 +56,7 @@ nav = [
   { "Project" = [
     { "Architecture" = "architecture.md" },
     { "Development" = "development.md" },
+    { "Retrieval evaluation" = "retrieval-evaluation.md" },
     { "Architecture Decisions" = "adr/README.md" },
   ] },
 ]

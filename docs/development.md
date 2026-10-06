@@ -29,6 +29,10 @@ mise run web:check  # typecheck, test, build and package the web dashboard, then
 mise run web:build  # build web/ into web/dist, for `--assets-dir "$PWD"` with `web.enable`
 mise run web:dev    # the dashboard's dev server, proxying /api to the running daemon
 mise run web:package # lay out what a release ships in target/bundled-web
+mise run eval       # measure retrieval quality and latency on the bundled dataset (docs/retrieval-evaluation.md)
+mise run eval:baseline # rewrite the committed retrieval baseline, after a change meant to move quality
+mise run eval:compare -- a.json b.json # what changed between two retrieval reports
+mise run eval:longmemeval -- file.json # session retrieval on a downloaded LongMemEval file
 mise run check      # every lint, the guards, both test suites, the sources, the integrations and the dashboard, without modifying the tree
 mise run ci         # check plus the docs build: the local equivalent of CI's lint,
                     # test and docs steps
@@ -131,6 +135,9 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `tests/migrate.rs` — `memcastle migrate` and its `--check`/`--status` modes (subprocess).
   - `tests/cli.rs` — the binary's argument parsing and its behaviour with no daemon reachable (subprocess),
     including colour, `completions` and the absence of a `help` subcommand.
+  - `tests/in_process/retrieval_eval/` — the retrieval evaluation harness ([Retrieval evaluation](retrieval-evaluation.md)):
+    the bundled dataset against its committed baseline, no result outside its scope or time, and the metric, report and
+    LongMemEval converter units (in-process). Its explicit runs (`mise run eval*`) are `#[ignore]`d.
   - `tests/in_process/palace.rs` — the `/api/wings/...` hierarchy routes: lifecycle, error contract and memory-mode gates
     (in-process).
   - `tests/shutdown.rs` — a stopping process lets the embedded datastore finish stopping before it exits (subprocess).

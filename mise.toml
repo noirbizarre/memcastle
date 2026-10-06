@@ -399,3 +399,61 @@ set -euo pipefail
 # The stand-in for a wrapped program, when the source ships one (see `sources:check`).
 PATH="$PWD/sources/${usage_name?}/fixtures/bin:$PATH" ./target/debug/memcastle source test "sources/${usage_name?}"
 """
+
+# The retrieval evaluation (docs/retrieval-evaluation.md). Explicit tasks, deliberately outside `check` and `ci`: they print
+# and write reports, take longer than the everyday suite, and a benchmark number is not a release gate. The small
+# bundled dataset also runs in the everyday suite as a regression floor (`mise run test -- retrieval_eval`).
+# They run the `#[ignore]`d tests of `tests/in_process/retrieval_eval`, with `--no-capture` so the report reaches the
+# terminal, and with the `[env]` development defaults dropped for the reason `integrations:check` gives.
+
+[tasks.eval]
+description = "Measure retrieval quality and latency on the bundled dataset: prints a report, writes target/eval/report.json"
+# EVAL_REPETITIONS (timed passes, default 5), EVAL_SCALE (filler documents, default 0), EVAL_OUT (report path) and
+# EVAL_DATASET (another dataset file) tune a run; the page lists them.
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
+cargo nextest run --test in_process --no-capture --run-ignored ignored-only -E 'test(retrieval_eval::explicit::an_explicit_run)'
+"""
+
+[tasks."eval:baseline"]
+description = "Re-measure the bundled dataset and rewrite the committed baseline (tests/fixtures/retrieval/baseline.json)"
+# Only for a change that is meant to move retrieval quality, and then reviewed like any other diff: the baseline is the
+# floor the everyday suite holds the engine to.
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
+# Timings are not part of a baseline, so there is nothing to repeat.
+EVAL_UPDATE_BASELINE=1 EVAL_REPETITIONS=0 \\
+  cargo nextest run --test in_process --no-capture --run-ignored ignored-only -E 'test(retrieval_eval::explicit::an_explicit_run)'
+"""
+
+[tasks."eval:compare"]
+description = "Compare two reports and fail on a drop: mise run eval:compare -- <base.json> <new.json> [threshold]"
+usage = '''
+arg "<base>" help="The report to compare against, such as tests/fixtures/retrieval/baseline.json"
+arg "<new>" help="The report to judge, such as target/eval/report.json"
+arg "[threshold]" help="The largest drop in any metric that is tolerated" default="0.02"
+'''
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
+EVAL_BASE="${usage_base?}" EVAL_NEW="${usage_new?}" EVAL_THRESHOLD="${usage_threshold:-0.02}" EVAL_FAIL_ON_REGRESSION=1 \\
+  cargo nextest run --test in_process --no-capture --run-ignored ignored-only -E 'test(retrieval_eval::explicit::an_explicit_compare)'
+"""
+
+[tasks."eval:longmemeval"]
+description = "Measure session retrieval on a downloaded LongMemEval file: mise run eval:longmemeval -- <file.json>"
+# The data is never part of this repository (docs/retrieval-evaluation.md says where it comes from and why). Setting
+# EVAL_EMBEDDINGS_URL and EVAL_EMBEDDINGS_MODEL adds the semantic and hybrid configurations, embedded by that provider.
+usage = 'arg "<file>" help="A LongMemEval JSON file, such as longmemeval_s.json"'
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+for name in $(compgen -e | grep '^MEMCASTLE_' || true); do unset "$name"; done
+EVAL_LONGMEMEVAL="$(realpath "${usage_file?}")" \\
+  cargo nextest run --test in_process --no-capture --run-ignored ignored-only -E 'test(retrieval_eval::explicit::an_explicit_longmemeval)'
+"""

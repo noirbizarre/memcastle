@@ -1,0 +1,70 @@
+[
+  {
+    "question_id": "syn001",
+    "question_type": "single-session-user",
+    "question": "Which city did I book the conference trip to?",
+    "answer": "Lisbon",
+    "question_date": "2024/03/01 (Fri) 10:00",
+    "haystack_session_ids": ["syn001_a", "syn001_b", "syn001_c"],
+    "haystack_dates": ["2024/02/10 (Sat) 09:00", "2024/02/14 (Wed) 18:30", "2024/02/20 (Tue) 12:15"],
+    "haystack_sessions": [
+      [
+        { "role": "user", "content": "Can you suggest a sourdough hydration for a first loaf?" },
+        { "role": "assistant", "content": "Seventy percent hydration is forgiving for beginners." }
+      ],
+      [
+        { "role": "user", "content": "I just booked the conference trip to Lisbon for April.", "has_answer": true },
+        { "role": "assistant", "content": "Lisbon in April is pleasant; remember to book the hotel early." }
+      ],
+      [
+        { "role": "user", "content": "What is a good stretching routine after long flights?" },
+        { "role": "assistant", "content": "Start with hip flexor and hamstring stretches." }
+      ]
+    ],
+    "answer_session_ids": ["syn001_b"]
+  },
+  {
+    "question_id": "syn002",
+    "question_type": "multi-session",
+    "question": "What are the two programming languages I said I am learning?",
+    "answer": "Rust and Zig",
+    "question_date": "2024/03/02 (Sat) 11:00",
+    "haystack_session_ids": ["syn002_a", "syn002_b", "syn002_c"],
+    "haystack_dates": ["2024/01/05 (Fri) 08:00", "2024/01/19 (Fri) 20:00", "2024/02/02 (Fri) 21:00"],
+    "haystack_sessions": [
+      [
+        { "role": "user", "content": "I started learning Rust this week, mostly for the borrow checker.", "has_answer": true },
+        { "role": "assistant", "content": "The borrow checker is demanding at first and rewarding later." }
+      ],
+      [
+        { "role": "user", "content": "Do you have recipes for a quick weeknight curry?" },
+        { "role": "assistant", "content": "A chickpea curry takes about twenty minutes." }
+      ],
+      [
+        { "role": "user", "content": "I am also learning Zig now, for its explicit allocators.", "has_answer": true },
+        { "role": "assistant", "content": "Zig makes allocation visible at every call site." }
+      ]
+    ],
+    "answer_session_ids": ["syn002_a", "syn002_c"]
+  },
+  {
+    "question_id": "syn003_abs",
+    "question_type": "single-session-user",
+    "question": "What is the name of my pet parrot?",
+    "answer": "You did not mention a pet parrot.",
+    "question_date": "2024/03/03 (Sun) 09:00",
+    "haystack_session_ids": ["syn003_a", "syn003_b"],
+    "haystack_dates": ["2024/02/01 (Thu) 07:00", "2024/02/08 (Thu) 19:00"],
+    "haystack_sessions": [
+      [
+        { "role": "user", "content": "My cat refuses to eat the new food." },
+        { "role": "assistant", "content": "Try mixing it gradually with the old food." }
+      ],
+      [
+        { "role": "user", "content": "Any tips for repotting a fiddle leaf fig?" },
+        { "role": "assistant", "content": "Choose a pot one size larger and water sparingly afterwards." }
+      ]
+    ],
+    "answer_session_ids": []
+  }
+]
