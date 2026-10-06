@@ -68,7 +68,9 @@ An invariant nothing checks is a comment, and it will be violated.
    Enforced by the prek `no-hand-rolled-ddl` hook: no `DEFINE`/`REMOVE`/`ALTER` DDL or `INFO FOR` statement
    may appear in Rust code under `src/` (comments excepted).
 6. **Every route but `GET /api/health` passes the authentication layer, and MCP never touches credentials** —
-   the layer wraps the merged router in `server::run`, so a route added later is guarded by default,
+   the layer wraps the merged router in `server::run`, so a route added later is guarded by default
+   (`GET /api/events`, the server-sent change stream, is one: it is read with a header, never a token in a URL, and its
+   events carry identifiers and never content, see `docs/adr/041-server-sent-events-for-dashboard-updates.md`),
    and token generation and revocation are REST/CLI operations with no MCP tool.
    The same holds for a mining source's OAuth sign-in: the browser flow's redirect lands on a one-shot loopback listener
    outside the router, never on a public route, and no answer, log, file or database row but the credential store holds
@@ -215,6 +217,7 @@ src/
 ├── migrate/    versioned data migrations and the version watermark, run before serving
 ├── assets/     runtime asset resolution (override, installed, embedded); never user data, never the network
 ├── dbadmin/    the database admin endpoint: SurrealDB's WebSocket protocol over the daemon's own handle
+├── events/     the change bus: identifiers and kinds published after a write, relayed by `GET /api/events`; pure, no store, no jobs
 ├── jobs/       the scheduler: claiming, dispatch, cooperative pause/cancel, crash recovery
 ├── project.rs  the project-local `.config/memcastle.toml` and `MEMCASTLE_WING`/`MEMCASTLE_ROOM`: a directory read, shared by
 │               the directory adapter and the CLI's `note`; no store, no jobs

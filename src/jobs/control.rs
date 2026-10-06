@@ -16,6 +16,7 @@ use crate::config::{DedupConfig, MiningConfig};
 use crate::domain::{AccessTokens, Job, JobId, JobProgress};
 use crate::embed::Embeddings;
 use crate::error::Result;
+use crate::events::{Action, EventBus};
 use crate::extract::Extraction;
 use crate::store::SurrealStore;
 
@@ -90,6 +91,9 @@ pub struct JobContext {
     /// The access tokens of the sources that sign in with OAuth, for the mining handler. None unless the scheduler
     /// was given them.
     credentials: Option<Arc<dyn AccessTokens>>,
+    /// Where a handler announces that it wrote something. Heard by nobody unless the scheduler was given the
+    /// daemon's bus.
+    events: EventBus,
 }
 
 impl JobContext {
@@ -106,7 +110,21 @@ impl JobContext {
             extraction: Extraction::disabled(),
             dedup: DedupConfig::default(),
             credentials: None,
+            events: EventBus::new(),
         }
+    }
+
+    /// Give this context the daemon's event bus.
+    #[must_use]
+    pub fn with_events(mut self, events: EventBus) -> Self {
+        self.events = events;
+        self
+    }
+
+    /// The event bus, for handlers that write drawers, wings, rooms or entities.
+    #[must_use]
+    pub fn events(&self) -> &EventBus {
+        &self.events
     }
 
     /// Give this context the access tokens of the sources that sign in with OAuth.
@@ -255,17 +273,19 @@ impl JobContext {
         job.progress = progress;
         job.checkpoint = checkpoint;
         match &self.lease_owner {
-            None => self.store.save_job(job).await,
+            None => self.store.save_job(job).await?,
             Some(owner) => {
-                if self.store.save_job_fenced(job, owner).await? {
-                    Ok(())
-                } else {
-                    Err(crate::Error::LeaseLost {
+                if !self.store.save_job_fenced(job, owner).await? {
+                    return Err(crate::Error::LeaseLost {
                         id: job.id.to_string(),
-                    })
+                    });
                 }
             }
         }
+        // Every handler reports its progress through here, so this one call is how a dashboard sees a job advance.
+        // After the save, so a client that re-reads on the event finds the progress it was told about.
+        self.events.publish(super::job_event(Action::Updated, job));
+        Ok(())
     }
 
     /// Checkpoint an index-based handler (mining, checkpoint): record that

@@ -131,6 +131,8 @@ uuid = { version = "1.26.1", features = ["v4", "serde"] }
 # timeout and kill-on-drop; `daemon start` and `daemon restart` respawn through `std::process`.
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net", "process", "io-util", "fs"] }
 tokio-util = "0.7.19"
+# `ReceiverStream` turns the per-connection channel of `GET /api/events` into the stream axum's `Sse` wants.
+tokio-stream = "0.1"
 
 # Storage. `kv-surrealkv` is the embedded engine — pure Rust, so the storage
 # layer pulls no native C++ dependency (see #47; the prior `kv-rocksdb` did).

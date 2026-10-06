@@ -201,6 +201,23 @@ export interface GraphView {
   truncated: boolean
 }
 
+/** What `GET /api/events` can say changed. `resync` means events were missed: read everything again. */
+export type EventKind = "job" | "drawer" | "wing" | "room" | "entity" | "resync"
+
+/**
+ * One change notice from the daemon: identifiers and words only, never content, so a view re-reads through the
+ * routes that apply the memory mode (docs/adr/041).
+ */
+export interface DaemonEvent {
+  kind: EventKind
+  action: "created" | "updated" | "deleted"
+  id?: string
+  /** For a job: `mine`, `audit`, ... */
+  job_kind?: string
+  /** For a job: `running`, `completed`, ... */
+  status?: JobStatus
+}
+
 export interface ErrorBody {
   code?: string
   help?: string

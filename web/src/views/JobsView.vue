@@ -25,9 +25,14 @@ const states = [ALL, "queued", "running", "paused", "completed", "failed", "canc
 const state = ref<string>(ALL)
 const kind = ref<string>(ALL)
 const selected = ref<Job>()
-
-const jobs: Loaded<Job[]> = useLoad(() => client.jobs({ status: state.value === ALL ? undefined : (state.value as JobStatus), limit: 200 }))
+const jobs: Loaded<Job[]> = useLoad(() => client.jobs({ status: state.value === ALL ? undefined : (state.value as JobStatus), limit: 200 }), { on: ["job"] })
 watch(state, () => void jobs.refresh())
+// A job that is open in the Details dialog keeps updating while it runs. If it has left the list (another state is
+// filtered, say) the dialog keeps what it last showed rather than closing under the reader.
+watch(jobs.data, (list) => {
+  const fresh = list?.find((job) => job.id === selected.value?.id)
+  if (fresh) selected.value = fresh
+})
 
 const kinds = computed(() => [ALL, ...new Set((jobs.data.value ?? []).map((job) => job.kind.type))])
 const visible = computed(() => (jobs.data.value ?? []).filter((job) => kind.value === ALL || job.kind.type === kind.value))

@@ -22,6 +22,7 @@ use crate::domain::{
     NewRelationship, Observation, RelationshipId,
 };
 use crate::error::{Error, Result};
+use crate::events::Event;
 use crate::jobs::{JobContext, JobOutcome};
 use crate::store::SurrealStore;
 
@@ -96,6 +97,7 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: ExtractParams) -> Resu
         }
         let texts: Vec<String> = drawers.iter().map(|d| d.content.clone()).collect();
         let graphs = extraction.extract(&texts).await?;
+        let (entities_before, relations_before) = (totals.entities, totals.relations);
         for (drawer, graph) in drawers.iter().zip(graphs) {
             let (entities, relations) =
                 write_graph(store, job, extractor, drawer, graph, fuzzy).await?;
@@ -111,6 +113,10 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: ExtractParams) -> Resu
                 totals.drawers, totals.entities, totals.relations
             )),
         };
+        // One event per pass, after the entities are saved: the graph view re-reads once, however many were found.
+        if entities_before != totals.entities || relations_before != totals.relations {
+            ctx.events().publish(Event::entity_graph_changed());
+        }
         ctx.checkpoint(job, progress, totals.to_json()).await?;
     }
     job.result = Some(totals.to_json());

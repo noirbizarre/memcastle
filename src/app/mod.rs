@@ -31,6 +31,7 @@ use crate::domain::{
 };
 use crate::embed::Embeddings;
 use crate::error::{Error, Result};
+use crate::events::EventBus;
 use crate::extract::Extraction;
 use crate::jobs::Scheduler;
 use crate::search::{RankingMode, SearchHit, SearchQuery};
@@ -330,6 +331,8 @@ pub struct AppServices {
     miners: Arc<MinerRegistry>,
     /// The OAuth sign-ins of the sources that need one (docs/adr/039).
     credentials: crate::credential::Credentials,
+    /// Where the services announce what they changed, for `GET /api/events` (docs/adr/041).
+    events: EventBus,
 }
 
 impl AppServices {
@@ -351,7 +354,38 @@ impl AppServices {
             credentials: crate::credential::Credentials::from_config(
                 &crate::config::CredentialsConfig::default(),
             ),
+            events: EventBus::new(),
         }
+    }
+
+    /// Give the services the daemon's event bus, shared with the scheduler that publishes job changes to it.
+    #[must_use]
+    pub fn with_events(mut self, events: EventBus) -> Self {
+        self.events = events;
+        self
+    }
+
+    /// Start receiving change notifications (`GET /api/events`).
+    ///
+    /// Gated like any read: the stream says that jobs, drawers and wings exist and change, which a `disabled` session
+    /// must not learn. A `read_only` session may read, so it gets the same stream.
+    /// The events hold identifiers and kinds only, never content: a client re-reads through the routes that apply
+    /// the mode.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ModeForbidden`] in `disabled` mode.
+    pub fn subscribe_events(
+        &self,
+        mode: MemoryMode,
+    ) -> Result<tokio::sync::broadcast::Receiver<crate::events::Event>> {
+        Self::require_read(mode, "events")?;
+        Ok(self.events.subscribe())
+    }
+
+    /// Announce a change that has already been saved.
+    pub(crate) fn announce(&self, event: crate::events::Event) {
+        self.events.publish(event);
     }
 
     /// Give the services the daemon's OAuth credentials, shared with the scheduler that runs the jobs which use them.
@@ -1199,7 +1233,13 @@ impl AppServices {
         )
         .await?
         {
-            crate::dedup::Outcome::Stored { .. } => drawer,
+            crate::dedup::Outcome::Stored { .. } => {
+                self.announce(crate::events::Event::drawer(
+                    crate::events::Action::Created,
+                    drawer.id,
+                ));
+                drawer
+            }
             crate::dedup::Outcome::Duplicate { existing } => {
                 return self.store.get_drawer(existing).await?.ok_or_else(|| {
                     Error::DrawerNotFound {

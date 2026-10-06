@@ -55,6 +55,7 @@ use serde::{Deserialize, Serialize};
 use crate::audit::OrphanDrawer;
 use crate::domain::{DrawerId, Job, JobId, JobKind, JobProgress, JobStatus};
 use crate::error::{Error, Result};
+use crate::events::{Action, Event};
 use crate::jobs::{JobContext, JobOutcome};
 use crate::store::{SurrealStore, bindable};
 
@@ -198,6 +199,8 @@ async fn plan_or_apply(
                 return Ok((actions, Some(stop)));
             }
             store.delete_drawer(orphan.drawer_id).await?;
+            ctx.events()
+                .publish(Event::drawer(Action::Deleted, orphan.drawer_id));
         }
         actions.push(RepairAction::RemoveOrphanDrawer(orphan));
     }

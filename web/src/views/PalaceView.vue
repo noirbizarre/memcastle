@@ -20,9 +20,11 @@ const wing = ref<string>()
 const room = ref<string>()
 const limit = ref(50)
 
-const wings = useLoad(() => client.wings())
-const detail = useLoad(async () => (wing.value ? await client.wing(wing.value) : undefined))
-const drawers = useLoad(async () => (wing.value && room.value ? await client.drawers(wing.value, room.value, limit.value) : undefined))
+// A new wing, room or drawer changes the counts as well as the lists, so all three listen to all three.
+const changes = { on: ["wing", "room", "drawer"] } as const
+const wings = useLoad(() => client.wings(), changes)
+const detail = useLoad(async () => (wing.value ? await client.wing(wing.value) : undefined), changes)
+const drawers = useLoad(async () => (wing.value && room.value ? await client.drawers(wing.value, room.value, limit.value) : undefined), changes)
 
 watch(wing, () => {
   room.value = undefined

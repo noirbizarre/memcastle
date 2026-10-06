@@ -19,6 +19,7 @@ mod cli_daemon;
 mod concurrency;
 mod db_endpoint;
 mod dedup;
+mod events;
 mod extraction;
 mod integration_contract;
 mod mcp_memory_mode;

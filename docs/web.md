@@ -37,11 +37,23 @@ The REST API and MCP are unaffected.
 | Maintenance | Run an audit or a repair (a dry run first), and see the last report of each. |
 | Settings | The configuration in effect, from `GET /api/config`: no secret, and nothing read from the files. |
 
-The dashboard does not refresh by itself and does not poll.
-Each page that shows something that changes has a **Refresh** button in its header, with the time of the last answer beside
+The dashboard does not poll, and it updates by itself.
+The daemon pushes small "something changed" notices over [`GET /api/events`](mcp-and-api.md#the-event-stream),
+and the Overview, Palace, Jobs and Maintenance pages read again, quietly, a moment after a change they show:
+a job's progress bar moves and a new note appears without a button press.
+The sidebar says whether updates are **Live**, **Connecting** or **Manual**.
+The notices carry identifiers and never content,
+so what a page shows still comes through the routes that apply the memory mode,
+and the stream is closed and opened again when you change the mode, sign out or the token is refused.
+It reconnects by itself if the connection drops, and reads again once it is back.
+
+Each page that shows something that changes also keeps its **Refresh** button, with the time of the last answer beside
 it, and reads again when you press it (and after an action of yours, such as submitting or controlling a job).
+It is the fallback when there is no stream (it was refused, or a proxy in front of the daemon buffers it),
+and the way to see what another daemon wrote to a [shared remote palace](adr/006-job-leases.md),
+whose changes this daemon cannot announce.
 A failed read keeps the last good data on screen and shows the error with a retry.
-Pushing updates to the page is a follow-up (issue #215).
+Behind a reverse proxy, turn response buffering off for `/api/events` or the updates arrive late.
 
 It does not shut the daemon down, install sources or manage tokens.
 Those stay in the CLI and the REST API, deliberately: see [Authentication](authentication.md) and

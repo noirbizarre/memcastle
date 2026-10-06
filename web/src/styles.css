@@ -55,6 +55,10 @@ nav { display: flex; flex-direction: column; gap: 0.15rem; }
 .nav-link.active { background: var(--p-highlight-background); color: var(--p-highlight-color); font-weight: 600; }
 .sidebar-footer { margin-top: auto; display: flex; flex-direction: column; gap: 0.6rem; border-top: 1px solid var(--p-content-border-color); padding-top: 0.8rem; }
 .footer-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; font-size: 0.85rem; }
+.live { display: inline-flex; align-items: center; gap: 0.4rem; }
+.live::before { content: ""; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--p-surface-400); }
+.live.live::before { background: var(--p-green-500, #22c55e); }
+.live.connecting::before { background: var(--p-amber-500, #f59e0b); }
 .sign-out { display: flex; align-items: center; gap: 0.5rem; background: none; border: 0; color: var(--p-text-muted-color); cursor: pointer; padding: 0.3rem 0.1rem; font: inherit; font-size: 0.85rem; }
 .sign-out:hover { color: var(--p-text-color); }
 

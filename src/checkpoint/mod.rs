@@ -31,6 +31,7 @@ use crate::domain::{
     NewRelationship, Provenance, RelationshipId, RoomId,
 };
 use crate::error::{Error, Result};
+use crate::events::{Action, Event};
 use crate::jobs::{JobContext, JobOutcome};
 use crate::store::SurrealStore;
 
@@ -114,7 +115,10 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: CheckpointParams) -> R
             per_agent: item.destination == CheckpointDestination::Diary,
         };
         match crate::dedup::write(store, &drawer, ctx.dedup(), rules).await? {
-            crate::dedup::Outcome::Stored { .. } => {}
+            crate::dedup::Outcome::Stored { .. } => {
+                ctx.events()
+                    .publish(Event::drawer(Action::Created, drawer.id));
+            }
             crate::dedup::Outcome::Duplicate { existing } => {
                 duplicates += 1;
                 tracing::info!(index, %existing, "checkpoint item already stored; not duplicated");

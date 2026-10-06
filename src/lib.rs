@@ -15,6 +15,9 @@
 //! `dbadmin` is a side listener, started on request by `app` (never by `serve`): SurrealDB's WebSocket
 //! protocol over a clone of the daemon's own database handle, for SurrealDB Studio.
 //!
+//! `events` is the daemon's change notifications: `app`, `jobs` and the handlers publish identifiers (never content)
+//! after a write is saved, and `GET /api/events` relays them so a client re-reads instead of polling.
+//!
 //! `main.rs`/`cli.rs` are thin: every subcommand either runs `server::run`
 //! (the `serve` command) or goes through `client::DaemonClient`
 //! (everything else), with two narrow exceptions: `migrate` connects to
@@ -40,6 +43,7 @@ pub mod distribution;
 pub mod domain;
 pub mod embed;
 pub mod error;
+pub mod events;
 pub mod extract;
 pub mod integration;
 pub mod jobs;

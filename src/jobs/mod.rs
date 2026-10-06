@@ -27,6 +27,7 @@ use crate::config::{DedupConfig, MiningConfig};
 use crate::domain::{AccessTokens, Job, JobEvent, JobId, JobKind, JobStatus, Priority};
 use crate::embed::Embeddings;
 use crate::error::Result;
+use crate::events::{Action, Event, EventBus};
 use crate::extract::Extraction;
 use crate::store::SurrealStore;
 
@@ -124,6 +125,8 @@ pub struct Scheduler {
     dedup: DedupConfig,
     /// The access tokens of the sources that sign in with OAuth, handed to every job's context.
     credentials: Option<Arc<dyn AccessTokens>>,
+    /// Where a job's changes are announced, and handed to every job's context for the handler's own writes.
+    events: EventBus,
 }
 
 impl Scheduler {
@@ -148,7 +151,20 @@ impl Scheduler {
             extraction: Extraction::disabled(),
             dedup: DedupConfig::default(),
             credentials: None,
+            events: EventBus::new(),
         }
+    }
+
+    /// Give the scheduler the daemon's event bus, so job changes reach `GET /api/events`.
+    #[must_use]
+    pub fn with_events(mut self, events: EventBus) -> Self {
+        self.events = events;
+        self
+    }
+
+    /// Announce a job change that has already been saved.
+    fn announce(&self, action: Action, job: &Job) {
+        self.events.publish(job_event(action, job));
     }
 
     /// Give the scheduler the access tokens of the sources that sign in with OAuth.
@@ -391,9 +407,13 @@ impl Scheduler {
             }
         }
         if self.exclusive_store {
-            return self.store.save_job(&job).await;
+            self.store.save_job(&job).await?;
+            self.announce(Action::Updated, &job);
+            return Ok(());
         }
-        if !self.store.save_job_if_lease_unchanged(&job, &seen).await? {
+        if self.store.save_job_if_lease_unchanged(&job, &seen).await? {
+            self.announce(Action::Updated, &job);
+        } else {
             info!(job_id = %seen.id, "another daemon recovered or renewed this job first");
         }
         Ok(())
@@ -431,6 +451,7 @@ impl Scheduler {
             requested_by = %job.requested_by,
             "job queued"
         );
+        self.announce(Action::Created, &job);
         Ok(job)
     }
 
@@ -541,7 +562,11 @@ impl Scheduler {
         let mut job = self.load_job(id).await?;
         let seen = job.status;
         job.apply(event)?;
-        self.store.save_job_if_status(&job, seen).await
+        let saved = self.store.save_job_if_status(&job, seen).await?;
+        if saved {
+            self.announce(Action::Updated, &job);
+        }
+        Ok(saved)
     }
 
     /// [`Self::apply_guarded`], re-reading and retrying when the job changed
@@ -685,6 +710,7 @@ impl Scheduler {
                     worker_id = %self.worker,
                     "job claimed by worker"
                 );
+                self.announce(Action::Updated, &job);
                 // Registered here, before the spawn, not inside `execute`:
                 // the job is already `Running` in the store, so a pause or
                 // cancel arriving in the gap would otherwise find no control
@@ -726,7 +752,8 @@ impl Scheduler {
             .with_extraction(self.extraction.clone())
             .with_dedup(self.dedup.clone())
             .with_mining(self.mining.clone())
-            .with_credentials(self.credentials.clone());
+            .with_credentials(self.credentials.clone())
+            .with_events(self.events.clone());
 
         let kind_wrote_drawers =
             matches!(job.kind, JobKind::Mine { .. } | JobKind::Checkpoint { .. });
@@ -826,7 +853,7 @@ impl Scheduler {
         // Fenced like every other write of a leased run: if the lease lapsed
         // and the job was reaped, this final state is stale and is dropped.
         match self.store.save_job_fenced(&job, &self.worker).await {
-            Ok(true) => {}
+            Ok(true) => self.announce(Action::Updated, &job),
             Ok(false) => warn!(
                 job_id = %job.id,
                 "lease lost before the final state could be saved; dropping it"
@@ -845,6 +872,11 @@ impl Scheduler {
             self.ensure_extraction_sweep().await;
         }
     }
+}
+
+/// The notice that `job` changed: its id, kind and status, and nothing of its input or progress line.
+fn job_event(action: Action, job: &Job) -> Event {
+    Event::job(action, job.id, kind_name(&job.kind), job.status)
 }
 
 /// The stable `snake_case` name of a job's kind, for log fields. Never
@@ -1498,6 +1530,74 @@ mod tests {
             assert!(log.contains(event), "missing `{event}` in: {log}");
         }
         assert!(log.contains(&job.id.to_string()), "{log}");
+    }
+
+    /// Every job event the bus holds right now.
+    fn drain(receiver: &mut tokio::sync::broadcast::Receiver<Event>) -> Vec<Event> {
+        std::iter::from_fn(|| receiver.try_recv().ok()).collect()
+    }
+
+    #[tokio::test]
+    async fn submitting_a_job_announces_it_by_id_kind_and_status_only() {
+        let bus = EventBus::new();
+        let mut heard = bus.subscribe();
+        let scheduler = scheduler().await.with_events(bus);
+
+        let job = submit_demo(&scheduler).await;
+
+        assert_eq!(
+            drain(&mut heard),
+            vec![Event::job(Action::Created, job.id, "demo", "queued")]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_job_announces_its_claim_every_progress_write_and_its_final_status() {
+        let bus = EventBus::new();
+        let mut heard = bus.subscribe();
+        let scheduler = Arc::new(scheduler().await.with_events(bus));
+        let job = scheduler
+            .submit(JobKind::Demo { steps: 2 }, Priority::Normal, "test")
+            .await
+            .unwrap();
+        let shutdown = CancellationToken::new();
+        let run = tokio::spawn(Arc::clone(&scheduler).run(shutdown.clone()));
+        for _ in 0..200 {
+            if reload(&scheduler, &job).await.status == JobStatus::Completed {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        shutdown.cancel();
+        run.await.unwrap();
+
+        let statuses: Vec<String> = drain(&mut heard)
+            .into_iter()
+            .map(|event| {
+                assert_eq!(event.id.as_deref(), Some(job.id.to_string().as_str()));
+                event.status.expect("a job event carries its status")
+            })
+            .collect();
+        // Queued, claimed, one write per step, then the final state.
+        assert_eq!(
+            statuses,
+            ["queued", "running", "running", "running", "completed"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cancel_before_the_job_ran_is_announced() {
+        let bus = EventBus::new();
+        let scheduler = scheduler().await.with_events(bus.clone());
+        let job = submit_demo(&scheduler).await;
+        let mut heard = bus.subscribe();
+
+        scheduler.request_cancel(job.id).await.unwrap();
+
+        assert_eq!(
+            drain(&mut heard),
+            vec![Event::job(Action::Updated, job.id, "demo", "cancelled")]
+        );
     }
 
     #[tokio::test]

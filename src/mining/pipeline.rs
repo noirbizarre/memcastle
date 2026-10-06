@@ -31,6 +31,7 @@ use crate::domain::{
     validate_name,
 };
 use crate::error::Result;
+use crate::events::{Action, Event};
 use crate::jobs::{JobContext, JobOutcome};
 use crate::store::SurrealStore;
 
@@ -90,12 +91,16 @@ pub async fn mine<A: SourceAdapter>(
     // A name that would create a wing is checked here, whoever chose it: an adapter's default (an installed source's
     // too) is not validated anywhere else, and a UUID-shaped or `/`-bearing wing is one no path can address. An
     // existing wing is accepted whatever its name, so a palace written before names were checked keeps mining.
-    if store.get_wing(&wing_name).await?.is_none() {
+    let wing_is_new = store.get_wing(&wing_name).await?.is_none();
+    if wing_is_new {
         validate_name(NameKind::Wing, &wing_name)?;
     }
     // After the check, so a refused wing leaves no source record behind.
     let source = store.get_or_create_source(&reference, None).await?;
     let wing = store.get_or_create_wing(&wing_name, None).await?;
+    if wing_is_new {
+        ctx.events().publish(Event::wing(Action::Created, wing.id));
+    }
 
     // A run that already checkpointed continues from its own cursor, whatever `full` says: `full` means "from the
     // beginning", and the beginning is where this run already started.
@@ -136,6 +141,9 @@ pub async fn mine<A: SourceAdapter>(
             return Ok(JobOutcome::Paused);
         }
 
+        // Compared after the document, so one event says "drawers changed" per document and not per chunk: a large
+        // run would otherwise publish thousands of events a minute for a client that re-reads once anyway.
+        let drawers_before = stats.created + stats.superseded + stats.retired;
         match adapter.read(&reference, candidate).await? {
             None => stats.skipped += 1,
             Some(raw) => {
@@ -177,6 +185,9 @@ pub async fn mine<A: SourceAdapter>(
             }
         }
         stats.documents += 1;
+        if stats.created + stats.superseded + stats.retired != drawers_before {
+            ctx.events().publish(Event::drawers_changed());
+        }
 
         store
             .save_source_cursor(source.id, &candidate.cursor_after, job.id, Utc::now())
