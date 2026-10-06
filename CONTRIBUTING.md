@@ -120,6 +120,26 @@ CI does not rebuild the release to check this, because two LTO release builds ar
 Bump the toolchain in `RUSTUP_TOOLCHAIN` and the `dtolnay/rust-toolchain` refs together.
 See [ADR-013](docs/adr/013-release-packaging-and-asset-resolution.md) for the reasoning.
 
+### Trying a release build without publishing
+
+Where 📦 Publish Release is dispatched decides whether it publishes.
+gh-ship dispatches it on the release tag, which builds, attests and uploads as above.
+A run dispatched on a branch is a trial: it builds every leg, writes a table of build time and binary size to the
+run's summary, and never reaches the publish job.
+
+```sh
+gh workflow run publish-release.yaml --ref <branch> -f tag=trial
+```
+
+On a branch, `tag` is only a label for the asset names.
+There are no trial options: to try a different profile, edit `[profile.release]` in `Cargo.toml` on the branch
+(or change the workflow itself), and dispatch that branch, which runs the branch's own copy of the workflow.
+A trial's binaries are ordinary artifacts, so compare their sizes against the release assets as well as the times.
+
+The release profile is thin LTO with one codegen unit, chosen from trials of 0.3.0's build:
+fat LTO took 53 to 59 minutes on the macOS legs, thin LTO under 28 on every leg for a binary 8% larger.
+Run a trial before changing `lto` or `codegen-units` in `[profile.release]`, and compare both time and size.
+
 The pinned release workflow is template-owned (see below), so a change that belongs to every project generated
 from the template should be made in rust.tpl.
 

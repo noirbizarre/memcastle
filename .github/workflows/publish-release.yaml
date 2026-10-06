@@ -6,11 +6,23 @@ name: 📦 Publish Release
 # Release" alone would not.
 run-name: 📦 Publish Release ${{ inputs.tag }}
 
+# Where the run was dispatched decides whether it publishes. gh-ship dispatches
+# it on the release tag, so a tag run builds, attests and uploads exactly as
+# before. A run dispatched on a branch is a trial: it builds every leg and
+# reports their time and size, and never reaches the `publish` job. To try a
+# different profile or leg, change `Cargo.toml` or this file on a branch and
+# dispatch that branch, which runs the branch's own copy of this workflow:
+#
+#   gh workflow run publish-release.yaml --ref <branch> -f tag=trial
+#
+# Through `workflow_call` the caller's ref decides, so a caller running on a
+# branch gets a trial too.
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: The tag being released
+        description: >-
+          The tag being released. On a branch it is only a label for the asset names: pass `trial`
         required: true
         type: string
 
@@ -56,23 +68,25 @@ jobs:
         # it on the non-Windows ones would make `${{ matrix.ext }}` reference a
         # property that is not in the matrix type whenever no Windows target is
         # selected — an actionlint error, not a runtime one, so it would only
-        # surface in the consuming project's CI.
+        # surface in the consuming project's CI. `smoke` marks the legs whose
+        # binary the runner can execute.
         #
         # Runners are named images, not `-latest`: the toolchain, linker and
         # SDK a release is built with come from the image, so a `-latest`
         # that moves between two releases changes the binary.
         include:
-          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-24.04, asset: linux-amd64, cross: true, ext: "" }
-          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04, asset: linux-arm64, cross: true, ext: "" }
-          - { target: x86_64-apple-darwin, runner: macos-15, asset: darwin-amd64, cross: false, ext: "" }
-          - { target: aarch64-apple-darwin, runner: macos-15, asset: darwin-arm64, cross: false, ext: "" }
-          - { target: x86_64-pc-windows-msvc, runner: windows-2022, asset: windows-amd64, cross: false, ext: ".exe" }
+          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-24.04, asset: linux-amd64, cross: true, ext: "", smoke: true }
+          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04, asset: linux-arm64, cross: true, ext: "", smoke: false }
+          - { target: x86_64-apple-darwin, runner: macos-15, asset: darwin-amd64, cross: false, ext: "", smoke: false }
+          - { target: aarch64-apple-darwin, runner: macos-15, asset: darwin-arm64, cross: false, ext: "", smoke: true }
+          - { target: x86_64-pc-windows-msvc, runner: windows-2022, asset: windows-amd64, cross: false, ext: ".exe", smoke: true }
     steps:
       - uses: actions/checkout@v7
         with:
           # Build exactly what is being released, not a branch tip that
-          # may have moved since.
-          ref: ${{ inputs.tag }}
+          # may have moved since. A trial has no tag, so it builds the commit
+          # the run was dispatched on.
+          ref: ${{ github.ref_type == 'tag' && inputs.tag || github.sha }}
           # The upload authenticates via a separately-installed `gh`; nothing
           # in this job shells out to `git push`.
           persist-credentials: false
@@ -127,14 +141,43 @@ jobs:
         shell: bash
         run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "${GITHUB_ENV}"
 
+      # The wall-clock time is measured around the build alone, so the summary
+      # below shows what the profile costs and not runner start-up.
       - name: Build
         shell: bash
         run: |
+          started="$(date +%s)"
           if [ "${{ matrix.cross }}" = "true" ]; then
             cross build --release --locked --target ${{ matrix.target }}
           else
             cargo build --release --locked --target ${{ matrix.target }}
           fi
+          echo "BUILD_SECONDS=$(( $(date +%s) - started ))" >> "${GITHUB_ENV}"
+
+      # One table row per leg on the run's summary page: what a trial compares,
+      # and on a release it records how long the build took.
+      - name: Report the build
+        shell: bash
+        run: |
+          bin="target/${{ matrix.target }}/release/memcastle${{ matrix.ext }}"
+          bytes="$(wc -c < "${bin}" | tr -d ' ')"
+          {
+            echo "### ${{ matrix.target }}"
+            echo
+            echo "| build | size |"
+            echo "| --- | --- |"
+            echo "| $(( BUILD_SECONDS / 60 ))m$(( BUILD_SECONDS % 60 ))s | ${bytes} B ($(awk -v b="${bytes}" 'BEGIN { printf "%.1f MiB", b / 1048576 }')) |"
+            echo
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      # A lighter LTO can change what the binary does, not only how big it is,
+      # so a leg whose binary the runner can execute proves it starts. The
+      # others (arm64 Linux, x86_64 macOS on an arm runner) have no way to.
+      - name: Smoke-test the binary
+        if: matrix.smoke
+        shell: bash
+        run: |
+          "target/${{ matrix.target }}/release/memcastle${{ matrix.ext }}" --version
 
       - name: Stage the asset
         shell: bash
@@ -152,6 +195,8 @@ jobs:
   publish:
     name: 🚀 Publish
     needs: build
+    # Only a run on a tag releases: see the header. A trial stops after `build`.
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
 
     # `id-token` lets the job ask GitHub to sign an attestation as this
