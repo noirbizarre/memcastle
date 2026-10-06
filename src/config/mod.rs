@@ -150,6 +150,9 @@ pub struct ServerConfig {
 /// The directory under the assets root that holds the bundled source packages, one unpacked package per directory.
 const ASSETS_SOURCES_DIR: &str = "sources";
 
+/// The API `mining.github_api_url` defaults to.
+pub const DEFAULT_GITHUB_API: &str = "https://api.github.com";
+
 /// The official source registry, published with the documentation site on every release (docs/adr/039).
 ///
 /// The one default that can reach the network, and only when someone asks to search, install or update a source.
@@ -527,13 +530,17 @@ pub struct MiningConfig {
     pub source_timeout_secs: u64,
     /// The registry indexes `memcastle source search`, `install <name>` and `update` consult, in order: an `https://`
     /// URL, a `file://` URL or a path to a `memcastle-index.json` (docs/adr/033). The official registry by default
-    /// (docs/adr/039); a list set here replaces it, and an empty one means no registry. It is read only when a user
-    /// runs one of those commands, never at startup.
+    /// (docs/adr/039), a static file in the documentation; a list set here replaces it, and an empty one means no
+    /// registry. It is read only when a user runs one of those commands, never at startup.
     pub registries: Vec<String>,
     /// What a package from a registry must prove before it is installed.
     pub trust: TrustMode,
     /// The public keys (base64, as `memcastle source keygen` prints them) whose signatures are trusted.
     pub trusted_keys: Vec<String>,
+    /// The GitHub API a registry entry that names a repository is resolved through (docs/adr/039): the releases of
+    /// `owner/name` are read from `<this>/repos/owner/name/releases`. Another value is a GitHub Enterprise server, or a
+    /// stand-in for one in a test.
+    pub github_api_url: String,
     /// Where the sources shipped with MemCastle live, one unpacked package per directory. Unset means
     /// `share/memcastle/sources` of the installed assets.
     pub bundled_dir: Option<PathBuf>,
@@ -561,6 +568,7 @@ impl Default for MiningConfig {
             registries: vec![OFFICIAL_REGISTRY.to_string()],
             trust: TrustMode::default(),
             trusted_keys: Vec::new(),
+            github_api_url: DEFAULT_GITHUB_API.to_string(),
             bundled_dir: None,
         }
     }
@@ -994,6 +1002,9 @@ impl Config {
         if let Some(raw) = lookup("MEMCASTLE_MINING_TRUSTED_KEYS") {
             self.mining.trusted_keys = split_list(&raw);
         }
+        if let Some(url) = lookup("MEMCASTLE_MINING_GITHUB_API_URL") {
+            self.mining.github_api_url = url;
+        }
         if let Some(dir) = lookup("MEMCASTLE_MINING_BUNDLED_DIR") {
             self.mining.bundled_dir = Some(PathBuf::from(dir));
         }
@@ -1289,6 +1300,12 @@ impl Config {
                 ))
             })?;
         }
+        crate::distribution::Location::parse(&mining.github_api_url).map_err(|reason| {
+            Error::config(format!(
+                "mining.github_api_url (or MEMCASTLE_MINING_GITHUB_API_URL) {:?} is not usable: {reason}",
+                mining.github_api_url
+            ))
+        })?;
         for key in &mining.trusted_keys {
             crate::source::signing::parse_public_key(key).map_err(|_| {
                 Error::config(
@@ -2110,6 +2127,10 @@ mod tests {
                 "mining.registries",
             ),
             (
+                |c| c.mining.github_api_url = "http://example.org/api".into(),
+                "mining.github_api_url",
+            ),
+            (
                 |c| c.mining.trusted_keys = vec!["not a key".into()],
                 "mining.trusted_keys",
             ),
@@ -2465,6 +2486,7 @@ mod tests {
             "the official registry is the default, and the only one"
         );
         assert_eq!(defaults.trust, TrustMode::Optional);
+        assert_eq!(defaults.github_api_url, DEFAULT_GITHUB_API);
         assert!(defaults.trusted_keys.is_empty() && defaults.bundled_dir.is_none());
 
         let mut config: Config = toml::from_str(
@@ -2488,6 +2510,10 @@ mod tests {
                     &format!("{}, {b_url} ,", a.display()),
                 ),
                 ("MEMCASTLE_MINING_TRUST", "required"),
+                (
+                    "MEMCASTLE_MINING_GITHUB_API_URL",
+                    "https://github.example.test/api/v3",
+                ),
                 ("MEMCASTLE_MINING_TRUSTED_KEYS", &key),
                 (
                     "MEMCASTLE_MINING_BUNDLED_DIR",
@@ -2498,6 +2524,10 @@ mod tests {
 
         assert_eq!(config.mining.registries, [a.display().to_string(), b_url]);
         assert_eq!(config.mining.trust, TrustMode::Required);
+        assert_eq!(
+            config.mining.github_api_url,
+            "https://github.example.test/api/v3"
+        );
         assert_eq!(config.mining.trusted_keys, [key]);
         assert_eq!(config.mining.bundled_dir, Some(bundle));
         config.palace.path = std::env::temp_dir();

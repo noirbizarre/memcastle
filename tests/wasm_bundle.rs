@@ -1,9 +1,8 @@
 //! The sources that ship with MemCastle (docs/adr/039), packaged by the script the release runs: a bundle of unpacked
-//! packages a daemon runs in place from the start, and the archives and registry index the documentation site publishes.
+//! packages a daemon runs in place from the start, and the archives a release attaches for the official registry.
 //!
 //! This is what keeps "official sources ship with releases" from being a claim about the release workflow that only a
-//! tag would test: the script, the bundle it writes, the index it writes and the daemon's use of the bundle are all run
-//! here.
+//! tag would test: the script, the bundle and archives it writes and the daemon's use of the bundle are all run here.
 
 #![cfg(unix)]
 
@@ -18,13 +17,12 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// Run `packaging/sources/build.sh` into `out`, with `env` set for it.
-fn bundle_with(out: &Path, env: &[(&str, &str)]) {
+/// Run `packaging/sources/build.sh` into `out`.
+fn bundle(out: &Path) {
     let output = std::process::Command::new("bash")
         .arg(root().join("packaging/sources/build.sh"))
         .arg(assert_cmd::cargo::cargo_bin("memcastle"))
         .arg(out)
-        .envs(env.iter().copied())
         .output()
         .expect("bash starts");
     assert!(
@@ -35,29 +33,16 @@ fn bundle_with(out: &Path, env: &[(&str, &str)]) {
     );
 }
 
-/// The release script's output with no environment, in a directory that goes with the test.
+/// The release script's output, in a directory that goes with the test.
 fn default_bundle() -> tempfile::TempDir {
     let out = tempfile::tempdir().unwrap();
-    bundle_with(out.path(), &[]);
+    bundle(out.path());
     out
 }
 
-fn read_index(path: &Path) -> Value {
-    serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
-}
-
-fn indexed_urls(index: &Value) -> Vec<String> {
-    index["sources"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .flat_map(|source| source["versions"].as_array().unwrap())
-        .map(|version| version["url"].as_str().unwrap().to_string())
-        .collect()
-}
-
 #[test]
-fn the_release_script_writes_the_unpacked_bundle_the_archives_and_an_index_that_lists_them() {
+fn the_release_script_writes_the_unpacked_bundle_and_the_archives_the_official_registry_resolves_to()
+ {
     let out = default_bundle();
     let out = out.path();
 
@@ -65,66 +50,25 @@ fn the_release_script_writes_the_unpacked_bundle_the_archives_and_an_index_that_
         let package = out.join("sources").join(name);
         assert!(package.join("memcastle-source.toml").is_file(), "{name}");
         assert!(package.join("source.wasm").is_file(), "{name}");
-    }
-    let index = read_index(&out.join("memcastle-index.json"));
-    let names: Vec<&str> = index["sources"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|source| source["name"].as_str().unwrap())
-        .collect();
-    assert_eq!(names, ["opencode", "pi"], "{index}");
-    for url in indexed_urls(&index) {
-        // No base URL: the archives sit beside the index, as a local registry directory has them.
+
+        // `<name>-<version>.tar.gz` is the file name the registry looks for among a release's assets, and the
+        // version in it is the manifest's.
+        let manifest = std::fs::read_to_string(package.join("memcastle-source.toml")).unwrap();
+        let version = memcastle::source::manifest::parse(&manifest, &[])
+            .unwrap()
+            .source
+            .version;
+        let archive = format!("{name}-{version}.tar.gz");
+        assert!(out.join("archives").join(&archive).is_file(), "{archive}");
         assert!(
-            out.join("archives").join(&url).is_file(),
-            "{url} is listed and must be among the archives"
-        );
-        assert!(
-            out.join("archives").join(format!("{url}.sha256")).is_file(),
+            out.join("archives")
+                .join(format!("{archive}.sha256"))
+                .is_file(),
             "the checksum file is shipped with each archive"
         );
     }
-}
-
-#[test]
-fn the_release_script_publishes_absolute_urls_and_never_reindexes_a_version_already_published() {
-    let first = tempfile::tempdir().unwrap();
-    bundle_with(
-        first.path(),
-        &[("SOURCES_BASE_URL", "https://example.test/releases/v1/")],
-    );
-    let published = first.path().join("memcastle-index.json");
-    let index = read_index(&published);
-    for url in indexed_urls(&index) {
-        assert!(
-            url.starts_with("https://example.test/releases/v1/"),
-            "{url}"
-        );
-    }
-
-    // The next release carries the same versions of these sources: the index and its digests stay what they were,
-    // and no archive is offered for upload again, since the published URL points at the first release.
-    let second = tempfile::tempdir().unwrap();
-    bundle_with(
-        second.path(),
-        &[
-            ("SOURCES_BASE_URL", "https://example.test/releases/v2"),
-            ("SOURCES_PREVIOUS_INDEX", published.to_str().unwrap()),
-        ],
-    );
-    assert_eq!(
-        read_index(&second.path().join("memcastle-index.json")),
-        index
-    );
-    assert_eq!(
-        std::fs::read_dir(second.path().join("archives"))
-            .unwrap()
-            .count(),
-        0
-    );
-    // The bundle is the release's own, whatever the index already lists.
-    assert!(second.path().join("sources/pi/source.wasm").is_file());
+    // The registry is a file in the documentation that names this repository, so a release builds no index.
+    assert!(!out.join("memcastle-index.json").exists());
 }
 
 #[tokio::test(flavor = "multi_thread")]

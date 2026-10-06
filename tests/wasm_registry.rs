@@ -631,6 +631,228 @@ async fn a_registry_chosen_for_one_install_replaces_the_configured_ones_for_it()
     fixture.daemon.shutdown().await;
 }
 
+// --- a registry that names GitHub repositories (docs/adr/039) ------------------------------------------------------
+
+/// What a GitHub stand-in knows about the repository `o/r`: its releases, oldest first, as (version, the archive's
+/// bytes, and the digest GitHub reports for it, which a test can make differ from the bytes).
+type Releases = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>, Option<String>)>>>;
+
+struct GitHub {
+    api: String,
+    releases: Releases,
+}
+
+impl GitHub {
+    /// Start a server on this machine that answers the two requests a daemon makes: the repository's releases, and
+    /// the download of an asset.
+    async fn start() -> Self {
+        use axum::extract::{Path, State};
+        use axum::routing::get;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let api = format!("http://{}", listener.local_addr().unwrap());
+        let releases = Releases::default();
+
+        let base = api.clone();
+        let list = move |State(releases): State<Releases>,
+                         Path((owner, repo)): Path<(String, String)>| {
+            let base = base.clone();
+            async move {
+                if (owner.as_str(), repo.as_str()) != ("o", "r") {
+                    return Err(StatusCode::NOT_FOUND);
+                }
+                // Newest first, as GitHub lists them.
+                let listing: Vec<Value> = releases
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .rev()
+                    .map(|(version, bytes, digest)| {
+                        let file = format!("{NAME}-{version}.tar.gz");
+                        json!({
+                            "tag_name": format!("v{version}"),
+                            "draft": false,
+                            "prerelease": false,
+                            "assets": [{
+                                "name": file,
+                                "state": "uploaded",
+                                "size": bytes.len(),
+                                "digest": digest
+                                    .clone()
+                                    .unwrap_or_else(|| format!("sha256:{}", memcastle::domain::sha256_hex(bytes))),
+                                "browser_download_url": format!("{base}/download/{file}"),
+                            }],
+                        })
+                    })
+                    .collect();
+                Ok(axum::Json(listing))
+            }
+        };
+        let download = |State(releases): State<Releases>, Path(file): Path<String>| async move {
+            releases
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|(version, _, _)| file == format!("{NAME}-{version}.tar.gz"))
+                .map(|(_, bytes, _)| bytes.clone())
+                .ok_or(StatusCode::NOT_FOUND)
+        };
+        let app = axum::Router::new()
+            .route("/repos/{owner}/{repo}/releases", get(list))
+            .route("/download/{file}", get(download))
+            .with_state(releases.clone());
+        tokio::spawn(async move { axum::serve(listener, app).await });
+        Self { api, releases }
+    }
+
+    /// Attach `bytes` to a new release of `version`, which GitHub reports the SHA-256 of.
+    fn release(&self, version: &str, bytes: Vec<u8>) {
+        self.releases
+            .lock()
+            .unwrap()
+            .push((version.to_string(), bytes, None));
+    }
+}
+
+/// A registry directory whose only source names the repository `o/r`, as the official registry does.
+fn registry_naming_a_repository(repository: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let index = json!({
+        "format": 1,
+        "name": "test",
+        "sources": [{"name": NAME, "description": "wasm directory", "repository": repository}],
+    });
+    std::fs::write(
+        dir.path().join(memcastle::distribution::INDEX_FILE),
+        index.to_string(),
+    )
+    .unwrap();
+    dir
+}
+
+async fn start_against(
+    github: &GitHub,
+    registry: &tempfile::TempDir,
+    configure: impl FnOnce(&mut memcastle::config::MiningConfig),
+) -> Fixture {
+    let api = github.api.clone();
+    Fixture::start_with(
+        vec![registry.path().display().to_string()],
+        None,
+        move |mining| {
+            mining.github_api_url = api;
+            configure(mining);
+        },
+    )
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_source_registered_by_repository_is_found_in_its_releases_installed_after_consent_and_updated_by_a_newer_one()
+ {
+    let github = GitHub::start().await;
+    github.release("0.1.0", archive("0.1.0", false, ">=0.2"));
+    let registry = registry_naming_a_repository("o/r");
+    let fixture = start_against(&github, &registry, |_| {}).await;
+
+    let (status, found) = fixture.get("/api/source-registry/search").await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["warnings"], json!([]), "{found}");
+    assert_eq!(found["entries"][0]["name"], NAME, "{found}");
+    assert_eq!(found["entries"][0]["version"], "0.1.0", "{found}");
+    assert_eq!(found["entries"][0]["origin"], "registry");
+
+    let installed = fixture.install(true).await;
+    assert_eq!(installed["source"]["origin"], "registry", "{installed}");
+    assert!(
+        installed["source"]["signed_by"].is_null(),
+        "a release carries no signature: {installed}"
+    );
+    assert_eq!(fixture.listed().await["version"], "0.1.0");
+
+    // A new release is all it takes: the registry file is not touched.
+    github.release("0.1.1", archive("0.1.1", false, ">=0.2"));
+    let (_, check) = fixture.get("/api/source-registry/updates").await;
+    assert_eq!(check["updates"][0]["available"], "0.1.1", "{check}");
+    let (_, outcomes) = fixture.post("/api/source-registry/update", json!({})).await;
+    assert_eq!(outcomes[0]["status"], "updated", "{outcomes}");
+    assert_eq!(fixture.listed().await["version"], "0.1.1");
+    fixture.daemon.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_release_asset_that_is_not_what_github_computed_the_digest_of_is_refused_and_nothing_is_installed()
+ {
+    let github = GitHub::start().await;
+    // GitHub says the asset is one package, and the download is another.
+    let digest = format!(
+        "sha256:{}",
+        memcastle::domain::sha256_hex(&archive("0.1.0", false, ">=0.2"))
+    );
+    github.releases.lock().unwrap().push((
+        "0.1.0".to_string(),
+        archive("0.1.0", true, ">=0.2"),
+        Some(digest),
+    ));
+    let registry = registry_naming_a_repository("o/r");
+    let fixture = start_against(&github, &registry, |_| {}).await;
+
+    let (status, body) = fixture
+        .post("/api/source-registry/install", json!({"name": NAME}))
+        .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
+    assert_eq!(body["code"], "memcastle::source::integrity");
+    assert!(fixture.listed().await.is_null());
+    assert!(!fixture.sources_dir.join(NAME).exists());
+    fixture.daemon.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_repository_that_cannot_be_read_is_a_warning_and_a_required_trust_policy_refuses_an_unsigned_release()
+ {
+    let key = signing::generate().unwrap();
+    let github = GitHub::start().await;
+    github.release("0.1.0", archive("0.1.0", false, ">=0.2"));
+
+    // The repository the registry names does not exist: the registry is up, and says which repository is not.
+    let missing = registry_naming_a_repository("nobody/nothing");
+    let fixture = start_against(&github, &missing, |_| {}).await;
+    let (status, found) = fixture.get("/api/source-registry/search").await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["entries"], json!([]), "{found}");
+    assert!(
+        found["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("nobody/nothing"),
+        "{found}"
+    );
+    let (status, body) = fixture
+        .post("/api/source-registry/install", json!({"name": NAME}))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["code"], "memcastle::source::not_in_registry");
+    assert!(
+        body["error"].as_str().unwrap().contains("nobody/nothing"),
+        "{body}"
+    );
+    fixture.daemon.shutdown().await;
+
+    // GitHub releases are not signed, so a policy that requires a signature refuses them.
+    let registry = registry_naming_a_repository("o/r");
+    let fixture = start_against(&github, &registry, |mining| {
+        mining.trust = TrustMode::Required;
+        mining.trusted_keys = vec![signing::public_key_text(&key.verifying_key())];
+    })
+    .await;
+    let (status, body) = fixture
+        .post("/api/source-registry/install", json!({"name": NAME}))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["code"], "memcastle::source::untrusted");
+    fixture.daemon.shutdown().await;
+}
+
 // --- the command line ---------------------------------------------------------------------------------------------
 
 fn memcastle_for(daemon: &TestDaemon) -> tokio::process::Command {

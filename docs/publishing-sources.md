@@ -91,7 +91,8 @@ A registry is one JSON file, `memcastle-index.json`, served from anywhere that s
 | `format` | The index format, 1. A higher number is refused. |
 | `sources[].name` | A [source name](writing-sources.md#the-manifest), unique in the index. |
 | `versions[].version` | A semantic version, unique for the source. |
-| `versions[].contract`, `memcastle` | Copied from the package's manifest, so a version that cannot run here is skipped without downloading it. |
+| `repository` | Instead of `versions`: a GitHub repository, `owner/name`, whose [releases](#registering-a-github-repository) publish the source. |
+| `versions[].contract`, `memcastle` | Optional. Copied from the package's manifest, so a version that cannot run here is skipped without downloading it. |
 | `versions[].url` | Where the archive is: absolute, or relative to the index's own location. A relative URL may not climb out of the index's directory. |
 | `versions[].sha256` | SHA-256 of the archive. Always checked. |
 | `versions[].size` | Optional, informational. |
@@ -100,7 +101,7 @@ A registry is one JSON file, `memcastle-index.json`, served from anywhere that s
 
 An index is at most 4 MiB and an archive at most 64 MiB.
 
-**Where an index can be** is the same for the bundle, a public registry, a mirror and an offline copy:
+**Where an index can be** is the same for a public registry, a mirror and an offline copy:
 
 | Location | Example |
 |---|---|
@@ -115,7 +116,7 @@ the index has no digest of its own to catch tampering in transit.
 **Choosing a version** is the same for `install`, `search` and `update`: the highest semantic version that is not yanked
 and runs on this MemCastle.
 A name pinned as `claude@1.1.0` takes exactly that version, or says why it cannot.
-The first index that offers a name decides, in the order: the bundle, then `mining.registries` as listed.
+The first index that offers a name decides, in the order of `mining.registries`.
 
 ## Publishing
 
@@ -243,12 +244,21 @@ The set is a line in `packaging/sources/build.sh`, which a release and `mise run
 and it does not constrain the runtime: any directory under `sources/` could be added.
 `directory` is the worked example of the built-in source and is not bundled.
 
+The bundle shares its root with the agent integrations and the skills: `assets.dir` is the one directory a package
+installs into, and `sources/` is one of the directories under it (see [Runtime assets](configuration.md#runtime-assets)
+and [Agent integrations](integrations.md)).
+The `pi` and `opencode` sources here mine those agents' session history; they are not the integrations that run inside the
+agent.
+
 ## The official registry
 
-The same script packages `pi` and `opencode` as archives and writes a registry index for them.
-A release attaches the archives to itself and extends the index of the latest published release,
-so the registry keeps every version it ever offered, and the documentation site publishes it at
-`https://noirbizarre.github.io/memcastle/registry/memcastle-index.json`.
+The official registry is a static file in this repository, [`docs/registry/memcastle-index.json`](https://github.com/noirbizarre/memcastle/blob/main/docs/registry/memcastle-index.json),
+published with the documentation at `https://noirbizarre.github.io/memcastle/registry/memcastle-index.json`.
+It lists no versions: it names the GitHub repositories that publish sources (`pi` and `opencode` are published by this one),
+and the daemon reads their releases.
+Registering a source, or changing where it comes from, is therefore a pull request to that file, merged and deployed like
+any documentation change, and publishing a new version is a release of the source's own repository: no new release of
+MemCastle and no change to the registry.
 It is the default value of `mining.registries`, so on any installation:
 
 ```sh
@@ -256,16 +266,45 @@ memcastle source search          # lists pi and opencode, and says which are alr
 memcastle source install pi      # on a build with no bundle: after you agree to its permissions
 ```
 
-Nothing is fetched until you run one of those commands, and a package from it is checked against its published SHA-256
-and your `mining.trust` policy like any other registry's.
+Nothing is fetched until you run one of those commands, and a package from it is checked against its SHA-256 and your
+`mining.trust` policy like any other registry's.
 The official packages are not signed yet, so `trust = "required"` refuses them.
 Set `mining.registries` to use other registries instead of it, or to `[]` to use none.
 
-The bundle shares its root with the agent integrations and the skills: `assets.dir` is the one directory a package
-installs into, and `sources/` is one of the directories under it (see [Runtime assets](configuration.md#runtime-assets)
-and [Agent integrations](integrations.md)).
-The `pi` and `opencode` sources here mine those agents' session history; they are not the integrations that run inside the
-agent.
+### Registering a GitHub repository
+
+An entry names the repository instead of listing versions:
+
+```json
+{
+  "name": "claude",
+  "description": "Claude Code session history",
+  "license": "MIT",
+  "repository": "example/memcastle-claude"
+}
+```
+
+The daemon lists the repository's releases (`GET /repos/example/memcastle-claude/releases`, one request for each
+repository however many sources it publishes) and takes from them:
+
+- every release that is neither a draft nor a prerelease;
+- the assets named `<name>-<version>.tar.gz`, which is what `memcastle source package` writes, where `<version>` is a
+  semantic version and `<name>` is the entry's name;
+- for each, the SHA-256 that GitHub computed when the asset was uploaded (the asset's `digest`), which the download is
+  then checked against like any other archive.
+  An asset with no digest, which GitHub only computes for uploads made since it started, is passed over with a warning:
+  upload it again.
+
+The newest release wins when several attach the same version.
+What GitHub reports is not a signature, so these packages count as unsigned, and a MemCastle whose `mining.trust` is
+`required` refuses them.
+The compatibility a package declares is checked when it is downloaded, so `search` may show a version that `install`
+then refuses with `memcastle::source::incompatible`.
+
+A repository that cannot be read (it does not exist, or GitHub's unauthenticated limit of 60 requests an hour for an
+address is spent) is a warning that names it, its sources are left out, and every other source in the registry still
+answers.
+`mining.github_api_url` points the daemon at another API, such as a GitHub Enterprise server.
 
 ## When something goes wrong
 

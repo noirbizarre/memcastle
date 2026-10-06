@@ -1,26 +1,30 @@
 name: 📚 Documentation
 
+# A pull request builds the site, so a broken page, a bad link or a mistake in the source registry
+# (`docs/registry/memcastle-index.json`, which is published with it) fails there. Only `main` deploys, so the registry
+# is updated by merging a pull request and not by cutting a release (docs/adr/039).
 on:
+  pull_request:
+    paths:
+      - docs/**
+      - zensical.toml
+      - .github/workflows/docs.yaml
   push:
     branches: [main]
     paths:
       - docs/**
       - zensical.toml
       - .github/workflows/docs.yaml
-  # The registry of official sources (docs/adr/039) is the index of the latest release, so the site follows releases.
-  release:
-    types: [published]
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
-# Only one deployment at a time; never cancel one midway.
+# Only one deployment at a time; never cancel one midway. A pull request's build has its own group, so it never waits
+# for a deployment and a newer push to the same pull request replaces it.
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('docs-{0}', github.ref) || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -35,34 +39,24 @@ jobs:
         with:
           cache: true
 
-      # The official source registry (docs/adr/039): the index the latest release published, served as a static file
-      # beside the pages at `registry/memcastle-index.json`, which is `mining.registries`' default. The archives it
-      # lists stay release assets. Every deployment replaces the whole site, so every deployment carries the index; a
-      # repository with no release that has one yet simply has no registry page, which `source search` reports as a
-      # registry it could not read.
-      - name: Fetch the source registry index
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          mkdir -p docs/registry
-          if gh release view --json assets --jq '.assets[].name' 2>/dev/null | grep -qx memcastle-index.json; then
-            gh release download --pattern memcastle-index.json --dir docs/registry --clobber
-          else
-            echo "::notice::no release has published a source registry index yet"
-          fi
-
       - name: Build the site
         run: mise run docs:build
 
+      # Nothing is uploaded for a pull request: there is nothing to deploy.
       - uses: actions/upload-pages-artifact@v5
+        if: github.event_name != 'pull_request'
         with:
           path: site
 
   deploy:
     name: 🚀 Deploy
     needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    # Pages needs these two to deploy, and nothing that only builds does.
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

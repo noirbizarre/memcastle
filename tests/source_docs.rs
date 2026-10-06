@@ -66,3 +66,27 @@ fn every_source_diagnostic_code_is_explained_in_the_guide() {
         );
     }
 }
+
+#[test]
+fn the_official_registry_published_with_the_docs_is_an_index_this_memcastle_reads() {
+    // The file is edited by hand in a pull request and deployed as it is (docs/adr/039), so a typo in it would reach
+    // every installation's default registry. It names the bundled sources by the repository that releases them, and
+    // each entry's manifest must agree with what it says about itself.
+    let text = std::fs::read_to_string(root().join("docs/registry/memcastle-index.json")).unwrap();
+    let index = memcastle::domain::SourceIndex::parse(&text).unwrap();
+
+    for name in ["pi", "opencode"] {
+        let source = index
+            .find(name)
+            .unwrap_or_else(|| panic!("the official registry does not list `{name}`"));
+        assert_eq!(source.repository.as_deref(), Some("noirbizarre/memcastle"));
+        let manifest =
+            std::fs::read_to_string(root().join(format!("sources/{name}/memcastle-source.toml")))
+                .unwrap();
+        let manifest = memcastle::source::manifest::parse(&manifest, &[]).unwrap();
+        assert_eq!(
+            source.description, manifest.source.description,
+            "`{name}`'s description in the registry differs from its manifest"
+        );
+    }
+}

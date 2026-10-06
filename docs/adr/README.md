@@ -142,6 +142,6 @@ The history is the value.
   (amends ADR-012, ADR-015 and ADR-016)
 - [ADR-039](039-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md) — bundled
   sources are unpacked beside the binary, installed from the start and run in place, so enabling is all they need and
-  `install` and `update` are for registry sources only; the official registry is published with the documentation site
-  and is the default `mining.registries`
+  `install` and `update` are for registry sources only; the official registry is a static file in the documentation
+  that names GitHub repositories, whose releases are the versions, and is the default `mining.registries`
   (amends ADR-033 and ADR-026)

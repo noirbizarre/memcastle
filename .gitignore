@@ -13,9 +13,6 @@ junit.xml
 # Zensical documentation build output
 site/
 
-# The official source registry's index, downloaded from the latest release for the documentation build (docs.yaml)
-/docs/registry/
-
 # Release-asset staging (publish-release.yaml) and, when `man_pages` is on,
 # `mise run man`'s collected output.
 /dist

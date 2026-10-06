@@ -130,8 +130,9 @@ An invariant nothing checks is a comment, and it will be violated.
     its own reach (see `docs/adr/026-pluggable-source-adapters-as-webassembly-components.md`).
     The same holds for searching, installing from and updating from a registry, which make the daemon fetch code:
     `mining.registries` is the official registry by default and is read only when a user runs one of those commands,
-    never at startup, a package must match its index's SHA-256, pass the trust policy and carry the name and version the
-    index lists, and an update that asks for permissions the installed version did not is never installed without consent
+    never at startup, a package must match its index's SHA-256 (for an entry naming a GitHub repository, the digest
+    GitHub reports for the release asset), pass the trust policy and carry the name and version the index lists,
+    and an update that asks for permissions the installed version did not is never installed without consent
     (see `docs/adr/033-source-distribution.md`).
     A source that ships with MemCastle is the one exception to consent and trust, because it is the release itself:
     enabling it needs no digest, it is never fetched, installed, updated or removed through a registry

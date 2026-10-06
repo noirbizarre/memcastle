@@ -705,7 +705,8 @@ Deliberately out of scope, and each is structurally possible without rework give
   An installed source can read a variable its manifest lists, but there is no credential store.
 - Restricting an installed source's network access by host name and a filesystem write permission for sources: the package
   contract allows each, and neither is built.
-- A hosted official registry and a registry server: an index is a static file anyone can host, and none is run for you.
+- A registry server and a search across registries beyond their names and descriptions: the official registry is a static
+  file in the documentation that names GitHub repositories, and no service is run for it.
 - Propagating a deletion at the source: a document that disappears is not noticed.
 - Extracting entities from a *query* to resolve its words to the graph: extraction reads drawers, and expansion starts from
   drawers already found.

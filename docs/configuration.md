@@ -140,6 +140,8 @@ source_timeout_secs = 60    # the longest one call may run; a source's own limit
 # memcastle-index.json (or a directory holding one). The official registry by default; a list here replaces it, and
 # `[]` means none. It is read only when you run one of those commands.
 # registries = ["https://example.org/memcastle/index.json"]
+# The GitHub API a registry entry that names a repository is resolved through (see "Publishing and installing sources").
+# github_api_url = "https://api.github.com"
 # "optional" installs an unsigned package and refuses a bad signature from a key you trust; "required" installs only
 # what a key in `trusted_keys` signed. Keys are the public keys `memcastle source keygen` prints.
 trust = "optional"
@@ -235,6 +237,7 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `mining.source_memory_mib` (16 to 4096) | `MEMCASTLE_MINING_SOURCE_MEMORY_MIB` | `256` |
 | `mining.source_timeout_secs` (1 to 3600) | `MEMCASTLE_MINING_SOURCE_TIMEOUT_SECS` | `60` |
 | `mining.registries` (a list of URLs or absolute paths) | `MEMCASTLE_MINING_REGISTRIES` (comma-separated; empty for none) | the [official registry](publishing-sources.md#the-official-registry) |
+| `mining.github_api_url` (an `https://` URL) | `MEMCASTLE_MINING_GITHUB_API_URL` | `https://api.github.com` |
 | `mining.trust` (`optional` or `required`) | `MEMCASTLE_MINING_TRUST` | `optional` |
 | `mining.trusted_keys` (a list of base64 public keys) | `MEMCASTLE_MINING_TRUSTED_KEYS` (comma-separated) | none |
 | `mining.bundled_dir` (an absolute path) | `MEMCASTLE_MINING_BUNDLED_DIR` | `share/memcastle/sources` of the installation |

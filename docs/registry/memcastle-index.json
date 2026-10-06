@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "name": "MemCastle official sources",
+  "sources": [
+    {
+      "name": "opencode",
+      "description": "OpenCode coding-agent session history, acquired through the opencode CLI, one document per session",
+      "homepage": "https://noirbizarre.github.io/memcastle/mining-sources/#opencode",
+      "license": "MIT",
+      "repository": "noirbizarre/memcastle"
+    },
+    {
+      "name": "pi",
+      "description": "Pi coding-agent session history (JSONL files under ~/.pi/agent/sessions), one document per session",
+      "homepage": "https://noirbizarre.github.io/memcastle/mining-sources/#pi",
+      "license": "MIT",
+      "repository": "noirbizarre/memcastle"
+    }
+  ]
+}

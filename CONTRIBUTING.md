@@ -102,9 +102,8 @@ Nothing to release is the normal case for step 1, and costs one workflow run rep
 - the bundled sources on their own, `memcastle_<tag>_sources.tar.gz`, the bundled integrations with their skills,
   `memcastle_<tag>_integrations.tar.gz`, and the web dashboard, `memcastle_<tag>_web.tar.gz`, which one asset each serves
   to the AUR package and the Homebrew formula;
-- the source packages as archives, `<name>-<version>.tar.gz` with their `.sha256`, and the registry index
-  `memcastle-index.json`, which extends the one of the previous release and is what the documentation site publishes
-  as the official source registry (see [Publishing and installing sources](docs/publishing-sources.md#the-official-registry));
+- the source packages as archives, `<name>-<version>.tar.gz` with their `.sha256`, which the official source registry
+  resolves to (see [Publishing and installing sources](docs/publishing-sources.md#the-official-registry));
 - `.deb` and `.rpm` packages for linux-amd64 and linux-arm64, `memcastle_<tag>_<platform>.{deb,rpm}`, built by nfpm
   from `packaging/nfpm/nfpm.yaml` (binary, systemd user unit, shell completions, documentation, bundled sources,
   integrations, skills and the web dashboard)
