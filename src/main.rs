@@ -1009,7 +1009,7 @@ enum InstallTarget {
     File(std::path::PathBuf),
     /// A source project, to be built and packaged first.
     Directory(std::path::PathBuf),
-    /// A name from the bundle or a registry, with the version if one was pinned.
+    /// A name from a registry, with the version if one was pinned.
     Named {
         name: String,
         version: Option<String>,

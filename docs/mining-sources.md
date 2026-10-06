@@ -144,8 +144,9 @@ The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unc
 
 Only `directory` is compiled into MemCastle.
 `pi` and `opencode` are [WebAssembly sources](writing-sources.md), built from `sources/pi/` and `sources/opencode/` in
-the repository and shipped alongside each release (release archives and the `.deb` and `.rpm` carry them under
-`share/memcastle/sources/`), so `memcastle source install pi` installs one with no registry and no network:
+the repository and shipped alongside each release (release archives and the `.deb` and `.rpm` carry them, unpacked, under
+`share/memcastle/sources/`), so they are installed from the start and `memcastle source enable pi` is all one needs, with
+no registry and no network:
 no Pi or OpenCode code is part of the core, and they run under the same sandbox and the same pipeline as any source a
 user writes.
 Other sources are found in [registries](publishing-sources.md).
@@ -173,24 +174,26 @@ It works on sessions of any age and with no Pi process running.
 This is how Pi's *history* gets into MemCastle; the live integration (`integrations/pi/`) is a separate thing that talks
 to the daemon over MCP and decides *when* to ask for mining, and never reads these files itself.
 
-Install it from the sources bundled with your MemCastle, and mine it:
+It ships with your MemCastle and is installed already: turn it on, and mine it:
 
 ```sh
-memcastle source install pi --enable
+memcastle source enable pi
 memcastle mine --source pi
 ```
 
-A build that was not installed from a release (a checkout, `cargo install`) has no bundle; install from the project
-directory instead, which builds and packages it first, or write the two steps out:
+A build that was not installed from a release (a checkout, `cargo install`) has no bundle.
+Install it from the [official registry](publishing-sources.md#the-official-registry) (`memcastle source install pi --enable`),
+or from the project directory, which builds and packages it first, or write the two steps out:
 
 ```sh
 memcastle source install sources/pi --enable
 # or: memcastle source package sources/pi && memcastle source install sources/pi/dist/pi-0.1.0.tar.gz --enable
 ```
 
-Installing lists what the source asks for and needs your consent to exactly that:
-read-only access to the folder it is asked to mine and to `~/.pi/agent/sessions`, and the one environment variable `HOME`
-(to find that folder when no `--locator` is given).
+Installing it from a registry or a directory lists what the source asks for and needs your consent to exactly that;
+`memcastle source show pi` lists the same for the bundled one, which is enabled without it.
+It asks for read-only access to the folder it is asked to mine and to `~/.pi/agent/sessions`,
+and the one environment variable `HOME` (to find that folder when no `--locator` is given).
 It asks for no network, runs no program, writes no file and needs no credentials.
 `memcastle source test sources/pi` runs its conformance cases, and CI does the same on every change.
 
@@ -226,15 +229,16 @@ thing that talks to the daemon over MCP and decides *when* to ask for mining.
 
 It needs OpenCode 1.2 or later (the version that moved history into the database) installed so that `opencode` is on the
 daemon's `PATH`; it was written against 1.18.
-Install it from the bundle, as for `pi` (or from a checkout with `memcastle source install sources/opencode`):
+It ships with MemCastle like `pi` (or install it from a checkout with `memcastle source install sources/opencode`):
 
 ```sh
-memcastle source install opencode --enable
+memcastle source enable opencode
 memcastle mine --source opencode
 ```
 
-Installing lists what the source asks for and needs your consent to exactly that:
-running the program `opencode`, and the environment variable `XDG_DATA_HOME`
+Installing it from a registry or a directory lists what the source asks for and needs your consent to exactly that;
+`memcastle source show opencode` lists the same for the bundled one.
+It asks for running the program `opencode`, and the environment variable `XDG_DATA_HOME`
 (OpenCode reads it to find its data when you have moved it; `PATH` and `HOME` are always passed to a program).
 It asks for no file access, no network, and needs no credentials.
 A program is a wider grant than a file: `opencode` runs with the daemon's own authority over the machine,

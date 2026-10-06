@@ -411,10 +411,45 @@ fn every_package_arriving_from_a_registry_is_checked_against_the_trust_policy() 
     let fetch = shipped_code("src/distribution/mod.rs");
     assert!(
         fetch.contains("policy.check(name, &archive, entry.signature.as_ref())"),
-        "`Registry::fetch` must apply the trust policy to every archive that is not bundled"
+        "`Registry::fetch` must apply the trust policy to every archive: nothing a registry serves is exempt"
     );
     assert!(
         fetch.contains("archive_digest != entry.sha256"),
         "`Registry::fetch` must compare the archive's digest with the index's before anything reads it"
+    );
+}
+
+#[test]
+fn the_bundle_is_read_from_disk_and_reaches_neither_storage_nor_the_job_machinery_nor_the_network()
+{
+    // A bundled source is installed from the start and run in place (docs/adr/040): finding and reading the release's own
+    // packages is a directory read. If it could open a palace or a connection, "shipped with MemCastle" would no longer
+    // be what makes it trusted without a signature.
+    let source = shipped_code("src/mining/bundled.rs");
+    for forbidden in [
+        "crate::store",
+        "crate::jobs",
+        "crate::distribution",
+        "SurrealStore",
+        "JobContext",
+        "surrealdb",
+        "reqwest",
+        "wasmtime",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "src/mining/bundled.rs mentions `{forbidden}`: the bundle is read from disk and nothing else"
+        );
+    }
+}
+
+#[test]
+fn a_registry_archive_never_skips_the_trust_policy_because_of_where_it_came_from() {
+    // The one exemption from the trust policy used to be an index that shipped beside the binary. The bundle is not an
+    // index any more, so `Registry::fetch` must not know an origin at all: there is no kind of archive to exempt.
+    let fetch = shipped_code("src/distribution/mod.rs");
+    assert!(
+        !fetch.contains("SourceOrigin"),
+        "src/distribution/mod.rs names an origin; every archive it fetches is held to the same policy"
     );
 }

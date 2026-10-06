@@ -8,23 +8,24 @@
 //! The registry reads which packages are installed and in what state, but never writes: installing, enabling and
 //! removing are `crate::app`'s, and the source and document records are the pipeline's.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::config::MiningConfig;
 use crate::domain::{
-    AccessTokens, Cursor, Permissions, RawDocument, SourceCapabilities, SourcePackageRecord,
-    SourcePackageState, SourceRef, SourceState, sha256_hex,
+    AccessTokens, Cursor, Permissions, RawDocument, SourceCapabilities, SourceOrigin,
+    SourcePackageRecord, SourcePackageState, SourceRef, SourceState, sha256_hex,
 };
 use crate::error::{Error, Result};
 use crate::source::manifest::check_compatible;
 use crate::source::package::read_installed_component;
 use crate::store::SurrealStore;
 
+use super::AdapterInfo;
 use super::adapter::{Discovery, SourceAdapter};
 use super::adapters::directory::{self, DirectoryAdapter};
+use super::bundled::Bundle;
 use super::wasm::WasmAdapter;
-use super::{AdapterInfo, SourceOrigin};
 
 /// The names an installed source may not take: they are the built-in adapters', and a package called `directory`
 /// would otherwise silently replace what `memcastle mine <path>` means.
@@ -187,6 +188,91 @@ pub fn describe_package(record: &SourcePackageRecord, sources_dir: &Path) -> Ada
     }
 }
 
+/// The directory `record`'s component is read from: the bundle for a bundled source, `mining.sources_dir()` for any
+/// other.
+///
+/// A row that says `bundled` while this installation ships no such source (a MemCastle that dropped it, or a daemon
+/// moved to a standalone binary) is an ordinary installed package again, so its files under `sources_dir` still run
+/// when they are intact, and are `unavailable` with the reason when they are not.
+#[must_use]
+pub fn component_dir(record: &SourcePackageRecord, mining: &MiningConfig) -> PathBuf {
+    if record.origin == SourceOrigin::Bundled
+        && let Some(bundle) = Bundle::find(mining)
+        && bundle.contains(&record.name)
+    {
+        return bundle.root().to_path_buf();
+    }
+    mining.sources_dir()
+}
+
+/// How an installed source is described to users, wherever its component is read from.
+#[must_use]
+pub fn describe_installed(record: &SourcePackageRecord, mining: &MiningConfig) -> AdapterInfo {
+    describe_package(record, &component_dir(record, mining))
+}
+
+/// The installed source `name`: what the user installed, or else what this release ships.
+///
+/// A stored row that is not `bundled` is an explicit install (a package file or a registry), and wins, so a developer
+/// can run their own build of a bundled source and removing it brings the bundled one back. Otherwise a bundled source
+/// is its bundle's manifest and component, with only the state taken from the row, if there is one.
+///
+/// # Errors
+///
+/// A store error, and [`Error::SourceManifestInvalid`] or an I/O error when the bundle's own package is broken.
+pub async fn lookup(
+    store: &SurrealStore,
+    mining: &MiningConfig,
+    name: &str,
+) -> Result<Option<SourcePackageRecord>> {
+    let stored = store.get_source_package(name).await?;
+    if let Some(record) = stored.as_ref()
+        && record.origin != SourceOrigin::Bundled
+    {
+        return Ok(stored);
+    }
+    match Bundle::find(mining).filter(|bundle| bundle.contains(name)) {
+        Some(bundle) => bundle.record(name, stored.as_ref()).map(Some),
+        None => Ok(stored),
+    }
+}
+
+/// Every installed source, by name: the stored ones, and the bundled ones that nobody has replaced.
+///
+/// A bundled source whose package cannot be read is left out and logged: one broken file in a release must not take
+/// the whole listing down with it.
+///
+/// # Errors
+///
+/// A store error when the installed sources cannot be read.
+pub async fn installed_records(
+    store: &SurrealStore,
+    mining: &MiningConfig,
+) -> Result<Vec<SourcePackageRecord>> {
+    let mut records = store.list_source_packages().await?;
+    if let Some(bundle) = Bundle::find(mining) {
+        for name in bundle.names() {
+            let stored = records.iter().position(|record| record.name == name);
+            if let Some(index) = stored
+                && records[index].origin != SourceOrigin::Bundled
+            {
+                continue;
+            }
+            match bundle.record(&name, stored.map(|index| &records[index])) {
+                Ok(record) => match stored {
+                    Some(index) => records[index] = record,
+                    None => records.push(record),
+                },
+                Err(error) => {
+                    tracing::warn!(source = %name, %error, "a bundled source cannot be read and is left out");
+                }
+            }
+        }
+    }
+    records.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(records)
+}
+
 /// Every source this daemon knows: the built-in ones, then the installed ones by name, each with its state.
 ///
 /// # Errors
@@ -196,10 +282,9 @@ pub async fn list_adapters(
     store: &SurrealStore,
     mining: &MiningConfig,
 ) -> Result<Vec<AdapterInfo>> {
-    let dir = mining.sources_dir();
     let mut all = builtin_adapters();
-    for record in store.list_source_packages().await? {
-        all.push(describe_package(&record, &dir));
+    for record in installed_records(store, mining).await? {
+        all.push(describe_installed(&record, mining));
     }
     Ok(all)
 }
@@ -221,8 +306,8 @@ pub async fn ensure_minable(
     if BUILTIN_NAMES.contains(&source) {
         return Ok(());
     }
-    match store.get_source_package(source).await? {
-        Some(record) => minable_package(&record, &mining.sources_dir()),
+    match lookup(store, mining, source).await? {
+        Some(record) => minable_package(&record, &component_dir(&record, mining)),
         None => Err(unknown(store, mining, source).await),
     }
 }
@@ -278,10 +363,10 @@ pub async fn resolve(
             mining.max_file_bytes,
         ))),
         other => {
-            let Some(record) = store.get_source_package(other).await? else {
+            let Some(record) = lookup(store, mining, other).await? else {
                 return Err(unknown(store, mining, other).await);
             };
-            let dir = mining.sources_dir();
+            let dir = component_dir(&record, mining);
             minable_package(&record, &dir)?;
             let bytes = read_installed_component(&dir, &record.name)?;
             let manifest = record.manifest;

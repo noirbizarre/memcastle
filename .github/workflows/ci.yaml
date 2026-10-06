@@ -328,8 +328,9 @@ jobs:
           done
           # A stand-in for the bundled sources (packaging/sources/build.sh builds the real ones, which
           # tests/wasm_bundle.rs checks): enough to prove the packages carry whatever the bundle holds.
-          mkdir bundle
-          echo '{"format":1,"sources":[]}' > bundle/memcastle-index.json
+          mkdir -p bundle/demo
+          echo 'format = 1' > bundle/demo/memcastle-source.toml
+          printf '\0asm' > bundle/demo/source.wasm
           # Likewise for the integrations (packaging/integrations/build.sh builds the real ones, which
           # tests/integration_bundle.rs checks): the layout is what the packages must carry.
           mkdir -p integrations-bundle/integrations/pi integrations-bundle/skills/wake-up
@@ -354,7 +355,7 @@ jobs:
                         usr/share/bash-completion/completions/memcastle \
                         usr/share/zsh/site-functions/_memcastle \
                         usr/share/fish/vendor_completions.d/memcastle.fish \
-                        usr/share/memcastle/sources/memcastle-index.json \
+                        usr/share/memcastle/sources/demo/source.wasm \
                         usr/share/memcastle/integrations/pi/memcastle-integration.toml \
                         usr/share/memcastle/skills/wake-up/SKILL.md \
                         usr/share/memcastle/web/dist/index.html; do

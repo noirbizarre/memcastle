@@ -42,6 +42,7 @@ impl IntoResponse for ApiError {
             | Error::SourceIncompatible { .. }
             | Error::SourceConsentRequired { .. }
             | Error::SourceBuiltin { .. }
+            | Error::SourceBundled { .. }
             // Asking a source that does not sign in to sign in.
             | Error::CredentialOauthUnsupported { .. }
             // A miner definition the caller wrote is theirs to fix.

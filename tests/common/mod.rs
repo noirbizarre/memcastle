@@ -64,6 +64,9 @@ impl TestDaemon {
         config.jobs.max_concurrency = 1;
         config.server.bind = "127.0.0.1".parse().expect("valid IP address");
         config.server.port = 0;
+        // The official source registry is the default, and a test must never reach the network by accident: one that
+        // is about registries sets its own.
+        config.mining.registries.clear();
         // In-process daemons are never killed mid-write, so what a flush per
         // commit protects against cannot happen here, while paying for it
         // cost seconds per boot on a slow disk (Windows CI). A test that is

@@ -1,8 +1,9 @@
-//! The registry index: the published list of source packages a registry offers (docs/adr/033).
+//! The registry index: the published list of source packages a registry offers (docs/adr/033, docs/adr/040).
 //!
 //! A registry is one JSON file, `memcastle-index.json`, that anyone can host (a git repository's raw file, static
 //! pages, a directory on a share). It names each source, and for each version where its archive is, the SHA-256 of
-//! that archive and optionally a signature over it. This module is only the shape and the rules about it: reading the
+//! that archive and optionally a signature over it. A source may instead name a GitHub repository, and its versions
+//! are then the releases of that repository, read when the index is loaded (`crate::distribution`). This module is only the shape and the rules about it: reading the
 //! file, downloading an archive and verifying a signature are `crate::distribution`'s, so the choice of version is a
 //! pure function a test can enumerate.
 
@@ -43,6 +44,10 @@ pub struct IndexedSource {
     /// The SPDX identifier of its licence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
+    /// The GitHub repository (`owner/name`) whose releases publish this source, instead of `versions`: the versions
+    /// are filled in from them when the index is loaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
     /// Every published version, in any order.
     #[serde(default)]
     pub versions: Vec<IndexedVersion>,
@@ -55,10 +60,13 @@ pub struct IndexedVersion {
     /// The package's semantic version.
     pub version: String,
     /// The contract it was built against (`MAJOR.MINOR`), copied from its manifest so an incompatible version is
-    /// skipped without downloading it.
-    pub contract: String,
-    /// The MemCastle versions it runs on, copied from its manifest.
-    pub memcastle: String,
+    /// skipped without downloading it. Absent when the publisher did not record it (a GitHub release): the manifest
+    /// inside the archive is then what decides, once it is downloaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<String>,
+    /// The MemCastle versions it runs on, copied from its manifest; absent as [`Self::contract`] is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memcastle: Option<String>,
     /// Where the archive is: absolute, or relative to the index's own location.
     pub url: String,
     /// SHA-256 of the archive, in lowercase hex. Always checked before anything is read from the archive.
@@ -87,6 +95,22 @@ pub struct IndexSignature {
     pub key: String,
     /// The 64-byte signature, base64.
     pub value: String,
+}
+
+/// Whether `text` names a GitHub repository the way `owner/name` does: two non-empty segments of the characters GitHub
+/// allows, so it can be put in a URL path without escaping.
+#[must_use]
+pub fn is_repository(text: &str) -> bool {
+    let valid = |part: &str| {
+        !part.is_empty()
+            && part != "."
+            && part != ".."
+            && part
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    };
+    text.split_once('/')
+        .is_some_and(|(owner, name)| valid(owner) && valid(name))
 }
 
 impl SourceIndex {
@@ -135,6 +159,20 @@ impl SourceIndex {
             if !names.insert(source.name.as_str()) {
                 return Err(format!("source `{}` is listed twice", source.name));
             }
+            if let Some(repository) = &source.repository {
+                if !is_repository(repository) {
+                    return Err(format!(
+                        "source `{}`: repository `{repository}` is not `owner/name`",
+                        source.name
+                    ));
+                }
+                if !source.versions.is_empty() {
+                    return Err(format!(
+                        "source `{}` names a repository and lists versions; its versions are the repository's releases",
+                        source.name
+                    ));
+                }
+            }
             let mut versions = HashSet::new();
             for entry in &source.versions {
                 let at = format!("{} {}", source.name, entry.version);
@@ -143,13 +181,14 @@ impl SourceIndex {
                 if !versions.insert(version) {
                     return Err(format!("`{at}` is listed twice"));
                 }
-                contract_version(&entry.contract).map_err(|reason| format!("`{at}`: {reason}"))?;
-                semver::VersionReq::parse(&entry.memcastle).map_err(|_| {
-                    format!(
-                        "`{at}`: memcastle `{}` is not a version requirement",
-                        entry.memcastle
-                    )
-                })?;
+                if let Some(contract) = &entry.contract {
+                    contract_version(contract).map_err(|reason| format!("`{at}`: {reason}"))?;
+                }
+                if let Some(memcastle) = &entry.memcastle {
+                    semver::VersionReq::parse(memcastle).map_err(|_| {
+                        format!("`{at}`: memcastle `{memcastle}` is not a version requirement")
+                    })?;
+                }
                 if entry.url.trim().is_empty() {
                     return Err(format!("`{at}` has no url"));
                 }
@@ -192,11 +231,19 @@ impl SourceIndex {
 impl IndexedVersion {
     /// Whether this version runs on the MemCastle `running`, and if not, why.
     ///
+    /// A version that records neither requirement is assumed to, and the manifest inside the downloaded archive is
+    /// checked by the install, which refuses one that cannot run with `SourceIncompatible`.
+    ///
     /// # Errors
     ///
     /// A sentence saying why not.
     pub fn compatible_with(&self, running: &semver::Version) -> std::result::Result<(), String> {
-        version_compatibility(&self.contract, &self.memcastle, running)
+        match (&self.contract, &self.memcastle) {
+            (Some(contract), Some(memcastle)) => {
+                version_compatibility(contract, memcastle, running)
+            }
+            _ => Ok(()),
+        }
     }
 
     fn semver(&self) -> Option<semver::Version> {
@@ -278,8 +325,8 @@ mod tests {
     fn version(number: &str, memcastle: &str) -> IndexedVersion {
         IndexedVersion {
             version: number.to_string(),
-            contract: crate::domain::CONTRACT_VERSION.to_string(),
-            memcastle: memcastle.to_string(),
+            contract: Some(crate::domain::CONTRACT_VERSION.to_string()),
+            memcastle: Some(memcastle.to_string()),
             url: format!("demo-{number}.tar.gz"),
             sha256: "a".repeat(64),
             size: None,
@@ -294,6 +341,7 @@ mod tests {
             description: "Reads demo documents".into(),
             homepage: None,
             license: None,
+            repository: None,
             versions,
         }
     }
@@ -396,6 +444,49 @@ mod tests {
         assert_eq!(index.search("documents").len(), 1);
         assert_eq!(index.search("").len(), 1);
         assert!(index.search("nothing").is_empty());
+    }
+
+    #[test]
+    fn a_source_naming_a_repository_lists_no_versions_of_its_own_and_the_name_must_be_owner_slash_name()
+     {
+        let repository = |value: &str| {
+            index_json(|v| {
+                v["sources"][0]["versions"] = serde_json::json!([]);
+                v["sources"][0]["repository"] = value.into();
+            })
+        };
+        assert!(SourceIndex::parse(&repository("noirbizarre/memcastle")).is_ok());
+        for bad in [
+            "memcastle",
+            "a/b/c",
+            "/b",
+            "a/",
+            "../x",
+            "a/..",
+            "a b/c",
+            "a/b?x=1",
+        ] {
+            let error = SourceIndex::parse(&repository(bad)).unwrap_err();
+            assert!(error.contains("owner/name"), "{bad}: {error}");
+        }
+        let both = index_json(|v| v["sources"][0]["repository"] = "o/r".into());
+        let error = SourceIndex::parse(&both).unwrap_err();
+        assert!(error.contains("repository's releases"), "{error}");
+    }
+
+    #[test]
+    fn a_version_that_records_no_compatibility_is_taken_to_run_and_the_install_decides() {
+        let mut unknown = version("1.0.0", ">=0.1");
+        unknown.contract = None;
+        unknown.memcastle = None;
+        let source = source(vec![unknown]);
+        assert_eq!(source.pick(None, &running()).unwrap().version, "1.0.0");
+        // A requirement the index does record is still held to.
+        let incompatible = IndexedSource {
+            versions: vec![version("1.0.0", ">=9")],
+            ..source
+        };
+        assert!(incompatible.pick(None, &running()).is_err());
     }
 
     #[test]

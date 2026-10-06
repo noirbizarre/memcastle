@@ -219,6 +219,41 @@ pub fn read_installed_component(sources_dir: &Path, name: &str) -> Result<Vec<u8
     std::fs::read(&path).map_err(|e| Error::io(path.display().to_string(), e))
 }
 
+/// The installed manifest of `name`, as written.
+///
+/// # Errors
+///
+/// [`Error::Io`] when it is missing or unreadable.
+pub fn read_installed_manifest(sources_dir: &Path, name: &str) -> Result<String> {
+    let path = installed_dir(sources_dir, name).join(MANIFEST_FILE);
+    std::fs::read_to_string(&path).map_err(|e| Error::io(path.display().to_string(), e))
+}
+
+/// The names under `sources_dir` that hold a whole package: a manifest and a component, in a directory of that name.
+///
+/// A directory with only one of the two is a source *project* or a half-written install, and is not listed; that is
+/// also what tells a checkout's `sources/` (projects, built into `dist/`) from a release's (packages). Sorted, so a
+/// listing does not depend on the filesystem's order.
+#[must_use]
+pub fn installed_names(sources_dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(sources_dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(std::result::Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let dir = entry.path();
+            (crate::domain::is_valid_source_name(&name)
+                && dir.join(MANIFEST_FILE).is_file()
+                && dir.join(COMPONENT_FILE).is_file())
+            .then_some(name)
+        })
+        .collect();
+    names.sort();
+    names
+}
+
 /// Delete the installed files of `name`. Missing files are not an error: the goal is that they are gone.
 ///
 /// # Errors

@@ -525,7 +525,7 @@ impl DaemonClient {
         .await
     }
 
-    /// Search the bundled sources and the configured registries.
+    /// Search the configured registries.
     ///
     /// # Errors
     ///

@@ -194,9 +194,10 @@ for installing the packaged layout with `--assets-dir target/bundled-integration
 `mise run integrations:check` bundles the integrations and installs them from both layouts as part of the checks.
 
 The bundled mining sources use the same root: with `--assets-dir` pointing at a root whose `sources/` holds a
-`memcastle-index.json`, the daemon offers those as the [bundled sources](publishing-sources.md#bundled-sources).
-A checkout has no such index (its `sources/` holds projects, not packages), so the daemon then falls back to the
-installed ones.
+`source.wasm` and a `memcastle-source.toml` in each directory, the daemon offers those as the
+[bundled sources](publishing-sources.md#bundled-sources).
+A checkout has no such package (its `sources/` holds projects, whose component is built into `dist/`), so the daemon then
+falls back to the installed ones.
 
 ## The manifest
 

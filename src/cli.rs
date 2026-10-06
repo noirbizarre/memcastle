@@ -321,11 +321,10 @@ pub enum SourceCommand {
     /// print the public key users put under `mining.trusted_keys`. Local:
     /// needs no daemon.
     Keygen(SourceKeygenArgs),
-    /// Search the sources shipped with MemCastle and the configured
-    /// registries.
+    /// Search the configured registries (the official one by default).
     Search(SourceSearchArgs),
     /// Install a source into the running daemon: a package file, a project
-    /// directory, or a name from the bundle or a registry. A source that asks
+    /// directory, or a name from a registry. A source that asks
     /// for permissions is installed only after you agree to exactly those.
     Install(SourceInstallArgs),
     /// Update installed sources to the newest version their registry offers.
@@ -440,7 +439,7 @@ pub struct SourceSearchArgs {
     /// Part of a name or description. Without it, everything on offer.
     pub query: Option<String>,
     /// Search only this registry (a URL or an absolute path) instead of the
-    /// bundled sources and the configured registries.
+    /// configured registries.
     #[arg(long, value_name = "LOCATION")]
     pub registry: Option<String>,
 }
@@ -450,12 +449,13 @@ pub struct SourceSearchArgs {
 pub struct SourceInstallArgs {
     /// What to install: a package file as written by `memcastle source
     /// package`, a source project directory (it is built and packaged
-    /// first), or a name, optionally pinned as `name@1.2.0`, from the
-    /// bundled sources or a registry. Write `./name` for a path that looks
-    /// like a name.
+    /// first), or a name, optionally pinned as `name@1.2.0`, from a
+    /// registry. The sources that ship with MemCastle are installed already:
+    /// enable them with `memcastle source enable`. Write `./name` for a path
+    /// that looks like a name.
     pub source: String,
     /// Install a name from this registry (a URL or an absolute path) only,
-    /// instead of the bundled sources and the configured registries.
+    /// instead of the configured registries.
     #[arg(long, value_name = "LOCATION")]
     pub registry: Option<String>,
     /// Enable the source once it is installed.

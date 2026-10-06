@@ -203,11 +203,14 @@ Every path, environment variable, flag and the precedence between them is in [Co
     (no build, basic suite).
   - `tests/wasm_registry.rs` — registries against a real daemon (a directory registry written with the same calls
     `source index` makes): search, install by name with consent, an archive that is not the one published, a package that
-    is not the one the index says, version choice, the trust policy, update with and without new permissions, bundled
-    sources, an unreadable registry, and the CLI publishing, signing, searching, installing and updating
-    (in-process and subprocess, WebAssembly suite).
-  - `tests/wasm_bundle.rs` — `packaging/sources/build.sh`, the script a release runs, packaging `pi` and `opencode` and
-    their index, and installing both by name from the bundle it writes (WebAssembly suite, Unix only).
+    is not the one the index says, version choice, the trust policy, update with and without new permissions, a bundled
+    source that a registry never installs, updates or replaces, a source registered by GitHub repository (against a
+    stand-in for the API, with a digest that does not match and a repository that cannot be read), an unreadable
+    registry, and the CLI publishing, signing, searching, installing and updating (in-process and subprocess,
+    WebAssembly suite).
+  - `tests/wasm_bundle.rs` — `packaging/sources/build.sh`, the script a release runs, packaging `pi` and `opencode` as an
+    unpacked bundle and as `<name>-<version>.tar.gz` archives, and a daemon that lists both as installed and enables them
+    with no consent (WebAssembly suite, Unix only).
   - `tests/wasm_runtime.rs` — installable sources against a real daemon: consent, the lifecycle, mining through the
     shared pipeline, and refusing a component altered on disk (in-process, WebAssembly suite).
   - `tests/wasm_projects.rs` — `memcastle source init`, `build`, `test` and `package` for real, the sandbox

@@ -1,4 +1,7 @@
-//! Finding, installing and updating sources from the bundle and from registries (docs/adr/033).
+//! Finding, installing and updating sources from registries (docs/adr/033).
+//!
+//! A source that ships with MemCastle is not here: it is installed from the start (docs/adr/040), so a registry never
+//! installs, updates or replaces one.
 //!
 //! The same administrative rule as installing from a file (`source_packages`): REST and the CLI only, no MCP tool, so
 //! an agent cannot reach out to a registry or install code. Everything an install checks is checked here the same way
@@ -10,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::distribution::{Catalog, Registry, TrustPolicy};
 use crate::domain::{IndexedVersion, Permissions, SourceOrigin, SourcePackageRecord, SourceState};
 use crate::error::{Error, Result};
-use crate::mining::registry::{BUILTIN_NAMES, describe_package};
+use crate::mining::registry::{BUILTIN_NAMES, describe_installed, installed_records};
 
 use super::AppServices;
 use super::source_packages::{InstalledSource, Upstream};
@@ -31,7 +34,7 @@ pub struct RegistryEntry {
     pub name: String,
     /// What it reads.
     pub description: String,
-    /// Where it was found: the bundle, or a registry.
+    /// Where it was found: always a registry; kept so an answer still says what kind of source it describes.
     pub origin: SourceOrigin,
     /// The index that offers it.
     pub registry: String,
@@ -66,7 +69,7 @@ pub struct RegistryPreview {
     pub version: String,
     /// What it reads.
     pub description: String,
-    /// The bundle or a registry.
+    /// Where it comes from: a registry.
     pub origin: SourceOrigin,
     /// The index it comes from.
     pub registry: String,
@@ -90,7 +93,7 @@ pub struct RegistryInstall {
     /// A version; absent means the newest that can be installed.
     #[serde(default)]
     pub version: Option<String>,
-    /// Consult only this index, instead of the bundle and the configured ones.
+    /// Consult only this index, instead of the configured ones.
     #[serde(default)]
     pub registry: Option<String>,
     /// The digest of the permissions the user agreed to.
@@ -110,7 +113,7 @@ pub struct UpdateCandidate {
     pub installed: String,
     /// The version an update would install.
     pub available: String,
-    /// The bundle or a registry.
+    /// Where it comes from: a registry.
     pub origin: SourceOrigin,
 }
 
@@ -171,7 +174,7 @@ fn parsed(entry: &IndexedVersion) -> semver::Version {
 }
 
 impl AppServices {
-    /// Search the bundle and the configured registries for sources whose name or description contains `query`.
+    /// Search the configured registries for sources whose name or description contains `query`.
     ///
     /// # Errors
     ///
@@ -182,8 +185,8 @@ impl AppServices {
         registry: Option<&str>,
     ) -> Result<RegistrySearch> {
         let catalog = Catalog::open(&self.mining, registry).await?;
-        let installed = self.store.list_source_packages().await?;
-        let sources_dir = self.mining.sources_dir();
+        // What is installed includes what ships with MemCastle, so a registry that offers it says it is there.
+        let installed = installed_records(&self.store, &self.mining).await?;
         let running = running_version();
         let mut search = RegistrySearch {
             warnings: catalog.warnings.clone(),
@@ -206,15 +209,21 @@ impl AppServices {
                 search.entries.push(RegistryEntry {
                     name: source.name.clone(),
                     description: source.description.clone(),
-                    origin: registry.origin,
+                    origin: SourceOrigin::Registry,
                     registry: registry.label.clone(),
+                    // Only what came from a registry is updated from one: a bundled source is updated with MemCastle
+                    // and a package from a file has no upstream, so offering either an update would be a lie.
                     update_available: match (&version, record) {
-                        (Some(available), Some(record)) => semver::Version::parse(available)
-                            .and_then(|available| {
-                                semver::Version::parse(&record.manifest.source.version)
-                                    .map(|current| available > current)
-                            })
-                            .unwrap_or(false),
+                        (Some(available), Some(record))
+                            if record.origin == SourceOrigin::Registry =>
+                        {
+                            semver::Version::parse(available)
+                                .and_then(|available| {
+                                    semver::Version::parse(&record.manifest.source.version)
+                                        .map(|current| available > current)
+                                })
+                                .unwrap_or(false)
+                        }
                         _ => false,
                     },
                     version,
@@ -222,7 +231,7 @@ impl AppServices {
                     license: source.license.clone(),
                     installed: record.map(|record| InstalledVersion {
                         version: record.manifest.source.version.clone(),
-                        state: describe_package(record, &sources_dir).state,
+                        state: describe_installed(record, &self.mining).state,
                     }),
                 });
             }
@@ -333,7 +342,8 @@ impl AppServices {
     /// # Errors
     ///
     /// [`Error::SourceNotFound`] or [`Error::SourceBuiltin`] for a name that is not an installed package,
-    /// [`Error::SourceNotInRegistry`] when `name` was installed from a file, and store errors. Failures of a
+    /// [`Error::SourceBundled`] for a source that ships with MemCastle, [`Error::SourceNotInRegistry`] when `name` was
+    /// installed from a file, and store errors. Failures of a
     /// particular update are outcomes, so one failure does not stop the others.
     pub async fn update_sources(
         &self,
@@ -344,10 +354,13 @@ impl AppServices {
         let records = match name {
             Some(name) => {
                 let record = self.installed(name).await?;
-                if !matches!(
-                    record.origin,
-                    SourceOrigin::Bundled | SourceOrigin::Registry
-                ) {
+                if record.origin == SourceOrigin::Bundled && self.is_bundled(name) {
+                    return Err(Error::SourceBundled {
+                        name: name.to_string(),
+                        action: "updated".to_string(),
+                    });
+                }
+                if record.origin != SourceOrigin::Registry {
                     return Err(Error::SourceNotInRegistry {
                         name: name.to_string(),
                         reason:
@@ -417,24 +430,20 @@ impl AppServices {
         record: &SourcePackageRecord,
     ) -> std::result::Result<Option<(&'a Registry, &'a IndexedVersion)>, String> {
         let registry = match record.origin {
-            SourceOrigin::Bundled => catalog
-                .registries
-                .iter()
-                .find(|registry| registry.origin == SourceOrigin::Bundled),
             SourceOrigin::Registry => record
                 .registry
                 .as_deref()
                 .and_then(|label| catalog.by_label(label)),
-            // Built in, or installed from a file: no upstream.
-            SourceOrigin::Builtin | SourceOrigin::Package => return Ok(None),
+            // Built in, bundled (updated with MemCastle) or installed from a file: no registry to ask.
+            SourceOrigin::Builtin | SourceOrigin::Bundled | SourceOrigin::Package => {
+                return Ok(None);
+            }
         };
         let Some(registry) = registry else {
-            return Err(match &record.registry {
-                Some(label) => format!(
-                    "the registry it came from, {label}, is not configured or cannot be read"
-                ),
-                None => "the bundled sources are not available in this installation".to_string(),
-            });
+            return Err(format!(
+                "the registry it came from, {}, is not configured or cannot be read",
+                record.registry.as_deref().unwrap_or("(unrecorded)")
+            ));
         };
         let Some(source) = registry.index.find(&record.name) else {
             return Err(format!("{} no longer offers it", registry.label));
@@ -470,7 +479,7 @@ impl AppServices {
             consent,
             false,
             Upstream {
-                origin: registry.origin,
+                origin: SourceOrigin::Registry,
                 registry: Some(registry.label.clone()),
                 archive_digest: Some(fetched.archive_digest),
                 signed_by: fetched.signed_by,
@@ -504,10 +513,18 @@ impl AppServices {
                 format!("`{name}` is not a source name: lowercase letters, digits and `-`"),
             ));
         }
+        // It is installed already, from the release that carries it: a registry's copy would only be a second,
+        // differently trusted one under the same name.
+        if self.is_bundled(name) {
+            return Err(Error::SourceBundled {
+                name: name.to_string(),
+                action: "installed from a registry".to_string(),
+            });
+        }
         let catalog = Catalog::open(&self.mining, registry).await?;
         let Some((found, source)) = catalog.locate(name) else {
             let searched = if catalog.registries.is_empty() {
-                "no registry is configured and nothing is bundled; set `mining.registries`, or install a package file"
+                "no registry is configured; set `mining.registries`, or install a package file"
                     .to_string()
             } else {
                 format!(
@@ -540,7 +557,7 @@ impl AppServices {
         let policy = TrustPolicy::from_config(&self.mining)?;
         let fetched = found.fetch(name, &entry, &policy).await?;
         let upstream = Upstream {
-            origin: found.origin,
+            origin: SourceOrigin::Registry,
             registry: Some(found.label.clone()),
             archive_digest: Some(fetched.archive_digest.clone()),
             signed_by: fetched.signed_by.clone(),

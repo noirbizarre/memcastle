@@ -990,6 +990,21 @@ pub enum Error {
         name: String,
     },
 
+    /// A source that ships with MemCastle was asked to be installed from a registry, updated or removed.
+    #[error("`{name}` ships with MemCastle and cannot be {action}")]
+    #[diagnostic(
+        code(memcastle::source::bundled),
+        help(
+            "it is already installed: `memcastle source enable {name}` or `memcastle source disable {name}` is all it takes, and it is updated with MemCastle; to run a different build, install a package file under that name"
+        )
+    )]
+    SourceBundled {
+        /// The bundled source's name.
+        name: String,
+        /// What was asked, as a past participle: `removed`, `updated`, `installed from a registry`.
+        action: String,
+    },
+
     /// A source ran and failed: it trapped, ran out of memory, or reported an error.
     #[error("source `{name}` failed: {message}")]
     #[diagnostic(
@@ -1142,7 +1157,7 @@ pub enum Error {
     #[diagnostic(
         code(memcastle::source::not_in_registry),
         help(
-            "`memcastle source search` lists what the bundled and configured registries offer; a local package installs with `memcastle source install <file>`"
+            "`memcastle source search` lists what the configured registries offer; a local package installs with `memcastle source install <file>`"
         )
     )]
     SourceNotInRegistry {
@@ -1806,6 +1821,10 @@ mod tests {
             Error::SourceBuiltin {
                 name: "directory".to_string(),
             },
+            Error::SourceBundled {
+                name: "pi".to_string(),
+                action: "removed".to_string(),
+            },
             Error::SourceFailed {
                 name: "slack".to_string(),
                 message: "trap".to_string(),
@@ -1965,6 +1984,7 @@ mod tests {
             | Error::MinerConfigFile { .. }
             | Error::SourceConsentRequired { .. }
             | Error::SourceBuiltin { .. }
+            | Error::SourceBundled { .. }
             | Error::SourceFailed { .. }
             | Error::SourceTimeout { .. }
             | Error::SourcePermissionDenied { .. }

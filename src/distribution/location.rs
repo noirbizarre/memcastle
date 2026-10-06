@@ -148,6 +148,22 @@ impl Location {
     ///
     /// A sentence saying what failed: unreachable, a refusal, too large.
     pub async fn read(&self, limit: usize) -> std::result::Result<Vec<u8>, String> {
+        self.read_as(limit, None).await
+    }
+
+    /// [`Self::read`], presenting `bearer` as a bearer token when this is an HTTP location.
+    ///
+    /// For the one request that is *to* an API the token belongs to, so the caller decides which; a redirect to another
+    /// host does not carry it (the HTTP client drops credentials when a redirect leaves the origin).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::read`].
+    pub async fn read_as(
+        &self,
+        limit: usize,
+        bearer: Option<&str>,
+    ) -> std::result::Result<Vec<u8>, String> {
         match self {
             Self::File(path) => {
                 let path = path.clone();
@@ -155,7 +171,7 @@ impl Location {
                     .await
                     .map_err(|e| format!("reading was interrupted: {e}"))?
             }
-            Self::Http(url) => read_http(url, limit).await,
+            Self::Http(url) => read_http(url, limit, bearer).await,
         }
     }
 }
@@ -184,7 +200,11 @@ fn read_file(path: &Path, limit: usize) -> std::result::Result<Vec<u8>, String> 
     Ok(bytes)
 }
 
-async fn read_http(url: &reqwest::Url, limit: usize) -> std::result::Result<Vec<u8>, String> {
+async fn read_http(
+    url: &reqwest::Url,
+    limit: usize,
+    bearer: Option<&str>,
+) -> std::result::Result<Vec<u8>, String> {
     let client = reqwest::Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .user_agent(concat!("memcastle/", env!("CARGO_PKG_VERSION")))
@@ -202,8 +222,12 @@ async fn read_http(url: &reqwest::Url, limit: usize) -> std::result::Result<Vec<
         }))
         .build()
         .map_err(|e| format!("cannot start a request: {e}"))?;
-    let mut response = client
-        .get(url.clone())
+    let mut request = client.get(url.clone());
+    if let Some(token) = bearer {
+        // Marked sensitive by `bearer_auth`, so it is left out of the client's debug output.
+        request = request.bearer_auth(token);
+    }
+    let mut response = request
         .send()
         .await
         .map_err(|e| format!("cannot reach {url}: {}", describe(e)))?;

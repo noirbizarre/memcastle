@@ -586,7 +586,8 @@ pub enum SourceOrigin {
     /// A package archive or project directory the user installed from their own disk. It has no upstream, so
     /// `update` leaves it alone.
     Package,
-    /// A package shipped alongside MemCastle (`share/memcastle/sources`): independently packaged, not linked in.
+    /// A package shipped alongside MemCastle (`share/memcastle/sources`): independently packaged, not linked in, and
+    /// installed from the start. It runs from the bundle, so `update` and `remove` leave it alone (docs/adr/040).
     Bundled,
     /// A package installed from a configured registry index.
     Registry,
@@ -631,7 +632,7 @@ pub struct SourcePackageRecord {
     /// Where it was installed from.
     #[serde(default = "SourceOrigin::installed_default")]
     pub origin: SourceOrigin,
-    /// The index it came from, for a bundled or registry source: what `update` asks about a newer version.
+    /// The index it came from, for a registry source: what `update` asks about a newer version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registry: Option<String>,
     /// SHA-256 of the archive it was installed from, when that is known: what the index published.

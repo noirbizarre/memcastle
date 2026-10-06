@@ -299,8 +299,8 @@ real, evolving format, keeps raw documents and asks for two permissions (`docs/m
 `sources/opencode/` is the OpenCode coding agent's session history, and the worked example of a source that wraps a
 program through `run-process` and is tested against a stand-in for it (`docs/mining-sources.md#opencode`).
 The sources that ship with MemCastle's releases, `pi` and `opencode`, are built from here and bundled without being
-compiled into the binary: they use exactly the package contract a user installs, and `memcastle source install pi`
-finds them with no registry.
+compiled into the binary: they use exactly the package contract a user installs, and a release carries them unpacked, so
+they are installed from the start and `memcastle source enable pi` turns one on.
 
 ## Testing your source in CI
 
@@ -327,7 +327,8 @@ gets its own CI job, which runs `mise run sources:test -- <name>`.
 | `memcastle::source::permission_denied` | The source ran a program its manifest does not list, or asked for an access token without declaring `[permissions.oauth]`. |
 | `memcastle::source::build_failed` | The build command failed or did not produce a component. |
 | `memcastle::source::registry_unavailable` | A registry's index could not be read: unreachable, not an index, or a format this MemCastle does not know. Check `mining.registries`. |
-| `memcastle::source::not_in_registry` | No bundled source or registry offers that name, or none of its versions can be installed here. `memcastle source search` lists what is offered. |
+| `memcastle::source::not_in_registry` | No registry offers that name, or none of its versions can be installed here. `memcastle source search` lists what is offered. |
+| `memcastle::source::bundled` | A source that ships with MemCastle cannot be installed from a registry, updated or removed: it is installed already, and `source enable` or `disable` is all it takes. |
 | `memcastle::source::integrity` | A downloaded package is not the archive the index published: its SHA-256 differs, or the package inside is not the name and version listed. Nothing was installed. |
 | `memcastle::source::untrusted` | The trust policy refuses the package: a bad signature from a trusted key, or no trusted signature under `mining.trust = "required"`. |
 | `memcastle::source::signing_failed` | A signing key or signature could not be made or read. `memcastle source keygen` writes a new key. |

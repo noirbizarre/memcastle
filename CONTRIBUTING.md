@@ -26,7 +26,7 @@ CI uses `dtolnay/rust-toolchain` because it needs per-job components and cross-c
 | `mise run test:wasm` | Run the WebAssembly suite, every `tests/wasm_*.rs` binary (slow, needs the `wasm32-wasip2` target) |
 | `mise run sources:check` | Build and conformance-test every source under `sources/` |
 | `mise run sources:test -- <name>` | Build and conformance-test one source under `sources/` |
-| `mise run sources:package` | Package the sources that ship with releases, with their index, into `target/bundled-sources` |
+| `mise run sources:package` | Package the sources that ship with releases (unpacked bundle, archives and registry index) into `target/bundled-sources` |
 | `mise run integrations:check` | Typecheck and test every package under `integrations/` against a real daemon (needs bun) |
 | `mise run integrations:build` | Bundle the Pi and OpenCode integrations into `integrations/<id>/dist`, for `--assets-dir "$PWD"` (needs bun) |
 | `mise run integrations:package` | Lay out the integrations and skills that ship with releases in `target/bundled-integrations` (needs bun) |
@@ -102,6 +102,8 @@ Nothing to release is the normal case for step 1, and costs one workflow run rep
 - the bundled sources on their own, `memcastle_<tag>_sources.tar.gz`, the bundled integrations with their skills,
   `memcastle_<tag>_integrations.tar.gz`, and the web dashboard, `memcastle_<tag>_web.tar.gz`, which one asset each serves
   to the AUR package and the Homebrew formula;
+- the source packages as archives, `<name>-<version>.tar.gz` with their `.sha256`, which the official source registry
+  resolves to (see [Publishing and installing sources](docs/publishing-sources.md#the-official-registry));
 - `.deb` and `.rpm` packages for linux-amd64 and linux-arm64, `memcastle_<tag>_<platform>.{deb,rpm}`, built by nfpm
   from `packaging/nfpm/nfpm.yaml` (binary, systemd user unit, shell completions, documentation, bundled sources,
   integrations, skills and the web dashboard)

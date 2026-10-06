@@ -37,8 +37,8 @@ contents:
     expand: true
     file_info:
       mode: 0644
-  # The sources that ship with MemCastle, as ordinary packages beside the index that lists them (docs/adr/033), where
-  # `memcastle source install <name>` looks first, with no registry and no network.
+  # The sources that ship with MemCastle, unpacked one directory each (docs/adr/040): installed from the start, run in
+  # place from where the daemon looks for them, with no registry and no network.
   - src: "${SOURCES_DIR}"
     dst: /usr/share/memcastle/sources
     type: tree

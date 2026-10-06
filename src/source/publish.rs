@@ -86,8 +86,8 @@ pub fn add_archive(
     let version = manifest.source.version.clone();
     let entry = IndexedVersion {
         version: version.clone(),
-        contract: manifest.compatibility.contract.clone(),
-        memcastle: manifest.compatibility.memcastle.clone(),
+        contract: Some(manifest.compatibility.contract.clone()),
+        memcastle: Some(manifest.compatibility.memcastle.clone()),
         url: url.to_string(),
         sha256: sha256_hex(archive),
         size: Some(archive.len() as u64),
@@ -103,6 +103,7 @@ pub fn add_archive(
             description: manifest.source.description.clone(),
             homepage: None,
             license: None,
+            repository: None,
             versions: Vec::new(),
         });
         index.sources.len() - 1
@@ -173,7 +174,10 @@ mod tests {
         let entry = &index.find("demo").unwrap().versions[0];
         assert_eq!(entry.sha256, sha256_hex(&bytes));
         assert_eq!(entry.size, Some(bytes.len() as u64));
-        assert_eq!(entry.contract, crate::domain::CONTRACT_VERSION);
+        assert_eq!(
+            entry.contract.as_deref(),
+            Some(crate::domain::CONTRACT_VERSION)
+        );
         assert_eq!(index.find("demo").unwrap().license.as_deref(), Some("MIT"));
     }
 

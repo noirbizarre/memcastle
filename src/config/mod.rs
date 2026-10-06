@@ -147,8 +147,16 @@ pub struct ServerConfig {
 }
 
 /// The default listener address: loopback only, never a wildcard.
-/// The directory under the assets root that holds the bundled source packages and their index.
+/// The directory under the assets root that holds the bundled source packages, one unpacked package per directory.
 const ASSETS_SOURCES_DIR: &str = "sources";
+
+/// The API `mining.github_api_url` defaults to.
+pub const DEFAULT_GITHUB_API: &str = "https://api.github.com";
+
+/// The official source registry, published with the documentation site on every release (docs/adr/040).
+///
+/// The one default that can reach the network, and only when someone asks to search, install or update a source.
+pub const OFFICIAL_REGISTRY: &str = "https://noirbizarre.github.io/memcastle/registry.json";
 
 const DEFAULT_BIND: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 /// The default listener port.
@@ -519,15 +527,26 @@ pub struct MiningConfig {
     /// The longest, in seconds, one call into a WebAssembly source may run. A source's own `[limits]` can ask for
     /// less, never more.
     pub source_timeout_secs: u64,
-    /// The registry indexes `memcastle source search` and `install <name>` consult, in order: an `https://` URL, a
-    /// `file://` URL or a path to a `memcastle-index.json` (docs/adr/033). Empty by default, so a daemon never
-    /// reaches the network for sources unless asked to.
+    /// The registry indexes `memcastle source search`, `install <name>` and `update` consult, in order: an `https://`
+    /// URL, a `file://` URL or a path to a `memcastle-index.json` (docs/adr/033). The official registry by default
+    /// (docs/adr/040), a static file in the documentation; a list set here replaces it, and an empty one means no
+    /// registry. It is read only when a user runs one of those commands, never at startup.
     pub registries: Vec<String>,
     /// What a package from a registry must prove before it is installed.
     pub trust: TrustMode,
     /// The public keys (base64, as `memcastle source keygen` prints them) whose signatures are trusted.
     pub trusted_keys: Vec<String>,
-    /// Where the sources shipped with MemCastle live. Unset means `share/memcastle/sources` of the installed assets.
+    /// The GitHub API a registry entry that names a repository is resolved through (docs/adr/040): the releases of
+    /// `owner/name` are read from `<this>/repos/owner/name/releases`. Another value is a GitHub Enterprise server, or a
+    /// stand-in for one in a test.
+    pub github_api_url: String,
+    /// A token presented to `github_api_url` (and only to it) when a registry entry's releases are read, so the
+    /// unauthenticated rate limit does not apply. Read from `GH_TOKEN`, else `GITHUB_TOKEN`; never from the file, never
+    /// serialised, and redacted in `Debug`.
+    #[serde(skip)]
+    pub github_token: Option<Secret>,
+    /// Where the sources shipped with MemCastle live, one unpacked package per directory. Unset means
+    /// `share/memcastle/sources` of the installed assets.
     pub bundled_dir: Option<PathBuf>,
 }
 
@@ -550,9 +569,11 @@ impl Default for MiningConfig {
             sources_dir: None,
             source_memory_mib: DEFAULT_MINING_SOURCE_MEMORY_MIB,
             source_timeout_secs: DEFAULT_MINING_SOURCE_TIMEOUT_SECS,
-            registries: Vec::new(),
+            registries: vec![OFFICIAL_REGISTRY.to_string()],
             trust: TrustMode::default(),
             trusted_keys: Vec::new(),
+            github_api_url: DEFAULT_GITHUB_API.to_string(),
+            github_token: None,
             bundled_dir: None,
         }
     }
@@ -856,7 +877,7 @@ impl Config {
     }
 
     /// The `[mining]` settings the daemon runs with: `mining.bundled_dir`, or else `sources/` under `assets.dir` when
-    /// that directory carries a bundle index.
+    /// that directory carries bundled packages.
     ///
     /// `assets.dir` is the one data root for everything MemCastle ships (docs/adr/034), so pointing it at a package
     /// layout must also point the bundled sources there. A root with no bundle (a development worktree holds source
@@ -869,8 +890,7 @@ impl Config {
             && let Some(root) = &self.assets.dir
         {
             let sources = root.join(ASSETS_SOURCES_DIR);
-            // The file name is the one `distribution::INDEX_FILE` names; config may not call `distribution`.
-            if sources.join("memcastle-index.json").is_file() {
+            if !crate::source::package::installed_names(&sources).is_empty() {
                 mining.bundled_dir = Some(sources);
             }
         }
@@ -1048,6 +1068,17 @@ impl Config {
         }
         if let Some(raw) = lookup("MEMCASTLE_MINING_TRUSTED_KEYS") {
             self.mining.trusted_keys = split_list(&raw);
+        }
+        // The variables `gh` and GitHub Actions already set, `GH_TOKEN` first as `gh` does. A secret, so no
+        // `parse_override`; an empty one (a secret manager that resolved to nothing) means no token.
+        self.mining.github_token = ["GH_TOKEN", "GITHUB_TOKEN"]
+            .iter()
+            .filter_map(|name| lookup(name))
+            .map(|token| token.trim().to_string())
+            .find(|token| !token.is_empty())
+            .map(Secret::new);
+        if let Some(url) = lookup("MEMCASTLE_MINING_GITHUB_API_URL") {
+            self.mining.github_api_url = url;
         }
         if let Some(dir) = lookup("MEMCASTLE_MINING_BUNDLED_DIR") {
             self.mining.bundled_dir = Some(PathBuf::from(dir));
@@ -1372,6 +1403,12 @@ impl Config {
                 ))
             })?;
         }
+        crate::distribution::Location::parse(&mining.github_api_url).map_err(|reason| {
+            Error::config(format!(
+                "mining.github_api_url (or MEMCASTLE_MINING_GITHUB_API_URL) {:?} is not usable: {reason}",
+                mining.github_api_url
+            ))
+        })?;
         for key in &mining.trusted_keys {
             crate::source::signing::parse_public_key(key).map_err(|_| {
                 Error::config(
@@ -1640,16 +1677,36 @@ mod tests {
         }
     }
 
+    /// `<root>/sources/demo/` holding a manifest and a component: what a release's bundle holds.
+    fn write_bundled_package(root: &std::path::Path) {
+        let package = root.join("sources/demo");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("memcastle-source.toml"), "").unwrap();
+        std::fs::write(package.join("source.wasm"), b"\0asm").unwrap();
+    }
+
+    #[test]
+    fn a_worktrees_source_projects_are_not_a_bundle() {
+        // `sources/pi/` in a checkout has a manifest and no component: a project, to be built, not a package.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("sources/pi");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join("memcastle-source.toml"), "").unwrap();
+        let mut config = Config::default();
+        config.assets.dir = Some(root.path().to_path_buf());
+
+        assert_eq!(config.effective_mining().bundled_dir, None);
+    }
+
     #[test]
     fn no_assets_directory_is_configured_by_default() {
         assert_eq!(Config::default().assets.dir, None);
     }
 
     #[test]
-    fn the_assets_directory_supplies_the_bundled_sources_when_it_carries_an_index() {
+    fn the_assets_directory_supplies_the_bundled_sources_when_it_carries_unpacked_packages() {
         let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir(root.path().join("sources")).unwrap();
-        std::fs::write(root.path().join("sources/memcastle-index.json"), "{}").unwrap();
+        write_bundled_package(root.path());
         let mut config = Config::default();
         config.assets.dir = Some(root.path().to_path_buf());
 
@@ -1673,8 +1730,7 @@ mod tests {
     #[test]
     fn an_explicit_bundled_dir_outranks_the_assets_directory() {
         let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir(root.path().join("sources")).unwrap();
-        std::fs::write(root.path().join("sources/memcastle-index.json"), "{}").unwrap();
+        write_bundled_package(root.path());
         let mut config = Config::default();
         config.assets.dir = Some(root.path().to_path_buf());
         config.mining.bundled_dir = Some(PathBuf::from("/explicit"));
@@ -2174,6 +2230,10 @@ mod tests {
                 "mining.registries",
             ),
             (
+                |c| c.mining.github_api_url = "http://example.org/api".into(),
+                "mining.github_api_url",
+            ),
+            (
                 |c| c.mining.trusted_keys = vec!["not a key".into()],
                 "mining.trusted_keys",
             ),
@@ -2520,13 +2580,16 @@ mod tests {
     }
 
     #[test]
-    fn registry_settings_default_to_no_network_and_come_from_the_file_then_the_environment() {
+    fn registry_settings_default_to_the_official_registry_and_come_from_the_file_then_the_environment()
+     {
         let defaults = MiningConfig::default();
-        assert!(
-            defaults.registries.is_empty(),
-            "a daemon never reaches a registry unless asked to"
+        assert_eq!(
+            defaults.registries,
+            [OFFICIAL_REGISTRY],
+            "the official registry is the default, and the only one"
         );
         assert_eq!(defaults.trust, TrustMode::Optional);
+        assert_eq!(defaults.github_api_url, DEFAULT_GITHUB_API);
         assert!(defaults.trusted_keys.is_empty() && defaults.bundled_dir.is_none());
 
         let mut config: Config = toml::from_str(
@@ -2550,6 +2613,10 @@ mod tests {
                     &format!("{}, {b_url} ,", a.display()),
                 ),
                 ("MEMCASTLE_MINING_TRUST", "required"),
+                (
+                    "MEMCASTLE_MINING_GITHUB_API_URL",
+                    "https://github.example.test/api/v3",
+                ),
                 ("MEMCASTLE_MINING_TRUSTED_KEYS", &key),
                 (
                     "MEMCASTLE_MINING_BUNDLED_DIR",
@@ -2560,10 +2627,71 @@ mod tests {
 
         assert_eq!(config.mining.registries, [a.display().to_string(), b_url]);
         assert_eq!(config.mining.trust, TrustMode::Required);
+        assert_eq!(
+            config.mining.github_api_url,
+            "https://github.example.test/api/v3"
+        );
         assert_eq!(config.mining.trusted_keys, [key]);
         assert_eq!(config.mining.bundled_dir, Some(bundle));
         config.palace.path = std::env::temp_dir();
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn a_github_token_comes_from_gh_token_then_github_token_and_never_reaches_a_log_or_a_file() {
+        let token = |vars: &[(&str, &str)]| {
+            let mut config = Config::default();
+            config.apply_overrides_from(env(vars)).unwrap();
+            config.mining.github_token
+        };
+        assert!(token(&[]).is_none());
+        assert_eq!(
+            token(&[("GITHUB_TOKEN", " ghs_actions ")])
+                .as_ref()
+                .map(Secret::expose),
+            Some("ghs_actions")
+        );
+        // `gh` prefers `GH_TOKEN`, so a machine set up for it behaves the same here.
+        assert_eq!(
+            token(&[("GITHUB_TOKEN", "ghs_actions"), ("GH_TOKEN", "ghp_user")])
+                .as_ref()
+                .map(Secret::expose),
+            Some("ghp_user")
+        );
+        // A variable a secret manager resolved to nothing is not a token, and does not hide the other one.
+        assert_eq!(
+            token(&[("GH_TOKEN", "  "), ("GITHUB_TOKEN", "ghs_actions")])
+                .as_ref()
+                .map(Secret::expose),
+            Some("ghs_actions")
+        );
+
+        let mut config = Config::default();
+        config.mining.github_token = Some(Secret::new("ghp_very_secret"));
+        assert!(!format!("{config:?}").contains("ghp_very_secret"));
+        assert!(
+            !toml::to_string(&config)
+                .unwrap()
+                .contains("ghp_very_secret")
+        );
+        // And the file cannot set it: a token in a file is one more place to leak it from.
+        let from_file: Config =
+            toml::from_str("[mining]\ngithub_token = \"x\"").unwrap_or_default();
+        assert!(from_file.mining.github_token.is_none());
+    }
+
+    #[test]
+    fn an_empty_registry_list_opts_out_of_the_official_registry() {
+        let from_file: Config = toml::from_str("[mining]\nregistries = []").unwrap();
+        assert!(from_file.mining.registries.is_empty());
+
+        let mut config = Config::default();
+        config
+            .apply_overrides_from(env(&[("MEMCASTLE_MINING_REGISTRIES", "")]))
+            .unwrap();
+        assert!(config.mining.registries.is_empty());
+        // The official location is itself a location the daemon accepts.
+        Config::default().validate().unwrap();
     }
 
     #[test]

@@ -3,7 +3,8 @@
 A mining source is a [WebAssembly package](writing-sources.md), and this page is how one gets from its author to a user:
 the package format, the registry index that lists packages, how to publish to one, and how users find, install, update
 and trust sources.
-The decisions behind it are in [ADR-033](adr/033-source-distribution.md).
+The decisions behind it are in [ADR-033](adr/033-source-distribution.md)
+and [ADR-040](adr/040-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md).
 
 Nobody installing a published source needs Rust, Python, Node or an SDK: a package is a component and a manifest, and the
 daemon runs it.
@@ -13,13 +14,13 @@ daemon runs it.
 | Origin | What it is | Installed by |
 |---|---|---|
 | Built in | Compiled into MemCastle (`directory`). | Nothing: it is always there and cannot be removed. |
-| Bundled | An ordinary package shipped beside the binary, with an index. | `memcastle source install <name>`, with no registry and no network. |
+| Bundled | An ordinary package unpacked beside the binary (`pi`, `opencode`). | Nothing: it is installed from the start, and `memcastle source enable <name>` turns it on. |
 | Registry | A package listed in an index you configured. | `memcastle source install <name>`. |
 | Local | A package file or a project directory on your disk. | `memcastle source install <file or directory>`. |
 
-All of them share one lifecycle: they are listed together, and an installed one is enabled, disabled and removed the same
-way.
-The origin only decides what `update` looks at.
+They are listed together and share one lifecycle, and `install` and `update` are for the last two:
+a bundled source is already installed and is updated with MemCastle, and a built-in one is MemCastle.
+The origin decides what `update` looks at.
 
 ## The package format
 
@@ -90,7 +91,8 @@ A registry is one JSON file, `memcastle-index.json`, served from anywhere that s
 | `format` | The index format, 1. A higher number is refused. |
 | `sources[].name` | A [source name](writing-sources.md#the-manifest), unique in the index. |
 | `versions[].version` | A semantic version, unique for the source. |
-| `versions[].contract`, `memcastle` | Copied from the package's manifest, so a version that cannot run here is skipped without downloading it. |
+| `repository` | Instead of `versions`: a GitHub repository, `owner/name`, whose [releases](#registering-a-github-repository) publish the source. |
+| `versions[].contract`, `memcastle` | Optional. Copied from the package's manifest, so a version that cannot run here is skipped without downloading it. |
 | `versions[].url` | Where the archive is: absolute, or relative to the index's own location. A relative URL may not climb out of the index's directory. |
 | `versions[].sha256` | SHA-256 of the archive. Always checked. |
 | `versions[].size` | Optional, informational. |
@@ -99,7 +101,7 @@ A registry is one JSON file, `memcastle-index.json`, served from anywhere that s
 
 An index is at most 4 MiB and an archive at most 64 MiB.
 
-**Where an index can be** is the same for the bundle, a public registry, a mirror and an offline copy:
+**Where an index can be** is the same for a public registry, a mirror and an offline copy:
 
 | Location | Example |
 |---|---|
@@ -114,7 +116,7 @@ the index has no digest of its own to catch tampering in transit.
 **Choosing a version** is the same for `install`, `search` and `update`: the highest semantic version that is not yanked
 and runs on this MemCastle.
 A name pinned as `claude@1.1.0` takes exactly that version, or says why it cannot.
-The first index that offers a name decides, in the order: the bundle, then `mining.registries` as listed.
+The first index that offers a name decides, in the order of `mining.registries`.
 
 ## Publishing
 
@@ -152,7 +154,7 @@ registries = ["https://example.org/memcastle/memcastle-index.json"]
 ## Installing, searching and updating
 
 ```sh
-memcastle source search claude                  # what the bundle and the registries offer
+memcastle source search claude                  # what the registries offer
 memcastle source install claude                 # newest version that runs here, after you agree to its permissions
 memcastle source install claude@1.1.0 --enable
 memcastle source install ./claude-1.2.0.tar.gz  # a file: no registry involved
@@ -167,9 +169,9 @@ Before anything is installed the daemon has downloaded and verified the package,
 asks for: you agree to the permissions of what was actually fetched.
 `source show` afterwards says where it came from, which registry and, when there is one, which key vouched for it.
 
-**Updating** installs the newest version from the same origin: the bundle for a bundled source, the index it was installed
-from for a registry source.
-A source you installed from a file has no upstream and is left alone.
+**Updating** installs the newest version from the index a registry source was installed from.
+A source you installed from a file has no upstream and is left alone, and a bundled source is updated with MemCastle:
+`update` leaves it out, and `update pi` says so (`memcastle::source::bundled`).
 An update keeps the source's state.
 The consent you gave is to a set of permissions, not to a version, so an update that asks for the same permissions needs
 no new agreement, and one that asks for anything else is not installed until you agree to exactly those: the command says
@@ -184,6 +186,7 @@ memcastle source install claude --registry /mnt/usb/sources
 ```
 
 **Removing** a source deletes its files and its record; what it mined stays in the palace.
+A bundled source cannot be removed, since it comes with MemCastle: disable it instead.
 
 ## Trust
 
@@ -218,15 +221,24 @@ on disk after install is never run.
 
 ## Bundled sources
 
-Releases ship `pi` and `opencode` as packages, with an index, under `share/memcastle/sources/`:
+Releases ship `pi` and `opencode` unpacked, one directory each (`pi/memcastle-source.toml`, `pi/source.wasm`), under
+`share/memcastle/sources/`:
 in the release tarballs, as `/usr/share/memcastle/sources/` in the `.deb`, `.rpm` and AUR package, and under the formula's
 `share/memcastle/sources/` with Homebrew.
 The release also publishes them alone as `memcastle_<version>_sources.tar.gz`, which is what the AUR and Homebrew recipes
 fetch, since they install the raw binary asset and not a tarball.
 The daemon finds them beside the binary (the same search as other [runtime assets](configuration.md#runtime-assets)),
-or in `mining.bundled_dir`, so `memcastle source install pi` needs no registry and no network.
-They are not linked into the binary and are installed, updated and removed like any other source.
-A standalone binary carries none: install from a file or a registry instead.
+or in `mining.bundled_dir`.
+
+They are installed from the start, and run from where the release put them:
+`memcastle source list` shows them as `bundled` and `installed`, and `memcastle source enable pi` is all they need.
+Enabling is the consent: a bundled source is as trusted as the MemCastle that carries it, so it is not asked to be
+agreed to as an installed package is, and `memcastle source show pi` prints what it may read and run.
+They are not linked into the binary, and they cannot be installed again, updated or removed;
+only whether one is enabled is yours, and it survives an upgrade, which brings the new version of the source with it.
+A package file you install under the same name (`memcastle source install ./pi`) is read instead, and removing it brings
+the bundled one back.
+A standalone binary or a checkout carries none: install the official ones from the registry below.
 
 The set is a line in `packaging/sources/build.sh`, which a release and `mise run sources:package` both run,
 and it does not constrain the runtime: any directory under `sources/` could be added.
@@ -237,6 +249,70 @@ installs into, and `sources/` is one of the directories under it (see [Runtime a
 and [Agent integrations](integrations.md)).
 The `pi` and `opencode` sources here mine those agents' session history; they are not the integrations that run inside the
 agent.
+
+## The official registry
+
+The official registry is a static file in this repository, [`docs/registry.json`](https://github.com/noirbizarre/memcastle/blob/main/docs/registry.json),
+published with the documentation at `https://noirbizarre.github.io/memcastle/registry.json`.
+It lists no versions: it names the GitHub repositories that publish sources (`pi` and `opencode` are published by this one),
+and the daemon reads their releases.
+Registering a source, or changing where it comes from, is therefore a pull request to that file, merged and deployed like
+any documentation change, and publishing a new version is a release of the source's own repository: no new release of
+MemCastle and no change to the registry.
+It is the default value of `mining.registries`, so on any installation:
+
+```sh
+memcastle source search          # lists pi and opencode, and says which are already installed
+memcastle source install pi      # on a build with no bundle: after you agree to its permissions
+```
+
+Nothing is fetched until you run one of those commands, and a package from it is checked against its SHA-256 and your
+`mining.trust` policy like any other registry's.
+The official packages are not signed yet, so `trust = "required"` refuses them.
+Set `mining.registries` to use other registries instead of it, or to `[]` to use none.
+
+### Registering a GitHub repository
+
+An entry names the repository instead of listing versions:
+
+```json
+{
+  "name": "claude",
+  "description": "Claude Code session history",
+  "license": "MIT",
+  "repository": "example/memcastle-claude"
+}
+```
+
+The daemon lists the repository's releases (`GET /repos/example/memcastle-claude/releases`, one request for each
+repository however many sources it publishes) and takes from them:
+
+- every release that is neither a draft nor a prerelease;
+- the assets named `<name>-<version>.tar.gz`, which is what `memcastle source package` writes, where `<version>` is a
+  semantic version and `<name>` is the entry's name;
+- for each, the SHA-256 that GitHub computed when the asset was uploaded (the asset's `digest`), which the download is
+  then checked against like any other archive.
+  An asset with no digest, which GitHub only computes for uploads made since it started, is passed over with a warning:
+  upload it again.
+
+The newest release wins when several attach the same version.
+What GitHub reports is not a signature, so these packages count as unsigned, and a MemCastle whose `mining.trust` is
+`required` refuses them.
+The compatibility a package declares is checked when it is downloaded, so `search` may show a version that `install`
+then refuses with `memcastle::source::incompatible`.
+
+A repository that cannot be read (it does not exist, or GitHub's unauthenticated limit of 60 requests an hour for an
+address is spent) is a warning that names it, its sources are left out, and every other source in the registry still
+answers.
+
+Set `GH_TOKEN` or `GITHUB_TOKEN` in the daemon's environment (`GH_TOKEN` wins, as it does for `gh`) to lift that limit.
+The token is sent as a bearer token to the releases request and to nothing else: not to the archive downloads, not to a
+registry that is not GitHub, and not across a redirect to another host.
+A token with no scopes is enough, since the releases of a public repository are public, and a token for a private
+repository lets the daemon read its releases.
+It is read from the environment only, never from the configuration file, and it is not logged, reported or stored.
+`mining.github_api_url` points the daemon at another API, such as a GitHub Enterprise server, and the token is then
+presented to that server.
 
 ## When something goes wrong
 

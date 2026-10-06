@@ -110,10 +110,13 @@ An invariant nothing checks is a comment, and it will be violated.
    A source is built in or an installed WebAssembly component (`src/mining/wasm/`, the only module that names the
    runtime), behind the same contract, and the pipeline cannot tell which
    (see `docs/adr/026-pluggable-source-adapters-as-webassembly-components.md`).
-   Sources arrive from the bundle or a registry through `src/distribution/`, which only `app` calls
+   Sources arrive from a registry through `src/distribution/`, which only `app` calls
    (and `config`, only to parse a location at load), which touches neither
    the store, the jobs nor the runtime, and which returns bytes that have passed the index's SHA-256 and the trust policy
    (see `docs/adr/033-source-distribution.md`).
+   A source that ships with MemCastle arrives from nowhere: it is unpacked beside the binary, installed from the start,
+   and read in place by `src/mining/bundled.rs`, which touches neither the store, the jobs nor the network
+   (see `docs/adr/040-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md`).
    Entity extraction is the stage after: it reads drawers, names no source, and only adds graph records, never writing a
    drawer (see `docs/adr/024-entity-extraction-as-an-enrich-job.md`).
    Enforced by `tests/source_isolation.rs`, which fails on an adapter name or file access in `pipeline.rs`, `chunk.rs`
@@ -134,9 +137,16 @@ An invariant nothing checks is a comment, and it will be violated.
     Install, enable, disable and remove are REST and CLI only, with no MCP tool, so an agent cannot install code or widen
     its own reach (see `docs/adr/026-pluggable-source-adapters-as-webassembly-components.md`).
     The same holds for searching, installing from and updating from a registry, which make the daemon fetch code:
-    `mining.registries` is empty by default, a package must match its index's SHA-256 and carry the name and version the
-    index lists, and an update that asks for permissions the installed version did not is never installed without consent
+    `mining.registries` is the official registry by default and is read only when a user runs one of those commands,
+    never at startup, a package must match its index's SHA-256 (for an entry naming a GitHub repository, the digest
+    GitHub reports for the release asset; the `GH_TOKEN` that lifts its rate limit goes to that request alone), pass the
+    trust policy and carry the name and version the index lists,
+    and an update that asks for permissions the installed version did not is never installed without consent
     (see `docs/adr/033-source-distribution.md`).
+    A source that ships with MemCastle is the one exception to consent and trust, because it is the release itself:
+    enabling it needs no digest, it is never fetched, installed, updated or removed through a registry
+    (`memcastle::source::bundled`), and enabling it is still REST and CLI only
+    (see `docs/adr/040-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md`).
     A source that signs in with OAuth declares it as a permission (a public client and endpoints, part of the consent
     digest) and is given an access token only by `host.access-token`, never for `normalize` and never one it did not declare;
     signing a source in is REST and CLI only, with no MCP tool, so an agent cannot start one
@@ -150,11 +160,13 @@ An invariant nothing checks is a comment, and it will be violated.
     (every `/api/source-packages` and `/api/source-registry` route is guarded, no MCP tool installs, searches or changes
     a source), by `tests/source_isolation.rs` (`distribution` reaches no store, jobs or runtime, only `app` calls it, and
     `config` only to parse a location, the
-    local tooling and adapters open no network, and the digest and trust checks are in `Registry::fetch`) and by
+    local tooling and adapters open no network, the digest and trust checks are in `Registry::fetch` with no origin that
+    skips them, and the bundle is read from disk and nothing else) and by
     `tests/wasm_registry.rs` (a tampered or substituted package is never installed, `required` trust refuses what no
-    trusted key signed, an update never widens permissions silently)
-    and `tests/wasm_oauth.rs` (a source gets a token only with the declaration and the consent, and no token is kept
-    anywhere but the credential store).
+    trusted key signed, an update never widens permissions silently, a registry never installs, updates or replaces a
+    bundled source), `tests/wasm_bundle.rs` (the release script's bundle is listed as installed and enabled without
+    consent) and `tests/wasm_oauth.rs` (a source gets a token only with the declaration and the consent, and no token is
+    kept anywhere but the credential store).
 
 11. **The web dashboard is a client of the REST API and nothing else, and it is opt-in** —
     everything under `web/` reaches MemCastle only over HTTP, never storage, the job code or the database admin endpoint,
@@ -208,7 +220,8 @@ src/
 │               the directory adapter and the CLI's `note`; no store, no jobs
 ├── mining/     the mining job handler: the source adapter contract, the shared pipeline and chunker, the built-in adapters
 │               (the directory adapter alone reads a project's `.config/memcastle.toml`, for its default wing, through `project`),
-│               the registry that names them, and the WebAssembly host that runs installed sources (`wasm/`)
+│               the registry that names them, `bundled`, which reads the sources unpacked beside the binary, and the
+│               WebAssembly host that runs installed sources (`wasm/`)
 ├── integration/ agent integrations: manifest, discovery under the assets root, install/update/remove with a receipt, and
 │               the Pi and OpenCode adapters (no store, no jobs, no network, no daemon)
 ├── source/     source packages: manifest, archive, scaffolding, build, signing, publishing an index, and the conformance runner

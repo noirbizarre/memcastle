@@ -141,9 +141,9 @@ jobs:
           set -euo pipefail
           pacman -U --noconfirm ./*.pkg.tar.zst
           memcastle --version
-          # The bundled sources must land where the daemon looks for them, with their index.
-          test -f /usr/share/memcastle/sources/memcastle-index.json
-          ls /usr/share/memcastle/sources/*.tar.gz
+          # The bundled sources must land where the daemon looks for them, unpacked, one directory each.
+          test -f /usr/share/memcastle/sources/pi/source.wasm
+          test -f /usr/share/memcastle/sources/pi/memcastle-source.toml
           # The integrations must land there too, and be found from the binary's own prefix with no flag.
           test -f /usr/share/memcastle/integrations/pi/memcastle-integration.toml
           test -f /usr/share/memcastle/skills/wake-up/SKILL.md
