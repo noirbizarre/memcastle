@@ -6,7 +6,9 @@
 
 use axum::body::Bytes;
 use axum::extract::{Path, State};
-use axum::response::{IntoResponse, Json};
+use axum::http::HeaderValue;
+use axum::http::header::CACHE_CONTROL;
+use axum::response::{IntoResponse, Json, Response};
 use serde::Deserialize;
 
 use super::extract::ApiQuery;
@@ -70,4 +72,44 @@ pub(super) async fn remove(
 ) -> Result<impl IntoResponse, ApiError> {
     state.app.remove_source_package(&name).await?;
     Ok(Json(serde_json::json!({ "removed": name })))
+}
+
+/// `POST /api/source-packages/{name}/auth`: start signing the source in, and say what the user must do.
+///
+/// Administrative and REST-only: a sign-in lets a source act on an account, so an agent cannot start one. The answer
+/// holds the code the user types and the page to type it at, never a token, and is still kept out of every cache.
+pub(super) async fn auth_begin(
+    State(state): State<ApiState>,
+    Path(name): Path<String>,
+) -> Result<Response, ApiError> {
+    let challenge = state.app.begin_source_auth(&name).await?;
+    Ok(no_store(Json(challenge).into_response()))
+}
+
+#[derive(Deserialize)]
+pub(super) struct WaitQuery {
+    /// How long to hold the request open, in seconds; the daemon caps it.
+    #[serde(default)]
+    timeout: Option<u64>,
+}
+
+/// `POST /api/source-packages/{name}/auth/{flow}/wait`: a long poll for the end of a sign-in.
+///
+/// `{"status":"pending"}` means the user has not finished and the caller asks again; `signed_in` ends it, and a
+/// failed sign-in is an error answer.
+pub(super) async fn auth_wait(
+    State(state): State<ApiState>,
+    Path((name, flow)): Path<(String, String)>,
+    ApiQuery(query): ApiQuery<WaitQuery>,
+) -> Result<Response, ApiError> {
+    let window = std::time::Duration::from_secs(query.timeout.unwrap_or(25));
+    let status = state.app.wait_source_auth(&name, &flow, window).await?;
+    Ok(no_store(Json(status).into_response()))
+}
+
+fn no_store(mut response: Response) -> Response {
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }

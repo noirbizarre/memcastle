@@ -148,6 +148,9 @@ async fn every_other_route_is_guarded_including_ones_that_do_not_exist() {
         (Method::DELETE, "/api/source-packages/x"),
         (Method::POST, "/api/source-packages/x/enable"),
         (Method::POST, "/api/source-packages/x/disable"),
+        // Signing a source in with OAuth lets installed code act on an account (docs/adr/039): both routes are guarded.
+        (Method::POST, "/api/source-packages/x/auth"),
+        (Method::POST, "/api/source-packages/x/auth/y/wait"),
         // Registries make the daemon fetch code from elsewhere and install it (docs/adr/033): every route is guarded.
         (Method::GET, "/api/source-registry/search"),
         (Method::GET, "/api/source-registry/sources/x"),
@@ -403,6 +406,8 @@ async fn mcp_offers_no_way_to_install_or_change_a_mining_source() {
         "update",
         "trust",
         "sign",
+        // Signing a source in with OAuth (docs/adr/039): an agent must not start a sign-in either.
+        "oauth",
     ];
     for name in &names {
         assert!(

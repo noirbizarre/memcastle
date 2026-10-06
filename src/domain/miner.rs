@@ -366,6 +366,17 @@ webhook = "signal"
     }
 
     #[test]
+    fn an_oauth_credential_is_a_reference_with_nothing_to_name_and_nothing_secret_to_keep() {
+        let m = miner("name = \"a\"\nsource = \"b\"\ncredential = { type = \"oauth\" }\n");
+        assert_eq!(m.credential, Some(CredentialRef::Oauth));
+        assert_eq!(m.validate(), Ok(()));
+        assert_eq!(
+            serde_json::to_value(&m.credential).unwrap(),
+            json!({"type": "oauth"})
+        );
+    }
+
+    #[test]
     fn empty_required_fields_name_the_field() {
         let mut m = miner("name = \"a\"\nsource = \"b\"\n");
         m.source = " ".to_string();

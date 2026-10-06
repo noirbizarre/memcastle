@@ -368,7 +368,7 @@ fn manifest_text(contract: &str) -> String {
 
 #[test]
 fn bytes_that_are_not_a_component_or_do_not_fit_the_contract_are_incompatible_not_a_panic() {
-    let manifest = memcastle::source::manifest::parse(&manifest_text("0.2"), &[]).unwrap();
+    let manifest = memcastle::source::manifest::parse(&manifest_text("0.3"), &[]).unwrap();
     let config = MiningConfig::default();
 
     // The component header, then nonsense.
@@ -754,4 +754,199 @@ async fn the_cli_installs_a_package_that_asks_for_nothing_unasked_and_one_that_a
         .unwrap();
     assert!(String::from_utf8_lossy(&missing.stderr).contains("memcastle::source::not_found"));
     daemon.shutdown().await;
+}
+
+// --- OAuth: a source that signs in is handed a fresh access token, and only when it declared one (docs/adr/039) ---
+
+mod sign_in {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use memcastle::domain::{AccessTokens, CanonicalDocument, OAuthRequirement, Secret};
+
+    use super::*;
+
+    /// Hands out `token-1`, `token-2`, ... and can be made to refuse as a provider that revoked the grant would.
+    struct Tokens {
+        issued: AtomicUsize,
+        revoked: bool,
+    }
+
+    impl Tokens {
+        fn shared(revoked: bool) -> Arc<dyn AccessTokens> {
+            Arc::new(Self {
+                issued: AtomicUsize::new(0),
+                revoked,
+            })
+        }
+    }
+
+    impl AccessTokens for Tokens {
+        fn access_token(
+            &self,
+            source: &str,
+            requirement: &OAuthRequirement,
+        ) -> memcastle::Result<Secret> {
+            assert_eq!(
+                source, "oauth-demo",
+                "the token is asked for by the installed source's name"
+            );
+            assert_eq!(
+                requirement.client_id, "demo-client",
+                "and under what its manifest declares"
+            );
+            if self.revoked {
+                return Err(Error::CredentialRequired {
+                    source_name: source.to_string(),
+                    reason: "the provider no longer honours it".to_string(),
+                });
+            }
+            let n = self.issued.fetch_add(1, Ordering::SeqCst) + 1;
+            Ok(Secret::new(format!("token-{n}")))
+        }
+
+        fn is_signed_in(&self, _: &str, _: &OAuthRequirement) -> bool {
+            !self.revoked
+        }
+    }
+
+    /// A source whose `read` returns the access token as the document, and whose `normalize` asks for one when told to.
+    fn built() -> Built {
+        scaffold(
+            "oauth-demo",
+            Template::Rust,
+            |lib| {
+                lib.replace(
+                    "let Ok(body) = std::fs::read_to_string(&path) else {\n            return Ok(None);\n        };",
+                    "let _ = &path;\n        let body = memcastle::source::host::access_token().map_err(SourceError::Failed)?;",
+                )
+                .replace(
+                    "let metadata: Value = serde_json::from_str(&raw.metadata).unwrap_or(Value::Null);",
+                    "if raw.body == \"ask-in-normalize\" {\n            memcastle::source::host::access_token().map_err(SourceError::Failed)?;\n        }\n        let metadata: Value = serde_json::from_str(&raw.metadata).unwrap_or(Value::Null);",
+                )
+            },
+            |manifest| {
+                format!(
+                    "{}\n[permissions.oauth]\nclient_id = \"demo-client\"\nscopes = [\"read\"]\ntoken_url = \"https://auth.example.com/token\"\ndevice_authorization_url = \"https://auth.example.com/device\"\n",
+                    manifest.replace("needs_credentials = false", "needs_credentials = true")
+                )
+            },
+        )
+    }
+
+    fn load_with(built: &Built, tokens: Option<Arc<dyn AccessTokens>>) -> WasmAdapter {
+        let bytes = std::fs::read(built.project.component_path()).unwrap();
+        WasmAdapter::load_with(
+            &built.project.manifest,
+            &bytes,
+            &MiningConfig::default(),
+            tokens,
+        )
+        .unwrap()
+    }
+
+    fn raw(body: &str) -> RawDocument {
+        RawDocument {
+            external_id: "a".to_string(),
+            revision: "1".to_string(),
+            body: body.to_string(),
+            metadata: serde_json::json!({}),
+            occurred_at: None,
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_source_that_declared_a_sign_in_is_given_a_fresh_token_for_every_call() {
+        let built = built();
+        let adapter = load_with(&built, Some(Tokens::shared(false)));
+        let tree = files(&["a.txt"]);
+        let source = source(&adapter, tree.path());
+
+        let first = adapter.read(&source, &candidate("a.txt")).await.unwrap();
+        let second = adapter.read(&source, &candidate("a.txt")).await.unwrap();
+
+        // Asked for each time, because one token may have expired since the last: the host never caches it for the guest.
+        assert_eq!(first.unwrap().body, "token-1");
+        assert_eq!(second.unwrap().body, "token-2");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_credential_that_needs_signing_in_again_is_what_a_failed_read_reports_not_the_sources_own_message()
+     {
+        let built = built();
+        let adapter = load_with(&built, Some(Tokens::shared(true)));
+        let tree = files(&["a.txt"]);
+        let source = source(&adapter, tree.path());
+
+        let error = adapter
+            .read(&source, &candidate("a.txt"))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, Error::CredentialRequired { .. }), "{error}");
+        let help = miette::Diagnostic::help(&error).unwrap().to_string();
+        assert!(help.contains("memcastle source auth oauth-demo"), "{help}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn normalize_is_never_given_a_token_whatever_the_manifest_declares() {
+        let built = built();
+        let adapter = load_with(&built, Some(Tokens::shared(false)));
+
+        let plain: CanonicalDocument = adapter.normalize(&raw("plain")).unwrap();
+        assert_eq!(plain.segments[0].text, "plain");
+
+        let error = adapter.normalize(&raw("ask-in-normalize")).unwrap_err();
+        assert!(
+            matches!(error, Error::SourcePermissionDenied { .. }),
+            "normalize is pure by contract: {error}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_source_that_declared_no_sign_in_is_refused_a_token_even_when_the_daemon_has_them() {
+        let built = built();
+        let mut manifest = built.project.manifest.clone();
+        manifest.permissions.oauth = None;
+        manifest.capabilities.needs_credentials = false;
+        let bytes = std::fs::read(built.project.component_path()).unwrap();
+        let adapter = WasmAdapter::load_with(
+            &manifest,
+            &bytes,
+            &MiningConfig::default(),
+            Some(Tokens::shared(false)),
+        )
+        .unwrap();
+        let tree = files(&["a.txt"]);
+        let source = source(&adapter, tree.path());
+
+        let error = adapter
+            .read(&source, &candidate("a.txt"))
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(error, Error::SourcePermissionDenied { .. }),
+            "{error}"
+        );
+        assert!(error.to_string().contains("no access token"), "{error}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_daemon_with_no_credentials_refuses_the_token_rather_than_inventing_one() {
+        let built = built();
+        let adapter = load_with(&built, None);
+        let tree = files(&["a.txt"]);
+        let source = source(&adapter, tree.path());
+
+        let error = adapter
+            .read(&source, &candidate("a.txt"))
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(error, Error::SourcePermissionDenied { .. }),
+            "{error}"
+        );
+    }
 }

@@ -9,11 +9,12 @@
 //! removing are `crate::app`'s, and the source and document records are the pipeline's.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::config::MiningConfig;
 use crate::domain::{
-    Cursor, Permissions, RawDocument, SourceCapabilities, SourcePackageRecord, SourcePackageState,
-    SourceRef, SourceState, sha256_hex,
+    AccessTokens, Cursor, Permissions, RawDocument, SourceCapabilities, SourcePackageRecord,
+    SourcePackageState, SourceRef, SourceState, sha256_hex,
 };
 use crate::error::{Error, Result};
 use crate::source::manifest::check_compatible;
@@ -126,6 +127,7 @@ fn describe(adapter: &impl SourceAdapter) -> AdapterInfo {
         permissions: Permissions::default(),
         registry: None,
         signed_by: None,
+        auth: None,
     }
 }
 
@@ -181,6 +183,7 @@ pub fn describe_package(record: &SourcePackageRecord, sources_dir: &Path) -> Ada
         permissions: record.manifest.permissions.normalized(),
         registry: record.registry.clone(),
         signed_by: record.signed_by.clone(),
+        auth: None,
     }
 }
 
@@ -262,11 +265,12 @@ async fn unknown(store: &SurrealStore, mining: &MiningConfig, source: &str) -> E
 ///
 /// # Errors
 ///
-/// As [`ensure_minable`], and [`Error::SourceIncompatible`] or [`Error::SourceFailed`] when the component does not
-/// load.
+/// As [`ensure_minable`], [`Error::CredentialRequired`] when the source signs in with OAuth and nobody has signed it
+/// in, and [`Error::SourceIncompatible`] or [`Error::SourceFailed`] when the component does not load.
 pub async fn resolve(
     store: &SurrealStore,
     mining: &MiningConfig,
+    credentials: Option<&Arc<dyn AccessTokens>>,
     source: &str,
 ) -> Result<AnySource> {
     match source {
@@ -281,17 +285,56 @@ pub async fn resolve(
             minable_package(&record, &dir)?;
             let bytes = read_installed_component(&dir, &record.name)?;
             let manifest = record.manifest;
+            ensure_signed_in(&record.name, &manifest.permissions, credentials).await?;
             let mining = mining.clone();
+            let credentials = credentials.cloned();
             // Compiling a component is CPU-bound and takes noticeable time on first use.
-            let adapter =
-                tokio::task::spawn_blocking(move || WasmAdapter::load(&manifest, &bytes, &mining))
-                    .await
-                    .map_err(|e| Error::SourceFailed {
-                        name: other.to_string(),
-                        message: format!("loading was interrupted: {e}"),
-                    })??;
+            let adapter = tokio::task::spawn_blocking(move || {
+                WasmAdapter::load_with(&manifest, &bytes, &mining, credentials)
+            })
+            .await
+            .map_err(|e| Error::SourceFailed {
+                name: other.to_string(),
+                message: format!("loading was interrupted: {e}"),
+            })??;
             Ok(AnySource::Wasm(adapter))
         }
+    }
+}
+
+/// Refuse a source that signs in with OAuth before it starts, when nobody has signed it in.
+///
+/// Before any cursor or drawer is touched, so a run that cannot work fails at once with the one thing to do, and not
+/// halfway through a discovery with whatever the source made of a missing token.
+///
+/// # Errors
+///
+/// [`Error::CredentialRequired`] when the source declares `[permissions.oauth]` and has no credential to use.
+pub async fn ensure_signed_in(
+    name: &str,
+    permissions: &Permissions,
+    credentials: Option<&Arc<dyn AccessTokens>>,
+) -> Result<()> {
+    let Some(requirement) = permissions.oauth.clone() else {
+        return Ok(());
+    };
+    let required = |reason: &str| Error::CredentialRequired {
+        source_name: name.to_string(),
+        reason: reason.to_string(),
+    };
+    let Some(credentials) = credentials.cloned() else {
+        return Err(required("this daemon has no credential store"));
+    };
+    let source = name.to_string();
+    // The store may be a system service, so the question is asked off the async runtime.
+    let signed_in =
+        tokio::task::spawn_blocking(move || credentials.is_signed_in(&source, &requirement))
+            .await
+            .unwrap_or(false);
+    if signed_in {
+        Ok(())
+    } else {
+        Err(required("it has not been signed in"))
     }
 }
 
@@ -346,8 +389,8 @@ mod tests {
     fn an_intact_compatible_package_has_no_reason_to_be_unavailable() {
         let dir = tempfile::tempdir().unwrap();
         install_component(dir.path(), b"component");
-        assert_eq!(unavailable_reason(&record("0.2"), dir.path()), None);
-        let described = describe_package(&record("0.2"), dir.path());
+        assert_eq!(unavailable_reason(&record("0.3"), dir.path()), None);
+        let described = describe_package(&record("0.3"), dir.path());
         assert_eq!(described.state, SourceState::Enabled);
         assert_eq!(described.version.as_deref(), Some("1.0.0"));
     }
@@ -367,11 +410,11 @@ mod tests {
     #[test]
     fn a_package_whose_component_is_missing_or_altered_says_which() {
         let dir = tempfile::tempdir().unwrap();
-        let missing = unavailable_reason(&record("0.2"), dir.path()).unwrap();
+        let missing = unavailable_reason(&record("0.3"), dir.path()).unwrap();
         assert!(missing.contains("missing"), "{missing}");
 
         install_component(dir.path(), b"something else");
-        let altered = unavailable_reason(&record("0.2"), dir.path()).unwrap();
+        let altered = unavailable_reason(&record("0.3"), dir.path()).unwrap();
         assert!(altered.contains("no longer matches"), "{altered}");
     }
 
@@ -379,13 +422,13 @@ mod tests {
     fn a_disabled_package_is_not_minable_and_the_state_is_named() {
         let dir = tempfile::tempdir().unwrap();
         install_component(dir.path(), b"component");
-        let mut disabled = record("0.2");
+        let mut disabled = record("0.3");
         disabled.state = SourcePackageState::Disabled;
         let error = minable_package(&disabled, dir.path())
             .unwrap_err()
             .to_string();
         assert!(error.contains("disabled"), "{error}");
-        assert!(minable_package(&record("0.2"), dir.path()).is_ok());
+        assert!(minable_package(&record("0.3"), dir.path()).is_ok());
         let unavailable = minable_package(&record("0.9"), dir.path())
             .unwrap_err()
             .to_string();

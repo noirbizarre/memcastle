@@ -128,6 +128,18 @@ pub fn default_sources_dir() -> PathBuf {
         .join("sources")
 }
 
+/// The default directory for the owner-only credential file fallback: `$XDG_DATA_HOME/memcastle/credentials`.
+///
+/// User data and not state: a refresh token cannot be regenerated without the user signing in again. Relative when
+/// nothing resolves, for the same reason as [`default_palace_dir`]: the store then says what to set rather than writing
+/// a secret into the working directory.
+#[must_use]
+pub fn default_credentials_dir() -> PathBuf {
+    resolve_from_process(XdgDir::Data)
+        .unwrap_or_else(|| PathBuf::from(APP_DIR))
+        .join("credentials")
+}
+
 /// The default directory for installed agent integrations: `$XDG_DATA_HOME/memcastle/agents`.
 ///
 /// User data, not package content: an integration is copied here so that it keeps working when a package upgrade

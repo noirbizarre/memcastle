@@ -6,13 +6,14 @@
 //! is also what keeps sources stateless (docs/adr/026): nothing a call leaves behind is visible to the next.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use wasmtime::StoreLimits;
 use wasmtime::component::ResourceTable;
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
-use crate::domain::Permissions;
+use crate::domain::{AccessTokens, OAuthRequirement, Permissions};
 
 use super::process::{self, ProcessError, ProcessGrant};
 
@@ -20,6 +21,16 @@ wasmtime::component::bindgen!({
     path: "wit/memcastle-source.wit",
     world: "source",
 });
+
+/// What lets one call into a source ask for an access token: the sign-in its manifest declares, and who has the tokens.
+#[derive(Clone)]
+pub(super) struct TokenGrant {
+    /// The installed source's name, which is what its credential is kept under.
+    pub source: String,
+    /// What the manifest declares, so that a credential obtained under other terms is not used.
+    pub requirement: OAuthRequirement,
+    pub provider: Arc<dyn AccessTokens>,
+}
 
 /// The state of one call into a source.
 pub(super) struct HostState {
@@ -32,6 +43,11 @@ pub(super) struct HostState {
     /// The first permission the source asked for and was refused, so that a failure that follows can be reported as
     /// a permission problem rather than as whatever error the source made of it.
     pub denied: Option<String>,
+    /// How `access-token` is answered; none for a source that declared no sign-in, and for `normalize`.
+    tokens: Option<TokenGrant>,
+    /// Why the last token was not given, kept so that a failure the source makes of it is reported as what it is: a
+    /// credential that needs signing in again, and not whatever message the source wrote.
+    pub credential_failure: Option<crate::Error>,
 }
 
 impl WasiView for HostState {
@@ -64,6 +80,27 @@ impl memcastle::source::host::Host for HostState {
                 Err(message)
             }
             Err(ProcessError::Failed(message)) => Err(message),
+        }
+    }
+
+    fn access_token(&mut self) -> Result<String, String> {
+        let Some(grant) = &self.tokens else {
+            let message =
+                "no access token is available here: the source declared no `[permissions.oauth]`, or this call is not given credentials"
+                    .to_string();
+            self.denied.get_or_insert_with(|| message.clone());
+            return Err(message);
+        };
+        match grant
+            .provider
+            .access_token(&grant.source, &grant.requirement)
+        {
+            Ok(token) => Ok(token.expose().to_string()),
+            Err(error) => {
+                let message = error.to_string();
+                self.credential_failure = Some(error);
+                Err(message)
+            }
         }
     }
 }
@@ -107,6 +144,7 @@ pub(super) fn state(
     locator: Option<&str>,
     memory_bytes: usize,
     timeout: Duration,
+    tokens: Option<TokenGrant>,
 ) -> Result<HostState, String> {
     let mut wasi = WasiCtxBuilder::new();
     for directory in readable_directories(permissions, locator) {
@@ -139,6 +177,8 @@ pub(super) fn state(
             timeout,
         },
         denied: None,
+        tokens,
+        credential_failure: None,
     })
 }
 
@@ -194,7 +234,14 @@ mod tests {
     }
 
     fn host_state(permissions: &Permissions) -> HostState {
-        state(permissions, None, 16 * 1024 * 1024, Duration::from_secs(5)).unwrap()
+        state(
+            permissions,
+            None,
+            16 * 1024 * 1024,
+            Duration::from_secs(5),
+            None,
+        )
+        .unwrap()
     }
 
     #[test]

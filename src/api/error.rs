@@ -42,6 +42,8 @@ impl IntoResponse for ApiError {
             | Error::SourceIncompatible { .. }
             | Error::SourceConsentRequired { .. }
             | Error::SourceBuiltin { .. }
+            // Asking a source that does not sign in to sign in.
+            | Error::CredentialOauthUnsupported { .. }
             // A miner definition the caller wrote is theirs to fix.
             | Error::MinerInvalid { .. }
             // The trust policy is the daemon's configuration, but the package was the caller's choice.
@@ -54,7 +56,10 @@ impl IntoResponse for ApiError {
             | Error::ExtractionFailed { .. }
             // A registry is an upstream too: unreachable, or serving something other than what it published.
             | Error::SourceRegistryUnavailable { .. }
-            | Error::SourceIntegrity { .. } => StatusCode::BAD_GATEWAY,
+            | Error::SourceIntegrity { .. }
+            // An OAuth provider is an upstream too: it declined, expired the code, or could not be reached.
+            | Error::CredentialFlowFailed { .. }
+            | Error::CredentialRefreshFailed { .. } => StatusCode::BAD_GATEWAY,
             Error::ModeForbidden { .. } => StatusCode::FORBIDDEN,
             // 401, not 403: the caller is unidentified, which is different from
             // an identified caller being refused by its memory mode.
@@ -83,6 +88,8 @@ impl IntoResponse for ApiError {
             | Error::MinerDisabled { .. }
             | Error::MinerNotRunnable { .. }
             | Error::MinerConfigFile { .. }
+            // The request is fine; the source has not been signed in yet.
+            | Error::CredentialRequired { .. }
             | Error::PalaceBusy { .. } => StatusCode::CONFLICT,
             // The caller asked for something the daemon will not do (an unsafe
             // bind, or an endpoint for a database it does not embed): theirs to fix.

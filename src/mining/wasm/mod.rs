@@ -20,15 +20,15 @@ use wasmtime::{Config, Engine, Store, Trap};
 
 use crate::config::MiningConfig;
 use crate::domain::{
-    Candidate, CanonicalDocument, Cursor, Permissions, RawDocument, Segment, SourceCapabilities,
-    SourceKind, SourceManifest, SourceRef, sha256_hex,
+    AccessTokens, Candidate, CanonicalDocument, Cursor, Permissions, RawDocument, Segment,
+    SourceCapabilities, SourceKind, SourceManifest, SourceRef, sha256_hex,
 };
 use crate::error::{Error, Result};
 use crate::source::manifest::check_compatible;
 
 use super::adapter::{Discovery, SourceAdapter};
 use host::memcastle::source::types as wit;
-use host::{HostState, Source, SourcePre};
+use host::{HostState, Source, SourcePre, TokenGrant};
 
 /// How often the engine's epoch advances, which is the resolution of a source's time limit.
 const EPOCH_TICK: Duration = Duration::from_millis(50);
@@ -79,6 +79,9 @@ struct Inner {
     description: String,
     capabilities: SourceCapabilities,
     permissions: Permissions,
+    /// Who has the access tokens of a source that signs in. `None` where there are none to give (a conformance run, a
+    /// check at install), which a source that asks for one is told.
+    tokens: Option<Arc<dyn AccessTokens>>,
     engine: &'static Engine,
     pre: SourcePre<HostState>,
     memory_bytes: usize,
@@ -106,6 +109,21 @@ impl WasmAdapter {
     /// [`Error::SourceIncompatible`] when the manifest or the component does not fit this MemCastle, and
     /// [`Error::SourceFailed`] when the component does not run.
     pub fn load(manifest: &SourceManifest, bytes: &[u8], mining: &MiningConfig) -> Result<Self> {
+        Self::load_with(manifest, bytes, mining, None)
+    }
+
+    /// As [`WasmAdapter::load`], with the daemon's access tokens for a source that signs in with OAuth
+    /// (docs/adr/039).
+    ///
+    /// # Errors
+    ///
+    /// As [`WasmAdapter::load`].
+    pub fn load_with(
+        manifest: &SourceManifest,
+        bytes: &[u8],
+        mining: &MiningConfig,
+        tokens: Option<Arc<dyn AccessTokens>>,
+    ) -> Result<Self> {
         check_compatible(manifest)?;
         let name = manifest.source.name.clone();
         let incompatible = |reason: String| Error::SourceIncompatible {
@@ -157,6 +175,7 @@ impl WasmAdapter {
             description: manifest.source.description.clone(),
             capabilities: manifest.capabilities,
             permissions: manifest.permissions.normalized(),
+            tokens,
             engine,
             pre,
             memory_bytes: usize::try_from(memory_mib * 1024 * 1024).unwrap_or(usize::MAX),
@@ -201,7 +220,17 @@ impl Inner {
     ) -> Result<R> {
         let none = Permissions::default();
         let permissions = if granted { &self.permissions } else { &none };
-        let state = host::state(permissions, locator, self.memory_bytes, self.timeout)
+        // A token is offered only to a call that is granted its permissions, and only for the sign-in the manifest
+        // declares: `normalize` is pure, and a source that declared none has nothing to ask for.
+        let grant = match (granted, &self.permissions.oauth, &self.tokens) {
+            (true, Some(requirement), Some(provider)) => Some(TokenGrant {
+                source: self.name.clone(),
+                requirement: requirement.clone(),
+                provider: Arc::clone(provider),
+            }),
+            _ => None,
+        };
+        let state = host::state(permissions, locator, self.memory_bytes, self.timeout, grant)
             .map_err(|message| self.failed(message))?;
         let mut store = Store::new(self.engine, state);
         store.limiter(|state| &mut state.limits);
@@ -214,11 +243,15 @@ impl Inner {
             .instantiate(&mut store)
             .and_then(|instance| f(&mut store, instance.memcastle_source_adapter()));
         let denied = store.data().denied.clone();
-        match outcome {
-            Ok(Ok(value)) => Ok(value),
-            Ok(Err(error)) => Err(self.guest_error(error, denied)),
-            Err(trap) => Err(self.trap_error(&trap, denied)),
-        }
+        let credential = store.data_mut().credential_failure.take();
+        let failure = match outcome {
+            Ok(Ok(value)) => return Ok(value),
+            Ok(Err(error)) => self.guest_error(error, denied),
+            Err(trap) => self.trap_error(&trap, denied),
+        };
+        // The source asked for a token and was told why it has none; whatever it made of that, the fix is the
+        // credential's, so that is what is reported.
+        Err(credential.unwrap_or(failure))
     }
 
     fn failed(&self, message: impl Into<String>) -> Error {

@@ -24,7 +24,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::config::{DedupConfig, MiningConfig};
-use crate::domain::{Job, JobEvent, JobId, JobKind, JobStatus, Priority};
+use crate::domain::{AccessTokens, Job, JobEvent, JobId, JobKind, JobStatus, Priority};
 use crate::embed::Embeddings;
 use crate::error::Result;
 use crate::extract::Extraction;
@@ -122,6 +122,8 @@ pub struct Scheduler {
     extraction: Extraction,
     /// The `[dedup]` settings handed to every job's context.
     dedup: DedupConfig,
+    /// The access tokens of the sources that sign in with OAuth, handed to every job's context.
+    credentials: Option<Arc<dyn AccessTokens>>,
 }
 
 impl Scheduler {
@@ -145,7 +147,15 @@ impl Scheduler {
             mining: MiningConfig::default(),
             extraction: Extraction::disabled(),
             dedup: DedupConfig::default(),
+            credentials: None,
         }
+    }
+
+    /// Give the scheduler the access tokens of the sources that sign in with OAuth.
+    #[must_use]
+    pub fn with_credentials(mut self, credentials: Arc<dyn AccessTokens>) -> Self {
+        self.credentials = Some(credentials);
+        self
     }
 
     /// Give the scheduler the deduplication settings (see `[dedup]`).
@@ -715,7 +725,8 @@ impl Scheduler {
             .with_embeddings(self.embeddings.clone())
             .with_extraction(self.extraction.clone())
             .with_dedup(self.dedup.clone())
-            .with_mining(self.mining.clone());
+            .with_mining(self.mining.clone())
+            .with_credentials(self.credentials.clone());
 
         let kind_wrote_drawers =
             matches!(job.kind, JobKind::Mine { .. } | JobKind::Checkpoint { .. });

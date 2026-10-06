@@ -7,7 +7,7 @@ description = "OpenCode coding-agent session history, acquired through the openc
 
 [compatibility]
 # The contract (wit/memcastle-source.wit) this component was built against, and the MemCastle versions it runs on.
-contract = "0.2"
+contract = "0.3"
 memcastle = ">=0.2"
 
 [capabilities]
