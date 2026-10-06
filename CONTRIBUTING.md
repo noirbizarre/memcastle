@@ -119,22 +119,17 @@ See [ADR-013](docs/adr/013-release-packaging-and-asset-resolution.md) for the re
 
 Where 📦 Publish Release is dispatched decides whether it publishes.
 gh-ship dispatches it on the release tag, which builds, attests and uploads as above.
-A run dispatched on a branch is a trial: it builds the legs, writes a table of build time and binary size to the run's
-summary, and never reaches the publish job.
+A run dispatched on a branch is a trial: it builds every leg, writes a table of build time and binary size to the
+run's summary, and never reaches the publish job.
 
 ```sh
-gh workflow run publish-release.yaml --ref <branch> -f tag=trial \
-  -f targets=aarch64-apple-darwin -f lto=thin -f codegen_units=16 -f timings=true
+gh workflow run publish-release.yaml --ref <branch> -f tag=trial
 ```
 
 On a branch, `tag` is only a label for the asset names.
-The optional inputs exist for trials only, and a run on a tag refuses them:
-
-- `targets` is a comma-separated subset of the five targets; empty builds all of them;
-- `lto` (`fat`, `thin` or `off`) and `codegen_units` override `[profile.release]` without editing `Cargo.toml`;
-- `timings` passes `--timings` to cargo and uploads its report as the `timings-<platform>` artifact.
-
-A trial's binaries expire after three days, since they exist only to compare sizes.
+There are no trial options: to try a different profile, edit `[profile.release]` in `Cargo.toml` on the branch
+(or change the workflow itself), and dispatch that branch, which runs the branch's own copy of the workflow.
+A trial's binaries are ordinary artifacts, so compare their sizes against the release assets as well as the times.
 
 The release profile is thin LTO with one codegen unit, chosen from trials of 0.3.0's build:
 fat LTO took 53 to 59 minutes on the macOS legs, thin LTO under 28 on every leg for a binary 8% larger.
