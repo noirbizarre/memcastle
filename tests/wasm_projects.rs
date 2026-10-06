@@ -61,7 +61,9 @@ fn load(built: &Built) -> WasmAdapter {
 }
 
 fn source(adapter: &WasmAdapter, locator: &Path) -> SourceRef {
-    adapter.identify(locator.to_str()).unwrap()
+    adapter
+        .identify(locator.to_str(), &Default::default())
+        .unwrap()
 }
 
 fn candidate(handle: &str) -> Candidate {
@@ -328,14 +330,14 @@ async fn every_way_a_component_can_answer_becomes_the_matching_error_or_value() 
     assert_eq!(adapter.default_wing(&source), source.locator);
     assert!(format!("{adapter:?}").contains("misbehaving"));
     assert!(
-        adapter.identify(None).is_err(),
+        adapter.identify(None, &Default::default()).is_err(),
         "a missing locator is the guest's invalid-input"
     );
 
     // Called from a thread with no async runtime at all, the same synchronous methods still work.
     let outside = std::thread::scope(|scope| {
         scope
-            .spawn(|| adapter.identify(tree.path().to_str()))
+            .spawn(|| adapter.identify(tree.path().to_str(), &Default::default()))
             .join()
             .unwrap()
     });
@@ -368,7 +370,7 @@ fn manifest_text(contract: &str) -> String {
 
 #[test]
 fn bytes_that_are_not_a_component_or_do_not_fit_the_contract_are_incompatible_not_a_panic() {
-    let manifest = memcastle::source::manifest::parse(&manifest_text("0.3"), &[]).unwrap();
+    let manifest = memcastle::source::manifest::parse(&manifest_text("0.4"), &[]).unwrap();
     let config = MiningConfig::default();
 
     // The component header, then nonsense.

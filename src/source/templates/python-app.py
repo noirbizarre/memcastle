@@ -49,12 +49,15 @@ def revision_of(body):
 
 
 class Adapter(exports.Adapter):
-    def identify(self, locator):
+    def identify(self, locator, options):
+        # A source that accepts no options refuses one rather than ignoring it: a typo would otherwise mine everything.
+        if options:
+            raise Err(SourceError_InvalidInput("this source has no option `%s`" % options[0][0]))
         if locator is None:
             raise Err(SourceError_InvalidInput("give the directory to mine"))
         if not os.path.isdir(locator):
             raise Err(SourceError_InvalidInput("%s is not a directory this source can read" % locator))
-        return SourceRef(source=NAME, account=None, locator=locator)
+        return SourceRef(source=NAME, account=None, locator=locator, options=[])
 
     def default_wing(self, source):
         return os.path.basename(source.locator.rstrip("/")) or "unnamed"

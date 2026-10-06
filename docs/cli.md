@@ -305,21 +305,67 @@ memcastle note "..." | jq -r .id                              # the stable ident
 ### `mine`
 
 ```sh
-memcastle mine <PATH> [--wing <WING>] [--full]
-memcastle mine --source <NAME> [--locator <WHERE>] [--wing <WING>] [--full]
+memcastle mine <SOURCE> [PLACE] [KEY=VALUE]... [--wing <WING>] [--full]
+memcastle mine <PATH> [KEY=VALUE]... [--wing <WING>] [--full]
+```
+
+```sh
+memcastle mine directory /some/path
+memcastle mine /some/path                                        # the same: a path is the directory shorthand
+memcastle mine opencode since=2026-09 dir=/path/to/workspace
+memcastle mine pi /backups/pi/sessions since=2026-09-14 --full
 ```
 
 Submits a job that reads a source into drawers: a directory (one drawer per file, or several for a long one), or a named
 source such as `pi` or `opencode`, a coding agent's session history (installed sources: see
 [Mining sources](mining-sources.md#pi) and [`opencode`](mining-sources.md#opencode)).
+The first word says what to read.
+`directory` is the built-in source and takes the path to read as its one `PLACE`.
+Any other word is the name of a source (`memcastle sources` lists them with the options each accepts).
+A word that cannot be a source name is always a directory: one with a `/`, one that starts with `.` or `~`, or one with
+a capital letter, so `memcastle mine .` and `memcastle mine ~/project` keep working as the shorthand for
+`memcastle mine directory <path>`.
+A plain word that is not a source but is a directory in the current directory is a directory too, as it always was;
+a source of that name wins, so write `./pi` for a directory called `pi`.
+Anything else is refused with the list of sources.
+After it come at most one bare word, the `PLACE` to read within the source (`pi`'s sessions directory; `directory`'s
+path), and any number of `KEY=VALUE` options in any order.
+A word is an option when its key is lowercase letters, digits, `-` or `_` and starts with a letter,
+so a path that contains an `=` (`./a=b`) is still a path.
+An option's key may be given once.
+Each source declares the options it accepts, and the daemon refuses any other key before it queues the job,
+naming the ones it accepts:
+
+| Source | Option | Meaning |
+| --- | --- | --- |
+| `directory` | `since=DATE` | Only files modified at or after `DATE`. |
+| `pi` | `since=DATE` | Only sessions modified at or after `DATE`. |
+| `pi` | `dir=PATH` | Only sessions started in this working directory, or in directories matching a pattern. |
+| `opencode` | `since=DATE` | Only sessions updated at or after `DATE`. |
+| `opencode` | `dir=PATH` | Only sessions of this project directory, or of directories matching a pattern. |
+
+`DATE` is `2026-09` (the first of the month), `2026-09-14` or an RFC 3339 time, in UTC.
+A `dir` selects a different slice of the same history, so each directory has a cursor of its own;
+`since` only narrows, so it shares the source's cursor, and `--full` is how to read back past it.
+A `path` option is made absolute against the shell's working directory before the daemon sees it, like the path of `directory`.
+
+A `dir` is a directory or a pattern in which `*` matches any run of characters, `/` included:
+`dir=/work/app` is one project and `'dir=/work/*'` is every project under `/work`, however deeply nested.
+Quote a pattern, because a shell expands an unquoted star before `memcastle` sees it (zsh refuses with "no matches found").
+It is compared the way the tools record a working directory, so how it is spelled does not matter:
+the CLI makes it absolute, removes `.`, `..` and trailing or doubled slashes, and resolves links in the part that exists
+(the part before the first `*` in a pattern), and the source applies the same clean-up to the value it compares with.
+Only `*` is a wildcard; `?` and `[` are ordinary characters.
 Mining is incremental and idempotent: the daemon remembers where each source's last run stopped,
 so mining it again reads only what changed and files nothing twice.
 `--wing` defaults to the wing the directory's [project file](project-config.md#mining) declares, else the directory's
 name, or to the source's own default.
 `--full` reads the source again from the beginning; unchanged documents are still skipped, so nothing is duplicated.
-`--locator` names where within a source to read, when it needs more than its default; for `pi` it is a sessions
-directory, and it must be an absolute path.
+The `PLACE` names where within a source to read, when it needs more than its default; for `pi` it is a sessions
+directory.
+It is made absolute for a source that reads it as a directory.
 For `opencode` it is only a name for the history (OpenCode decides where its own database is), and is rarely needed.
+The `--source` and `--locator` flags of earlier versions are gone: the source is the first word and the locator is the `PLACE`.
 The command returns the job immediately; follow it with `memcastle job show <id>`.
 In a terminal it prints the queued job as a short card (kind, status, source, wing, progress) and that hint;
 piped, or with `--json`, it prints the job as JSON, whose `id` is what `job show` takes.
@@ -497,7 +543,11 @@ The file is edited in place: its comments and the other tables are kept.
 cursor stay.
 `reload` reads the file again now and says what changed; the daemon also notices an edited file on its own.
 `run` submits the miner's mining job and prints it, like `mine`, continuing from the cursor its source has;
-it refuses a disabled miner, and one that has a scope or settings, because no source applies them yet.
+it refuses a disabled miner.
+The miner's `scope` and settings are passed to the source as the run's options,
+exactly as `memcastle mine <source> key=value` would:
+a scalar is its text, a list of strings is comma-joined,
+a key the source does not declare makes the miner not runnable, and a key in both tables or a nested table is refused.
 
 `list` and `get` are reads, so they take `--mode` and a `disabled` session cannot use them, and `run` is a write;
 the others are administrative: `--mode` is accepted (it is a global flag) but ignored by them,

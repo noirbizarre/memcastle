@@ -33,7 +33,7 @@ The REST API and MCP are unaffected.
 | Graph | The knowledge graph: an overview, or the neighbourhood of one entity up to three hops, with each fact's provenance and the drawers that mention an entity. |
 | Diary | Read an agent's diary by identity and wing, and write an entry. |
 | Jobs | Active jobs and history, filtered by state and kind, with progress, parameters and results; pause, resume, cancel and retry. |
-| Launch | Submit a mine job (a directory or an installed source), an extract job or an embed job. |
+| Launch | Submit a mine job (a directory or an installed source, with the options that source declares, such as `since`), an extract job or an embed job. |
 | Maintenance | Run an audit or a repair (a dry run first), and see the last report of each. |
 | Settings | The configuration in effect, from `GET /api/config`: no secret, and nothing read from the files. |
 

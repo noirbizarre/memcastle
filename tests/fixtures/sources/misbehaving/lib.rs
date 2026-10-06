@@ -30,9 +30,16 @@ fn raw(candidate: &Candidate, metadata: &str, occurred_at: Option<&str>) -> RawD
 }
 
 impl Guest for Source {
-    fn identify(locator: Option<String>) -> Result<SourceRef, SourceError> {
+    fn identify(
+        locator: Option<String>,
+        options: Vec<(String, String)>,
+    ) -> Result<SourceRef, SourceError> {
+        // A source that accepts no options refuses one rather than ignoring it: a typo would otherwise mine everything.
+        if let Some((key, _)) = options.first() {
+            return Err(SourceError::InvalidInput(format!("this source has no option `{key}`")));
+        }
         let locator = locator.ok_or_else(|| SourceError::InvalidInput("a directory, please".to_string()))?;
-        Ok(SourceRef { source: "misbehaving".to_string(), account: None, locator })
+        Ok(SourceRef { source: "misbehaving".to_string(), account: None, locator, options: Vec::new() })
     }
 
     fn default_wing(source: SourceRef) -> String {

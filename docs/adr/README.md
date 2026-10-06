@@ -159,3 +159,9 @@ The history is the value.
   the dashboard reads it with `fetch` (not `EventSource`, which cannot send the token) and `useLoad` re-reads quietly,
   keeping the Refresh button for a stream-less session or a shared remote palace
   (amends ADR-035, builds on ADR-006, ADR-007 and ADR-014)
+- [ADR-042](042-mine-takes-a-source-and-its-options.md) — `memcastle mine <source> [place] [key=value]...` replaces
+  `--source` and `--locator`, with `memcastle mine <path>` kept as the directory shorthand;
+  sources declare the options they accept (`[options.<name>]`) and the daemon refuses the rest before queuing,
+  the source contract is `0.4.0` (`identify` takes the options, `source-ref` carries them) and the source decides which
+  options are identity and which only narrow, and a miner's scope and settings become the options of its run
+  (amends ADR-023, ADR-026 and ADR-037)

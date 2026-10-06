@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::domain::{Candidate, CanonicalDocument, Cursor, SourceRef};
+use crate::domain::{Candidate, CanonicalDocument, Cursor, Options, SourceRef};
 use crate::error::{Error, Result};
 use crate::mining::adapter::SourceAdapter;
 
@@ -34,6 +34,9 @@ pub struct Case {
     pub description: String,
     /// The tree to mine, relative to the case's directory.
     pub locator: String,
+    /// The options of the run (`since`, ...), when the case is about one.
+    #[serde(default)]
+    pub options: Options,
     /// The page size discovery is asked for. Smaller than the number of documents, so paging is exercised.
     pub limit: usize,
     /// The documents the source must produce, and what each must normalize to.
@@ -152,7 +155,7 @@ pub async fn run_case<A: SourceAdapter>(adapter: &A, case: &Case, tree: &Path) -
     }
 
     let locator = tree.display().to_string();
-    let source = match adapter.identify(Some(&locator)) {
+    let source = match adapter.identify(Some(&locator), &case.options) {
         Ok(source) => source,
         Err(error) => {
             fail(format!("identify({locator}) failed: {error}"));
@@ -166,7 +169,7 @@ pub async fn run_case<A: SourceAdapter>(adapter: &A, case: &Case, tree: &Path) -
             adapter.name()
         ));
     }
-    match adapter.identify(Some(&locator)) {
+    match adapter.identify(Some(&locator), &case.options) {
         Ok(again) if again == source => {}
         Ok(_) => fail("identify gave a different identity for the same locator".to_string()),
         Err(error) => fail(format!("identify failed the second time: {error}")),
@@ -369,6 +372,7 @@ mod tests {
             name: "t".into(),
             description: "t".into(),
             locator: dir.display().to_string(),
+            options: Options::new(),
             limit: 1,
             documents: expected_ids
                 .iter()
@@ -501,14 +505,14 @@ mod tests {
             self.inner.capabilities()
         }
 
-        fn identify(&self, locator: Option<&str>) -> Result<SourceRef> {
+        fn identify(&self, locator: Option<&str>, options: &Options) -> Result<SourceRef> {
             if self.is(Fault::IdentifyFails) {
                 return Err(Error::invalid_input("locator", "refused"));
             }
             if self.is(Fault::IdentifyFailsTheSecondTime) && self.tick() >= 1 {
                 return Err(Error::invalid_input("locator", "refused again"));
             }
-            let mut source = self.inner.identify(locator)?;
+            let mut source = self.inner.identify(locator, options)?;
             if self.is(Fault::WrongSource) {
                 source.source = "someone-else".to_string();
             }
@@ -676,11 +680,7 @@ mod tests {
     #[test]
     fn the_wrapper_delegates_what_it_does_not_break() {
         let faulty = Faulty::new(Fault::EmptyName);
-        let source = SourceRef {
-            source: "directory".into(),
-            account: None,
-            locator: "/data/notes".into(),
-        };
+        let source = SourceRef::new("directory", None, "/data/notes");
         assert_eq!(faulty.default_wing(&source), "notes");
         assert_eq!(faulty.default_room(), "files");
     }

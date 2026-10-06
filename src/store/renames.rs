@@ -227,6 +227,7 @@ mod tests {
                 },
                 wing: None,
                 full: false,
+                options: Default::default(),
             },
             Priority::Normal,
             "test",

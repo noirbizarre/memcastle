@@ -61,16 +61,17 @@ pub use search::{
 };
 pub use secret::Secret;
 pub use source::{
-    Candidate, CanonicalDocument, ChunkRef, CredentialRef, Cursor, RawDocument, Segment,
-    SourceCapabilities, SourceDocumentRecord, SourceRecord, SourceRef,
+    Candidate, CanonicalDocument, ChunkRef, CredentialRef, Cursor, OptionKind, OptionSpec, Options,
+    RawDocument, Segment, SourceCapabilities, SourceDocumentRecord, SourceRecord, SourceRef,
+    is_option_key, parse_since, unknown_option,
 };
 pub use source_index::{INDEX_FORMAT, IndexSignature, IndexedSource, IndexedVersion, SourceIndex};
 pub use source_package::{
     BuildSection, CONTRACT_VERSION, Compatibility, FilesystemPermissions, MANIFEST_FORMAT,
-    MAX_SOURCE_NAME_LEN, ManifestSource, OAuthRequirement, PackageTransitionError, Permissions,
-    ResourceLimits, SourceManifest, SourceOrigin, SourcePackageEvent, SourcePackageRecord,
-    SourcePackageState, SourceState, TestSection, contract_compatibility, contract_version,
-    is_secure_endpoint, is_valid_source_name, version_compatibility,
+    MAX_SOURCE_NAME_LEN, ManifestOption, ManifestSource, OAuthRequirement, PackageTransitionError,
+    Permissions, ResourceLimits, SourceManifest, SourceOrigin, SourcePackageEvent,
+    SourcePackageRecord, SourcePackageState, SourceState, TestSection, contract_compatibility,
+    contract_version, is_secure_endpoint, is_valid_source_name, version_compatibility,
 };
 
 /// The channels a write can come through, recorded as `Job::requested_by` and

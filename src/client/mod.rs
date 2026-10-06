@@ -16,6 +16,7 @@ use serde_json::json;
 
 pub mod hit_view;
 pub mod job_view;
+pub mod mine;
 pub mod miner_view;
 mod miners;
 mod palace;
@@ -33,7 +34,9 @@ use crate::app::{
 };
 use crate::config::Secret;
 use crate::domain::channel::CLI as CHANNEL;
-use crate::domain::{CheckpointPayload, Drawer, Job, JobId, JobStatus, MemoryMode, MiningSource};
+use crate::domain::{
+    CheckpointPayload, Drawer, Job, JobId, JobStatus, MemoryMode, MiningSource, Options,
+};
 use crate::error::{Error, Result};
 use crate::search::{SearchHit, SearchQuery};
 use crate::server::lifecycle;
@@ -438,6 +441,7 @@ impl DaemonClient {
     pub async fn submit_mine(
         &self,
         source: MiningSource,
+        options: Options,
         wing: Option<String>,
         full: bool,
     ) -> Result<Job> {
@@ -450,6 +454,10 @@ impl DaemonClient {
         body["requested_by"] = json!(CHANNEL);
         if full {
             body["full"] = json!(true);
+        }
+        // Left off when empty too, for the same reason: an older daemon reads the plain request it always did.
+        if !options.is_empty() {
+            body["options"] = json!(options);
         }
         self.send(
             self.http

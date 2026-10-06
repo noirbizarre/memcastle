@@ -847,6 +847,7 @@ mod tests {
             registry: None,
             signed_by: None,
             auth: None,
+            options: Vec::new(),
         }
     }
 

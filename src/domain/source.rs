@@ -11,6 +11,8 @@
 //!
 //! Optional semantic processing (entity extraction, summaries) is a separate stage that reads what ingest wrote.
 
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -46,10 +48,115 @@ pub enum CredentialRef {
     Oauth,
 }
 
+/// What a user passed to one mining run beyond the source and where to read: `since=2026-09`, `dir=/work/app`.
+///
+/// Strings on the wire, so a REST client, an MCP agent and the CLI all say the same thing; each source parses its own
+/// values in `identify` and refuses what it cannot (docs/adr/041).
+pub type Options = BTreeMap<String, String>;
+
+/// What kind of value an option takes. Descriptive for a person and for the CLI, which makes a `path` absolute against
+/// the shell's directory before the daemon, which may run elsewhere, sees it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OptionKind {
+    /// Free text.
+    #[default]
+    String,
+    /// A file or directory on the machine running the command.
+    Path,
+    /// A date (`2026-09`, `2026-09-14`) or an RFC 3339 instant; see [`parse_since`].
+    Date,
+}
+
+/// One option a source accepts: what the daemon checks a run's keys against, and what a person is shown.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OptionSpec {
+    /// The key, `[a-z][a-z0-9_-]*`.
+    pub name: String,
+    /// One line saying what the option does.
+    pub description: String,
+    /// What its value looks like.
+    #[serde(default, rename = "type")]
+    pub kind: OptionKind,
+}
+
+impl OptionSpec {
+    /// An option, for a built-in source to declare.
+    #[must_use]
+    pub fn new(name: &str, description: &str, kind: OptionKind) -> Self {
+        Self {
+            name: name.to_string(),
+            description: description.to_string(),
+            kind,
+        }
+    }
+}
+
+/// Whether `key` is a well-formed option name: a lowercase letter, then lowercase letters, digits, `_` or `-`.
+///
+/// The same rule the CLI uses to tell `since=2026` from a path that happens to contain `=`.
+#[must_use]
+pub fn is_option_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    chars.next().is_some_and(|c| c.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
+/// The first thing wrong with `options` for a source accepting `accepted`, as a message that names the key and lists
+/// what is accepted. `None` when every key is known.
+#[must_use]
+pub fn unknown_option(options: &Options, accepted: &[OptionSpec]) -> Option<String> {
+    let key = options
+        .keys()
+        .find(|key| !accepted.iter().any(|spec| &spec.name == *key))?;
+    let known = if accepted.is_empty() {
+        "it accepts none".to_string()
+    } else {
+        format!(
+            "it accepts {}",
+            accepted
+                .iter()
+                .map(|spec| format!("`{}`", spec.name))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    Some(format!("unknown option `{key}`; {known}"))
+}
+
+/// Parse a `since` value: `YYYY-MM` (the first of the month), `YYYY-MM-DD`, or an RFC 3339 instant, all in UTC.
+///
+/// # Errors
+///
+/// A message saying what was expected, for the source to wrap in its own invalid-input error.
+pub fn parse_since(value: &str) -> Result<DateTime<Utc>, String> {
+    let value = value.trim();
+    if let Ok(instant) = DateTime::parse_from_rfc3339(value) {
+        return Ok(instant.with_timezone(&Utc));
+    }
+    // A month alone has no day, so complete it: `NaiveDate` will not parse a partial date.
+    let complete = if value.len() == 7 {
+        format!("{value}-01")
+    } else {
+        value.to_string()
+    };
+    chrono::NaiveDate::parse_from_str(&complete, "%Y-%m-%d")
+        .ok()
+        .and_then(|date| date.and_hms_opt(0, 0, 0))
+        .map(|naive| naive.and_utc())
+        .ok_or_else(|| {
+            format!("`{value}` is not a date; use `2026-09`, `2026-09-14` or an RFC 3339 time")
+        })
+}
+
 /// The identity of a source: which system, which account on it, and which part of it.
 ///
 /// Two jobs mining "the same place" must agree on the source, because the source is what carries the cursor and what
 /// documents belong to; [`SourceRef::id`] is therefore derived from these three fields and nothing else.
+///
+/// [`SourceRef::options`] is deliberately not one of them: it is what this run was asked, handed back to `discover` and
+/// `read`. A filter that selects a different slice of the same place has to be folded into `account` or `locator` by
+/// the source in `identify`, so each slice has a cursor of its own.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceRef {
     /// The adapter's name (`directory`, `pi`, ...).
@@ -59,9 +166,34 @@ pub struct SourceRef {
     pub account: Option<String>,
     /// The part of the source to read: a directory path, a sessions root, a channel, a repository.
     pub locator: String,
+    /// The options of this run, as the source validated and normalised them in `identify`. Never stored.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub options: Options,
 }
 
 impl SourceRef {
+    /// A source with no options of this run.
+    #[must_use]
+    pub fn new(
+        source: impl Into<String>,
+        account: Option<String>,
+        locator: impl Into<String>,
+    ) -> Self {
+        Self {
+            source: source.into(),
+            account,
+            locator: locator.into(),
+            options: Options::new(),
+        }
+    }
+
+    /// The same source carrying the options of a run.
+    #[must_use]
+    pub fn with_options(mut self, options: Options) -> Self {
+        self.options = options;
+        self
+    }
+
     /// The stable identifier of this source.
     #[must_use]
     pub fn id(&self) -> SourceId {
@@ -217,11 +349,11 @@ impl SourceRecord {
     /// The identity this record stands for.
     #[must_use]
     pub fn reference(&self) -> SourceRef {
-        SourceRef {
-            source: self.source.clone(),
-            account: self.account.clone(),
-            locator: self.locator.clone(),
-        }
+        SourceRef::new(
+            self.source.clone(),
+            self.account.clone(),
+            self.locator.clone(),
+        )
     }
 }
 
@@ -266,11 +398,7 @@ mod tests {
     use super::*;
 
     fn reference(account: Option<&str>, locator: &str) -> SourceRef {
-        SourceRef {
-            source: "demo".into(),
-            account: account.map(str::to_string),
-            locator: locator.into(),
-        }
+        SourceRef::new("demo", account.map(str::to_string), locator)
     }
 
     #[test]
@@ -298,6 +426,74 @@ mod tests {
         assert_ne!(
             reference(Some("ab"), "").id(),
             reference(Some("a"), "b").id()
+        );
+    }
+
+    #[test]
+    fn the_options_of_a_run_are_not_part_of_the_source_identity() {
+        let plain = reference(None, "/a");
+        let with = plain.clone().with_options(Options::from([(
+            "since".to_string(),
+            "2026-09".to_string(),
+        )]));
+        assert_eq!(
+            plain.id(),
+            with.id(),
+            "a narrowing filter must not give a run a cursor of its own, or `since` would re-read everything"
+        );
+    }
+
+    #[test]
+    fn a_since_value_is_a_month_a_day_or_an_instant() {
+        let month = parse_since("2026-09").unwrap();
+        assert_eq!(month.to_rfc3339(), "2026-09-01T00:00:00+00:00");
+        assert_eq!(
+            parse_since("2026-09-14").unwrap().to_rfc3339(),
+            "2026-09-14T00:00:00+00:00"
+        );
+        assert_eq!(
+            parse_since("2026-09-14T10:00:00+02:00")
+                .unwrap()
+                .to_rfc3339(),
+            "2026-09-14T08:00:00+00:00"
+        );
+    }
+
+    #[test]
+    fn a_since_value_that_is_not_a_date_says_what_is_expected() {
+        let message = parse_since("last week").unwrap_err();
+        assert!(
+            message.contains("`last week`") && message.contains("2026-09"),
+            "{message}"
+        );
+        assert!(parse_since("2026-13").is_err(), "a month 13 is not a date");
+    }
+
+    #[test]
+    fn an_option_key_is_lowercase_words_and_a_path_is_not_one() {
+        assert!(is_option_key("since") && is_option_key("max-age_2"));
+        assert!(
+            !is_option_key("./a")
+                && !is_option_key("Since")
+                && !is_option_key("")
+                && !is_option_key("2x")
+        );
+    }
+
+    #[test]
+    fn an_unknown_option_names_the_key_and_lists_what_is_accepted() {
+        let accepted = [OptionSpec::new("since", "from", OptionKind::Date)];
+        let options = Options::from([("dir".to_string(), "/x".to_string())]);
+        let message = unknown_option(&options, &accepted).unwrap();
+        assert!(
+            message.contains("`dir`") && message.contains("`since`"),
+            "{message}"
+        );
+        assert!(unknown_option(&Options::new(), &accepted).is_none());
+        assert!(
+            unknown_option(&options, &[])
+                .unwrap()
+                .contains("accepts none")
         );
     }
 

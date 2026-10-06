@@ -11,7 +11,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 
 const NAME = "__NAME__";
 
-type SourceRef = { source: string; account?: string; locator: string };
+type SourceRef = { source: string; account?: string; locator: string; options: [string, string][] };
 type Candidate = { externalId: string; cursorAfter: string; handle: string };
 
 // The contract's errors are WIT variants: throw `{ tag, val }` and `jco` turns it into the `source-error`.
@@ -46,14 +46,16 @@ const revisionOf = (body: string): string => {
 };
 
 export const adapter = {
-  identify(locator?: string): SourceRef {
+  identify(locator: string | undefined, options: [string, string][]): SourceRef {
+    // A source that accepts no options refuses one rather than ignoring it: a typo would otherwise mine everything.
+    if (options.length > 0) throw failure("invalid-input", `this source has no option \`${options[0][0]}\``);
     if (locator === undefined) throw failure("invalid-input", "give the directory to mine");
     try {
       if (!statSync(locator).isDirectory()) throw new Error("not a directory");
     } catch {
       throw failure("invalid-input", `${locator} is not a directory this source can read`);
     }
-    return { source: NAME, locator };
+    return { source: NAME, locator, options: [] };
   },
 
   defaultWing(source: SourceRef): string {

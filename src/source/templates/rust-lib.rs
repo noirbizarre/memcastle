@@ -66,14 +66,21 @@ fn revision_of(body: &str) -> String {
 }
 
 impl Guest for Source {
-    fn identify(locator: Option<String>) -> Result<SourceRef, SourceError> {
+    fn identify(
+        locator: Option<String>,
+        options: Vec<(String, String)>,
+    ) -> Result<SourceRef, SourceError> {
+        // A source that accepts no options refuses one rather than ignoring it: a typo would otherwise mine everything.
+        if let Some((key, _)) = options.first() {
+            return Err(SourceError::InvalidInput(format!("this source has no option `{key}`")));
+        }
         let Some(locator) = locator else {
             return Err(SourceError::InvalidInput("give the directory to mine".to_string()));
         };
         if !Path::new(&locator).is_dir() {
             return Err(SourceError::InvalidInput(format!("{locator} is not a directory this source can read")));
         }
-        Ok(SourceRef { source: NAME.to_string(), account: None, locator })
+        Ok(SourceRef { source: NAME.to_string(), account: None, locator, options: Vec::new() })
     }
 
     fn default_wing(source: SourceRef) -> String {

@@ -1335,6 +1335,7 @@ mod tests {
                 },
                 wing: None,
                 full: false,
+                options: Default::default(),
             },
             crate::domain::Priority::Background,
             "test",

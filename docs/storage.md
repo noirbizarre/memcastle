@@ -62,7 +62,7 @@ Where a write ends up:
 | Written by | Wing | Room |
 |---|---|---|
 | `mine` of a directory | the `--wing` you give, else the wing the directory's [project file](project-config.md#mining) declares, else the directory's name | `files` |
-| `mine --source pi` | the `--wing` you give, or `pi` | the session's working directory name, or `sessions` |
+| `mine pi` | the `--wing` you give, or `pi` | the session's working directory name, or `sessions` |
 | `diary write` | the wing you give | `diary` |
 | `checkpoint` item | the item's `wing`, or `preferences`, `projects`, `diary` or `general` by destination | `diary` for diary items, `entries` otherwise |
 
@@ -103,7 +103,7 @@ The two drawers record each other (`superseded_by` and `supersedes`), which is w
 
 ### What mining reads
 
-`memcastle mine <dir>` reads the text files under a directory, and `memcastle mine --source <name>` reads another source;
+`memcastle mine <dir>` reads the text files under a directory, and `memcastle mine <source>` reads another source;
 see [Mining sources](mining-sources.md) for the model and each source's rules.
 For a directory:
 

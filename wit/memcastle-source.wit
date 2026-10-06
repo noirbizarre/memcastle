@@ -1,4 +1,4 @@
-// The MemCastle source contract, version 0.3.0 (docs/adr/026, docs/writing-sources.md).
+// The MemCastle source contract, version 0.4.0 (docs/adr/026, docs/writing-sources.md).
 //
 // A source is a WebAssembly Component implementing the `source` world. It is the same logical contract as the
 // native `SourceAdapter` trait: the host calls `identify`, `discover`, `read` and `normalize`, and does everything
@@ -6,7 +6,7 @@
 //
 // Cursors and metadata cross the boundary as JSON text, so the contract does not need to change for a source to
 // carry richer ones. `contract` in `memcastle-source.toml` names the version of this file a source was built for.
-package memcastle:source@0.3.0;
+package memcastle:source@0.4.0;
 
 interface types {
     /// The identity of a place that is mined.
@@ -15,6 +15,10 @@ interface types {
         source: string,
         account: option<string>,
         locator: string,
+        /// The options of this run (`since`, `dir`), as `identify` validated and normalised them. They are not part
+        /// of the identity: a filter that selects a different slice of the same place must be folded into `account`
+        /// or `locator` by `identify`, so each slice has a cursor of its own; one that only narrows must not be.
+        options: list<tuple<string, string>>,
     }
 
     /// A document found by `discover`, not yet read.
@@ -103,9 +107,11 @@ interface host {
 interface adapter {
     use types.{source-ref, candidate, discovery, raw-document, canonical-document, source-error};
 
-    /// Validate `locator` (or choose the source's default when absent) and return the source's identity.
-    /// Two spellings of the same place must give the same identity.
-    identify: func(locator: option<string>) -> result<source-ref, source-error>;
+    /// Validate `locator` (or choose the source's default when absent) and the run's `options` (key and value, both
+    /// strings; the keys the manifest's `[options]` declares) and return the source's identity, carrying the options
+    /// as it normalised them. Two spellings of the same place must give the same identity. An option the source does
+    /// not understand is an `invalid-input` error, never ignored.
+    identify: func(locator: option<string>, options: list<tuple<string, string>>) -> result<source-ref, source-error>;
 
     /// The wing drawers are filed under when the caller chooses none.
     default-wing: func(source: source-ref) -> string;

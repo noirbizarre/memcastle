@@ -216,3 +216,13 @@ available to `normalize`.
 That is a breaking change before 1.0, so the contract is `0.3.0`.
 An installed source built for `0.2` is `unavailable` with a reason that says to rebuild it, and the three reference
 sources are rebuilt.
+
+## Note, 2026-10-07: contract 0.4.0
+
+`identify` takes the options of the run, and the `source-ref` record carries them
+([ADR-042](042-mine-takes-a-source-and-its-options.md)).
+A manifest may declare the options it accepts under `[options.<name>]`; they are not permissions and are no part of the
+consent digest.
+That is a breaking change before 1.0, so the contract is `0.4.0`.
+An installed source built for `0.3` is `unavailable` with a reason that says to rebuild it, and the three reference sources
+are rebuilt.

@@ -168,6 +168,12 @@ The consequence above is narrowed accordingly: adding a *built-in* provider is a
 and a docs section, while any other provider is a package.
 The pipeline, the chunker and the wire shape of a job did not change.
 
+## Note, 2026-10-07: `--source` and `--locator` are gone
+
+`memcastle mine` now takes the source as its first word and the locator as the bare word after it
+([ADR-042](042-mine-takes-a-source-and-its-options.md)).
+Where this record says `--source` or `--locator`, read `memcastle mine <source> [place]`.
+
 ## Note, 2026-10-05: the adapter's name is `source`, not `provider`
 
 Where this record says `provider` for the adapter that reads a source,

@@ -24,6 +24,22 @@ fn help_lists_the_top_level_commands() {
 }
 
 #[test]
+fn mine_help_shows_the_source_first_grammar_and_no_longer_offers_the_old_flags() {
+    Command::cargo_bin("memcastle")
+        .unwrap()
+        .args(["mine", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("memcastle mine <SOURCE>"))
+        .stdout(contains(
+            "memcastle mine opencode since=2026-09 dir=/path/to/workspace",
+        ))
+        .stdout(contains("memcastle mine /some/path"))
+        .stdout(contains("--source").not())
+        .stdout(contains("--locator").not());
+}
+
+#[test]
 fn serve_help_says_it_runs_in_the_foreground() {
     Command::cargo_bin("memcastle")
         .unwrap()

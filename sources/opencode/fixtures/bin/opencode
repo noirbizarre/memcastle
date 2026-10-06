@@ -3,8 +3,9 @@
 # database. It answers the three invocations the source makes (`db path`, `db --format json <query>` and
 # `export <session>`) from ../data, found relative to this file because the host clears the child's environment.
 #
-# The discovery query is not evaluated as SQL: the two values and the limit the source writes into it are read back out
-# of its text, which is also what makes this fail loudly if the source changes its query without this being updated.
+# The discovery query is not evaluated as SQL: the values, the optional `since` and `dir` filters and the limit the source
+# writes into it are read back out of its text, which is also what makes this fail loudly if the source changes its query
+# without this being updated. `sessions.tsv` is id, `time_updated` and the session's directory, tab separated.
 # A file `../data/fail`, when present, makes every call fail, to exercise the source's error messages.
 # A file `../data/cut` makes the discovery query answer with a truncated document.
 
@@ -33,6 +34,11 @@ case "$1" in
     t=$(printf '%s' "$query" | sed -n 's/.*time_updated > \(-\{0,1\}[0-9]\{1,\}\) OR.*/\1/p')
     id=$(printf '%s' "$query" | sed -n "s/.*AND id > '\([A-Za-z0-9_]*\)').*/\1/p")
     n=$(printf '%s' "$query" | sed -n 's/.*LIMIT \([0-9]\{1,\}\)$/\1/p')
+    # Optional filters, after the cursor's parenthesis. `dir` is a quoted literal with `'` doubled.
+    since=$(printf '%s' "$query" | sed -n 's/.*) AND time_updated >= \([0-9]\{1,\}\).*/\1/p')
+    # `GLOB`'s one wildcard is `*`; `?` and `[` are put in a bracket of their own by the source, so they arrive as `[?]` and
+    # `[[]` and are read back as the characters they stand for.
+    dir=$(printf '%s' "$query" | sed -n "s|.* AND rtrim(directory, '/') GLOB '\(.*\)' ORDER BY.*|\1|p" | sed "s/''/'/g")
     if [ -z "$t" ] || [ -z "$n" ]; then
       echo "fake opencode: cannot read this query: $query" >&2
       exit 1
@@ -44,9 +50,25 @@ case "$1" in
       exit 0
     fi
     tab=$(printf '\t')
-    sort -t "$tab" -k2,2n -k1,1 "$data/sessions.tsv" | awk -F '\t' -v t="$t" -v id="$id" -v n="$n" '
-      BEGIN { printf "[" }
-      ($2 + 0 > t + 0 || ($2 + 0 == t + 0 && $1 > id)) && shown < n {
+    # Passed through the environment, not `-v`, which would read a backslash in a path as an escape.
+    export DIR="$dir"
+    sort -t "$tab" -k2,2n -k1,1 "$data/sessions.tsv" | awk -F '\t' -v t="$t" -v id="$id" -v n="$n" -v since="$since" '
+      # The pattern as a regular expression: `*` is any run, `[x]` is the character x, everything else is itself.
+      function regex(p,   out, i, c) {
+        out = "^"
+        for (i = 1; i <= length(p); i++) {
+          c = substr(p, i, 1)
+          if (c == "*") out = out ".*"
+          else if (c == "[" && substr(p, i + 2, 1) == "]") { out = out "\\" substr(p, i + 1, 1); i += 2 }
+          else if (index("\\.^$+(){}|?[]", c)) out = out "\\" c
+          else out = out c
+        }
+        return out "$"
+      }
+      # The stored directory is compared without a trailing `/`, as the `rtrim` of the query does.
+      function inside(d) { sub(/\/+$/, "", d); return d ~ rx }
+      BEGIN { printf "["; if (ENVIRON["DIR"] != "") rx = regex(ENVIRON["DIR"]) }
+      ($2 + 0 > t + 0 || ($2 + 0 == t + 0 && $1 > id)) && (since == "" || $2 + 0 >= since + 0) && (rx == "" || inside($3)) && shown < n {
         printf "%s\n  {\n    \"id\": \"%s\",\n    \"time_updated\": %s\n  }", (shown ? "," : ""), $1, $2
         shown++
       }

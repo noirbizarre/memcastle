@@ -133,9 +133,10 @@ pub enum Command {
     /// highlights, bounded by a deterministic item/byte budget.
     #[command(alias = "wake_up")]
     WakeUp(WakeUpArgs),
-    /// Submit a mining job for a directory or a source adapter. Mining is
-    /// incremental: a source remembers where the last run stopped, and
-    /// unchanged documents are not filed again.
+    /// Submit a mining job: `mine <source> [place] [key=value]...`, or
+    /// `mine <path>` for a directory. Mining is incremental: a source
+    /// remembers where the last run stopped, and unchanged documents are not
+    /// filed again.
     Mine(MineArgs),
     /// List the sources the daemon can mine and the ones it has mined, with
     /// where each one's last run stopped.
@@ -356,7 +357,7 @@ pub enum SourceCommand {
 #[derive(Debug, Args)]
 pub struct SourceInitArgs {
     /// The source's name: lowercase letters, digits and `-`. It becomes the
-    /// directory created, and the name given as `--source` when mining.
+    /// directory created, and the name given to `memcastle mine` when mining.
     pub name: String,
     /// The language and toolchain to start from.
     #[arg(long, value_enum, default_value = "rust")]
@@ -769,18 +770,29 @@ pub struct WakeUpArgs {
 
 /// Arguments for `memcastle mine`.
 #[derive(Debug, Args)]
+#[command(
+    override_usage = "memcastle mine <SOURCE> [PLACE] [KEY=VALUE]... [--wing <WING>] [--full]\n       \
+                      memcastle mine <PATH> [KEY=VALUE]... [--wing <WING>] [--full]",
+    after_help = "Examples:\n  \
+        memcastle mine directory /some/path\n  \
+        memcastle mine /some/path                       (shorthand for `directory`)\n  \
+        memcastle mine opencode since=2026-09 dir=/path/to/workspace\n  \
+        memcastle mine pi /backups/pi/sessions --full\n\n\
+        `memcastle sources` lists the sources and the options each accepts."
+)]
 pub struct MineArgs {
-    /// The directory to mine. Give this, or `--source`.
-    #[arg(required_unless_present = "source", conflicts_with = "source")]
-    pub path: Option<PathBuf>,
-    /// A source adapter to mine instead of a directory, such as
-    /// `pi` (Pi's session history, once installed). `memcastle sources` lists them.
-    #[arg(long)]
-    pub source: Option<String>,
-    /// Where within `--source` to read, when it needs more than its default
-    /// (for `pi`, an absolute path to a directory of Pi sessions).
-    #[arg(long, requires = "source")]
-    pub locator: Option<String>,
+    /// A source to mine (`directory`, `pi`, `opencode`, or an installed one;
+    /// `memcastle sources` lists them), or a directory, which is shorthand for
+    /// `directory <PATH>`. A word with a `/`, or one that is not shaped like a
+    /// source name (`.`, `~/x`), is always a directory.
+    #[arg(value_name = "SOURCE|PATH")]
+    pub target: String,
+    /// What to read and how, in the source's terms. At most one bare word,
+    /// the place to read (`directory`'s path, `pi`'s sessions directory), then
+    /// any number of `key=value` options. Each source declares the keys it
+    /// accepts (`since=2026-09` narrows by date); an unknown key is refused.
+    #[arg(value_name = "PLACE|KEY=VALUE")]
+    pub args: Vec<String>,
     /// Read the source again from the beginning instead of continuing from
     /// where the last run stopped. Unchanged documents are still skipped, so
     /// nothing is duplicated.

@@ -116,6 +116,189 @@ fn mtime_ns(metadata: &std::fs::Metadata) -> i64 {
         .unwrap_or(0)
 }
 
+/// The number of days in `month` of `year`.
+fn days_in_month(year: i64, month: i64) -> i64 {
+    match month {
+        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
+/// Days from 1970-01-01 to a civil date (after Howard Hinnant), the inverse of the conversion to a date.
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = year - i64::from(month <= 2);
+    let era = year.div_euclid(400);
+    let year_of_era = year.rem_euclid(400);
+    let month_index = (month + 9) % 12;
+    let day_of_year = (153 * month_index + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+/// A `since` value (`2026-09`, `2026-09-14` or an RFC 3339 time) as epoch milliseconds, UTC.
+///
+/// Written out rather than taken from a crate: it is all a source needs of a calendar, and a component carries what it
+/// links.
+fn parse_since(value: &str) -> Result<i64, String> {
+    let value = value.trim();
+    let bad = || {
+        format!("`{value}` is not a date; use `2026-09`, `2026-09-14` or an RFC 3339 time")
+    };
+    let number = |text: &str, digits: usize| -> Option<i64> {
+        if text.len() == digits && text.bytes().all(|byte| byte.is_ascii_digit()) {
+            text.parse().ok()
+        } else {
+            None
+        }
+    };
+    let (date, time) = match value.find(['T', 't']) {
+        Some(at) => (&value[..at], Some(&value[at + 1..])),
+        None => (value, None),
+    };
+    let mut parts = date.split('-');
+    let year = parts.next().and_then(|part| number(part, 4)).ok_or_else(bad)?;
+    let month = parts
+        .next()
+        .and_then(|part| number(part, 2))
+        .filter(|month| (1..=12).contains(month))
+        .ok_or_else(bad)?;
+    let day = match parts.next() {
+        Some(part) => number(part, 2).ok_or_else(bad)?,
+        None => 1,
+    };
+    if parts.next().is_some() || day < 1 || day > days_in_month(year, month) {
+        return Err(bad());
+    }
+    let mut seconds = days_from_civil(year, month, day) * 86_400;
+    let mut fraction_ms = 0;
+    if let Some(time) = time {
+        // The zone is `Z` or `+HH:MM`/`-HH:MM`; without one the time would mean something different on every machine.
+        let (clock, offset) = if let Some(clock) = time.strip_suffix(['Z', 'z']) {
+            (clock, 0)
+        } else {
+            let at = time.rfind(['+', '-']).ok_or_else(bad)?;
+            let (clock, zone) = time.split_at(at);
+            let sign = if zone.starts_with('-') { -1 } else { 1 };
+            let (hours, minutes) = zone[1..].split_once(':').ok_or_else(bad)?;
+            let hours = number(hours, 2).ok_or_else(bad)?;
+            let minutes = number(minutes, 2).ok_or_else(bad)?;
+            (clock, sign * (hours * 3600 + minutes * 60))
+        };
+        let (whole, fraction) = match clock.split_once('.') {
+            Some((whole, fraction)) => (whole, Some(fraction)),
+            None => (clock, None),
+        };
+        let mut fields = whole.split(':');
+        let mut next = |limit: i64| {
+            fields
+                .next()
+                .and_then(|part| number(part, 2))
+                .filter(|field| *field < limit)
+        };
+        let (hour, minute, second) = (
+            next(24).ok_or_else(bad)?,
+            next(60).ok_or_else(bad)?,
+            next(60).ok_or_else(bad)?,
+        );
+        if fields.next().is_some() {
+            return Err(bad());
+        }
+        seconds += hour * 3600 + minute * 60 + second - offset;
+        if let Some(fraction) = fraction {
+            if fraction.is_empty() || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(bad());
+            }
+            let padded: String = fraction.chars().chain("000".chars()).take(3).collect();
+            fraction_ms = padded.parse().map_err(|_| bad())?;
+        }
+    }
+    Ok(seconds * 1000 + fraction_ms)
+}
+
+/// The working directory a session was started in, from the first line of its file, or `None` when it has none.
+fn cwd_of(path: &Path) -> Option<String> {
+    use std::io::BufRead;
+    let mut line = String::new();
+    std::io::BufReader::new(std::fs::File::open(path).ok()?)
+        .read_line(&mut line)
+        .ok()?;
+    let header: Value = serde_json::from_str(line.trim()).ok()?;
+    header.get("cwd")?.as_str().map(str::to_string)
+}
+
+/// A `dir` value as it is compared with what OpenCode and Pi store, which is the working directory as the program saw it:
+/// separated by `/`, with no empty or `.` segment and no trailing `/`, and with `..` resolved against the literal
+/// segment before it. A segment holding a `*` is left alone, since what it stands for is not known.
+///
+/// Lexical only: this component has no file system to resolve a link with, so `memcastle mine` resolves one on the
+/// machine it runs on before the value gets here.
+fn normalize_dir(value: &str) -> String {
+    let absolute = value.starts_with('/');
+    let mut parts: Vec<&str> = Vec::new();
+    for part in value.split('/') {
+        match part {
+            "" | "." => {}
+            ".." if parts.last().is_some_and(|last| *last != ".." && !last.contains('*')) => {
+                parts.pop();
+            }
+            // `/..` is `/`: there is nothing above the root to go to.
+            ".." if absolute && parts.is_empty() => {}
+            other => parts.push(other),
+        }
+    }
+    let joined = parts.join("/");
+    if absolute { format!("/{joined}") } else { joined }
+}
+
+/// Why `pattern` (already normalised) cannot be a directory or a pattern for one, or `None` when it can.
+///
+/// It has to name a place: a path from the root (or a drive on Windows), or a pattern that starts with `*`. Anything
+/// else is relative to nothing, would match no session, and an empty result is the worst way to say so.
+fn dir_problem(pattern: &str) -> Option<String> {
+    let drive = pattern.as_bytes().get(1) == Some(&b':') && pattern.as_bytes()[0].is_ascii_alphabetic();
+    if pattern.is_empty() || pattern.chars().any(char::is_control) {
+        Some("`dir` must be a directory, or a pattern such as `/work/*`, with no control characters".to_string())
+    } else if !(pattern.starts_with('/') || pattern.starts_with('*') || drive) {
+        Some(format!(
+            "`dir` `{pattern}` is not an absolute path; give the full path (`/work/app`) or a pattern starting with `*`"
+        ))
+    } else {
+        None
+    }
+}
+
+/// Whether `text` matches `pattern`, where `*` stands for any run of characters (`/` included) and every other
+/// character is itself. Linear in the text: the usual two-pointer walk that backs up to the last `*`, so a pattern full
+/// of stars cannot make a long path slow.
+fn glob_match(pattern: &str, text: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().collect();
+    let text: Vec<char> = text.chars().collect();
+    let (mut p, mut t) = (0, 0);
+    // Where the last `*` was, and how much of the text it has swallowed so far.
+    let mut star: Option<(usize, usize)> = None;
+    while t < text.len() {
+        if p < pattern.len() && pattern[p] == '*' {
+            star = Some((p, t));
+            p += 1;
+        } else if p < pattern.len() && pattern[p] == text[t] {
+            p += 1;
+            t += 1;
+        } else if let Some((star_p, star_t)) = star {
+            p = star_p + 1;
+            t = star_t + 1;
+            star = Some((star_p, star_t + 1));
+        } else {
+            return false;
+        }
+    }
+    while p < pattern.len() && pattern[p] == '*' {
+        p += 1;
+    }
+    p == pattern.len()
+}
+
 /// The cursor `{"mtime_ns", "key"}` means "everything ordered at or before this is done"; `null` is the beginning.
 fn parse_cursor(cursor: &str) -> Result<Option<(i64, String)>, SourceError> {
     let invalid = |message: &str| SourceError::CursorInvalid(message.to_string());
@@ -251,7 +434,42 @@ fn first_line(text: &str) -> String {
 }
 
 impl Guest for Pi {
-    fn identify(locator: Option<String>) -> Result<SourceRef, SourceError> {
+    fn identify(
+        locator: Option<String>,
+        options: Vec<(String, String)>,
+    ) -> Result<SourceRef, SourceError> {
+        let mut normalised = Vec::new();
+        let mut account = None;
+        for (key, value) in options {
+            match key.as_str() {
+                // Only narrows what is read, so it is not part of the identity: an earlier `since` next time continues
+                // from the same cursor, and `--full` is how to reach back.
+                "since" => {
+                    parse_since(&value).map_err(SourceError::InvalidInput)?;
+                    // Checked now, kept as typed: `discover` parses it again, so a value that passes here cannot fail there.
+                    normalised.push((key, value.trim().to_string()));
+                }
+                // Selects one working directory's sessions out of the same root, so it is part of the identity: each
+                // directory has a cursor of its own, and a `dir` run never moves another's.
+                //
+                // The value is a directory or a pattern in which `*` matches any run of characters, `/` included
+                // (`/work/*` is every project under `/work`). It is normalised the way Pi's own `cwd` is stored, so
+                // `/work/app`, `/work/app/` and `/work/./app` are one `dir` and one cursor.
+                "dir" => {
+                    let dir = normalize_dir(value.trim());
+                    if let Some(problem) = dir_problem(&dir) {
+                        return Err(SourceError::InvalidInput(problem));
+                    }
+                    account = Some(format!("dir={dir}"));
+                    normalised.push((key, dir));
+                }
+                other => {
+                    return Err(SourceError::InvalidInput(format!(
+                        "the pi source has no option `{other}`; it accepts `since` and `dir`"
+                    )));
+                }
+            }
+        }
         let root = match locator {
             Some(locator) => PathBuf::from(locator),
             None => default_root().ok_or_else(|| {
@@ -271,8 +489,9 @@ impl Guest for Pi {
         }
         Ok(SourceRef {
             source: NAME.to_string(),
-            account: None,
+            account,
             locator: root.display().to_string(),
+            options: normalised,
         })
     }
 
@@ -289,6 +508,25 @@ impl Guest for Pi {
         let mut entries = Vec::new();
         collect(Path::new(&source.locator), &mut entries);
         // Oldest first, ties broken by path, so sessions saved in the same instant are neither skipped nor read twice.
+        let option = |name: &str| {
+            source
+                .options
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.as_str())
+        };
+        if let Some(since) = option("since").and_then(|at| parse_since(at).ok()) {
+            let floor = since.saturating_mul(1_000_000);
+            entries.retain(|entry| entry.mtime_ns >= floor);
+        }
+        if let Some(dir) = option("dir") {
+            // Read last, on what is left: the first line of each remaining file is all it costs. A session with no
+            // readable header has no directory to match, so it is not taken for this one.
+            entries.retain(|entry| {
+                cwd_of(&path_of(&source, &entry.key))
+                    .is_some_and(|cwd| glob_match(dir, &normalize_dir(&cwd)))
+            });
+        }
         entries.sort_by(|a, b| (a.mtime_ns, &a.key).cmp(&(b.mtime_ns, &b.key)));
         entries.retain(|entry| {
             after.as_ref().is_none_or(|(mtime, key)| {

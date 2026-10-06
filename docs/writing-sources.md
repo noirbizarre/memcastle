@@ -14,7 +14,7 @@ so the pipeline cannot tell them apart ([ADR-026](adr/026-pluggable-source-adapt
 ```mermaid
 flowchart LR
     I["memcastle source init"] --> B["source build"] --> T["source test"] --> P["source package"] --> N["source install"]
-    N --> E["source enable"] --> M["memcastle mine --source name"]
+    N --> E["source enable"] --> M["memcastle mine name"]
 ```
 
 ## Quick start
@@ -27,7 +27,7 @@ memcastle source test         # the conformance cases, in the daemon's own sandb
 memcastle source package      # dist/my-notes-0.1.0.tar.gz
 
 memcastle source install dist/my-notes-0.1.0.tar.gz --enable
-memcastle mine --source my-notes --locator ~/notes
+memcastle mine my-notes ~/notes
 ```
 
 `init`, `build`, `test`, `package`, `index` and `keygen` are local: they need no daemon and no palace.
@@ -40,7 +40,7 @@ Everything crossing the boundary is plain data; cursors and metadata are JSON te
 
 | Function | Contract |
 |---|---|
-| `identify(locator)` | Validate the locator (or choose the source's default when absent) and return the source's identity. Two spellings of the same place must give the same identity, because the identity is what carries the cursor. |
+| `identify(locator, options)` | Validate the locator (or choose the source's default when absent) and the run's options, and return the source's identity carrying the options as normalised. Two spellings of the same place must give the same identity, because the identity is what carries the cursor. An option the source does not declare is an `invalid-input` error, never ignored. See [Options](#options). |
 | `default-wing(source)` | The wing drawers are filed under when the caller names none. |
 | `default-room()` | The room drawers are filed under when a document names none. |
 | `discover(source, cursor, limit)` | Candidates strictly after `cursor` (JSON; `null` is the beginning), in cursor order, at most `limit`, each with the cursor to store once it is done; and whether anything is left. A listing, not a download. |
@@ -66,7 +66,7 @@ Every table refuses unknown keys.
 format = 1                   # the manifest format; optional, and 1 is the only one so far
 
 [source]
-name = "my-notes"            # the name given as --source: lowercase letters, digits, "-"
+name = "my-notes"            # the name given to `memcastle mine`: lowercase letters, digits, "-"
 version = "0.1.0"            # semantic version of the package
 description = "my notes"     # one line, shown by `memcastle sources`
 license = "MIT"              # optional: SPDX identifier, shown by `memcastle source search`
@@ -74,7 +74,7 @@ homepage = "https://example.org/my-notes"        # optional
 repository = "https://example.org/my-notes.git"  # optional: where the code is
 
 [compatibility]
-contract = "0.3"             # the WIT contract version it was built against
+contract = "0.4"             # the WIT contract version it was built against
 memcastle = ">=0.2.0, <0.3.0"  # the MemCastle versions it runs on
 
 [capabilities]               # the same three as a built-in adapter; all default to false
@@ -98,6 +98,10 @@ env = []                     # environment variables the source may read
 # device_authorization_url = "https://auth.example.com/oauth/device/code"   # the device flow
 # authorize_url = "https://auth.example.com/oauth/authorize"                # the browser flow, with PKCE
 
+[options.since]              # optional: what `memcastle mine my-notes key=value` accepts; see "Options"
+type = "date"                # "string" (the default), "path" or "date"
+description = "only files modified at or after this date"
+
 [limits]
 memory_mib = 64              # at most mining.source_memory_mib
 timeout_secs = 30            # per call; at most mining.source_timeout_secs
@@ -117,9 +121,34 @@ fixtures = "fixtures"
 | `compatibility.contract` | `MAJOR.MINOR` or `MAJOR.MINOR.PATCH`. |
 | `compatibility.memcastle` | A semver requirement. A pre-release of a release is held to the release's requirement. |
 | `permissions.filesystem.read` | `locator`, an absolute path, or a path starting with `~/`. A directory that does not exist is dropped, not an error. |
+| `options.<name>` | A key of lowercase letters, digits, `-` or `_` starting with a letter, with a one-line `description` and a `type` of `string`, `path` or `date`. Options are not permissions: they ask for nothing and are no part of what a user consents to. |
 | `permissions.process` | Bare program names (`git`), never a path or a command line. |
 | `permissions.oauth` | `client_id` and `token_url`, and `device_authorization_url`, `authorize_url` or both; every URL `https` (plain `http` only to `localhost`); each scope one word; and `capabilities.needs_credentials = true`. No client secret: a public client cannot keep one. |
 | `build.output` | Relative to the project; it must be a component, not a core module. |
+
+## Options
+
+A user narrows one run of a source with `key=value` words (`memcastle mine my-notes ~/notes since=2026-09`).
+A source declares the keys it accepts under `[options.<name>]`,
+and the daemon refuses any other key before it queues the job,
+naming the accepted ones, so a typo is an error and not a source that mines everything.
+`identify` receives them as a list of key and value strings,
+validates the values (an invalid one is `invalid-input` with a
+message that says what was expected), and returns them on the `source-ref` it gives back,
+from which `discover` and `read` read them.
+The `type` is for people and for the command line: a `path` value is made absolute against the shell's working directory
+before the daemon sees it, since the daemon runs somewhere else.
+
+An option either narrows or selects, and the two are not the same to the cursor, which belongs to the identity:
+
+- An option that only **narrows** what is read (`since`) must not change the identity.
+  A later run with another value continues from the same cursor, and `--full` reads back past it.
+- An option that **selects** a different slice of the same place (`dir`,
+  within a history that holds many projects) must be folded
+  into `account` or `locator` by `identify`, so each slice has a cursor of its own;
+  otherwise a run for one slice would move the cursor past documents another slice has not read yet.
+
+A case in the conformance fixtures can carry the options of a run in `options`, and runs through the same checks.
 
 ## Permissions and consent
 
@@ -159,7 +188,7 @@ the manifest says how to sign in, and `discover` and `read` say what to fetch.
 
 ```text
 memcastle source auth my-source   ->   the daemon runs the flow and keeps the tokens
-memcastle mine --source my-source ->   the daemon renews the token if needed, and hands it to each call that asks
+memcastle mine my-source ->   the daemon renews the token if needed, and hands it to each call that asks
 ```
 
 The source calls `access-token` (in the `host` interface) and gets a bearer token for the sign-in its manifest declares,
@@ -198,7 +227,7 @@ stateDiagram-v2
 | State | Meaning |
 |---|---|
 | `installed` | In the daemon, not yet enabled: it cannot be mined. |
-| `enabled` | Available to `memcastle mine --source`. |
+| `enabled` | Available to `memcastle mine <name>`. |
 | `disabled` | Turned off; files and history are kept. |
 | `unavailable` | Installed but unable to run here. Never stored: it is computed on every look from the files and the running MemCastle. |
 
@@ -212,7 +241,7 @@ Built-in sources are always enabled and cannot be disabled or removed.
 
 ## Compatibility
 
-The contract has a version (`wit/memcastle-source.wit`, currently `0.3.0`), and a source declares the one it was built
+The contract has a version (`wit/memcastle-source.wit`, currently `0.4.0`), and a source declares the one it was built
 against.
 
 | Host contract | A source built for it runs on |
@@ -262,6 +291,7 @@ A case is described by:
 |---|---|
 | `name`, `description` | What it checks. |
 | `locator`, `limit` | The tree, relative to the case, and the page size (smaller than the number of documents, so paging happens). |
+| `options` | The options of the run, when the case is about one (`{"dir": "/home/me/project"}`). |
 | `documents` | The external ids that must be produced, each with its normalized `title`, `kind`, `tags`, `room` and `segments`. |
 | `skipped` | Paths in the tree that must produce no document. |
 

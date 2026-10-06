@@ -784,7 +784,7 @@ pub enum Error {
     #[diagnostic(
         code(memcastle::source::cursor_invalid),
         help(
-            "mine it again from the beginning (`memcastle mine --source <name> --full`): unchanged documents are skipped, so nothing is duplicated"
+            "mine it again from the beginning (`memcastle mine <name> --full`): unchanged documents are skipped, so nothing is duplicated"
         )
     )]
     SourceCursorInvalid {
@@ -935,7 +935,7 @@ pub enum Error {
     #[diagnostic(
         code(memcastle::miner::not_runnable),
         help(
-            "`memcastle miner get {name}` shows its state; fix what it names, or mine by hand with `memcastle mine`"
+            "`memcastle miner get {name}` shows its state; fix what it names, or mine by hand with `memcastle mine <source>`"
         )
     )]
     MinerNotRunnable {
