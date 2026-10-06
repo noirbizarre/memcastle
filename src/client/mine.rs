@@ -373,6 +373,8 @@ mod tests {
         );
     }
 
+    // Unix only: the paths are written with `/`, and the links need `std::os::unix`.
+    #[cfg(unix)]
     #[test]
     fn a_path_option_is_resolved_the_way_a_programs_working_directory_is_recorded() {
         let dir = tempfile::tempdir().unwrap();
@@ -392,6 +394,8 @@ mod tests {
         }
     }
 
+    // Unix only: the paths are written with `/`, and the links need `std::os::unix`.
+    #[cfg(unix)]
     #[test]
     fn a_pattern_keeps_what_follows_its_first_star_and_resolves_what_precedes_it() {
         let dir = tempfile::tempdir().unwrap();
@@ -411,6 +415,8 @@ mod tests {
         );
     }
 
+    // Unix only: the paths are written with `/`, and the links need `std::os::unix`.
+    #[cfg(unix)]
     #[test]
     fn a_path_that_does_not_exist_is_only_cleaned_up_lexically() {
         assert_eq!(
@@ -420,6 +426,8 @@ mod tests {
         assert_eq!(resolve_pattern("/no/such/p*").unwrap(), "/no/such/p*");
     }
 
+    // Unix only: the paths are written with `/`, and the links need `std::os::unix`.
+    #[cfg(unix)]
     #[test]
     fn a_relative_pattern_is_made_absolute_against_the_shells_directory() {
         let resolved = resolve_pattern("workspaces/*").unwrap();
