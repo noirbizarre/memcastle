@@ -14,10 +14,13 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::json;
 
+pub mod hit_view;
+pub mod job_view;
 pub mod miner_view;
 mod miners;
 mod palace;
 pub mod palace_view;
+pub mod report_view;
 pub mod status;
 pub mod table;
 

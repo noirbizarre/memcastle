@@ -137,3 +137,6 @@ The history is the value.
   re-read when the file changes, read-only over MCP and administrative over REST and the CLI;
   a cursor belongs to the source a miner points at and not to its name, a scope never widens without `--allow-broaden`,
   and triggers and scope are stored but not yet acted on
+- [ADR-038](038-one-output-contract-for-every-command.md) — every command with a data answer is readable in a terminal
+  and JSON in a pipe, and the global `--json` forces JSON on a terminal
+  (amends ADR-012, ADR-015 and ADR-016)

@@ -3,7 +3,9 @@
 ## Status
 
 Accepted, amends [ADR-012](012-status-reports-a-stopped-daemon-and-exits-by-state.md)
-(a command may choose its form by stream instead of by flag)
+(a command may choose its form by stream instead of by flag),
+and amended by [ADR-038](038-one-output-contract-for-every-command.md)
+(every command with a data answer follows the stream, `search`, `recall` and `diary read` included, and `--json` is global)
 
 ## Context
 

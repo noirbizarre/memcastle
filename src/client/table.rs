@@ -487,7 +487,7 @@ pub(super) fn local_minute(at: chrono::DateTime<chrono::Utc>) -> String {
 
 /// A job kind as one short word, plus the one parameter that changes what it
 /// does to your data: a repair that applies is not the same job as a dry run.
-fn kind_label(kind: &JobKind) -> String {
+pub(super) fn kind_label(kind: &JobKind) -> String {
     match kind {
         JobKind::Demo { .. } => "demo".to_string(),
         JobKind::Mine { .. } => "mine".to_string(),
@@ -501,7 +501,7 @@ fn kind_label(kind: &JobKind) -> String {
 }
 
 /// `3/10`, or just `3` when the total is not known, or `-` before any work.
-fn progress_label(job: &Job) -> String {
+pub(super) fn progress_label(job: &Job) -> String {
     match (job.progress.current, job.progress.total) {
         (current, Some(total)) => format!("{current}/{total}"),
         (0, None) => "-".to_string(),
@@ -525,7 +525,7 @@ fn detail_label(job: &Job, painter: Painter) -> String {
 /// Collapse every run of whitespace, newlines included, to one space. A
 /// multi-line error would otherwise put hard line breaks in a cell, which the
 /// table cannot re-flow when the terminal is narrow.
-fn one_line(text: &str) -> String {
+pub(super) fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 

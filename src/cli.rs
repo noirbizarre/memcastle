@@ -91,6 +91,13 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "PATH", value_hint = ValueHint::DirPath)]
     pub palace: Option<PathBuf>,
 
+    /// Print JSON even in a terminal. Without it a terminal gets a readable
+    /// rendering and anything else (a pipe, a file) gets JSON. Commands with no
+    /// data to report (`daemon start`, `source build`, `auth generate`, ...)
+    /// print the same text either way.
+    #[arg(long, global = true)]
+    pub json: bool,
+
     /// The subcommand to run.
     #[command(subcommand)]
     pub command: Command,
@@ -114,7 +121,7 @@ pub enum Command {
     /// it serves and whether its datastore is healthy and migrated.
     /// Exit codes: 0 running and healthy, 1 running but degraded (or an
     /// error), 3 not running.
-    Status(StatusArgs),
+    Status,
     /// Search palace drawer content.
     Search(SearchArgs),
     /// Retrieve palace content matching a query, returned verbatim — the
@@ -261,9 +268,6 @@ pub struct IntegrationCommonArgs {
     /// read, never written.
     #[arg(long, value_name = "DIR")]
     pub assets_dir: Option<PathBuf>,
-    /// Print the result as JSON instead of text, for scripts.
-    #[arg(long)]
-    pub json: bool,
 }
 
 /// Arguments for `memcastle integration list`.
@@ -292,9 +296,6 @@ pub struct IntegrationRemoveArgs {
     /// The integration, which is named for its agent (`pi`, `opencode`), as
     /// `memcastle integration list` shows it.
     pub agent: String,
-    /// Print the result as JSON instead of text, for scripts.
-    #[arg(long)]
-    pub json: bool,
 }
 
 /// `memcastle source` subcommands: the lifecycle of a mining source, from a new project to an installed package.
@@ -614,14 +615,6 @@ pub struct ConfirmArgs {
     /// (a script, CI, a pipe) these commands never ask.
     #[arg(short, long)]
     pub yes: bool,
-}
-
-/// Arguments for `memcastle status`.
-#[derive(Debug, Args)]
-pub struct StatusArgs {
-    /// Print the report as JSON instead of text, for scripts.
-    #[arg(long)]
-    pub json: bool,
 }
 
 /// Arguments for `memcastle serve`, `memcastle daemon start` and
@@ -1080,7 +1073,7 @@ pub enum DbCommand {
     /// Close the database admin endpoint.
     Stop,
     /// Report whether the database admin endpoint is open and where.
-    Status(StatusArgs),
+    Status,
 }
 
 /// Arguments for `memcastle db start`. Anything left out falls back to the
@@ -1108,9 +1101,6 @@ pub struct DbStartArgs {
     /// from this machine are always allowed. Repeatable.
     #[arg(long = "allow-origin", value_name = "ORIGIN")]
     pub allow_origin: Vec<String>,
-    /// Print the endpoint's details as JSON instead of text, for scripts.
-    #[arg(long)]
-    pub json: bool,
 }
 
 /// `memcastle job` subcommands.
@@ -1400,8 +1390,20 @@ mod tests {
     }
 
     #[test]
-    fn job_list_has_no_json_flag_because_a_pipe_already_gets_json() {
-        assert!(Cli::try_parse_from(["memcastle", "job", "list", "--json"]).is_err());
+    fn the_json_flag_is_global_so_it_is_accepted_before_and_after_any_subcommand() {
+        for args in [
+            &["memcastle", "--json", "status"][..],
+            &["memcastle", "status", "--json"],
+            &["memcastle", "job", "list", "--json"],
+            &["memcastle", "mine", ".", "--json"],
+            &["memcastle", "db", "start", "--json"],
+            &["memcastle", "integration", "remove", "pi", "--json"],
+            &["memcastle", "integration", "list", "--json"],
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+            assert!(cli.json, "{args:?}");
+        }
+        assert!(!Cli::try_parse_from(["memcastle", "status"]).unwrap().json);
     }
 
     #[test]

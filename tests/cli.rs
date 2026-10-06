@@ -173,25 +173,19 @@ fn an_unknown_shell_is_rejected_listing_the_supported_ones() {
 }
 
 #[test]
-fn the_stopped_report_is_coloured_only_when_colour_is_forced() {
+fn a_piped_status_report_is_json_with_no_escape_codes_even_when_colour_is_forced() {
+    // Colour decorates the pretty rendering, which only a terminal gets: forcing it must not
+    // put escape codes into what a pipe reads. The coloured rendering itself is held by the
+    // `client::status` unit tests, since a test process has no terminal to run it in.
     let (state, palace) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let plain = status_without_a_daemon(&state, &palace)
-        .env_remove("CLICOLOR_FORCE")
-        .env_remove("NO_COLOR")
-        .output()
-        .unwrap();
-    let plain = String::from_utf8_lossy(&plain.stdout);
-    assert!(!plain.contains('\u{1b}'), "{plain:?}");
-
     let forced = status_without_a_daemon(&state, &palace)
         .env("CLICOLOR_FORCE", "1")
         .env_remove("NO_COLOR")
         .output()
         .unwrap();
     let forced = String::from_utf8_lossy(&forced.stdout);
-    assert!(forced.contains('\u{1b}'), "{forced:?}");
-    // Colour surrounds the words; it never replaces them.
-    assert_eq!(console::strip_ansi_codes(&forced), plain);
+    assert!(!forced.contains('\u{1b}'), "{forced:?}");
+    serde_json::from_str::<serde_json::Value>(&forced).expect("a piped status is JSON");
 }
 
 /// A `memcastle status` with no daemon, pointed at an empty palace and a
@@ -214,9 +208,8 @@ fn status_without_a_reachable_daemon_reports_not_running_and_exits_3() {
         .assert()
         // 3, not 1: a script must be able to tell "stopped" from "broken".
         .code(3)
-        .stdout(contains("MemCastle is not running"))
-        .stdout(contains("127.0.0.1:1"))
-        .stdout(contains("memcastle daemon start"));
+        .stdout(contains("\"running\": false"))
+        .stdout(contains("127.0.0.1:1"));
 }
 
 #[test]
@@ -277,8 +270,8 @@ fn status_diagnoses_a_registry_file_left_behind_by_a_killed_daemon() {
     status_without_a_daemon(&state, &palace)
         .assert()
         .code(3)
-        .stdout(contains("stale"))
-        .stdout(contains(dead_pid.to_string()));
+        .stdout(contains("\"state\": \"stale\""))
+        .stdout(contains(format!("\"pid\": {dead_pid}")));
 }
 
 #[cfg(unix)]

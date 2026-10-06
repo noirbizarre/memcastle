@@ -3,7 +3,8 @@
 ## Status
 
 Accepted, amended by [ADR-015](015-database-admin-endpoint.md) (`--json` on `db start` and `db status`),
-[ADR-016](016-cli-presentation-follows-the-output-stream.md) (a command may choose its form by stream)
+[ADR-016](016-cli-presentation-follows-the-output-stream.md) (a command may choose its form by stream),
+[ADR-038](038-one-output-contract-for-every-command.md) (`status` follows the stream, and `--json` is global)
 and [ADR-017](017-daemon-lifecycle-commands-live-under-daemon.md) (the daemon is started with `memcastle daemon start`)
 
 ## Context

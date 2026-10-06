@@ -18,31 +18,45 @@ without contacting a daemon.
 Run `memcastle <command> --help` for the authoritative text of any flag.
 There is no `help` subcommand: `--help` is the one way to ask.
 
-Client commands print the daemon's JSON answer, so the output pipes into `jq`.
-`status`, `db start`, `db stop` and `db status` are the exceptions: they print a readable report,
-and `--json` gives the same report as JSON (`db stop` prints the report only).
-`job list`, `sources`, `note`, every `miner` command except `remove` and `run`,
-every daemon-side `source` command (`search`, `install`, `update`, `list`, `show`, `enable` and `disable`),
-and the `wing`, `room` and `drawer` commands
-(`list`, `show`, `create` and `delete`, and `drawer history`) are the others:
-they print a table or a readable view when standard output is a terminal, and JSON when it is not.
+Every command that has an answer to give follows one rule:
+it prints a readable rendering when standard output is a terminal, and JSON when it is not (or when `--json` is given).
+`memcastle mine .` in a terminal prints the queued job and how to follow it,
+and `memcastle mine . | jq .id` prints the job as JSON.
 See [Output, colour and prompts](#output-colour-and-prompts).
 
 ## Output, colour and prompts
 
-What the CLI shows depends on where its output goes, never on a flag, so a script needs no change:
-a terminal gets decoration, and a pipe or a file gets plain data.
+What the CLI shows depends on where its output goes, so a script needs no flag:
+a terminal gets a readable rendering with colour, and a pipe or a file gets plain JSON.
+The readable rendering is not meant to be parsed and may change between releases, whereas the JSON is the contract.
+`--json` forces the JSON form on a terminal, for `memcastle search auth --json | jq` or to see exactly what a script
+would receive.
+It is a global flag, accepted before or after any subcommand, and it never changes a command's exit code.
+
+This applies to `status`, `db`, `integration`, `migrate`, `daemon stop`, `mine` and the other commands that queue a job
+(`audit`, `embed`, `extract`, `repair`, `checkpoint`), `job` (all subcommands), `search`, `recall`, `wake-up`, `diary`,
+`note`, `sources`, `miner`, every daemon-side `source` command, and the `wing`, `room` and `drawer` commands.
+Four groups of commands have no answer to render and print the same text on every stream:
+
+- `daemon start` and `daemon restart` print the `started:` or `restarted:` line.
+- The local `source` commands (`init`, `build`, `test`, `package`, `index` and `keygen`) print their progress.
+- `auth generate` prints the token and nothing else, so it can be captured.
+  A secret is never put in JSON.
+- `completions` prints a script.
+
+`--json` is accepted on these too and changes nothing.
 
 | Setting | Effect |
 |---|---|
 | `NO_COLOR` set to anything | No colour anywhere, even on a terminal. |
 | `CLICOLOR=0` | The same. |
-| `CLICOLOR_FORCE=1` | Colour even when output is piped, for tools that render escape codes. |
+| `CLICOLOR_FORCE=1` | Colour in the text a pipe receives (help, diagnostics, progress), for tools that render escape codes. A command's result is still plain JSON. |
 | `TERM=dumb` | No colour. |
 
 Colour is added around words and never replaces them.
 It colours `--help`, `status` and `db status` reports (healthy in green, degraded or unavailable in red,
-things that need attention in yellow), the table of `job list`, and the diagnostics printed on failure.
+things that need attention in yellow), the table of `job list`, the card of a job, and the diagnostics printed on failure.
+Colour belongs to the readable rendering, so a pipe never receives escape codes, even with `CLICOLOR_FORCE=1`.
 A job status has the same colour wherever it is shown:
 queued yellow, running cyan, paused magenta, completed green, failed red and cancelled dim.
 Standard output and standard error are decided separately:
@@ -67,6 +81,7 @@ These flags are accepted by every subcommand, before or after its name.
 | Flag | Environment variable | Meaning |
 |---|---|---|
 | `-v`, `-vv` | none | Log MemCastle at `debug` (`-v`) or `trace` (`-vv`), and print the full cause chain of an error. |
+| `--json` | none | Print JSON even on a terminal, see [Output, colour and prompts](#output-colour-and-prompts). |
 | `--config <FILE>` | `MEMCASTLE_CONFIG` | Config file to read. It must exist when named explicitly. |
 | `--palace <PATH>` | none | Absolute palace directory, overriding `MEMCASTLE_PALACE_PATH` and `palace.path`. |
 | `--mode <MODE>` | `MEMCASTLE_MODE` | Run the command as a session in `full` (the default), `read_only` or `disabled` mode. |
@@ -83,7 +98,7 @@ See [Configuration](configuration.md) for how these flags combine with the confi
 | `memcastle daemon start [--bind <IP>] [--port <PORT>] [--assets-dir <DIR>]` | Start a detached daemon and wait until it serves. Fails if one is already running. |
 | `memcastle daemon stop` | Ask the running daemon to shut down gracefully. |
 | `memcastle daemon restart [--bind <IP>] [--port <PORT>] [--assets-dir <DIR>]` | Stop the running daemon, start a detached new one and wait until it serves. |
-| `memcastle status [--json]` | Report whether the daemon is running, where, which palace, and whether the datastore is healthy. |
+| `memcastle status` | Report whether the daemon is running, where, which palace, and whether the datastore is healthy. |
 | `memcastle migrate [--check \| --status]` | Apply, or just inspect, the palace's migrations without a daemon. |
 | `memcastle completions <SHELL>` | Print a shell completion script, see [Shell completion](#shell-completion). |
 
@@ -125,8 +140,8 @@ The Homebrew formula, the `.deb` and `.rpm` packages and the AUR package install
 
 | Command | What it does |
 |---|---|
-| `memcastle db start [--bind <IP>] [--port <PORT>] [--allow-remote] [--allow-origin <ORIGIN>]... [--json]` | Ask the running daemon to open its database admin endpoint, then return. Succeeds, reporting the same details, when it is already open. |
-| `memcastle db status [--json]` | Report whether the endpoint is open, and where. |
+| `memcastle db start [--bind <IP>] [--port <PORT>] [--allow-remote] [--allow-origin <ORIGIN>]...` | Ask the running daemon to open its database admin endpoint, then return. Succeeds, reporting the same details, when it is already open. |
+| `memcastle db status` | Report whether the endpoint is open, and where. |
 | `memcastle db stop` | Close the endpoint and its connections. |
 
 These are client commands: the endpoint lives in the daemon, the only process that may open the embedded database,
@@ -138,7 +153,8 @@ authentication enabled.
 `--allow-origin` may be repeated, and lets a browser page from that origin connect;
 pages served from this machine and the SurrealDB Studio desktop app need no flag.
 Running `db start` while the endpoint is already open is not an error:
-it prints `already running on` the URL instead of `listening on`, followed by the same details, and exits `0`.
+it prints `already running on` the URL instead of `listening on`, followed by the same details, and exits `0`
+(as JSON, `already_running` is `true`).
 Flags that contradict the open endpoint
 (another `--bind`, a `--port` other than the one it uses, or an `--allow-origin` it does not allow)
 are refused with `memcastle::db::already_running`: run `db stop` first to change them.
@@ -190,7 +206,10 @@ so the second command is exactly 2026.
 The rules, and how a boundary behaves, are in [Searching](mcp-and-api.md#searching).
 `--expand` appends drawers related to the hits through the knowledge graph.
 The option is `--ranking` because `--mode` is the [memory mode](memory-modes.md).
-The output is JSON, and the fields of each hit are described in [Searching](mcp-and-api.md#searching).
+In a terminal each hit is a numbered block with its score, where it came from and the first lines of its content;
+the full content is in `memcastle drawer show` and in the JSON.
+Piped, or with `--json`, the output is JSON, and the fields of each hit are described in
+[Searching](mcp-and-api.md#searching).
 
 ### `recall`
 
@@ -302,6 +321,10 @@ name, or to the source's own default.
 directory, and it must be an absolute path.
 For `opencode` it is only a name for the history (OpenCode decides where its own database is), and is rarely needed.
 The command returns the job immediately; follow it with `memcastle job show <id>`.
+In a terminal it prints the queued job as a short card (kind, status, source, wing, progress) and that hint;
+piped, or with `--json`, it prints the job as JSON, whose `id` is what `job show` takes.
+The other commands that queue a job (`audit`, `embed`, `extract`, `repair`, `checkpoint` and `job demo`)
+print the same way.
 See [Mining sources](mining-sources.md) for the model,
 and [Storage and data](storage.md#what-mining-reads) for which files a directory mine reads.
 
@@ -438,10 +461,10 @@ and no MCP tool exists for any of them.
 ### `integration`
 
 ```sh
-memcastle integration list [--json] [--assets-dir <DIR>]
-memcastle integration install <AGENT> [--json] [--assets-dir <DIR>]
-memcastle integration update <AGENT> [--json] [--assets-dir <DIR>]
-memcastle integration remove <AGENT> [--json]
+memcastle integration list [--assets-dir <DIR>]
+memcastle integration install <AGENT> [--assets-dir <DIR>]
+memcastle integration update <AGENT> [--assets-dir <DIR>]
+memcastle integration remove <AGENT>
 ```
 
 Install, update and remove the integrations MemCastle ships for coding agents: `pi` and `opencode`.
@@ -465,7 +488,7 @@ It changes nothing, and says so, when the integration is already installed and c
 `--assets-dir` names the directory that holds `integrations/` and `skills/`, overriding `assets.dir` and
 `MEMCASTLE_ASSETS_DIR`: a checkout of the repository, or an unpacked package (see
 [Where integrations come from](integrations.md#where-integrations-come-from)).
-`--json` prints the report or the outcome as JSON, with the same fields in both.
+A terminal gets the report or the outcome as text, and a pipe (or `--json`) gets it as JSON, with the same fields in both.
 An error exits non-zero and names a `memcastle::integration::*` code, listed in
 [Troubleshooting](integrations.md#troubleshooting).
 
@@ -650,6 +673,9 @@ The detail column is only as wide as its text needs, and wraps onto further line
 The other columns are never wrapped, so on a very narrow terminal the table overflows instead.
 When standard output is a pipe or a file it prints the same jobs as a JSON array, so `memcastle job list | jq` works
 without a flag.
+`job show` prints one job as a card in a terminal (its parameters, progress, timestamps, and its error or result when it
+has one) and as JSON otherwise.
+`pause`, `resume`, `cancel` and `retry` print one sentence in a terminal and the daemon's answer as JSON otherwise.
 `job cancel` asks for confirmation in a terminal, see [Output, colour and prompts](#output-colour-and-prompts).
 Pausing and cancelling are requests: a running job stops at its next unit of work, not instantly.
 `retry` only applies to a failed job, and `resume` only to a paused one.

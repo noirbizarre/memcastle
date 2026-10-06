@@ -80,7 +80,7 @@ memcastle migrate --check    # like --status, but fail if anything is pending
 memcastle migrate            # apply whatever is pending
 ```
 
-Both report flags print JSON:
+Both report flags print JSON when piped, or with `--json`, and a short summary in a terminal:
 
 ```json
 {
@@ -92,7 +92,7 @@ Both report flags print JSON:
 
 `--check` exits with an error (`memcastle::migrate::pending`) when `pending` is not empty, so it fits in a CI job or a
 pre-start script.
-Applying prints what happened:
+Applying prints what happened, in the same two forms:
 
 ```json
 {
