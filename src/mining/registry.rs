@@ -13,8 +13,8 @@ use std::sync::Arc;
 
 use crate::config::MiningConfig;
 use crate::domain::{
-    AccessTokens, Cursor, Permissions, RawDocument, SourceCapabilities, SourceOrigin, SourcePackageRecord,
-    SourcePackageState, SourceRef, SourceState, sha256_hex,
+    AccessTokens, Cursor, Permissions, RawDocument, SourceCapabilities, SourceOrigin,
+    SourcePackageRecord, SourcePackageState, SourceRef, SourceState, sha256_hex,
 };
 use crate::error::{Error, Result};
 use crate::source::manifest::check_compatible;
