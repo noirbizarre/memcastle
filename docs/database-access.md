@@ -86,7 +86,7 @@ database admin endpoint: already running on ws://127.0.0.1:8000
 Only flags that contradict the open endpoint are refused, with `memcastle::db::already_running`;
 `db stop` first, then start it again with the new ones.
 
-`memcastle db status` says whether it is open and where, and `--json` gives the same for a script.
+`memcastle db status` says whether it is open and where, and gives the same as JSON when piped or with `--json`, for a script.
 Stopping the daemon closes the endpoint too, and so does `db stop`, which also closes any open Studio connections.
 The endpoint exists only after `db start`: `memcastle serve` alone opens the one listener it always did.
 

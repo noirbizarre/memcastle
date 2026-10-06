@@ -24,7 +24,7 @@ use cli::{
     AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, CompletionsArgs, DaemonCommand,
     DbCommand, DiaryCommand, DrawerCommand, EmbedArgs, ExtractArgs, IntegrationCommand, JobCommand,
     MigrateArgs, MineArgs, MinerCommand, NoteArgs, RecallArgs, RepairArgs, RoomCommand, SearchArgs,
-    ServeArgs, SourceCommand, StatusArgs, WakeUpArgs, WingCommand,
+    ServeArgs, SourceCommand, WakeUpArgs, WingCommand,
 };
 use memcastle::app::{DbEndpointRequest, DbEndpointStatus, WakeUpBudget};
 use memcastle::client::{DaemonClient, SetFlags, StatusView};
@@ -68,6 +68,8 @@ fn main() -> ExitCode {
 
 async fn async_main() -> ExitCode {
     let args = Cli::parse();
+    // First, before anything can print: every command's output form is decided from this flag and the stream.
+    term::set_json(args.json);
     // Before the configuration is loaded: a completion script depends on
     // nothing but the command definition, and a broken config file must not
     // stop someone from installing tab completion to help fix it.
@@ -199,7 +201,7 @@ fn overrides_from(args: &Cli) -> Overrides {
 /// every other command keeps returning a plain `Result<()>`.
 async fn run(args: Cli, config: Config) -> Result<ExitCode> {
     match args.command {
-        Command::Status(status) => cmd_status(&config, args.mode, &status).await,
+        Command::Status => cmd_status(&config, args.mode).await,
         // Like `status`, an update has more to say than success or failure: some sources may be updated while another
         // still waits for consent, and a script needs to tell.
         Command::Source(SourceCommand::Update(update)) => cmd_source_update(&config, &update).await,
@@ -220,7 +222,7 @@ async fn run_command(
         Command::Migrate(args) => cmd_migrate(&config, args).await,
         // Handled by `run`, which needs the exit code; the arm exists only so
         // this match stays exhaustive and a new command cannot be forgotten.
-        Command::Status(_) => Ok(()),
+        Command::Status => Ok(()),
         Command::Daemon(DaemonCommand::Start(start_args)) => {
             cmd_daemon_start(&config, config_file, mode, start_args).await
         }
@@ -298,11 +300,7 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
 /// 1 degraded, 3 not running (see `memcastle::client::status`). A stopped
 /// daemon is a normal answer here rather than a `not_running` diagnostic, so
 /// the report (endpoint, palace, how to start) is printed on stdout.
-async fn cmd_status(
-    config: &Config,
-    mode: Option<MemoryMode>,
-    args: &StatusArgs,
-) -> Result<ExitCode> {
+async fn cmd_status(config: &Config, mode: Option<MemoryMode>) -> Result<ExitCode> {
     let view = StatusView::collect(
         &config.palace.path,
         config.server.socket_addr(),
@@ -310,13 +308,8 @@ async fn cmd_status(
         config.auth.token.clone(),
     )
     .await?;
-    if args.json {
-        print_json(&view)?;
-    } else {
-        // Coloured only on a terminal that wants it, so a pipe or a log gets
-        // the exact plain text.
-        println!("{}", view.render_styled(Painter::for_stdout()));
-    }
+    // The exit code is the same either way: it is what a script branches on, whichever form it reads.
+    print_for_terminal_or_json(|painter, _| view.render_styled(painter), &view)?;
     Ok(ExitCode::from(view.exit_code()))
 }
 
@@ -330,7 +323,10 @@ async fn cmd_migrate(config: &Config, args: MigrateArgs) -> Result<()> {
 
     if args.check || args.status {
         let status = memcastle::migrate::status(&store).await?;
-        print_json(&status)?;
+        print_for_terminal_or_json(
+            |painter, _| memcastle::client::report_view::render_migration_status(&status, painter),
+            &status,
+        )?;
         if args.check && !status.pending.is_empty() {
             return Err(Error::MigrationsPending {
                 count: status.pending.len(),
@@ -341,13 +337,19 @@ async fn cmd_migrate(config: &Config, args: MigrateArgs) -> Result<()> {
     }
 
     let report = memcastle::migrate::run(&store).await?;
-    print_json(&report)?;
-    Ok(())
+    print_for_terminal_or_json(
+        |painter, _| memcastle::client::report_view::render_migration_report(&report, painter),
+        &report,
+    )
 }
 
 async fn cmd_stop(config: &Config, mode: Option<MemoryMode>) -> Result<()> {
-    print_json(&client(config, mode).shutdown().await?)?;
-    Ok(())
+    let answer = client(config, mode).shutdown().await?;
+    // The daemon's answer is `{"status": "shutting_down"}` and says nothing a person needs beyond that.
+    print_for_terminal_or_json(
+        |painter, _| memcastle::client::report_view::render_shutdown(painter),
+        &answer,
+    )
 }
 
 /// Start a background daemon with the flags this command was given, and wait
@@ -554,15 +556,19 @@ fn retrieval_query(
 async fn cmd_search(config: &Config, mode: Option<MemoryMode>, args: SearchArgs) -> Result<()> {
     let query = retrieval_query(args.query, args.limit, args.wing, args.room, args.retrieval)?;
     let hits = client(config, mode).search(&query).await?;
-    print_json(&hits)?;
-    Ok(())
+    print_for_terminal_or_json(
+        |painter, width| memcastle::client::hit_view::render_hits(&hits, painter, width),
+        &hits,
+    )
 }
 
 async fn cmd_recall(config: &Config, mode: Option<MemoryMode>, args: RecallArgs) -> Result<()> {
     let query = retrieval_query(args.query, args.limit, args.wing, None, args.retrieval)?;
     let hits = client(config, mode).recall(&query).await?;
-    print_json(&hits)?;
-    Ok(())
+    print_for_terminal_or_json(
+        |painter, width| memcastle::client::hit_view::render_hits(&hits, painter, width),
+        &hits,
+    )
 }
 
 async fn cmd_wake_up(config: &Config, mode: Option<MemoryMode>, args: WakeUpArgs) -> Result<()> {
@@ -570,8 +576,10 @@ async fn cmd_wake_up(config: &Config, mode: Option<MemoryMode>, args: WakeUpArgs
     let context = client(config, mode)
         .wake_up(&args.agent_identity, args.wing.as_deref(), budget)
         .await?;
-    print_json(&context)?;
-    Ok(())
+    print_for_terminal_or_json(
+        |painter, width| memcastle::client::hit_view::render_wake_up(&context, painter, width),
+        &context,
+    )
 }
 
 async fn cmd_mine(config: &Config, mode: Option<MemoryMode>, args: MineArgs) -> Result<()> {
@@ -598,8 +606,7 @@ async fn cmd_mine(config: &Config, mode: Option<MemoryMode>, args: MineArgs) -> 
     let job = client(config, mode)
         .submit_mine(source, args.wing, args.full)
         .await?;
-    print_json(&job)?;
-    Ok(())
+    print_submitted(&job)
 }
 
 async fn cmd_sources(config: &Config, mode: Option<MemoryMode>) -> Result<()> {
@@ -822,7 +829,10 @@ async fn cmd_source(
                 args.confirm.yes,
             )?;
             client(config, None).remove_source(&args.name).await?;
-            print_json(&serde_json::json!({ "removed": args.name }))
+            print_for_terminal_or_json(
+                |painter, _| format!("{} source {}", painter.ok("Removed"), args.name),
+                &serde_json::json!({ "removed": args.name }),
+            )
         }
         // Handled before the configuration is loaded (see `async_main`), or by `run` for its exit code.
         SourceCommand::Init(_)
@@ -894,7 +904,10 @@ async fn cmd_miner(config: &Config, command: MinerCommand) -> Result<()> {
                 args.confirm.yes,
             )?;
             daemon.remove_miner(&args.name).await?;
-            print_json(&serde_json::json!({ "removed": args.name }))
+            print_for_terminal_or_json(
+                |painter, _| format!("{} miner {}", painter.ok("Removed"), args.name),
+                &serde_json::json!({ "removed": args.name }),
+            )
         }
         MinerCommand::Reload => {
             let reload = daemon.reload_miners().await?;
@@ -902,7 +915,7 @@ async fn cmd_miner(config: &Config, command: MinerCommand) -> Result<()> {
         }
         MinerCommand::Run(args) => {
             let job = daemon.run_miner(&args.name, args.full).await?;
-            print_json(&job)
+            print_submitted(&job)
         }
     }
 }
@@ -1274,26 +1287,22 @@ async fn cmd_checkpoint(
     let job = client(config, mode)
         .submit_checkpoint(payload, args.emergency)
         .await?;
-    print_json(&job)?;
-    Ok(())
+    print_submitted(&job)
 }
 
 async fn cmd_audit(config: &Config, mode: Option<MemoryMode>, args: AuditArgs) -> Result<()> {
     let job = client(config, mode).submit_audit(args.wing).await?;
-    print_json(&job)?;
-    Ok(())
+    print_submitted(&job)
 }
 
 async fn cmd_embed(config: &Config, mode: Option<MemoryMode>, args: EmbedArgs) -> Result<()> {
     let job = client(config, mode).submit_embed(args.wing).await?;
-    print_json(&job)?;
-    Ok(())
+    print_submitted(&job)
 }
 
 async fn cmd_extract(config: &Config, mode: Option<MemoryMode>, args: ExtractArgs) -> Result<()> {
     let job = client(config, mode).submit_extract(args.wing).await?;
-    print_json(&job)?;
-    Ok(())
+    print_submitted(&job)
 }
 
 async fn cmd_repair(config: &Config, mode: Option<MemoryMode>, args: RepairArgs) -> Result<()> {
@@ -1316,11 +1325,11 @@ async fn cmd_repair(config: &Config, mode: Option<MemoryMode>, args: RepairArgs)
     let job = client(config, mode)
         .submit_repair(!args.apply, based_on_job)
         .await?;
-    print_json(&job)?;
-    Ok(())
+    print_submitted(&job)
 }
 
 async fn cmd_diary(config: &Config, mode: Option<MemoryMode>, command: DiaryCommand) -> Result<()> {
+    use memcastle::client::palace_view as view;
     let daemon = client(config, mode);
     match command {
         DiaryCommand::Write {
@@ -1329,7 +1338,10 @@ async fn cmd_diary(config: &Config, mode: Option<MemoryMode>, command: DiaryComm
             content,
         } => {
             let drawer = daemon.diary_write(&agent_identity, &wing, content).await?;
-            print_json(&drawer)?;
+            print_for_terminal_or_json(
+                |painter, _| view::render_diary_written(&drawer, painter),
+                &drawer,
+            )
         }
         DiaryCommand::Read {
             agent_identity,
@@ -1337,10 +1349,12 @@ async fn cmd_diary(config: &Config, mode: Option<MemoryMode>, command: DiaryComm
             limit,
         } => {
             let entries = daemon.diary_read(&agent_identity, &wing, limit).await?;
-            print_json(&entries)?;
+            print_for_terminal_or_json(
+                |painter, _| memcastle::client::hit_view::render_diary(&entries, painter),
+                &entries,
+            )
         }
     }
-    Ok(())
 }
 
 async fn cmd_job(config: &Config, mode: Option<MemoryMode>, command: JobCommand) -> Result<()> {
@@ -1349,28 +1363,25 @@ async fn cmd_job(config: &Config, mode: Option<MemoryMode>, command: JobCommand)
         JobCommand::List { status } => {
             let status = status.map(|s| Error::parse_job_status(&s)).transpose()?;
             let jobs = daemon.list_jobs(status).await?;
-            // A table for a person, JSON for anything else: whatever reads a
-            // pipe (`jq`, a script, a test) gets data it can parse without
-            // asking for it, and a terminal gets something it can read.
-            if term::stdout_is_terminal() {
-                println!(
-                    "{}",
-                    memcastle::client::table::render_jobs(
-                        &jobs,
-                        Painter::for_stdout(),
-                        term::terminal_width()
-                    )
-                );
-            } else {
-                print_json(&jobs)?;
-            }
+            print_for_terminal_or_json(
+                |painter, width| memcastle::client::table::render_jobs(&jobs, painter, width),
+                &jobs,
+            )
         }
-        JobCommand::Show { id } => print_json(&daemon.get_job(Error::parse_job_id(&id)?).await?)?,
+        JobCommand::Show { id } => {
+            let job = daemon.get_job(Error::parse_job_id(&id)?).await?;
+            print_for_terminal_or_json(
+                |painter, _| memcastle::client::job_view::render_job(&job, painter),
+                &job,
+            )
+        }
         JobCommand::Pause { id } => {
-            print_json(&daemon.pause_job(Error::parse_job_id(&id)?).await?)?;
+            let job_id = Error::parse_job_id(&id)?;
+            print_control(job_id, &daemon.pause_job(job_id).await?)
         }
         JobCommand::Resume { id } => {
-            print_json(&daemon.resume_job(Error::parse_job_id(&id)?).await?)?;
+            let job_id = Error::parse_job_id(&id)?;
+            print_control(job_id, &daemon.resume_job(job_id).await?)
         }
         JobCommand::Cancel { id, yes } => {
             let job_id = Error::parse_job_id(&id)?;
@@ -1379,10 +1390,11 @@ async fn cmd_job(config: &Config, mode: Option<MemoryMode>, command: JobCommand)
                 &format!("cancelling job {job_id}"),
                 yes,
             )?;
-            print_json(&daemon.cancel_job(job_id).await?)?;
+            print_control(job_id, &daemon.cancel_job(job_id).await?)
         }
         JobCommand::Retry { id } => {
-            print_json(&daemon.retry_job(Error::parse_job_id(&id)?).await?)?;
+            let job_id = Error::parse_job_id(&id)?;
+            print_control(job_id, &daemon.retry_job(job_id).await?)
         }
         JobCommand::Demo { steps } => {
             // The daemon has no "submit a demo job" REST endpoint of its
@@ -1390,10 +1402,20 @@ async fn cmd_job(config: &Config, mode: Option<MemoryMode>, command: JobCommand)
             // with a `demo` kind — reuse the same generic endpoint the
             // `mine` command uses, just with a different JSON body.
             let job: memcastle::domain::Job = daemon.submit_demo(steps).await?;
-            print_json(&job)?;
+            print_submitted(&job)
         }
     }
-    Ok(())
+}
+
+/// Print what a pause, resume, cancel or retry request did: a sentence on a terminal, the daemon's answer otherwise.
+fn print_control(
+    id: memcastle::domain::JobId,
+    result: &memcastle::app::JobControlResult,
+) -> Result<()> {
+    print_for_terminal_or_json(
+        |painter, _| memcastle::client::job_view::render_control(id, result, painter),
+        result,
+    )
 }
 
 /// `memcastle integration`: local, because installing an integration touches the machine's files and the agent, never
@@ -1405,15 +1427,11 @@ fn cmd_integration(config: &Config, command: &IntegrationCommand) -> Result<()> 
     use memcastle::assets::InstallSearch;
     use memcastle::integration::{Context, Locations, Operation, SystemRunner};
 
-    let (operation, json) = match command {
-        IntegrationCommand::List(args) => (Operation::List, args.common.json),
-        IntegrationCommand::Install(args) => {
-            (Operation::Install(args.agent.clone()), args.common.json)
-        }
-        IntegrationCommand::Update(args) => {
-            (Operation::Update(args.agent.clone()), args.common.json)
-        }
-        IntegrationCommand::Remove(args) => (Operation::Remove(args.agent.clone()), args.json),
+    let operation = match command {
+        IntegrationCommand::List(_) => Operation::List,
+        IntegrationCommand::Install(args) => Operation::Install(args.agent.clone()),
+        IntegrationCommand::Update(args) => Operation::Update(args.agent.clone()),
+        IntegrationCommand::Remove(args) => Operation::Remove(args.agent.clone()),
     };
     let locations = Locations::from_process();
     let runner = SystemRunner;
@@ -1423,20 +1441,29 @@ fn cmd_integration(config: &Config, command: &IntegrationCommand) -> Result<()> 
         config.assets.dir.as_deref(),
         &InstallSearch::from_process(),
         &ctx,
-        json,
+        // `execute` renders either form itself, so the one output rule is applied here, to what it is asked for.
+        !term::pretty(),
         Painter::for_stdout(),
     )?;
     println!("{text}");
     Ok(())
 }
 
-/// Print `human` when stdout is a terminal, `json` otherwise: the same rule
-/// `job list` follows, so a pipe always gets data it can parse.
+/// Print a job that was just submitted: its card and how to follow it on a terminal, the job as JSON otherwise.
+fn print_submitted(job: &memcastle::domain::Job) -> Result<()> {
+    print_for_terminal_or_json(
+        |painter, _| memcastle::client::job_view::render_submitted(job, painter),
+        job,
+    )
+}
+
+/// Print `human` when the output is pretty (stdout is a terminal and `--json` was not given), `json` otherwise:
+/// the one rule every command with a data answer follows, so a pipe always gets data it can parse.
 fn print_for_terminal_or_json(
     human: impl FnOnce(Painter, Option<u16>) -> String,
     json: &impl serde::Serialize,
 ) -> Result<()> {
-    if term::stdout_is_terminal() {
+    if term::pretty() {
         println!("{}", human(Painter::for_stdout(), term::terminal_width()));
         Ok(())
     } else {
@@ -1647,7 +1674,10 @@ async fn cmd_drawer(
             let outcome = daemon
                 .supersede_drawer(&found.id.to_string(), replacement)
                 .await?;
-            print_json(&outcome)?;
+            print_for_terminal_or_json(
+                |painter, _| view::render_superseded(&outcome, painter),
+                &outcome,
+            )?;
         }
         DrawerCommand::History { drawer } => {
             let (wing, room, name) = PalacePath::parse_drawer(&drawer)?;
@@ -1666,7 +1696,10 @@ async fn cmd_drawer(
             let link = daemon
                 .link_drawer_entity(&found.id.to_string(), &name, &kind)
                 .await?;
-            print_json(&link)?;
+            print_for_terminal_or_json(
+                |painter, _| view::render_entity_link(&link, painter),
+                &link,
+            )?;
         }
         DrawerCommand::Delete { drawer, yes } => {
             let (wing, room, name) = PalacePath::parse_drawer(&drawer)?;
@@ -1755,7 +1788,12 @@ async fn cmd_auth(config: &Config, command: AuthCommand) -> Result<()> {
                 confirm.yes,
             )?;
             let result = daemon.auth_revoke().await?;
-            print_json(&result)?;
+            print_for_terminal_or_json(
+                |painter, _| {
+                    memcastle::client::palace_view::render_revoked(result.revoked, painter)
+                },
+                &result,
+            )?;
         }
     }
     Ok(())
@@ -1778,17 +1816,17 @@ async fn cmd_db(config: &Config, command: DbCommand) -> Result<()> {
                     allowed_origins: args.allow_origin,
                 })
                 .await?;
-            print_db_status(&status, args.json)
+            print_db_status(&status)
         }
-        DbCommand::Stop => print_db_status(&daemon.db_stop().await?, false),
-        DbCommand::Status(args) => print_db_status(&daemon.db_status().await?, args.json),
+        DbCommand::Stop => print_db_status(&daemon.db_stop().await?),
+        DbCommand::Status => print_db_status(&daemon.db_status().await?),
     }
 }
 
 /// Print the admin endpoint's state, as JSON for scripts or as the few lines a
 /// person needs to point SurrealDB Studio at it.
-fn print_db_status(status: &DbEndpointStatus, json: bool) -> Result<()> {
-    if json {
+fn print_db_status(status: &DbEndpointStatus) -> Result<()> {
+    if !term::pretty() {
         return print_json(status);
     }
     // Coloured only on a terminal that wants it; the words are the same plain.

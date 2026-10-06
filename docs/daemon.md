@@ -95,7 +95,7 @@ The exit code tells scripts which state it found:
 | `1` | Running but degraded (datastore unreachable or migrations pending), or an error. |
 | `3` | Not running. |
 
-`memcastle status --json` prints the same report as JSON:
+Piped, or with `--json`, `memcastle status` prints the same report as JSON:
 
 ```sh
 memcastle status --json | jq .daemon.datastore

@@ -70,18 +70,41 @@ fn the_lifecycle_installs_updates_and_removes_both_agents_from_a_development_che
     let assets = machine.path("assets");
     let assets = assets.to_str().unwrap();
 
-    machine
+    // Piped, so JSON: the human sentences are held by the `integration::render` unit tests.
+    let installed = machine
         .memcastle()
         .args(["integration", "install", "pi", "--assets-dir", assets])
         .assert()
         .success()
-        .stdout(contains("Installed pi 0.1.0"));
-    machine
+        .get_output()
+        .stdout
+        .clone();
+    let installed = json(&installed);
+    assert_eq!(
+        (
+            &installed["id"],
+            &installed["action"],
+            &installed["version"]
+        ),
+        (&"pi".into(), &"installed".into(), &"0.1.0".into())
+    );
+    let installed = machine
         .memcastle()
         .args(["integration", "install", "opencode", "--assets-dir", assets])
         .assert()
         .success()
-        .stdout(contains("Installed opencode 0.1.0"));
+        .get_output()
+        .stdout
+        .clone();
+    let installed = json(&installed);
+    assert_eq!(
+        (
+            &installed["id"],
+            &installed["action"],
+            &installed["version"]
+        ),
+        (&"opencode".into(), &"installed".into(), &"0.1.0".into())
+    );
 
     assert!(machine.installed("pi").join("dist/index.js").is_file());
     assert!(
@@ -126,14 +149,14 @@ fn the_lifecycle_installs_updates_and_removes_both_agents_from_a_development_che
         .args(["integration", "update", "pi", "--assets-dir", assets])
         .assert()
         .success()
-        .stdout(contains("Updated pi"));
+        .stdout(contains("\"action\": \"updated\""));
 
     machine
         .memcastle()
         .args(["integration", "remove", "pi"])
         .assert()
         .success()
-        .stdout(contains("Removed pi"));
+        .stdout(contains("\"action\": \"removed\""));
     machine
         .memcastle()
         .args(["integration", "remove", "opencode"])

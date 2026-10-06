@@ -50,7 +50,7 @@ It runs as a background job, so the command returns immediately:
 memcastle mine ./my-project --wing my-project
 ```
 
-The output is the queued job, including its `id`.
+The output is the queued job, including its `id`, and the command that follows it (`memcastle job show <id>`).
 Watch it finish:
 
 ```sh
@@ -93,9 +93,10 @@ memcastle wake-up --agent-identity me --wing my-project
 ```
 
 `search` matches the words you stored (and, once you configure an [embedding provider](configuration.md#embeddings),
-their meaning), and returns JSON with each drawer's content verbatim.
+their meaning), and shows each hit with its score and the start of its content.
 `wake-up` builds the context an agent would load at the start of a session.
-Pipe any of them through `jq` to pick out what you need, for example `memcastle search formatter | jq '.[].content'`.
+Piped, or with `--json`, they print JSON with each drawer's content verbatim,
+so `memcastle search formatter | jq '.[].content'` picks out what you need.
 
 ## 5. Stop, restart, and find everything still there
 

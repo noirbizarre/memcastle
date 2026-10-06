@@ -24,6 +24,36 @@ pub fn stdout_is_terminal() -> bool {
     std::io::stdout().is_terminal()
 }
 
+/// Whether `--json` was given. Set once at startup; see [`set_json`].
+static JSON_FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// Record the global `--json` flag.
+///
+/// A process-wide value rather than a parameter: the flag is global, so every command
+/// would otherwise have to thread it through to the one place that prints. Set once;
+/// a second call is ignored, so a late caller cannot flip the contract mid-run.
+pub fn set_json(json: bool) {
+    let _ = JSON_FLAG.set(json);
+}
+
+/// The one rule every command's output follows: a person at a terminal gets the
+/// pretty rendering, anything else (a pipe, a file, `--json`) gets JSON.
+///
+/// A pure function of its inputs so the four cases are testable without a terminal.
+#[must_use]
+pub const fn is_pretty(json_flag: bool, stdout_is_terminal: bool) -> bool {
+    !json_flag && stdout_is_terminal
+}
+
+/// Whether this command should print its pretty rendering rather than JSON.
+#[must_use]
+pub fn pretty() -> bool {
+    is_pretty(
+        JSON_FLAG.get().copied().unwrap_or(false),
+        stdout_is_terminal(),
+    )
+}
+
 /// The terminal's width in columns, when stdout is one and it reports a real
 /// size. A pseudo-terminal that was never sized reports 0 columns; taken
 /// literally, a table would be squeezed to one character per column, so 0 is
@@ -261,6 +291,15 @@ fn edit_with(editor: Option<&str>, initial: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_terminal_without_the_json_flag_gets_the_pretty_rendering() {
+        // (json flag, stdout is a terminal) -> pretty
+        assert!(is_pretty(false, true), "a person at a terminal");
+        assert!(!is_pretty(true, true), "--json forces JSON on a terminal");
+        assert!(!is_pretty(false, false), "a pipe always gets JSON");
+        assert!(!is_pretty(true, false), "--json on a pipe is still JSON");
+    }
 
     #[test]
     fn editing_without_an_editor_says_how_to_configure_one() {

@@ -56,7 +56,8 @@ The exit code says what to do:
 
 Where the package installed a systemd user unit, `systemctl --user enable --now memcastle` keeps it running across logins.
 `memcastle serve` runs it in the foreground, which is only useful for watching its log.
-The daemon listens on `127.0.0.1:8420` by default, and the `mcp` line of `memcastle status` prints the exact URL in use.
+The daemon listens on `127.0.0.1:8420` by default.
+`memcastle status` prints the exact URL in use: on the `mcp` line in a terminal, and as `mcp_url` in the JSON a pipe gets.
 
 To verify health without the CLI, `GET /api/health` answers `{"status":"ok"}` and needs no credentials.
 

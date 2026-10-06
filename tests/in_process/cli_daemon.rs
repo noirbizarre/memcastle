@@ -169,29 +169,33 @@ async fn mining_a_relative_path_works_when_the_daemon_runs_somewhere_else() {
 }
 
 #[tokio::test]
-async fn status_against_a_healthy_daemon_prints_the_report_and_exits_zero() {
+async fn a_piped_status_against_a_healthy_daemon_is_json_without_asking_and_exits_zero() {
     let daemon = TestDaemon::start().await;
 
-    let output = memcastle(&daemon)
+    let piped = memcastle(&daemon)
         .arg("status")
         .output()
         .await
         .expect("run memcastle");
+    let forced = memcastle(&daemon)
+        .args(["status", "--json"])
+        .output()
+        .await
+        .expect("run memcastle");
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // Exit 0 is the "healthy" half of the scripting contract.
-    assert_eq!(output.status.code(), Some(0), "{stdout}");
-    assert!(stdout.contains("MemCastle is running"), "{stdout}");
-    assert!(stdout.contains(&daemon.base_url), "{stdout}");
-    assert!(
-        stdout.contains("from the daemon's registry file"),
-        "{stdout}"
-    );
-    assert!(stdout.contains("/mcp"), "{stdout}");
-    assert!(
-        stdout.contains(&daemon.palace_path.display().to_string()),
-        "{stdout}"
-    );
+    // Exit 0 is the "healthy" half of the scripting contract, whichever form is printed.
+    assert_eq!(piped.status.code(), Some(0));
+    let mut view: serde_json::Value =
+        serde_json::from_slice(&piped.stdout).expect("status as JSON");
+    assert_eq!(view["running"], true);
+    assert_eq!(view["endpoint"], daemon.base_url.as_str());
+    // Asking for JSON on a pipe changes nothing: the stream already decided. The uptime is the one field that
+    // moves between two calls.
+    let mut asked: serde_json::Value =
+        serde_json::from_slice(&forced.stdout).expect("status as JSON");
+    view["daemon"]["uptime_secs"] = serde_json::Value::Null;
+    asked["daemon"]["uptime_secs"] = serde_json::Value::Null;
+    assert_eq!(view, asked);
 
     daemon.shutdown().await;
 }
@@ -243,13 +247,16 @@ async fn db_start_opens_the_endpoint_tells_where_to_connect_and_db_stop_closes_i
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("ws://127.0.0.1:"), "{stdout}");
-    // What Studio needs to select, so the user is not left guessing.
+    let started: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json");
     assert!(
-        stdout.contains("memcastle") && stdout.contains("palace"),
-        "{stdout}"
+        started["url"]
+            .as_str()
+            .is_some_and(|url| url.starts_with("ws://127.0.0.1:")),
+        "{started}"
     );
+    // What Studio needs to select, so the user is not left guessing.
+    assert_eq!(started["namespace"], "memcastle", "{started}");
+    assert_eq!(started["database"], "palace", "{started}");
 
     let status = memcastle(&daemon)
         .args(["db", "status", "--json"])
@@ -265,7 +272,8 @@ async fn db_start_opens_the_endpoint_tells_where_to_connect_and_db_stop_closes_i
         .await
         .expect("run memcastle");
     assert!(stopped.status.success());
-    assert!(String::from_utf8_lossy(&stopped.stdout).contains("not running"));
+    let stopped: serde_json::Value = serde_json::from_slice(&stopped.stdout).expect("json");
+    assert_eq!(stopped["running"], false, "{stopped}");
     let status = memcastle(&daemon)
         .args(["db", "status", "--json"])
         .output()
@@ -286,8 +294,9 @@ async fn db_start_again_says_it_is_already_running_and_shows_the_same_details() 
         .await
         .expect("run memcastle");
     assert!(first.status.success());
-    let first = String::from_utf8_lossy(&first.stdout).into_owned();
-    assert!(first.contains("listening on ws://127.0.0.1:"), "{first}");
+    let mut first: serde_json::Value = serde_json::from_slice(&first.stdout).expect("json");
+    assert_eq!(first["running"], true, "{first}");
+    assert_eq!(first["already_running"], false, "{first}");
 
     let again = memcastle(&daemon)
         .args(["db", "start"])
@@ -301,24 +310,12 @@ async fn db_start_again_says_it_is_already_running_and_shows_the_same_details() 
         "{}",
         String::from_utf8_lossy(&again.stderr)
     );
-    let again = String::from_utf8_lossy(&again.stdout);
-    assert!(
-        again.contains("already running on ws://127.0.0.1:"),
-        "{again}"
-    );
-    // Everything after the headline is what the first start printed.
-    assert_eq!(
-        first.lines().skip(1).collect::<Vec<_>>(),
-        again.lines().skip(1).collect::<Vec<_>>()
-    );
-    // The URL is the same one, not a second endpoint.
-    let url = |text: &str| {
-        text.lines()
-            .next()
-            .and_then(|line| line.rsplit(' ').next())
-            .map(str::to_string)
-    };
-    assert_eq!(url(&first), url(&again));
+    let mut again: serde_json::Value = serde_json::from_slice(&again.stdout).expect("json");
+    assert_eq!(again["already_running"], true, "{again}");
+    // The same endpoint, not a second one: only the repeat marker differs.
+    first["already_running"] = serde_json::Value::Null;
+    again["already_running"] = serde_json::Value::Null;
+    assert_eq!(first, again);
 
     daemon.shutdown().await;
 }
@@ -491,16 +488,48 @@ async fn yes_is_accepted_everywhere_a_confirmation_would_be_asked() {
 }
 
 #[tokio::test]
-async fn a_piped_status_report_has_no_escape_codes() {
+async fn every_command_with_a_data_answer_prints_json_with_no_escape_codes_in_a_pipe() {
     let daemon = TestDaemon::start().await;
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(project.path().join("notes.txt"), "remember the milk").unwrap();
+    let job = submit_demo(&daemon, "1").await;
+    let job_id = job.id.to_string();
 
-    let output = memcastle(&daemon)
-        .arg("status")
+    // Colour forced on: it must still never reach a pipe, because the pretty form is the only one that has any.
+    for args in [
+        vec!["status"],
+        vec!["db", "status"],
+        vec!["job", "list"],
+        vec!["job", "show", &job_id],
+        vec!["audit"],
+        vec!["search", "milk"],
+        vec!["recall", "milk"],
+        vec!["wake-up", "--agent-identity", "tester"],
+        vec!["diary", "read", "--agent-identity", "tester", "--wing", "w"],
+        vec!["sources"],
+        vec!["wing", "list"],
+    ] {
+        let output = memcastle(&daemon)
+            .env("CLICOLOR_FORCE", "1")
+            .args(&args)
+            .output()
+            .await
+            .expect("run memcastle");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(!stdout.contains('\u{1b}'), "{args:?}: {stdout:?}");
+        serde_json::from_str::<serde_json::Value>(&stdout)
+            .unwrap_or_else(|error| panic!("{args:?} is not JSON ({error}): {stdout}"));
+    }
+
+    // `mine` is the command that started this: it used to be the one that printed JSON in a terminal.
+    let mined = memcastle(&daemon)
+        .env("CLICOLOR_FORCE", "1")
+        .current_dir(project.path())
+        .args(["mine", "."])
         .output()
         .await
         .expect("run memcastle");
-
-    assert!(!String::from_utf8_lossy(&output.stdout).contains('\u{1b}'));
+    serde_json::from_slice::<Job>(&mined.stdout).expect("mine prints the job as JSON in a pipe");
 
     daemon.shutdown().await;
 }

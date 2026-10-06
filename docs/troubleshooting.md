@@ -225,8 +225,9 @@ Fix it, or pass `--wing` and `--room` explicitly, see [Project configuration](pr
 ### Colours look wrong, or escape codes show up in a file
 
 Colour follows the output stream: it is on for a terminal and off for a pipe or a file.
-Set `NO_COLOR=1` to turn it off everywhere, or `CLICOLOR_FORCE=1` to turn it on for a pipe,
-see [Output, colour and prompts](cli.md#output-colour-and-prompts).
+Set `NO_COLOR=1` to turn it off everywhere, or `CLICOLOR_FORCE=1` to turn it on for the text that reaches a pipe
+(`--help`, diagnostics, the progress of `source build`), see [Output, colour and prompts](cli.md#output-colour-and-prompts).
+Command results are JSON in a pipe and never carry colour.
 A `CLICOLOR_FORCE` left in your environment is the usual reason escape codes reach a log.
 
 ## Configuration

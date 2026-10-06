@@ -240,7 +240,11 @@ async fn a_generated_token_survives_a_restart_and_then_gates_every_cli_command()
     // 4. The generated token, persisted as a verifier across the restart, is accepted.
     let ok = sandbox.run(Some(&token), &["status"]).await;
     assert!(ok.status.success(), "{}", text(&ok.stderr));
-    assert!(text(&ok.stdout).contains("enabled"), "{}", text(&ok.stdout));
+    assert!(
+        text(&ok.stdout).contains("\"auth_enabled\": true"),
+        "{}",
+        text(&ok.stdout)
+    );
     assert!(
         sandbox
             .run(Some(&token), &["search", "x"])

@@ -289,10 +289,11 @@ but not the flags, so a daemon started on a non-default port with `--port` is fo
 `daemon start` and `daemon restart` pass their `--bind`, `--port` and `--assets-dir` on to the new daemon.
 
 `memcastle status` shows which of the two it used (`endpoint_source`: `registry` or `config`).
-It exits 0 for a healthy daemon, 1 for a degraded one and 3 when none is running, and takes `--json` for scripts:
+It exits 0 for a healthy daemon, 1 for a degraded one and 3 when none is running,
+and prints JSON when piped (or with `--json`) for scripts:
 
 ```sh
-memcastle status                      # human-readable report
+memcastle status                      # human-readable report in a terminal, JSON in a pipe
 memcastle status --json | jq .daemon.datastore
 memcastle status || echo "exit $?"    # 3 means not running
 ```

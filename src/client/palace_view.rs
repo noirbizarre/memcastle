@@ -1,16 +1,17 @@
 //! Human renderings of a single wing, room or drawer, and of what a delete
 //! would remove.
 //!
-//! Like [`super::table`] these are only used on a terminal; a pipe gets JSON.
+//! Like [`super::table`] these are only used when the output is pretty (a terminal without `--json`);
+//! anything else gets JSON.
 
-use crate::app::WingDetail;
+use crate::app::{EntityLink, Superseded, WingDetail};
 use crate::domain::{Deleted, Drawer, DrawerHistory, RoomSummary, WingSummary};
 use crate::term::Painter;
 
 use super::table::render_rooms;
 
 /// `Label: value`, the label dimmed so the value is what the eye lands on.
-fn field(painter: Painter, label: &str, value: impl std::fmt::Display) -> String {
+pub(super) fn field(painter: Painter, label: &str, value: impl std::fmt::Display) -> String {
     format!("{} {value}", painter.dim(&format!("{label}:")))
 }
 
@@ -219,5 +220,126 @@ pub fn render_created(kind: &str, name: &str, created: bool, painter: Painter) -
         format!("{} {kind} {name}", painter.ok("Created"))
     } else {
         format!("{} {kind} {name} already exists", painter.dim("Found"))
+    }
+}
+
+/// One line confirming a diary entry: its id, so it can be found again.
+#[must_use]
+pub fn render_diary_written(drawer: &Drawer, painter: Painter) -> String {
+    format!("{} diary entry {}", painter.ok("Saved"), drawer.id)
+}
+
+/// One or two lines saying which drawer stopped being current and what, if anything, took its place.
+#[must_use]
+pub fn render_superseded(outcome: &Superseded, painter: Painter) -> String {
+    match &outcome.replacement {
+        Some(replacement) => format!(
+            "{} drawer {}\n{} drawer {}",
+            painter.ok("Superseded"),
+            outcome.superseded.id,
+            painter.dim("Replaced by"),
+            replacement.id,
+        ),
+        // No replacement: the drawer is simply no longer current, which is not a delete.
+        None => format!(
+            "{} drawer {} (its history is kept)",
+            painter.ok("Invalidated"),
+            outcome.superseded.id
+        ),
+    }
+}
+
+/// One line saying that a drawer now mentions an entity, or already did.
+#[must_use]
+pub fn render_entity_link(link: &EntityLink, painter: Painter) -> String {
+    let entity = format!("{} {}", link.entity.kind, link.entity.name);
+    if link.created {
+        format!(
+            "{} drawer {} to {entity}",
+            painter.ok("Linked"),
+            link.drawer
+        )
+    } else {
+        format!(
+            "{} drawer {} was already linked to {entity}",
+            painter.dim("Found"),
+            link.drawer
+        )
+    }
+}
+
+/// One line saying whether revoking found a token to revoke.
+#[must_use]
+pub fn render_revoked(revoked: bool, painter: Painter) -> String {
+    if revoked {
+        format!("{} the generated token", painter.ok("Revoked"))
+    } else {
+        // Not an error: the end state the user asked for already holds.
+        format!("{} no generated token to revoke", painter.dim("Found"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{DrawerId, Provenance, RoomId, Source, SourceKind};
+
+    fn drawer() -> Drawer {
+        Drawer::new(
+            DrawerId::new(),
+            RoomId::new(),
+            "body".to_string(),
+            Source {
+                kind: SourceKind::Note,
+                uri: None,
+                agent: None,
+                origin: None,
+            },
+            Vec::new(),
+            Provenance {
+                requested_by: "cli".to_string(),
+                job_id: None,
+            },
+        )
+    }
+
+    #[test]
+    fn a_saved_diary_entry_is_confirmed_by_its_id() {
+        let entry = drawer();
+        assert_eq!(
+            render_diary_written(&entry, Painter::PLAIN),
+            format!("Saved diary entry {}", entry.id)
+        );
+    }
+
+    #[test]
+    fn a_supersession_names_the_replacement_and_an_invalidation_says_nothing_was_deleted() {
+        let (old, new) = (drawer(), drawer());
+        let replaced = Superseded {
+            superseded: old.clone(),
+            replacement: Some(new.clone()),
+        };
+        let text = render_superseded(&replaced, Painter::PLAIN);
+        assert!(
+            text.contains(&old.id.to_string()) && text.contains(&new.id.to_string()),
+            "{text}"
+        );
+
+        let invalidated = Superseded {
+            superseded: old,
+            replacement: None,
+        };
+        let text = render_superseded(&invalidated, Painter::PLAIN);
+        assert!(text.starts_with("Invalidated drawer"), "{text}");
+        assert!(text.contains("history is kept"), "{text}");
+    }
+
+    #[test]
+    fn revoking_with_no_token_is_reported_as_already_done_not_as_a_revocation() {
+        assert_eq!(
+            render_revoked(true, Painter::PLAIN),
+            "Revoked the generated token"
+        );
+        assert!(render_revoked(false, Painter::PLAIN).contains("no generated token"));
     }
 }
