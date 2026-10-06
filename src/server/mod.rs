@@ -23,6 +23,7 @@ use crate::config::{Config, Secret};
 use crate::credential::Credentials;
 use crate::embed::Embeddings;
 use crate::error::{Error, Result};
+use crate::events::EventBus;
 use crate::extract::Extraction;
 use crate::jobs::Scheduler;
 use crate::store::SurrealStore;
@@ -102,7 +103,11 @@ pub async fn run(config: Config) -> Result<()> {
     // and report whether they are). Nothing is read or written until a source that signs in is touched, so a daemon
     // with no such source never starts the platform keyring.
     let credentials = Credentials::from_config(&config.credentials);
+    // One bus for the scheduler (job changes, the handlers' writes) and the services (their own writes), so
+    // `GET /api/events` hears both.
+    let events = EventBus::new();
     let mut scheduler = Scheduler::new(store.clone(), config.jobs.max_concurrency)
+        .with_events(events.clone())
         .with_credentials(Arc::new(credentials.clone()))
         .with_embeddings(embeddings.clone())
         .with_extraction(extraction.clone())
@@ -139,6 +144,7 @@ pub async fn run(config: Config) -> Result<()> {
     let backend_info = backend.describe();
     let backend_info_kind = backend_info.kind.to_string();
     let app = AppServices::new(store, Arc::clone(&scheduler))
+        .with_events(events)
         .with_credentials(credentials)
         .with_mining(config.effective_mining())
         .with_embeddings(embeddings)

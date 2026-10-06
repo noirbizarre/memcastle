@@ -124,7 +124,7 @@ The history is the value.
   its static shell is the second public path,
   it signs in as the database console does (user `memcastle`, the token as the password, checked by every request),
   carries a memory mode, and a hook holds `web/` to HTTP
-  (amends ADR-013, ADR-014, ADR-015 and ADR-034)
+  (amends ADR-013, ADR-014, ADR-015 and ADR-034; its read-on-demand rule amended by ADR-041)
 - [ADR-036](036-retrieval-evaluation-framework.md) — retrieval is evaluated by an HTTP-only harness under
   `tests/in_process/retrieval_eval/`, so nothing ships in the binary or a release;
   a small bundled dataset runs in the everyday suite against a committed quality baseline,
@@ -152,3 +152,10 @@ The history is the value.
   `install` and `update` are for registry sources only; the official registry is a static file in the documentation
   that names GitHub repositories, whose releases are the versions, and is the default `mining.registries`
   (amends ADR-033 and ADR-026)
+- [ADR-041](041-server-sent-events-for-dashboard-updates.md) — the daemon announces changes on an in-process bus and
+  `GET /api/events` relays them as server-sent events: identifiers and kinds, never content, behind the ordinary
+  authentication layer and read gate (`disabled` is refused), a slow connection told to `resync`, the stream ended by
+  shutdown;
+  the dashboard reads it with `fetch` (not `EventSource`, which cannot send the token) and `useLoad` re-reads quietly,
+  keeping the Refresh button for a stream-less session or a shared remote palace
+  (amends ADR-035, builds on ADR-006, ADR-007 and ADR-014)

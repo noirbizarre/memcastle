@@ -22,7 +22,7 @@ const busy = ref<string | null>(null)
 const latest = useLoad(async () => {
   const [audits, repairs] = await Promise.all([client.jobs({ kind: "audit", limit: 1 }), client.jobs({ kind: "repair", limit: 1 })])
   return { audit: audits[0], repair: repairs[0] }
-})
+}, { on: ["job"] })
 
 interface Task {
   id: "audit" | "repair"

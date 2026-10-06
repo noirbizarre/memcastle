@@ -181,6 +181,9 @@ Every path, environment variable, flag and the precedence between them is in [Co
     daemon, and the proof, from the requests on the wire, that an `off` session receives nothing.
     It is test-only and imports the integrations' sources, see
     [ADR-027](adr/027-cross-integration-tests-live-in-a-common-package.md).
+  - `tests/in_process/events.rs` — `GET /api/events` against a real daemon: a note, a wing and a job's progress arrive as
+    identifiers and never as content, a `disabled` session is refused and a `read_only` one served, the token is
+    required, and an open stream does not keep the daemon from shutting down.
   - `tests/in_process/web.rs` — the dashboard's routes against a real daemon: opt-in, the static files and their headers,
     the refusal of any path that leaves `web/dist`, the page for a build that is missing, the public shell with
     authentication on, `/api/config`, and the jobs listing's `kind` and `limit` (in-process).
@@ -188,7 +191,8 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `tests/web_bundle.rs` — builds the dashboard with `packaging/web/build.sh`, checks the package tree (no sources, maps
     or `node_modules`) and serves it from an installed prefix and from the checkout.
     It needs bun and node, so it is `#[ignore]`d in the basic suite and `mise run web:check` runs it.
-  - `web/test/` — the dashboard's client, login, route guard and polling (vitest, no daemon), and the same client and login
+  - `web/test/` — the dashboard's client, login, route guard, event-stream parser and live loader
+    (vitest, no daemon), and the same client, login and event stream
     against a real `memcastle serve` (`web/test/daemon`, bun), see [Web dashboard](web.md#developing-the-dashboard).
   - `tests/wasm_conformance.rs` — the same conformance cases run against the built-in `directory` source and against the
     reference WebAssembly source built from `sources/directory/` (in-process, WebAssembly suite).

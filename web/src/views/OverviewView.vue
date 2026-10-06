@@ -17,7 +17,7 @@ const RECENT = 200
 const overview = useLoad(async () => {
   const [status, jobs] = await Promise.all([client.status(), client.jobs({ limit: RECENT })])
   return { status, jobs }
-})
+}, { on: ["job", "drawer", "wing", "room"] })
 
 const outcomes = computed(() => {
   const jobs = overview.data.value?.jobs ?? []

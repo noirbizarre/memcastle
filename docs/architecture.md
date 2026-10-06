@@ -96,6 +96,30 @@ the same runner `serve` calls on every startup, because migration must work befo
 The invariants that keep this true are listed in `AGENTS.md`, and each is enforced by a `prek` hook or a test:
 `store-isolation` greps for forbidden imports, and `single-writer` limits who may construct a store.
 
+## Change notices: a bus, not a database feature
+
+A client that wants to know "something changed" without polling reads `GET /api/events`, a server-sent events stream
+([ADR-041](adr/041-server-sent-events-for-dashboard-updates.md)).
+The notices come from a small in-process bus (`events::EventBus`, a bounded `tokio::sync::broadcast`) that `server::run`
+creates and hands to the scheduler and to `AppServices`.
+
+```mermaid
+flowchart LR
+    SCH["jobs: transitions and<br/>JobContext::checkpoint"] -->|publish| BUS(("EventBus"))
+    HAND["handlers: mining, checkpoint,<br/>extract, repair"] -->|"ctx.events()"| BUS
+    APP["app: palace, graph and<br/>diary writes"] -->|announce| BUS
+    BUS -->|subscribe_events| API["api: GET /api/events"]
+    API -->|"SSE: identifiers only"| CLIENT["dashboard or any client"]
+    CLIENT -.->|"re-reads, mode-gated"| API2["api: ordinary routes"]
+```
+
+An event is published after the change is saved and holds identifiers and kinds, never content,
+so a client re-reads through the routes that apply the memory mode and the stream cannot show what a read would refuse.
+A connection that falls behind the bounded channel is told to `resync` instead of being queued.
+The bus is this process's only: on a remote palace shared by several daemons, another daemon's writes are not announced
+here, which is why the dashboard keeps its Refresh button.
+Subscribing is a read (a `disabled` session gets a `403`), and the stream ends with the daemon's shutdown.
+
 ## Storage: one SurrealDB, embedded or remote
 
 `store::SurrealStore` wraps a single `Surreal<Any>` connection (`surrealdb::engine::any`),

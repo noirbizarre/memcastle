@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::{Entity, EntityId, MemoryMode, Mention, Relationship};
 use crate::error::{Error, Result};
+use crate::events::{Action, Event};
 use crate::store::PossibleEntity;
 
 use super::{AppServices, effective_limit};
@@ -114,12 +115,15 @@ impl AppServices {
         mode: MemoryMode,
     ) -> Result<Entity> {
         Self::require_write(mode, "entity_alias")?;
-        self.store
+        let entity = self
+            .store
             .add_entity_alias(entity, alias)
             .await?
             .ok_or_else(|| Error::EntityNotFound {
                 id: entity.to_string(),
-            })
+            })?;
+        self.announce(Event::entity(Action::Updated, entity.id));
+        Ok(entity)
     }
 
     /// A piece of the knowledge graph in one answer, so a client can draw it without one request per entity.

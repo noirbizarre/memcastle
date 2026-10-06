@@ -3,7 +3,9 @@ import Button from "openvue/button"
 import { computed } from "vue"
 import Icon from "./Icon.vue"
 
-// Re-reads what the page shows. The dashboard does not refresh by itself, so it says how old the data is.
+// Re-reads what the page shows. Pages that listen to the daemon's change stream also update by themselves, but the
+// stream may be absent (another daemon writing the same palace, a refused stream), so the button stays and the page says
+// how old the data is.
 const props = defineProps<{ loading?: boolean; updatedAt?: Date | null }>()
 defineEmits<{ refresh: [] }>()
 

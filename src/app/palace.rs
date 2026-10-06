@@ -17,6 +17,7 @@ use crate::domain::{
     Room, RoomId, RoomSummary, Source, SourceKind, Wing, WingId, WingSummary, validate_name,
 };
 use crate::error::{Error, Result};
+use crate::events::{Action, Event};
 
 use super::{AppServices, effective_limit};
 
@@ -149,7 +150,10 @@ impl AppServices {
         if !self.store.supersede_drawer(id, new.as_ref(), at).await? {
             return Err(superseded());
         }
-        if new.is_some() {
+        // Announced once saved, and before the re-read below can fail: the change happened either way.
+        self.announce(Event::drawer(Action::Updated, id));
+        if let Some(new) = &new {
+            self.announce(Event::drawer(Action::Created, new.id));
             self.scheduler.ensure_embedding_sweep().await;
         }
         let closed = self
@@ -208,6 +212,7 @@ impl AppServices {
             .store
             .link_drawer_entity_observed(drawer, entity.id, None, Some(&observation))
             .await?;
+        self.announce(Event::entity(Action::Updated, entity.id));
         Ok(EntityLink {
             drawer,
             entity,
@@ -255,6 +260,9 @@ impl AppServices {
         validate_name(NameKind::Wing, name)?;
         let created = self.store.get_wing(name).await?.is_none();
         let wing = self.store.get_or_create_wing(name, description).await?;
+        if created {
+            self.announce(Event::wing(Action::Created, wing.id));
+        }
         let item = self.store.wing_summary(wing).await?;
         Ok(Created { created, item })
     }
@@ -272,7 +280,9 @@ impl AppServices {
         let wing = self.resolve_wing(wing).await?;
         self.ensure_no_palace_writers(format!("wing `{}`", wing.name))
             .await?;
-        self.store.delete_wing(wing.id).await
+        let deleted = self.store.delete_wing(wing.id).await?;
+        self.announce(Event::wing(Action::Deleted, wing.id));
+        Ok(deleted)
     }
 
     /// The rooms of one wing with their drawer counts.
@@ -323,6 +333,9 @@ impl AppServices {
             .store
             .get_or_create_room(wing.id, name, description)
             .await?;
+        if created {
+            self.announce(Event::room(Action::Created, room.id));
+        }
         let item = self.store.room_summary(&wing, room).await?;
         Ok(Created { created, item })
     }
@@ -340,7 +353,9 @@ impl AppServices {
         let room = self.resolve_room(&wing, room).await?;
         self.ensure_no_palace_writers(format!("room `{}/{}`", wing.name, room.name))
             .await?;
-        self.store.delete_room(room.id).await
+        let deleted = self.store.delete_room(room.id).await?;
+        self.announce(Event::room(Action::Deleted, room.id));
+        Ok(deleted)
     }
 
     /// The newest drawers of a room, as listing rows (a preview of the
@@ -446,6 +461,7 @@ impl AppServices {
             .await?
             {
                 crate::dedup::Outcome::Stored { .. } => {
+                    self.announce(Event::drawer(Action::Created, drawer.id));
                     self.scheduler.ensure_embedding_sweep().await;
                     Ok(Created {
                         created: true,
@@ -498,6 +514,7 @@ impl AppServices {
                 Err(error)
             };
         }
+        self.announce(Event::drawer(Action::Created, drawer.id));
         self.scheduler.ensure_embedding_sweep().await;
         Ok(Created {
             created: true,
@@ -555,6 +572,7 @@ impl AppServices {
         .await?
         {
             crate::dedup::Outcome::Stored { .. } => {
+                self.announce(Event::drawer(Action::Created, drawer.id));
                 // Derived data, queued after the canonical write succeeded and never able to fail it.
                 self.scheduler.ensure_embedding_sweep().await;
                 // Notes carry no mining origin, so nothing else would ever ask for them to be read.
@@ -642,6 +660,7 @@ impl AppServices {
         let room = self.resolve_room(&wing, room).await?;
         let drawer = self.resolve_drawer(&wing, &room, drawer).await?;
         self.store.delete_drawer(drawer.id).await?;
+        self.announce(Event::drawer(Action::Deleted, drawer.id));
         Ok(Deleted {
             wings: 0,
             rooms: 0,
@@ -677,7 +696,9 @@ impl AppServices {
                     });
                 }
                 validate_name(NameKind::Wing, wing)?;
-                self.store.get_or_create_wing(wing, None).await
+                let created = self.store.get_or_create_wing(wing, None).await?;
+                self.announce(Event::wing(Action::Created, created.id));
+                Ok(created)
             }
             Err(error) => Err(error),
         }
@@ -697,7 +718,9 @@ impl AppServices {
                     });
                 }
                 validate_name(NameKind::Room, room)?;
-                self.store.get_or_create_room(wing.id, room, None).await
+                let created = self.store.get_or_create_room(wing.id, room, None).await?;
+                self.announce(Event::room(Action::Created, created.id));
+                Ok(created)
             }
             Err(error) => Err(error),
         }

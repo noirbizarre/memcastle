@@ -124,6 +124,8 @@ async fn every_other_route_is_guarded_including_ones_that_do_not_exist() {
     let daemon = authenticated_daemon().await;
     let routes = [
         (Method::GET, "/api/status"),
+        // The change stream: guarded like any read, and read with a header, never a token in the address.
+        (Method::GET, "/api/events"),
         (Method::GET, "/api/search?q=x"),
         (Method::GET, "/api/recall?q=x"),
         // The JSON forms of search and recall, which carry query vectors.

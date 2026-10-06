@@ -10,6 +10,7 @@
 mod auth;
 mod db;
 mod error;
+mod events;
 mod extract;
 mod graph;
 mod miners;
@@ -53,6 +54,7 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/status", get(status))
+        .route("/api/events", get(events::events))
         .route("/api/config", get(config))
         .route("/api/search", get(search).post(search_json))
         .route("/api/recall", get(recall).post(recall_json))

@@ -5,8 +5,10 @@
 // request that carried a token means the token was revoked or rotated: the session is told, and the login page comes
 // back (docs/adr/035). Nothing else is imported from the daemon: this is HTTP, as the CLI's client is.
 
+import { SseParser } from "./sse.ts"
 import type {
   ConfigReport,
+  DaemonEvent,
   Drawer,
   DrawerHistory,
   DrawerSummary,
@@ -75,10 +77,24 @@ function drawerPath(name: string): string {
 export class MemCastleClient {
   constructor(private readonly options: ClientOptions) {}
 
+  /** What every request carries: the memory mode, and the token when there is one. The same for a stream. */
+  private headers(token: string | null, accept: string): Record<string, string> {
+    const headers: Record<string, string> = { Accept: accept, "X-MemCastle-Mode": this.options.mode() }
+    if (token) headers.Authorization = `Bearer ${token}`
+    return headers
+  }
+
+  /** Turn a refused answer into the `ApiError` it carries, and end the session when it says the token is no good. */
+  private async refusal(response: Response, token: string | null): Promise<ApiError> {
+    const body = (await response.json().catch(() => ({}))) as ErrorBody
+    // Only a refused *token* ends the session: a 401 with no token is just the login probe being answered.
+    if (response.status === 401 && token) this.options.onUnauthorized?.()
+    return new ApiError(response.status, body.code ?? `http_${response.status}`, body.error ?? response.statusText, body.help)
+  }
+
   private async request<T>(method: string, path: string, init: { query?: Query; body?: unknown; token?: string | null } = {}): Promise<T> {
     const token = init.token === undefined ? this.options.token() : init.token
-    const headers: Record<string, string> = { Accept: "application/json", "X-MemCastle-Mode": this.options.mode() }
-    if (token) headers.Authorization = `Bearer ${token}`
+    const headers = this.headers(token, "application/json")
     if (init.body !== undefined) headers["Content-Type"] = "application/json"
 
     let response: Response
@@ -89,16 +105,68 @@ export class MemCastleClient {
         body: init.body === undefined ? undefined : JSON.stringify(init.body),
       })
     } catch (cause) {
-      throw new ApiError(0, "network", `The daemon did not answer: ${cause instanceof Error ? cause.message : String(cause)}`, "Is it running? Try `memcastle status`.")
+      throw this.unreachable(cause)
     }
 
-    if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as ErrorBody
-      // Only a refused *token* ends the session: a 401 with no token is just the login probe being answered.
-      if (response.status === 401 && token) this.options.onUnauthorized?.()
-      throw new ApiError(response.status, body.code ?? `http_${response.status}`, body.error ?? response.statusText, body.help)
-    }
+    if (!response.ok) throw await this.refusal(response, token)
     return (response.status === 204 ? undefined : await response.json()) as T
+  }
+
+  /**
+   * The daemon's change notices (`GET /api/events`), until `signal` aborts or the daemon closes the stream.
+   *
+   * Read with `fetch` and not `EventSource`, which cannot send the token or the memory mode (docs/adr/041).
+   *
+   * @throws ApiError when the stream cannot be opened (a refusal, or no answer) or breaks while open.
+   */
+  async *events(signal: AbortSignal): AsyncGenerator<DaemonEvent | { kind: "open" }> {
+    const token = this.options.token()
+    let response: Response
+    try {
+      response = await (this.options.fetch ?? fetch)(`${this.options.baseUrl ?? ""}/api/events`, { headers: this.headers(token, "text/event-stream"), signal })
+    } catch (cause) {
+      throw this.unreachable(cause)
+    }
+    if (!response.ok) throw await this.refusal(response, token)
+    if (!response.body) throw new ApiError(0, "network", "The daemon answered with no stream.")
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    const parser = new SseParser()
+    try {
+      for (;;) {
+        let chunk: Awaited<ReturnType<typeof reader.read>>
+        try {
+          chunk = await reader.read()
+        } catch (cause) {
+          // Leaving on purpose is not a failure.
+          if (signal.aborted) return
+          throw this.unreachable(cause)
+        }
+        if (chunk.done) return
+        for (const frame of parser.push(decoder.decode(chunk.value, { stream: true }))) {
+          if (frame.event === "open") {
+            yield { kind: "open" }
+            continue
+          }
+          let event: DaemonEvent
+          try {
+            event = JSON.parse(frame.data) as DaemonEvent
+          } catch {
+            // Not JSON, so not one of ours: skipping it keeps one odd frame from ending the stream.
+            continue
+          }
+          yield event
+        }
+      }
+    } finally {
+      // Releases the connection however the loop ended, including a consumer that stopped listening.
+      void reader.cancel().catch(() => undefined)
+    }
+  }
+
+  private unreachable(cause: unknown): ApiError {
+    return new ApiError(0, "network", `The daemon did not answer: ${cause instanceof Error ? cause.message : String(cause)}`, "Is it running? Try `memcastle status`.")
   }
 
   /** Whether `token` is accepted, by asking for the one thing every session needs. Used by the login form. */

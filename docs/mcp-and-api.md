@@ -136,6 +136,7 @@ and `/api/status` accepts it only to report the mode
 (`full`, `read_only` or `disabled`; `full` when absent), and an unrecognized value is a `400`, never silently treated
 as `full`.
 `/api/health`, job control (pause, resume, cancel, retry) and `/api/shutdown` are never gated and ignore it.
+`GET /api/events` is a read: it accepts the header and refuses a `disabled` session.
 
 A mode the daemon refuses is a `403` with the code `memcastle::mode::forbidden`.
 A request without a valid token, on a daemon with [authentication](authentication.md) enabled,
@@ -155,6 +156,7 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 |---|---|---|
 | `GET /api/health` | Liveness: `{"status": "ok"}`. Touches nothing else. | none |
 | `GET /api/status` | The full status report, also used by `memcastle status`. | none |
+| `GET /api/events` | A stream of change notices (server-sent events), so a client can read again instead of polling: see [The event stream](#the-event-stream). A read, so a `disabled` session gets a `403`. There is no MCP tool. | none |
 | `GET /api/config` | The configuration in effect, for the [dashboard's](web.md) settings page: listener, palace, datastore, whether authentication and the dashboard are on, where the runtime assets come from, scheduler limits, provider names and models, mining limits. It carries no token, key, URL or command line, and is daemon information like `status`, so no memory mode gates it. There is no MCP tool. | none |
 | `GET /api/search` | Search drawers. | query string: `q` (or `query`), `limit`, `wing`, `room`, `ranking`, `tags`, `source_kind`, `as_of`, `from`, `until`, `include_historical`, `expand` |
 | `POST /api/search` | The same search as a JSON [`SearchQuery`](#searching), the only way to send a `query_embedding`. | JSON body |
@@ -238,6 +240,45 @@ With [`web.enable`](configuration.md#web-dashboard), the same listener also serv
 `/ui` (`GET` and `HEAD` only).
 They are not part of the API and carry no data; see [Web dashboard](web.md) and [Authentication](authentication.md#what-is-protected)
 for why they are the one thing besides the liveness probe that needs no token.
+
+### The event stream
+
+`GET /api/events` is a [server-sent events](https://html.spec.whatwg.org/multipage/server-sent-events.html) stream
+on the main listener, for the [dashboard](web.md) and any other client that would rather be told than poll.
+It is an ordinary route: it needs the `Authorization: Bearer` token when [authentication](authentication.md) is on,
+and a browser's `EventSource`, which cannot send one, is not the way to read it (use `fetch`, as the dashboard does).
+It accepts `X-MemCastle-Mode`: a `disabled` session is refused with a `403`, and a `read_only` one gets the same stream.
+
+Each frame is named by its kind and carries one JSON object:
+
+```text
+event: job
+data: {"kind":"job","action":"updated","id":"0b2e…","job_kind":"mine","status":"running"}
+```
+
+| Frame | Sent when | Fields beyond `kind` and `action` |
+|---|---|---|
+| `open` | first, once the stream is live | none |
+| `job` | a job is queued, claimed, makes progress, changes state or finishes | `id`, `job_kind`, `status` |
+| `drawer` | a drawer is written, superseded or deleted; a mining run sends one without an `id` per document | `id`, except for a batch |
+| `wing`, `room` | one is created or deleted | `id` |
+| `entity` | an entity or its aliases changed; an extraction sweep sends one without an `id` per pass | `id`, except for a batch |
+| `resync` | this connection fell behind and missed events | none |
+
+`action` is `created`, `updated` or `deleted`.
+An event names what changed and never what it holds: no title, text, job input, path or progress line.
+Read the change through the ordinary route (`GET /api/jobs/{id}`, `GET /api/wings`, ...), which applies the memory mode.
+After a `resync`, and after any reconnect, read everything you show, since events were missed while the stream was down.
+A comment line is sent every 15 seconds so a proxy does not close a quiet stream (behind nginx, turn response buffering
+off for this route).
+The stream ends when the daemon shuts down.
+
+Events come from this daemon only.
+With several daemons on one remote palace, another daemon's writes are not announced here, so keep a manual refresh.
+
+```sh
+curl -N -H "Authorization: Bearer $MEMCASTLE_AUTH_TOKEN" http://127.0.0.1:8420/api/events
+```
 
 ### Searching
 

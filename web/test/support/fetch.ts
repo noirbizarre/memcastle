@@ -54,3 +54,48 @@ export const STATUS = {
   datastore: { ok: true, backend: "embedded", location: "/p/db", error: null, migration_version: 3, latest_version: 3, pending: [] },
   auth_enabled: true,
 }
+
+/**
+ * A fake `fetch` for `GET /api/events`: every call opens a stream the test writes to (`send`) and ends (`close`), and
+ * the requests made are recorded. `answer` makes the next call a refusal instead.
+ */
+export function fakeStream() {
+  const requests: Recorded[] = []
+  const encoder = new TextEncoder()
+  const controllers: ReadableStreamDefaultController<Uint8Array>[] = []
+  let refusal: { status: number; body: unknown } | undefined
+  const impl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    requests.push({ url: String(input), method: init?.method ?? "GET", headers: (init?.headers ?? {}) as Record<string, string>, body: undefined })
+    if (refusal) {
+      const { status, body } = refusal
+      return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
+    }
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controllers.push(controller)
+        // Leaving on purpose ends the read, as a real aborted `fetch` does.
+        init?.signal?.addEventListener("abort", () => controller.error(new DOMException("aborted", "AbortError")))
+      },
+    })
+    return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } })
+  }
+  const latest = () => controllers[controllers.length - 1]!
+  return {
+    fetch: impl as typeof fetch,
+    requests,
+    /** How many streams have been opened. */
+    get opened() {
+      return controllers.length
+    },
+    /** Write raw text to the newest stream. */
+    send: (text: string) => latest().enqueue(encoder.encode(text)),
+    /** The daemon's `open` frame, then nothing: what a live stream starts with. */
+    open: () => latest().enqueue(encoder.encode('event: open\ndata: {}\n\n')),
+    /** One change notice. */
+    emit: (event: Record<string, unknown>) => latest().enqueue(encoder.encode(`event: ${String(event.kind)}\ndata: ${JSON.stringify(event)}\n\n`)),
+    /** The daemon closing the newest stream. */
+    close: () => latest().close(),
+    /** Answer the next call with a refusal. */
+    refuse: (status: number, body: unknown = {}) => void (refusal = { status, body }),
+  }
+}
