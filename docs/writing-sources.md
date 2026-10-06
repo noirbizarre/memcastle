@@ -121,7 +121,7 @@ The manifest lists what it asks for and nothing else is granted.
 |---|---|
 | `filesystem.read` | Opens the listed directories read-only, at the same path inside the sandbox as outside it, so `std::fs` on the locator works unchanged. `locator` is the directory being mined, canonicalised by the host. There is no write access. |
 | `network` | Opens the network, all or nothing. The host cannot yet restrict by host name, and the consent prompt says so. |
-| `process` | Lets the source call `run-process` for exactly those programs: no shell, a minimal environment (`PATH`, `HOME`, and the variables in `env`), a time limit, a cap on output. Any other program is refused. |
+| `process` | Lets the source call `run-process` for exactly those programs: no shell, a minimal environment (`PATH`, `HOME`, and the variables in `env`), a time limit, a cap on output (16 MiB, enforced while the program runs; its output is captured through scratch files, so a program that drops output on a pipe still answers whole). Any other program is refused. |
 | `env` | Passes the listed variables, when set, into the sandbox. It sees no others. |
 
 `normalize` runs with none of these, whatever the manifest says.

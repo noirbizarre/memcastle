@@ -6,6 +6,7 @@
 # The discovery query is not evaluated as SQL: the two values and the limit the source writes into it are read back out
 # of its text, which is also what makes this fail loudly if the source changes its query without this being updated.
 # A file `../data/fail`, when present, makes every call fail, to exercise the source's error messages.
+# A file `../data/cut` makes the discovery query answer with a truncated document.
 
 here=$(cd "$(dirname "$0")" && pwd)
 data="$here/../data"
@@ -35,6 +36,12 @@ case "$1" in
     if [ -z "$t" ] || [ -z "$n" ]; then
       echo "fake opencode: cannot read this query: $query" >&2
       exit 1
+    fi
+    # A file `../data/cut`, when present, makes the answer end in the middle of an object with a zero exit status, as
+    # OpenCode's does when its output is cut off.
+    if [ -e "$data/cut" ]; then
+      printf '[\n  {\n    "id": "ses_al'
+      exit 0
     fi
     tab=$(printf '\t')
     sort -t "$tab" -k2,2n -k1,1 "$data/sessions.tsv" | awk -F '\t' -v t="$t" -v id="$id" -v n="$n" '
