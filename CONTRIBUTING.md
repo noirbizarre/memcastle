@@ -136,6 +136,10 @@ The optional inputs exist for trials only, and a run on a tag refuses them:
 
 A trial's binaries expire after three days, since they exist only to compare sizes.
 
+The release profile is thin LTO with one codegen unit, chosen from trials of 0.3.0's build:
+fat LTO took 53 to 59 minutes on the macOS legs, thin LTO under 28 on every leg for a binary 8% larger.
+Run a trial before changing `lto` or `codegen-units` in `[profile.release]`, and compare both time and size.
+
 The pinned release workflow is template-owned (see below), so a change that belongs to every project generated
 from the template should be made in rust.tpl.
 

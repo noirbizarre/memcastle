@@ -71,7 +71,14 @@ path = "src/lib.rs"
 # Cargo only reads [profile.*] from a workspace's root manifest, so this stays
 # unconditional: member crates inherit it whether or not this file also
 # defines a [package].
-lto = true
+#
+# Thin, not fat, LTO: measured on 0.3.0's build, fat LTO took 53-59 minutes on
+# the macOS legs and outlived the one-hour token the release job holds, while
+# thin LTO with one codegen unit built every leg in under 28 minutes for a
+# binary 8% larger (73.0 to 79.1 MB on macOS arm64). More codegen units were
+# faster still but grew the binary by 46-71%, which is why this stays at 1.
+# See noirbizarre/memcastle#216 before changing either setting.
+lto = "thin"
 codegen-units = 1
 strip = true
 
