@@ -1,6 +1,6 @@
 //! Source registries end to end (docs/adr/033): a daemon that searches, installs and updates sources by name from a
 //! registry, and holds what it fetches to the index's digest and the configured trust policy. A source that ships with
-//! MemCastle (docs/adr/039) is installed from the start and is never touched by a registry.
+//! MemCastle (docs/adr/040) is installed from the start and is never touched by a registry.
 //!
 //! The registry is a directory on disk (a registry whose location is a path, which is also what offline installation
 //! is), written with the same library calls `memcastle source index` makes. The package is the reference source under
@@ -631,7 +631,7 @@ async fn a_registry_chosen_for_one_install_replaces_the_configured_ones_for_it()
     fixture.daemon.shutdown().await;
 }
 
-// --- a registry that names GitHub repositories (docs/adr/039) ------------------------------------------------------
+// --- a registry that names GitHub repositories (docs/adr/040) ------------------------------------------------------
 
 /// What a GitHub stand-in knows about the repository `o/r`: its releases, oldest first, as (version, the archive's
 /// bytes, and the digest GitHub reports for it, which a test can make differ from the bytes).

@@ -1,6 +1,6 @@
 //! Finding, installing and updating sources from registries (docs/adr/033).
 //!
-//! A source that ships with MemCastle is not here: it is installed from the start (docs/adr/039), so a registry never
+//! A source that ships with MemCastle is not here: it is installed from the start (docs/adr/040), so a registry never
 //! installs, updates or replaces one.
 //!
 //! The same administrative rule as installing from a file (`source_packages`): REST and the CLI only, no MCP tool, so

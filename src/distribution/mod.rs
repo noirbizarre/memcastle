@@ -1,4 +1,4 @@
-//! Finding, fetching and verifying source packages from registries (docs/adr/033, docs/adr/039).
+//! Finding, fetching and verifying source packages from registries (docs/adr/033, docs/adr/040).
 //!
 //! `crate::source` is what a package *is* and how to make one; `crate::mining::wasm` is how one *runs*; this module is
 //! how one *arrives*: reading an index, choosing a version, downloading the archive, and proving it is the archive the

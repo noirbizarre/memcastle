@@ -11,7 +11,7 @@
 //!   (`directory`), and [`wasm`] runs the ones a user installs as WebAssembly components
 //!   (docs/adr/026). Source-specific discovery and reading live in those and nowhere else.
 //! - [`registry`] turns a source name into one or the other, behind the same contract, and [`bundled`] reads the packages
-//!   that ship unpacked beside the binary, which are installed from the start (docs/adr/039).
+//!   that ship unpacked beside the binary, which are installed from the start (docs/adr/040).
 //! - [`pipeline`] is the one loop every source goes through: cursor, revision check, chunking, idempotent filing,
 //!   cursor commit, checkpoint. It knows no source by name.
 //! - [`chunk`] cuts a canonical document into drawer-sized texts.
@@ -47,7 +47,7 @@ pub struct MiningParams {
 }
 
 /// Where a source comes from: built in, a local package, a bundled one or one from a registry (docs/adr/033,
-/// docs/adr/039).
+/// docs/adr/040).
 pub use crate::domain::SourceOrigin;
 
 /// A source adapter the daemon can mine, as `memcastle sources` and `GET /api/sources` describe it.
@@ -83,6 +83,10 @@ pub struct AdapterInfo {
     /// The key whose signature on the package was verified when it was installed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signed_by: Option<String>,
+    /// Where it stands on signing in, for a source that declares `[permissions.oauth]`. Filled by the application
+    /// layer, which is the one that can ask where credentials are kept; `None` for every other source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<crate::domain::SourceAuth>,
 }
 
 fn enabled() -> SourceState {
@@ -110,7 +114,7 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: MiningParams) -> Resul
         wing: wing.as_deref(),
         full,
     };
-    let adapter = registry::resolve(ctx.store(), ctx.mining(), name).await?;
+    let adapter = registry::resolve(ctx.store(), ctx.mining(), ctx.credentials(), name).await?;
     pipeline::mine(&adapter, ctx, job, request).await
 }
 

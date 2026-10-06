@@ -1,4 +1,4 @@
-//! The registry index: the published list of source packages a registry offers (docs/adr/033, docs/adr/039).
+//! The registry index: the published list of source packages a registry offers (docs/adr/033, docs/adr/040).
 //!
 //! A registry is one JSON file, `memcastle-index.json`, that anyone can host (a git repository's raw file, static
 //! pages, a directory on a share). It names each source, and for each version where its archive is, the SHA-256 of

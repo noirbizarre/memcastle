@@ -652,7 +652,7 @@ See [Writing a mining source](writing-sources.md) and [ADR-026](adr/026-pluggabl
 **Sources arrive from four places and share one lifecycle.**
 A built-in source is compiled in.
 A bundled source is an ordinary package unpacked beside the binary: it is installed from the start, run in place, and
-only its enabled state is stored (`mining::bundled`, [ADR-039](adr/039-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md)).
+only its enabled state is stored (`mining::bundled`, [ADR-040](adr/040-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md)).
 A registry source comes from a static `memcastle-index.json` the user configured, the official one by default.
 A local source is a file or a project directory the user installed.
 Only the daemon reaches a registry, and only `crate::distribution`, called from `app`, does the fetching
@@ -700,9 +700,10 @@ Deliberately out of scope, and each is structurally possible without rework give
 
 - Semantic processing of mined documents beyond entity extraction (summaries): mining stops at filing drawers, and the
   `extract` job is the stage that reads what was filed.
-- Mining sources that need credentials (Slack, GitHub, Atlassian, ...): the model stores a credential *reference* and
-  never a secret, and no shipped adapter needs one yet.
-  An installed source can read a variable its manifest lists, but there is no credential store.
+- Handing a static credential (an environment variable or a file) to a source: the model stores a credential
+  *reference* and never a secret, and the source contract takes no static credential yet.
+  What exists is an OAuth sign-in a source can declare, which the daemon runs, keeps and renews, and hands over as an
+  access token ([ADR-039](adr/039-oauth-credentials-for-mining-sources.md)); no shipped source needs one yet.
 - Restricting an installed source's network access by host name and a filesystem write permission for sources: the package
   contract allows each, and neither is built.
 - A registry server and a search across registries beyond their names and descriptions: the official registry is a static
@@ -721,8 +722,10 @@ Deliberately out of scope, and each is structurally possible without rework give
 - TLS on the daemon's own listener (use a TLS-terminating proxy).
 - A read-only mode, live queries or transactions on the database admin endpoint
   ([ADR-015](adr/015-database-admin-endpoint.md)).
-- OAuth/OIDC, users, roles and scopes: there is one optional shared bearer token,
+- OAuth/OIDC, users, roles and scopes for *access to the daemon*: there is one optional shared bearer token,
   and the authentication layer is where those would attach ([ADR-014](adr/014-optional-token-authentication.md)).
+  OAuth as a *client*, to sign a mining source in to someone else's service, is a different thing and exists
+  ([ADR-039](adr/039-oauth-credentials-for-mining-sources.md)).
 - Robust cross-platform process supervision for `memcastle daemon start` and `daemon restart`
   (they are a best-effort detached spawn; use a real supervisor in production).
 - A dashboard that is more than an API client.

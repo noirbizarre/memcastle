@@ -12,6 +12,7 @@ mod graph;
 mod info;
 mod miners;
 mod palace;
+mod source_auth;
 mod source_packages;
 mod source_registry;
 
@@ -35,6 +36,7 @@ use crate::jobs::Scheduler;
 use crate::search::{RankingMode, SearchHit, SearchQuery};
 use crate::store::SurrealStore;
 
+pub use crate::credential::{Challenge, FlowKind, FlowStatus, SignedIn};
 pub use auth::{AuthPolicy, GeneratedToken, RevokeResult};
 pub use db_endpoint::{DbEndpoint, DbEndpointRequest, DbEndpointStatus};
 pub use graph::GraphView;
@@ -46,6 +48,7 @@ pub use miners::{
 pub use palace::{
     Created, DEFAULT_LIST_LIMIT, DrawerReplacement, EntityLink, Superseded, WingDetail,
 };
+pub use source_auth::MAX_WAIT as SOURCE_AUTH_MAX_WAIT;
 pub use source_packages::InstalledSource;
 pub use source_registry::{
     InstalledVersion, RegistryEntry, RegistryInstall, RegistryPreview, RegistrySearch,
@@ -325,6 +328,8 @@ pub struct AppServices {
     mining: MiningConfig,
     /// The `[[miners]]` of the configuration file, read back from it and rewritten through it.
     miners: Arc<MinerRegistry>,
+    /// The OAuth sign-ins of the sources that need one (docs/adr/039).
+    credentials: crate::credential::Credentials,
 }
 
 impl AppServices {
@@ -343,7 +348,17 @@ impl AppServices {
             dedup: DedupConfig::default(),
             mining: MiningConfig::default(),
             miners: Arc::new(MinerRegistry::default()),
+            credentials: crate::credential::Credentials::from_config(
+                &crate::config::CredentialsConfig::default(),
+            ),
         }
+    }
+
+    /// Give the services the daemon's OAuth credentials, shared with the scheduler that runs the jobs which use them.
+    #[must_use]
+    pub fn with_credentials(mut self, credentials: crate::credential::Credentials) -> Self {
+        self.credentials = credentials;
+        self
     }
 
     /// Give the services the deduplication settings (see `[dedup]`).
@@ -710,10 +725,11 @@ impl AppServices {
                 documents,
             });
         }
-        Ok(SourcesReport {
-            adapters: crate::mining::list_adapters(&self.store, &self.mining).await?,
-            sources,
-        })
+        let mut adapters = Vec::new();
+        for info in crate::mining::list_adapters(&self.store, &self.mining).await? {
+            adapters.push(self.with_sign_in(info).await);
+        }
+        Ok(SourcesReport { adapters, sources })
     }
 
     /// Submit a synthetic demo job (see `domain::job::JobKind::Demo`) at

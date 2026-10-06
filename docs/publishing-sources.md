@@ -4,7 +4,7 @@ A mining source is a [WebAssembly package](writing-sources.md), and this page is
 the package format, the registry index that lists packages, how to publish to one, and how users find, install, update
 and trust sources.
 The decisions behind it are in [ADR-033](adr/033-source-distribution.md)
-and [ADR-039](adr/039-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md).
+and [ADR-040](adr/040-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md).
 
 Nobody installing a published source needs Rust, Python, Node or an SDK: a package is a component and a manifest, and the
 daemon runs it.
@@ -72,7 +72,7 @@ A registry is one JSON file, `memcastle-index.json`, served from anywhere that s
       "versions": [
         {
           "version": "1.2.0",
-          "contract": "0.2",
+          "contract": "0.3",
           "memcastle": ">=0.2, <0.4",
           "url": "claude-1.2.0.tar.gz",
           "sha256": "<64 lowercase hex characters>",

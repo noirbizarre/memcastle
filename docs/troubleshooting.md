@@ -314,6 +314,23 @@ installed again; one that is incompatible needs rebuilding against this MemCastl
 cannot read a file it expects probably lacks a `filesystem.read` permission.
 The full list is in [Writing a mining source](writing-sources.md#troubleshooting).
 
+### `memcastle::credential::*`
+
+These come from [sources that sign in with OAuth](writing-sources.md#signing-in-with-oauth).
+`required` means a run, or a miner, needs the source signed in: run `memcastle source auth <source>`.
+It also follows a provider that revoked the credential, and an update that changed what the source asks for
+(its client, endpoints or scopes), because a credential is never used under terms it was not given under.
+`refresh_failed` means the stored credential could not be renewed just now, almost always the provider or the network;
+the credential is kept, so running again later is the fix, and `source auth` again if it keeps happening.
+`flow_failed` ends a sign-in that was declined, whose code expired, or that the provider refused;
+`source auth` starts a new one.
+The browser flow redirects to a port on the machine the *daemon* runs on, so with a daemon on another machine
+use a source that offers the device flow, or run the browser on the daemon's machine.
+`store_failed` means neither the platform keyring nor the fallback file could be used.
+On a Linux server with no desktop session there is no keyring, which `auto` handles by using the file,
+so look at the permissions of `credentials.dir`; `credentials.backend = "file"` makes the choice explicit.
+See [Credentials](configuration.md#credentials).
+
 ### `memcastle::miner::*`
 
 These come from [configured miners](configuration.md#miners).

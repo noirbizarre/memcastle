@@ -279,7 +279,7 @@ version = "0.1.0"
 description = "demo"
 
 [compatibility]
-contract = "0.2"
+contract = "0.3"
 memcastle = ">=0.1"
 "#;
 

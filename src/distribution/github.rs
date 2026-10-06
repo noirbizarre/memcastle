@@ -1,4 +1,4 @@
-//! Source packages published as GitHub releases (docs/adr/039).
+//! Source packages published as GitHub releases (docs/adr/040).
 //!
 //! An index entry that names a repository carries no versions: they are the repository's releases, read when the index
 //! is loaded. The convention is the one `memcastle source package` already follows: a release attaches

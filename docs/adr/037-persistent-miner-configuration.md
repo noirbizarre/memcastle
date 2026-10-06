@@ -119,3 +119,11 @@ Six decisions follow, and each has an alternative that is easier for one of the 
 - Disabling or removing a miner does not stop a job already queued or running: a job carries a source and a locator, not
   a miner's name.
 - A name, `reload`, is reserved, because `POST /api/miners/reload` is a fixed route.
+
+## Note, 2026-10-06: an OAuth credential
+
+`credential` gains a third reference, `{ type = "oauth" }`, for a source that signs in with OAuth
+([ADR-039](039-oauth-credentials-for-mining-sources.md)).
+It names nothing, so the file still holds no secret, and it is shown as `oauth` with whether the source is signed in.
+A miner for a source that declares a sign-in is unavailable until the source is signed in, whatever its `credential` says.
+An `env` or `file` credential is still only checked and not yet handed to a source.

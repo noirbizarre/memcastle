@@ -5,14 +5,14 @@
 #
 # Writes, under <out-dir>:
 #   sources/<name>/            each source unpacked (memcastle-source.toml, source.wasm, ...): the bundle, which goes to
-#                              `share/memcastle/sources/` and is installed from the start, run in place (docs/adr/039)
+#                              `share/memcastle/sources/` and is installed from the start, run in place (docs/adr/040)
 #   archives/<name>-<ver>.tar.gz and .sha256
 #                              the same packages as archives, attached to the release: what the official registry
 #                              resolves to when a daemon with no bundle installs `pi` or `opencode`
 #
 # There is no registry index here. The official registry is a static file in the documentation
 # (`docs/registry.json`) that names this repository, and a daemon reads its releases, so publishing a
-# source is attaching `<name>-<version>.tar.gz` to a release, and registering one is a pull request (docs/adr/039).
+# source is attaching `<name>-<version>.tar.gz` to a release, and registering one is a pull request (docs/adr/040).
 #
 # Bundled sources are ordinary packages (docs/adr/033), not code linked into the binary: this is the same
 # `memcastle source package` a third-party author runs. One script for 📦 Publish Release and for

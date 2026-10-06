@@ -493,6 +493,38 @@ impl DaemonClient {
         self.send(request).await
     }
 
+    /// Start signing the installed source `name` in with OAuth, and learn what the user must do.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable, or the daemon's refusal (a source that does not
+    /// sign in, one that is not installed).
+    pub async fn begin_source_auth(&self, name: &str) -> Result<crate::app::Challenge> {
+        self.send(
+            self.http
+                .post(self.api_url(&["source-packages", name, "auth"], None)?),
+        )
+        .await
+    }
+
+    /// Wait, for a few seconds, for the sign-in `flow` of `name` to finish. Asked again until it says it has.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable, or the daemon's refusal, which is how a
+    /// sign-in that was declined or expired ends.
+    pub async fn wait_source_auth(&self, name: &str, flow: &str) -> Result<crate::app::FlowStatus> {
+        self.send(
+            self.http
+                .post(self.api_url(&["source-packages", name, "auth", flow, "wait"], None)?)
+                .query(&[(
+                    "timeout",
+                    crate::app::SOURCE_AUTH_MAX_WAIT.as_secs().to_string(),
+                )]),
+        )
+        .await
+    }
+
     /// Search the configured registries.
     ///
     /// # Errors

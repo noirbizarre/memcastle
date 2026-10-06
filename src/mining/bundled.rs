@@ -1,4 +1,4 @@
-//! The sources that ship with MemCastle, installed from the start (docs/adr/039).
+//! The sources that ship with MemCastle, installed from the start (docs/adr/040).
 //!
 //! A bundled source is an ordinary package, unpacked under `share/memcastle/sources/<name>/` beside the binary: the
 //! same `memcastle-source.toml` and `source.wasm` an installed one has, and the host runs it from where it is. It is

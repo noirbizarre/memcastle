@@ -37,6 +37,9 @@ An invariant nothing checks is a comment, and it will be violated.
    daemon command: the rules for a miner live in `app::miners` (see `docs/adr/037-persistent-miner-configuration.md`).
    `source search`, `install <name>` and `update` never fetch anything themselves: the daemon does, through
    `crate::distribution`, and the CLI calls it over REST.
+   `source auth` never talks to a provider or keeps a token itself: the daemon runs the OAuth flow through
+   `crate::credential`, and the CLI calls it over REST, shows the code or address, and waits
+   (see `docs/adr/039-oauth-credentials-for-mining-sources.md`).
    `note` also reads the project directory through `crate::project` to choose a wing and room, then calls the daemon.)
    `migrate` is a second, narrow exception alongside `serve`: it connects to storage directly (via
    `crate::migrate::run`/`status`, the same runner `serve` calls on every startup) because migration must work
@@ -67,14 +70,19 @@ An invariant nothing checks is a comment, and it will be violated.
 6. **Every route but `GET /api/health` passes the authentication layer, and MCP never touches credentials** —
    the layer wraps the merged router in `server::run`, so a route added later is guarded by default,
    and token generation and revocation are REST/CLI operations with no MCP tool.
+   The same holds for a mining source's OAuth sign-in: the browser flow's redirect lands on a one-shot loopback listener
+   outside the router, never on a public route, and no answer, log, file or database row but the credential store holds
+   a token (see `docs/adr/039-oauth-credentials-for-mining-sources.md`).
    The one other exception is the web dashboard's static files: `GET`/`HEAD` of `/ui` and below, only when `web.enable`
    is set, named in `api::auth::is_public` and nowhere else (see `docs/adr/035-web-dashboard.md`).
    A token or secret is never logged, serialised or persisted in plaintext (`config::Secret` redacts it;
    the store holds only a digest) — see `docs/adr/014-optional-token-authentication.md`.
    Enforced by `tests/in_process/auth.rs`
    (every route and an unknown path refused without a token, `/ui` refused while the dashboard is off, no
-   credential-named MCP tool), `tests/in_process/web.rs` (with the dashboard on, only `/ui` is open: `/uix`, every `/api`
-   route and `/mcp` are still refused) and `tests/auth_lifecycle.rs` (no token in the log, the database or any file).
+   credential-named MCP tool), `tests/credential_isolation.rs` (the OAuth credential module reaches neither the palace nor
+   the jobs nor the runtime, nothing outside `app` and the daemon's root names it, and a token is read only where it is
+   stored or sent to its provider), `tests/in_process/web.rs` (with the dashboard on, only `/ui` is open: `/uix`, every
+   `/api` route and `/mcp` are still refused) and `tests/auth_lifecycle.rs` (no token in the log, the database or any file).
 7. **The database admin endpoint is opt-in, loopback by default, and runs on the daemon's own handle** —
    only an explicit `memcastle db start` (REST `/api/db`) opens it, `serve` never does, and it never binds beyond loopback
    without `--allow-remote` *and* authentication.
@@ -108,7 +116,7 @@ An invariant nothing checks is a comment, and it will be violated.
    (see `docs/adr/033-source-distribution.md`).
    A source that ships with MemCastle arrives from nowhere: it is unpacked beside the binary, installed from the start,
    and read in place by `src/mining/bundled.rs`, which touches neither the store, the jobs nor the network
-   (see `docs/adr/039-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md`).
+   (see `docs/adr/040-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md`).
    Entity extraction is the stage after: it reads drawers, names no source, and only adds graph records, never writing a
    drawer (see `docs/adr/024-entity-extraction-as-an-enrich-job.md`).
    Enforced by `tests/source_isolation.rs`, which fails on an adapter name or file access in `pipeline.rs`, `chunk.rs`
@@ -137,7 +145,11 @@ An invariant nothing checks is a comment, and it will be violated.
     A source that ships with MemCastle is the one exception to consent and trust, because it is the release itself:
     enabling it needs no digest, it is never fetched, installed, updated or removed through a registry
     (`memcastle::source::bundled`), and enabling it is still REST and CLI only
-    (see `docs/adr/039-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md`).
+    (see `docs/adr/040-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md`).
+    A source that signs in with OAuth declares it as a permission (a public client and endpoints, part of the consent
+    digest) and is given an access token only by `host.access-token`, never for `normalize` and never one it did not declare;
+    signing a source in is REST and CLI only, with no MCP tool, so an agent cannot start one
+    (see `docs/adr/039-oauth-credentials-for-mining-sources.md`).
     Enforced by `tests/source_isolation.rs` (the host calls nothing that inherits the environment, standard streams,
     arguments or a writable directory, and opens the network only inside the manifest's flag),
     by `tests/wasm_projects.rs` (a real source cannot read outside its grant, see the environment, outrun its time
@@ -151,8 +163,9 @@ An invariant nothing checks is a comment, and it will be violated.
     skips them, and the bundle is read from disk and nothing else) and by
     `tests/wasm_registry.rs` (a tampered or substituted package is never installed, `required` trust refuses what no
     trusted key signed, an update never widens permissions silently, a registry never installs, updates or replaces a
-    bundled source) and `tests/wasm_bundle.rs` (the release script's bundle is listed as installed and enabled without
-    consent).
+    bundled source), `tests/wasm_bundle.rs` (the release script's bundle is listed as installed and enabled without
+    consent) and `tests/wasm_oauth.rs` (a source gets a token only with the declaration and the consent, and no token is
+    kept anywhere but the credential store).
 
 11. **The web dashboard is a client of the REST API and nothing else, and it is opt-in** —
     everything under `web/` reaches MemCastle only over HTTP, never storage, the job code or the database admin endpoint,
@@ -175,7 +188,8 @@ An invariant nothing checks is a comment, and it will be violated.
     disabling, removing, reloading and running one are REST and CLI only, so an agent can read the miners
     (`memcastle_miner_list`, `memcastle_miner_get`) but cannot decide what the daemon mines.
     A secret is never written to the file (`credential` is a reference, and a secret-looking key is refused) nor returned
-    (a credential is shown as a kind and whether it resolves), and a change made through the daemon never widens a
+    (a credential is shown as a kind (`env`, `file` or `oauth`) and whether it resolves), and a change made through the
+    daemon never widens a
     scope without being told to.
     The rest of the file is never rewritten, only that section, in place (see
     `docs/adr/037-persistent-miner-configuration.md`).
@@ -211,6 +225,8 @@ src/
 │               the Pi and OpenCode adapters (no store, no jobs, no network, no daemon)
 ├── source/     source packages: manifest, archive, scaffolding, build, signing, publishing an index, and the conformance runner
 │               (no store, no jobs, no network)
+├── credential/ OAuth for mining sources: the device and browser sign-in flows, the keyring or owner-only file store, and
+│               renewal; reaches no store, jobs or runtime, and only `app` and `server` name it
 ├── distribution/ finding and fetching source packages: registry indexes, locations, the SHA-256 and signature checks;
 │               called only from `app` (and `config`, to parse a location), no store, no jobs
 ├── checkpoint/ the checkpoint job handler (durable, resumable memory writes)
@@ -221,7 +237,7 @@ src/
 ├── dedup/      drawer deduplication: assess what a new drawer duplicates or resembles, link it, skip an exact copy
 ├── extract/    entity extraction providers (heuristic, command, OpenAI-compatible HTTP) behind one trait, and the `Extract` job handler
 ├── app/        application services — the one layer mcp/api call into (the CLI reaches it over HTTP, via `client/`);
-│               `miners` reads and rewrites the configured miners
+│               `miners` reads and rewrites the configured miners; `source_auth` signs a source in
 ├── server/     the daemon composition root + lifecycle (registry file)
 ├── mcp/        MCP tool surface, over HTTP
 ├── api/        the REST API (health/status/config/jobs/search/recall/wake-up/diary/notes/wings/rooms/drawers/entities/graph/

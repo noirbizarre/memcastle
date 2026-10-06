@@ -140,7 +140,14 @@ The history is the value.
 - [ADR-038](038-one-output-contract-for-every-command.md) — every command with a data answer is readable in a terminal
   and JSON in a pipe, and the global `--json` forces JSON on a terminal
   (amends ADR-012, ADR-015 and ADR-016)
-- [ADR-039](039-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md) — bundled
+- [ADR-039](039-oauth-credentials-for-mining-sources.md) — a mining source that cannot use a static token declares
+  `[permissions.oauth]` (a public client, endpoints, scopes; part of the consent digest) and asks the host for an access
+  token through a new `host.access-token` function (source contract `0.3.0`);
+  the daemon runs the device or browser-with-PKCE sign-in for `memcastle source auth <source>`, keeps the refresh token
+  in the platform keyring or an owner-only file and never in the palace, renews it under one lock per source,
+  and signing in is administrative with no MCP tool
+  (amends ADR-026, builds on ADR-014 and ADR-037)
+- [ADR-040](040-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md) — bundled
   sources are unpacked beside the binary, installed from the start and run in place, so enabling is all they need and
   `install` and `update` are for registry sources only; the official registry is a static file in the documentation
   that names GitHub repositories, whose releases are the versions, and is the default `mining.registries`

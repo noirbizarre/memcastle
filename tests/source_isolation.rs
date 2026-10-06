@@ -422,7 +422,7 @@ fn every_package_arriving_from_a_registry_is_checked_against_the_trust_policy() 
 #[test]
 fn the_bundle_is_read_from_disk_and_reaches_neither_storage_nor_the_job_machinery_nor_the_network()
 {
-    // A bundled source is installed from the start and run in place (docs/adr/039): finding and reading the release's own
+    // A bundled source is installed from the start and run in place (docs/adr/040): finding and reading the release's own
     // packages is a directory read. If it could open a palace or a connection, "shipped with MemCastle" would no longer
     // be what makes it trusted without a signature.
     let source = shipped_code("src/mining/bundled.rs");

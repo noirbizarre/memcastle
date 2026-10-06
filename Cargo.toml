@@ -71,7 +71,14 @@ path = "src/lib.rs"
 # Cargo only reads [profile.*] from a workspace's root manifest, so this stays
 # unconditional: member crates inherit it whether or not this file also
 # defines a [package].
-lto = true
+#
+# Thin, not fat, LTO: measured on 0.3.0's build, fat LTO took 53-59 minutes on
+# the macOS legs and outlived the one-hour token the release job holds, while
+# thin LTO with one codegen unit built every leg in under 28 minutes for a
+# binary 8% larger (73.0 to 79.1 MB on macOS arm64). More codegen units were
+# faster still but grew the binary by 46-71%, which is why this stays at 1.
+# See noirbizarre/memcastle#216 before changing either setting.
+lto = "thin"
 codegen-units = 1
 strip = true
 
@@ -170,7 +177,7 @@ surrealdb-rpc = "=3.3.0"
 axum = { version = "0.8.9", features = ["ws"] }
 # The request-trace layer on the shared router, so REST and MCP are both logged.
 tower-http = { version = "0.7", default-features = false, features = ["trace", "request-id"] }
-reqwest = { version = "0.13.5", features = ["json", "query"] }
+reqwest = { version = "0.13.5", features = ["json", "query", "form"] }
 rmcp = { version = "3.4.1", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
 
 # Observability
@@ -208,7 +215,13 @@ getrandom = "0.4.3"
 # `default-features = false` drops the random-number and zeroize extras, because the seed comes from `getrandom`.
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 # Keys and signatures are written as base64 so they paste into a config file or an index.
-base64 = "0.22"
+base64 = "0.23"
+
+# OAuth credentials for mining sources (docs/adr/039): the refresh token lives in the platform credential store (macOS
+# Keychain, Windows Credential Manager, the Secret Service on Linux), never in the palace database or the configuration
+# file. The default `v1` feature picks the native store per platform and the Secret Service one is pure Rust (zbus), so
+# no C library is linked; a host with no reachable store falls back to an owner-only file (`credential::store`).
+keyring = "4.2"
 
 [dev-dependencies]
 assert_cmd = "2"

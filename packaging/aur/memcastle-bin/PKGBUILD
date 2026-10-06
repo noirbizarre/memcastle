@@ -38,7 +38,7 @@ sha256sums_aarch64=('@SHA256_AARCH64@')
 # is not one of the licences Arch keeps in /usr/share/licenses/common.
 # The systemd user unit is fetched from the tag for the same reason.
 #
-# The sources bundled with MemCastle (docs/adr/039) are portable WebAssembly packages, so one release asset serves both
+# The sources bundled with MemCastle (docs/adr/040) are portable WebAssembly packages, so one release asset serves both
 # architectures. makepkg extracts it to `$srcdir/memcastle-sources-$pkgver/`.
 #
 # The agent integrations and the shared skills (docs/adr/034) are bundled JavaScript, equally portable, and arrive the

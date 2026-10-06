@@ -15,7 +15,7 @@ use super::{SourceCapabilities, sha256_hex};
 /// While the major version is `0`, a source built for `0.N` runs only on a host that implements `0.N`; from `1.0` a
 /// source runs on any host of the same major version whose minor is at least the source's. A patch version is
 /// documentation only and never affects compatibility. See [`contract_compatibility`].
-pub const CONTRACT_VERSION: &str = "0.2.0";
+pub const CONTRACT_VERSION: &str = "0.3.0";
 
 /// What a source package declares about itself: `memcastle-source.toml`.
 ///
@@ -120,6 +120,149 @@ pub struct Permissions {
     pub process: Vec<String>,
     /// Environment variables the source may read; it sees no others.
     pub env: Vec<String>,
+    /// The OAuth sign-in the source needs, when it has one (docs/adr/039): the host runs the flow, keeps the tokens, and
+    /// hands the source a fresh access token through `host.access-token`. Absent is absent from the consent digest too,
+    /// so a source that asks for no sign-in keeps the digest it was consented under.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth: Option<OAuthRequirement>,
+}
+
+/// Whether `url` is an endpoint a token may be sent to: `https`, or `http` to a loopback address.
+#[must_use]
+pub fn is_secure_endpoint(url: &str) -> bool {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    // Credentials in the URL would be logged by anything that logs a URL.
+    if authority.is_empty() || authority.contains('@') {
+        return false;
+    }
+    match scheme {
+        "https" => true,
+        "http" => {
+            let host = if let Some(bracketed) = authority.strip_prefix('[') {
+                bracketed.split(']').next().unwrap_or("")
+            } else {
+                authority.split(':').next().unwrap_or("")
+            };
+            matches!(host, "localhost" | "127.0.0.1" | "::1")
+        }
+        _ => false,
+    }
+}
+
+/// `[permissions.oauth]`: the OAuth endpoints a source signs in at, and what it asks to do there.
+///
+/// A public client only: no client secret is ever written in a manifest. Which flows the source supports follows from
+/// which endpoints it names: a device authorization endpoint allows the device flow, an authorization endpoint allows
+/// the browser flow with PKCE. Everything here is shown to the user at install, and changing any of it asks again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OAuthRequirement {
+    /// The public client identifier MemCastle presents to the provider.
+    pub client_id: String,
+    /// What the source asks to be allowed to do. Sorted by [`Permissions::normalized`].
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    /// Where an authorization code or refresh token is exchanged for an access token.
+    pub token_url: String,
+    /// The browser flow's authorization endpoint (authorization code with PKCE, RFC 7636).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorize_url: Option<String>,
+    /// The device flow's endpoint (RFC 8628), for a machine with no browser of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_authorization_url: Option<String>,
+}
+
+impl OAuthRequirement {
+    /// Whether the device flow is available.
+    #[must_use]
+    pub fn supports_device(&self) -> bool {
+        self.device_authorization_url.is_some()
+    }
+
+    /// Whether the browser flow is available.
+    #[must_use]
+    pub fn supports_browser(&self) -> bool {
+        self.authorize_url.is_some()
+    }
+
+    /// The first thing wrong with this requirement, as a message that names the field.
+    ///
+    /// Endpoints must be `https`: a token or an authorization code never crosses the network in the clear. Plain `http` is
+    /// accepted only to a loopback address, which is how a provider is faked in a test and never leaves the machine.
+    ///
+    /// # Errors
+    ///
+    /// A message naming the field that is wrong.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.client_id.trim().is_empty() {
+            return Err("permissions.oauth.client_id must not be empty".to_string());
+        }
+        if self.authorize_url.is_none() && self.device_authorization_url.is_none() {
+            return Err("permissions.oauth needs `authorize_url`, `device_authorization_url`, or both, so that there \
+                        is a way to sign in"
+                .to_string());
+        }
+        let endpoints = [
+            ("token_url", Some(self.token_url.as_str())),
+            ("authorize_url", self.authorize_url.as_deref()),
+            (
+                "device_authorization_url",
+                self.device_authorization_url.as_deref(),
+            ),
+        ];
+        for (field, url) in endpoints {
+            let Some(url) = url else { continue };
+            if !is_secure_endpoint(url) {
+                return Err(format!(
+                    "permissions.oauth.{field} `{url}` must be an `https://` URL (plain `http://` only to localhost)"
+                ));
+            }
+        }
+        for scope in &self.scopes {
+            // A scope is one token of a space-separated list on the wire, so a space would split it in two.
+            if scope.is_empty() || scope.contains(char::is_whitespace) {
+                return Err(format!(
+                    "permissions.oauth.scopes `{scope}` must be one word with no spaces"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// A digest of everything a stored credential was obtained under.
+    ///
+    /// A credential kept under a different digest than the installed manifest's is treated as missing, so an update that
+    /// changes the client, the endpoints or the scopes never keeps using tokens granted under the old terms.
+    #[must_use]
+    pub fn fingerprint(&self) -> String {
+        let mut scopes = self.scopes.clone();
+        scopes.sort();
+        scopes.dedup();
+        let canonical = serde_json::json!({
+            "client_id": self.client_id,
+            "scopes": scopes,
+            "token_url": self.token_url,
+            "authorize_url": self.authorize_url,
+            "device_authorization_url": self.device_authorization_url,
+        });
+        sha256_hex(canonical.to_string().as_bytes())
+    }
+
+    /// The host name tokens are exchanged with, for a person to recognise at consent.
+    #[must_use]
+    pub fn provider(&self) -> String {
+        let rest = self
+            .token_url
+            .split_once("://")
+            .map_or(self.token_url.as_str(), |(_, rest)| rest);
+        rest.split(['/', '?', '#'])
+            .next()
+            .unwrap_or(rest)
+            .to_string()
+    }
 }
 
 /// `[permissions.filesystem]`.
@@ -149,6 +292,10 @@ impl Permissions {
             network: self.network,
             process: sorted(&self.process),
             env: sorted(&self.env),
+            oauth: self.oauth.as_ref().map(|oauth| OAuthRequirement {
+                scopes: sorted(&oauth.scopes),
+                ..oauth.clone()
+            }),
         }
     }
 
@@ -159,6 +306,7 @@ impl Permissions {
             && !self.network
             && self.process.is_empty()
             && self.env.is_empty()
+            && self.oauth.is_none()
     }
 
     /// The digest that stands for the user agreeing to exactly these permissions for the source called `name`.
@@ -194,6 +342,17 @@ impl Permissions {
             parts.push(format!(
                 "read environment variables {}",
                 self.env.join(", ")
+            ));
+        }
+        if let Some(oauth) = &self.oauth {
+            let scopes = if oauth.scopes.is_empty() {
+                String::new()
+            } else {
+                format!(" (scopes {})", oauth.scopes.join(", "))
+            };
+            parts.push(format!(
+                "sign in with OAuth at {}{scopes}",
+                oauth.provider()
             ));
         }
         parts.join("; ")
@@ -428,7 +587,7 @@ pub enum SourceOrigin {
     /// `update` leaves it alone.
     Package,
     /// A package shipped alongside MemCastle (`share/memcastle/sources`): independently packaged, not linked in, and
-    /// installed from the start. It runs from the bundle, so `update` and `remove` leave it alone (docs/adr/039).
+    /// installed from the start. It runs from the bundle, so `update` and `remove` leave it alone (docs/adr/040).
     Bundled,
     /// A package installed from a configured registry index.
     Registry,
@@ -541,6 +700,120 @@ mod tests {
         assert_ne!(network.consent_digest("x"), network.consent_digest("y"));
     }
 
+    fn oauth() -> OAuthRequirement {
+        OAuthRequirement {
+            client_id: "client".into(),
+            scopes: vec!["write".into(), "read".into()],
+            token_url: "https://auth.example.com/token".into(),
+            authorize_url: Some("https://auth.example.com/authorize".into()),
+            device_authorization_url: None,
+        }
+    }
+
+    #[test]
+    fn an_absent_sign_in_is_not_part_of_what_the_consent_digest_hashes() {
+        // A digest that moved would invalidate every consent already given, for sources that ask for no sign-in.
+        let permissions = Permissions {
+            network: true,
+            ..Permissions::default()
+        };
+        let canonical = serde_json::json!({ "name": "x", "permissions": permissions.normalized() });
+        assert!(
+            !canonical.to_string().contains("oauth"),
+            "an absent sign-in must not appear in what is hashed: {canonical}"
+        );
+    }
+
+    #[test]
+    fn asking_for_a_sign_in_or_a_wider_one_needs_consent_again() {
+        let plain = Permissions::default();
+        let signed_in = Permissions {
+            oauth: Some(oauth()),
+            ..Permissions::default()
+        };
+        assert_ne!(plain.consent_digest("x"), signed_in.consent_digest("x"));
+        let mut wider = oauth();
+        wider.scopes.push("admin".into());
+        let wider = Permissions {
+            oauth: Some(wider),
+            ..Permissions::default()
+        };
+        assert_ne!(signed_in.consent_digest("x"), wider.consent_digest("x"));
+        let mut reordered = oauth();
+        reordered.scopes.reverse();
+        let reordered = Permissions {
+            oauth: Some(reordered),
+            ..Permissions::default()
+        };
+        assert_eq!(signed_in.consent_digest("x"), reordered.consent_digest("x"));
+        assert!(!signed_in.is_empty());
+    }
+
+    #[test]
+    fn the_fingerprint_follows_what_a_credential_was_granted_under_and_not_the_order_of_scopes() {
+        let base = oauth();
+        let mut reordered = oauth();
+        reordered.scopes.reverse();
+        assert_eq!(base.fingerprint(), reordered.fingerprint());
+        for change in [
+            |o: &mut OAuthRequirement| o.client_id = "other".into(),
+            |o: &mut OAuthRequirement| o.scopes.push("admin".into()),
+            |o: &mut OAuthRequirement| o.token_url = "https://evil.example.com/token".into(),
+            |o: &mut OAuthRequirement| o.authorize_url = None,
+        ] {
+            let mut changed = oauth();
+            change(&mut changed);
+            assert_ne!(base.fingerprint(), changed.fingerprint());
+        }
+    }
+
+    #[test]
+    fn an_endpoint_is_https_or_plain_http_to_the_local_machine_and_nothing_else() {
+        for ok in [
+            "https://auth.example.com/token",
+            "http://127.0.0.1:8080/token",
+            "http://localhost/token",
+            "http://[::1]:9/token",
+        ] {
+            assert!(is_secure_endpoint(ok), "{ok}");
+        }
+        for bad in [
+            "http://auth.example.com/token",
+            "ftp://auth.example.com/token",
+            "https://user:pw@auth.example.com/token",
+            "http://localhost.evil.example/token",
+            "https://",
+            "auth.example.com/token",
+        ] {
+            assert!(!is_secure_endpoint(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_requirement_with_no_way_to_sign_in_or_an_insecure_endpoint_or_a_spaced_scope_is_refused() {
+        assert!(oauth().validate().is_ok());
+        type Change = fn(&mut OAuthRequirement);
+        let cases: [(Change, &str); 5] = [
+            (|o| o.client_id = " ".into(), "client_id"),
+            (|o| o.authorize_url = None, "sign in"),
+            (
+                |o| o.token_url = "http://auth.example.com/token".into(),
+                "token_url",
+            ),
+            (
+                |o| o.authorize_url = Some("http://x.example.com/a".into()),
+                "authorize_url",
+            ),
+            (|o| o.scopes.push("two words".into()), "scopes"),
+        ];
+        for (change, word) in cases {
+            let mut requirement = oauth();
+            change(&mut requirement);
+            let message = requirement.validate().unwrap_err();
+            assert!(message.contains(word), "{message}");
+        }
+    }
+
     #[test]
     fn a_manifest_with_an_unknown_permission_key_is_refused() {
         let parsed: std::result::Result<Permissions, _> =
@@ -550,10 +823,11 @@ mod tests {
 
     #[test]
     fn contracts_are_compatible_by_minor_before_one_point_zero() {
-        assert!(contract_compatibility("0.2").is_ok());
-        assert!(contract_compatibility("0.2.7").is_ok());
+        assert!(contract_compatibility("0.3").is_ok());
+        assert!(contract_compatibility("0.3.7").is_ok());
         assert!(contract_compatibility("0.1").is_err());
-        assert!(contract_compatibility("0.3").is_err());
+        assert!(contract_compatibility("0.2").is_err());
+        assert!(contract_compatibility("0.4").is_err());
         assert!(contract_compatibility("0.0").is_err());
         assert!(contract_compatibility("1.1").is_err());
         assert!(contract_compatibility("nonsense").is_err());
@@ -570,9 +844,18 @@ mod tests {
             network: true,
             process: vec!["git".into()],
             env: vec!["TOKEN".into()],
+            oauth: Some(oauth()),
         }
         .describe();
-        for word in ["locator", "network", "git", "TOKEN"] {
+        for word in [
+            "locator",
+            "network",
+            "git",
+            "TOKEN",
+            "OAuth",
+            "auth.example.com",
+            "read",
+        ] {
             assert!(described.contains(word), "{described}");
         }
     }
@@ -641,7 +924,7 @@ mod tests {
             "digest": "d",
             "manifest": {
                 "source": {"name": "x", "version": "1.0.0", "description": "x"},
-                "compatibility": {"contract": "0.2", "memcastle": ">=0.1"}
+                "compatibility": {"contract": "0.3", "memcastle": ">=0.1"}
             },
             "installed_at": "2026-01-01T00:00:00Z",
             "updated_at": "2026-01-01T00:00:00Z"

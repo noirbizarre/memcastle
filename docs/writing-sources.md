@@ -74,7 +74,7 @@ homepage = "https://example.org/my-notes"        # optional
 repository = "https://example.org/my-notes.git"  # optional: where the code is
 
 [compatibility]
-contract = "0.2"             # the WIT contract version it was built against
+contract = "0.3"             # the WIT contract version it was built against
 memcastle = ">=0.2.0, <0.3.0"  # the MemCastle versions it runs on
 
 [capabilities]               # the same three as a built-in adapter; all default to false
@@ -89,6 +89,14 @@ read = ["locator"]           # "locator", an absolute directory, or "~/..."
 network = false              # all or nothing
 process = []                 # bare program names the source may run
 env = []                     # environment variables the source may read
+
+# Only for a source that signs in with OAuth; see "Signing in with OAuth". needs_credentials must then be true.
+# [permissions.oauth]
+# client_id = "my-public-client-id"
+# scopes = ["read"]
+# token_url = "https://auth.example.com/oauth/token"
+# device_authorization_url = "https://auth.example.com/oauth/device/code"   # the device flow
+# authorize_url = "https://auth.example.com/oauth/authorize"                # the browser flow, with PKCE
 
 [limits]
 memory_mib = 64              # at most mining.source_memory_mib
@@ -110,6 +118,7 @@ fixtures = "fixtures"
 | `compatibility.memcastle` | A semver requirement. A pre-release of a release is held to the release's requirement. |
 | `permissions.filesystem.read` | `locator`, an absolute path, or a path starting with `~/`. A directory that does not exist is dropped, not an error. |
 | `permissions.process` | Bare program names (`git`), never a path or a command line. |
+| `permissions.oauth` | `client_id` and `token_url`, and `device_authorization_url`, `authorize_url` or both; every URL `https` (plain `http` only to `localhost`); each scope one word; and `capabilities.needs_credentials = true`. No client secret: a public client cannot keep one. |
 | `build.output` | Relative to the project; it must be a component, not a core module. |
 
 ## Permissions and consent
@@ -123,6 +132,7 @@ The manifest lists what it asks for and nothing else is granted.
 | `network` | Opens the network, all or nothing. The host cannot yet restrict by host name, and the consent prompt says so. |
 | `process` | Lets the source call `run-process` for exactly those programs: no shell, a minimal environment (`PATH`, `HOME`, and the variables in `env`), a time limit, a cap on output (16 MiB, enforced while the program runs; its output is captured through scratch files, so a program that drops output on a pipe still answers whole). Any other program is refused. |
 | `env` | Passes the listed variables, when set, into the sandbox. It sees no others. |
+| `oauth` | Lets the source call `access-token` for the sign-in the manifest declares (see below). The consent prompt says "sign in with OAuth at *host*" with the scopes, and a credential is never used under terms other than the ones agreed to. |
 
 `normalize` runs with none of these, whatever the manifest says.
 
@@ -137,6 +147,42 @@ A package that asks for nothing needs no consent.
 Each call runs in a fresh sandbox with a memory ceiling (`mining.source_memory_mib`) and a time limit
 (`mining.source_timeout_secs`), either of which the manifest can only lower.
 A source that loops is stopped by the engine, not by its own good manners.
+
+## Signing in with OAuth
+
+Some origins cannot be reached with a static token.
+A source that needs an interactive sign-in, a refresh token, or a credential that renews, declares `[permissions.oauth]`
+and asks the host for a token; it does not implement a sign-in, keep tokens, or renew them
+([ADR-039](adr/039-oauth-credentials-for-mining-sources.md)).
+Signing in is separate from reading the origin:
+the manifest says how to sign in, and `discover` and `read` say what to fetch.
+
+```text
+memcastle source auth my-source   ->   the daemon runs the flow and keeps the tokens
+memcastle mine --source my-source ->   the daemon renews the token if needed, and hands it to each call that asks
+```
+
+The source calls `access-token` (in the `host` interface) and gets a bearer token for the sign-in its manifest declares,
+or an error saying why there is none.
+Ask on every call that needs one, and do not keep the token between calls: it may have expired since, and the host
+renews it, so asking again is how a long run keeps working.
+The host refuses the call when the manifest declares no `oauth`, and `normalize`, which runs with no permissions, never
+gets a token.
+A failure that comes from the credential (never signed in, revoked, the provider unreachable) is reported as
+`memcastle::credential::required` or `memcastle::credential::refresh_failed`, whatever the source made of the error it
+was given, so return it as a `failed` and let the host say what to do.
+
+What the manifest names is public, so it is a **public client**: a `client_id`, the endpoints, and the scopes, and no
+secret.
+Which flows the source supports follows from the endpoints it lists:
+`device_authorization_url` allows the device flow (RFC 8628), which works on a machine with no browser and which the
+command prefers when it is available, and `authorize_url` allows the authorization code flow with PKCE (RFC 7636).
+Changing the client, an endpoint or the scopes in an update asks for consent again, and a credential obtained under the
+old terms is treated as missing, so an update never widens what a stored sign-in may do.
+
+Signing in needs no `network` permission, because the host talks to the provider.
+Calling the origin's API from the source does, and the sandbox does not yet offer an HTTP client of its own, so a source
+that fetches from an HTTPS API needs to bring one.
 
 ## Lifecycle
 
@@ -166,7 +212,7 @@ Built-in sources are always enabled and cannot be disabled or removed.
 
 ## Compatibility
 
-The contract has a version (`wit/memcastle-source.wit`, currently `0.2.0`), and a source declares the one it was built
+The contract has a version (`wit/memcastle-source.wit`, currently `0.3.0`), and a source declares the one it was built
 against.
 
 | Host contract | A source built for it runs on |
@@ -278,7 +324,7 @@ gets its own CI job, which runs `mise run sources:test -- <name>`.
 | `memcastle::source::failed` | The source ran and failed, trapped or ran out of memory. The message is the source's own. |
 | `memcastle::source::timeout` | One call took longer than its limit. |
 | `memcastle::source::cursor_invalid` | The stored cursor is not one the source produced. Mine again with `--full`: unchanged documents are skipped. |
-| `memcastle::source::permission_denied` | The source ran a program its manifest does not list. |
+| `memcastle::source::permission_denied` | The source ran a program its manifest does not list, or asked for an access token without declaring `[permissions.oauth]`. |
 | `memcastle::source::build_failed` | The build command failed or did not produce a component. |
 | `memcastle::source::registry_unavailable` | A registry's index could not be read: unreachable, not an index, or a format this MemCastle does not know. Check `mining.registries`. |
 | `memcastle::source::not_in_registry` | No registry offers that name, or none of its versions can be installed here. `memcastle source search` lists what is offered. |
@@ -286,6 +332,11 @@ gets its own CI job, which runs `mise run sources:test -- <name>`.
 | `memcastle::source::integrity` | A downloaded package is not the archive the index published: its SHA-256 differs, or the package inside is not the name and version listed. Nothing was installed. |
 | `memcastle::source::untrusted` | The trust policy refuses the package: a bad signature from a trusted key, or no trusted signature under `mining.trust = "required"`. |
 | `memcastle::source::signing_failed` | A signing key or signature could not be made or read. `memcastle source keygen` writes a new key. |
+| `memcastle::credential::required` | The source signs in with OAuth and has not been signed in, was signed in under other terms, or the provider revoked it. Run `memcastle source auth <source>`. |
+| `memcastle::credential::refresh_failed` | The stored credential could not be renewed just now, usually the provider or the network. It is kept, so run again later. |
+| `memcastle::credential::flow_failed` | A sign-in was declined, expired, or refused by the provider. Run `memcastle source auth <source>` again. |
+| `memcastle::credential::oauth_unsupported` | `source auth` was asked for a source that declares no `[permissions.oauth]`. |
+| `memcastle::credential::store_failed` | Neither the platform keyring nor the fallback file could be read or written. See [Credentials](configuration.md#credentials). |
 
 A source that cannot read a file it expects usually lacks a `filesystem.read` permission:
 the sandbox shows a directory it was not granted as simply not there.

@@ -334,8 +334,15 @@ pub enum SourceCommand {
     /// List the sources the daemon can mine, built in and installed, with
     /// their state and the permissions each was given.
     List,
-    /// Show one source: its capabilities, state and permissions.
+    /// Show one source: its capabilities, state and permissions, and whether
+    /// it is signed in when it signs in with OAuth.
     Show(SourceNameArgs),
+    /// Sign an installed source in with OAuth, then keep it signed in: the
+    /// daemon stores the tokens and renews them when a run needs them. Shows
+    /// a code to type or opens your browser, and waits for you to finish.
+    /// Run it again to sign in as someone else. Not `memcastle auth`, which
+    /// manages the daemon's own token.
+    Auth(SourceNameArgs),
     /// Allow an installed source to be mined.
     Enable(SourceNameArgs),
     /// Stop an installed source from being mined, keeping it installed.
@@ -553,8 +560,13 @@ pub struct MinerSetArgs {
     #[arg(long, value_name = "NAME", conflicts_with = "credential_file")]
     pub credential_env: Option<String>,
     /// Read the source's credential from the first line of this file.
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", conflicts_with = "credential_oauth")]
     pub credential_file: Option<String>,
+    /// Use the source's OAuth sign-in (`memcastle source auth <SOURCE>`),
+    /// which the daemon keeps and renews. Only for a source that signs in
+    /// with OAuth.
+    #[arg(long, conflicts_with_all = ["credential_env", "credential_file"])]
+    pub credential_oauth: bool,
     /// Filter what is mined: `KEY=VALUE[,VALUE...]`, always a list of strings
     /// (`--scope groups=MemCastle,Ops`; one value needs no comma). Repeatable;
     /// a key given again replaces the earlier value.

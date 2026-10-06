@@ -102,6 +102,15 @@ pub fn validate(manifest: &SourceManifest, reserved: &[&str]) -> Result<()> {
             )));
         }
     }
+    if let Some(oauth) = &manifest.permissions.oauth {
+        oauth.validate().map_err(invalid)?;
+        // The flag is what `source list` and a miner's activation check read, so a source that signs in must say so.
+        if !manifest.capabilities.needs_credentials {
+            return Err(invalid(
+                "permissions.oauth is set, so capabilities.needs_credentials must be true",
+            ));
+        }
+    }
     if manifest.limits.memory_mib == Some(0) || manifest.limits.timeout_secs == Some(0) {
         return Err(invalid("limits must be greater than zero when set"));
     }
@@ -152,7 +161,7 @@ version = "0.1.0"
 description = "demo documents"
 
 [compatibility]
-contract = "0.2"
+contract = "0.3"
 memcastle = ">=0.1"
 
 [permissions.filesystem]
@@ -209,7 +218,7 @@ read = ["locator"]
 
     #[test]
     fn a_manifest_for_another_contract_is_valid_but_incompatible() {
-        let manifest = with(|text| text.replace("\"0.2\"", "\"0.9\"")).unwrap();
+        let manifest = with(|text| text.replace("\"0.3\"", "\"0.9\"")).unwrap();
         let error = check_compatible(&manifest).unwrap_err();
         assert!(matches!(error, Error::SourceIncompatible { .. }), "{error}");
     }
@@ -237,7 +246,7 @@ read = ["locator"]
                 "source.description",
             ),
             (
-                GOOD.replace("contract = \"0.2\"", "contract = \"x\""),
+                GOOD.replace("contract = \"0.3\"", "contract = \"x\""),
                 "compatibility.contract",
             ),
             (
@@ -276,6 +285,43 @@ read = ["locator"]
         let manifest = parse(&text, &[]).unwrap();
         assert_eq!(manifest.permissions.env, ["GITHUB_TOKEN"]);
         assert_eq!(manifest.limits.memory_mib, Some(64));
+    }
+
+    const OAUTH: &str = "\n[capabilities]\nneeds_credentials = true\n\n[permissions.oauth]\nclient_id = \"abc\"\nscopes = [\"read\"]\ntoken_url = \"https://auth.example.com/token\"\ndevice_authorization_url = \"https://auth.example.com/device\"\n";
+
+    #[test]
+    fn a_source_that_signs_in_declares_its_endpoints_and_says_it_needs_credentials() {
+        let manifest = parse(&format!("{GOOD}{OAUTH}"), &[]).unwrap();
+        let oauth = manifest.permissions.oauth.unwrap();
+        assert_eq!(oauth.client_id, "abc");
+        assert!(oauth.supports_device() && !oauth.supports_browser());
+    }
+
+    #[test]
+    fn a_sign_in_without_the_credentials_flag_or_with_an_unsafe_endpoint_is_refused() {
+        let unflagged = OAUTH.replace("needs_credentials = true", "needs_credentials = false");
+        let error = parse(&format!("{GOOD}{unflagged}"), &[])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("needs_credentials"), "{error}");
+
+        let insecure = OAUTH.replace(
+            "https://auth.example.com/token",
+            "http://auth.example.com/token",
+        );
+        let error = parse(&format!("{GOOD}{insecure}"), &[])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("token_url") && error.contains("https"),
+            "{error}"
+        );
+
+        let secret = format!("{GOOD}{OAUTH}client_secret = \"nope\"\n");
+        assert!(
+            parse(&secret, &[]).is_err(),
+            "a client secret has no place in a manifest"
+        );
     }
 
     #[test]

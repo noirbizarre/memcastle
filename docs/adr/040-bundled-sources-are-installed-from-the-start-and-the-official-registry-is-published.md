@@ -1,4 +1,4 @@
-# ADR-039: Bundled sources are installed from the start, and install and update are for sources from elsewhere
+# ADR-040: Bundled sources are installed from the start, and install and update are for sources from elsewhere
 
 ## Status
 

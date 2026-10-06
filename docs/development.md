@@ -123,6 +123,13 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `tests/auth_lifecycle.rs` — the authentication lifecycle through the real CLI: generate, restart, enable, a
     rotated and a revoked token, the daemon refusing to start with nothing to check against, and no token ever reaching
     the log, the database or any file (subprocess).
+  - `tests/credential_isolation.rs` — OAuth credentials stay in one module that reaches no palace, no jobs and no
+    WebAssembly runtime, that only `app` and the daemon's root name, and that never logs or reads a token outside
+    where it is stored or sent to its provider.
+  - `tests/wasm_oauth.rs` — a source that signs in with OAuth against a real daemon and the real CLI, with a fake
+    provider: consent to the sign-in, `source auth` through the device flow, the token a run is given, renewal, a revoked
+    credential, a miner that needs the sign-in, and no refresh token anywhere but the credentials file (needs the
+    `wasm32-wasip2` target).
   - `tests/config_assets.rs` — the assets override is honoured and checked, and a standalone binary starts with no assets
     (subprocess).
   - `tests/dependencies.rs` — the lockfile never pulls a second storage engine into the binary (ADR-001), nor a
@@ -308,6 +315,12 @@ daemon's environment, standard streams, arguments or a writable directory.
 Building the reference WebAssembly sources needs the `wasm32-wasip2` target (`rustup target add wasm32-wasip2`, which
 `rust-toolchain.toml` requests); `mise run sources:check` builds and tests every source under `sources/`.
 `tests/source_isolation.rs` builds nothing and runs in the basic suite on every OS.
+
+Invariant 6 and 10's rule that MCP never touches credentials covers OAuth sign-ins too ([ADR-039](adr/039-oauth-credentials-for-mining-sources.md)):
+`tests/in_process/auth.rs` guards both `/api/source-packages/{name}/auth` routes and fails on any MCP tool that mentions
+`auth`, `credential`, `oauth` or `sign`, and `tests/credential_isolation.rs` reads the source text so that the credential
+module reaches neither the palace nor the WebAssembly runtime,
+and nothing outside `app` and the daemon's root can name it.
 
 Invariant 12 (changing a miner is administrative, and the daemon is the only writer of the `[[miners]]` section) has no
 hook either.

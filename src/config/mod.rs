@@ -153,7 +153,7 @@ const ASSETS_SOURCES_DIR: &str = "sources";
 /// The API `mining.github_api_url` defaults to.
 pub const DEFAULT_GITHUB_API: &str = "https://api.github.com";
 
-/// The official source registry, published with the documentation site on every release (docs/adr/039).
+/// The official source registry, published with the documentation site on every release (docs/adr/040).
 ///
 /// The one default that can reach the network, and only when someone asks to search, install or update a source.
 pub const OFFICIAL_REGISTRY: &str = "https://noirbizarre.github.io/memcastle/registry.json";
@@ -529,14 +529,14 @@ pub struct MiningConfig {
     pub source_timeout_secs: u64,
     /// The registry indexes `memcastle source search`, `install <name>` and `update` consult, in order: an `https://`
     /// URL, a `file://` URL or a path to a `memcastle-index.json` (docs/adr/033). The official registry by default
-    /// (docs/adr/039), a static file in the documentation; a list set here replaces it, and an empty one means no
+    /// (docs/adr/040), a static file in the documentation; a list set here replaces it, and an empty one means no
     /// registry. It is read only when a user runs one of those commands, never at startup.
     pub registries: Vec<String>,
     /// What a package from a registry must prove before it is installed.
     pub trust: TrustMode,
     /// The public keys (base64, as `memcastle source keygen` prints them) whose signatures are trusted.
     pub trusted_keys: Vec<String>,
-    /// The GitHub API a registry entry that names a repository is resolved through (docs/adr/039): the releases of
+    /// The GitHub API a registry entry that names a repository is resolved through (docs/adr/040): the releases of
     /// `owner/name` are read from `<this>/repos/owner/name/releases`. Another value is a GitHub Enterprise server, or a
     /// stand-in for one in a test.
     pub github_api_url: String,
@@ -570,6 +570,65 @@ impl Default for MiningConfig {
             github_api_url: DEFAULT_GITHUB_API.to_string(),
             bundled_dir: None,
         }
+    }
+}
+
+/// Where OAuth credentials for mining sources are kept (docs/adr/039).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CredentialBackend {
+    /// The platform's credential store (macOS Keychain, Windows Credential Manager, the Secret Service on Linux) when
+    /// one is reachable, otherwise an owner-only file.
+    #[default]
+    Auto,
+    /// The platform's credential store only; signing in fails where there is none.
+    Keyring,
+    /// An owner-only file under `credentials.dir` only, for a headless host that has no keyring.
+    File,
+}
+
+impl std::str::FromStr for CredentialBackend {
+    type Err = String;
+
+    fn from_str(raw: &str) -> std::result::Result<Self, String> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "auto" => Ok(Self::Auto),
+            "keyring" => Ok(Self::Keyring),
+            "file" => Ok(Self::File),
+            other => Err(format!(
+                "unknown credential backend `{other}`; expected one of: auto, keyring, file"
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for CredentialBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Auto => "auto",
+            Self::Keyring => "keyring",
+            Self::File => "file",
+        })
+    }
+}
+
+/// Credential storage settings (`[credentials]`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CredentialsConfig {
+    /// Which store holds the OAuth tokens a mining source signed in with.
+    pub backend: CredentialBackend,
+    /// The directory of the owner-only file store. Unset means `$XDG_DATA_HOME/memcastle/credentials`.
+    pub dir: Option<PathBuf>,
+}
+
+impl CredentialsConfig {
+    /// The directory of the file store: the configured one, or the default under the XDG data directory.
+    #[must_use]
+    pub fn dir(&self) -> PathBuf {
+        self.dir
+            .clone()
+            .unwrap_or_else(paths::default_credentials_dir)
     }
 }
 
@@ -754,6 +813,9 @@ pub struct Config {
     /// Mining settings.
     #[serde(default)]
     pub mining: MiningConfig,
+    /// OAuth credential storage settings.
+    #[serde(default)]
+    pub credentials: CredentialsConfig,
     /// Entity extraction settings.
     #[serde(default)]
     pub extraction: ExtractionConfig,
@@ -1015,6 +1077,12 @@ impl Config {
             self.mining.source_timeout_secs =
                 parse_override("MEMCASTLE_MINING_SOURCE_TIMEOUT_SECS", &n)?;
         }
+        if let Some(raw) = lookup("MEMCASTLE_CREDENTIALS_BACKEND") {
+            self.credentials.backend = parse_override("MEMCASTLE_CREDENTIALS_BACKEND", &raw)?;
+        }
+        if let Some(dir) = lookup("MEMCASTLE_CREDENTIALS_DIR") {
+            self.credentials.dir = Some(PathBuf::from(dir));
+        }
         // Same reasoning as the auth token below: a secret, so no
         // `parse_override`, whose error would echo the value.
         if let Some(key) = lookup("MEMCASTLE_EMBEDDINGS_API_KEY") {
@@ -1173,8 +1241,30 @@ impl Config {
         self.validate_embeddings()?;
         self.validate_extraction()?;
         self.validate_mining()?;
+        self.validate_credentials()?;
         self.validate_dedup()?;
         validate_miners(&self.miners)?;
+        Ok(())
+    }
+
+    /// The `[credentials]` invariants: a file store that was asked for must have somewhere absolute to live, so a
+    /// token is never written relative to whatever directory the daemon started in.
+    fn validate_credentials(&self) -> Result<()> {
+        let credentials = &self.credentials;
+        let explicit = credentials.dir.as_ref().filter(|dir| !dir.is_absolute());
+        if let Some(dir) = explicit {
+            return Err(Error::config(format!(
+                "credentials.dir {:?} is not an absolute path; set an absolute one or remove it \
+                 to use the default under the XDG data directory",
+                dir.display().to_string()
+            )));
+        }
+        if credentials.backend == CredentialBackend::File && !credentials.dir().is_absolute() {
+            return Err(Error::config(
+                "credentials.backend = \"file\" needs an absolute `credentials.dir` (or MEMCASTLE_CREDENTIALS_DIR), \
+                 because no home directory could be found for the default",
+            ));
+        }
         Ok(())
     }
 

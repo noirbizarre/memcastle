@@ -202,6 +202,8 @@ Without a valid token a client cannot even complete `initialize`.
 Generating, rotating and revoking a token are REST and CLI operations only, and no MCP tool exists for them,
 so an agent with MCP access cannot mint, replace or remove the credential that guards the palace.
 The same token lets an agent use every MCP tool, so give it the token only if you want it to have that.
+The same goes for the OAuth tokens a mining source signs in with: starting a sign-in, and everything about the stored tokens,
+is REST and CLI only ([Credentials](configuration.md#credentials)).
 
 The MCP endpoint also checks the `Host` header against the loopback names (`localhost`, `127.0.0.1`, `::1`),
 which is independent of authentication.

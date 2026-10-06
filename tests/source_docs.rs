@@ -69,7 +69,7 @@ fn every_source_diagnostic_code_is_explained_in_the_guide() {
 
 #[test]
 fn the_official_registry_published_with_the_docs_is_an_index_this_memcastle_reads() {
-    // The file is edited by hand in a pull request and deployed as it is (docs/adr/039), so a typo in it would reach
+    // The file is edited by hand in a pull request and deployed as it is (docs/adr/040), so a typo in it would reach
     // every installation's default registry. It names the bundled sources by the repository that releases them, and
     // each entry's manifest must agree with what it says about itself.
     let text = std::fs::read_to_string(root().join("docs/registry.json")).unwrap();

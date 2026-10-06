@@ -26,7 +26,7 @@ class Memcastle < Formula
     end
   end
 
-  # The sources bundled with MemCastle (docs/adr/039): portable WebAssembly packages, unpacked one directory each, one
+  # The sources bundled with MemCastle (docs/adr/040): portable WebAssembly packages, unpacked one directory each, one
   # asset for every platform. Homebrew strips the archive's single top-level directory when it stages the resource.
   resource "sources" do
     url "https://github.com/noirbizarre/memcastle/releases/download/#{version}/memcastle_#{version}_sources.tar.gz"

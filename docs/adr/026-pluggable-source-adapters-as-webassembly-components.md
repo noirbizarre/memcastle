@@ -11,7 +11,7 @@ and [ADR-019](019-shared-integration-contract.md) (a conformance suite both impl
 It adds a registry of installed sources, which ADR-023 left open ("nothing precludes a registry later").
 Partly superseded by [ADR-028](028-pi-history-is-an-installed-webassembly-source.md): `pi-sessions` is an installed
 source and no longer a built-in adapter, so the passages below that keep it built in describe the original decision.
-Amended by [ADR-039](039-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md):
+Amended by [ADR-040](040-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md):
 a source that ships with MemCastle is installed from the start and needs enabling, not installing.
 
 ## Context
@@ -205,4 +205,14 @@ The contract's `source-ref` record names the source's name `source`, not `provid
 [ADR-023](023-unified-source-model-for-mining.md)).
 That is a breaking change before 1.0, so the contract is `0.2.0`.
 An installed source built for `0.1` is `unavailable` with a reason that says to rebuild it, and the three reference
+sources are rebuilt.
+
+## Note, 2026-10-06: contract 0.3.0
+
+The `host` interface gains `access-token`, which hands a source a current access token for the OAuth sign-in its manifest
+declares under `[permissions.oauth]` ([ADR-039](039-oauth-credentials-for-mining-sources.md)).
+It is a permission like the others: part of the consent digest, refused to a source that did not declare it, and never
+available to `normalize`.
+That is a breaking change before 1.0, so the contract is `0.3.0`.
+An installed source built for `0.2` is `unavailable` with a reason that says to rebuild it, and the three reference
 sources are rebuilt.

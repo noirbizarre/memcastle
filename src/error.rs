@@ -1050,6 +1050,79 @@ pub enum Error {
         message: String,
     },
 
+    /// A source needs an OAuth sign-in that has not been done, or that the provider no longer honours.
+    // The command is in the message and not only in the help: a failed job records the message alone, and the job is
+    // where a person finds out that a run did not happen.
+    #[error(
+        "source `{source_name}` is not signed in: {reason}; sign in with `memcastle source auth {source_name}`"
+    )]
+    #[diagnostic(
+        code(memcastle::credential::required),
+        help("sign in with `memcastle source auth {source_name}`, then run the miner again")
+    )]
+    CredentialRequired {
+        /// The source.
+        source_name: String,
+        /// Why there is no usable credential: never signed in, signed in under other terms, or revoked.
+        reason: String,
+    },
+
+    /// A stored credential could not be renewed, and is kept so that a later attempt can.
+    #[error("the credential for source `{source_name}` could not be refreshed: {message}")]
+    #[diagnostic(
+        code(memcastle::credential::refresh_failed),
+        help(
+            "this is usually the provider or the network being unreachable, so run the miner again later; if it persists, sign in again with `memcastle source auth {source_name}`"
+        )
+    )]
+    CredentialRefreshFailed {
+        /// The source.
+        source_name: String,
+        /// What the provider or the network said.
+        message: String,
+    },
+
+    /// Signing in did not complete: the user declined, the code expired, or the provider refused.
+    #[error("signing in for source `{source_name}` failed: {message}")]
+    #[diagnostic(
+        code(memcastle::credential::flow_failed),
+        help(
+            "run `memcastle source auth {source_name}` again and finish signing in before the code expires"
+        )
+    )]
+    CredentialFlowFailed {
+        /// The source.
+        source_name: String,
+        /// What went wrong.
+        message: String,
+    },
+
+    /// The source does not sign in with OAuth, so there is nothing to authenticate.
+    #[error("source `{source_name}` does not use OAuth")]
+    #[diagnostic(
+        code(memcastle::credential::oauth_unsupported),
+        help(
+            "only a source whose manifest declares `[permissions.oauth]` signs in this way; `memcastle source show {source_name}` lists what it asks for, and a static token is a miner's `--credential-env` or `--credential-file`"
+        )
+    )]
+    CredentialOauthUnsupported {
+        /// The source.
+        source_name: String,
+    },
+
+    /// The place credentials are kept could not be read or written.
+    #[error("the credential store failed: {message}")]
+    #[diagnostic(
+        code(memcastle::credential::store_failed),
+        help(
+            "no platform keyring was usable and the fallback file could not be used either; check the permissions of the credentials directory shown, or set `credentials.backend = \"file\"` and a writable `credentials.dir`"
+        )
+    )]
+    CredentialStoreFailed {
+        /// What went wrong.
+        message: String,
+    },
+
     /// Building a source did not produce a component.
     #[error("building the source failed: {message}")]
     #[diagnostic(
@@ -1764,6 +1837,24 @@ mod tests {
                 name: "slack".to_string(),
                 message: "git".to_string(),
             },
+            Error::CredentialRequired {
+                source_name: "slack".to_string(),
+                reason: "never signed in".to_string(),
+            },
+            Error::CredentialRefreshFailed {
+                source_name: "slack".to_string(),
+                message: "timeout".to_string(),
+            },
+            Error::CredentialFlowFailed {
+                source_name: "slack".to_string(),
+                message: "denied".to_string(),
+            },
+            Error::CredentialOauthUnsupported {
+                source_name: "slack".to_string(),
+            },
+            Error::CredentialStoreFailed {
+                message: "read-only".to_string(),
+            },
             Error::SourceBuildFailed {
                 message: "no target".to_string(),
             },
@@ -1897,6 +1988,11 @@ mod tests {
             | Error::SourceFailed { .. }
             | Error::SourceTimeout { .. }
             | Error::SourcePermissionDenied { .. }
+            | Error::CredentialRequired { .. }
+            | Error::CredentialRefreshFailed { .. }
+            | Error::CredentialFlowFailed { .. }
+            | Error::CredentialOauthUnsupported { .. }
+            | Error::CredentialStoreFailed { .. }
             | Error::SourceBuildFailed { .. }
             | Error::SourceRegistryUnavailable { .. }
             | Error::SourceNotInRegistry { .. }

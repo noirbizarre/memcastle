@@ -41,6 +41,9 @@ pub enum CredentialRef {
         /// The file's path.
         path: String,
     },
+    /// The OAuth sign-in of the miner's own source (`memcastle source auth <source>`): the daemon keeps and renews the
+    /// tokens (docs/adr/039), so there is nothing to name here and nothing secret to write down.
+    Oauth,
 }
 
 /// The identity of a source: which system, which account on it, and which part of it.

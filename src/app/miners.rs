@@ -602,20 +602,70 @@ impl AppServices {
                 );
             }
         }
-        if let Some(credential) = &miner.credential
-            && !credential_available(credential)
-        {
-            return Err(match credential {
-                CredentialRef::Env { name } => format!(
+        self.check_credential(miner).await?;
+        Ok(())
+    }
+
+    /// A source that signs in with OAuth needs that done whatever the miner says, and a miner that says `oauth` for a
+    /// source that does not is mistaken: both are said here, with the command that fixes it.
+    pub(super) async fn check_credential(
+        &self,
+        miner: &MinerDefinition,
+    ) -> std::result::Result<(), String> {
+        let requirement = self.oauth_requirement(&miner.source).await;
+        match &miner.credential {
+            Some(CredentialRef::Env { name })
+                if !credential_available(&CredentialRef::Env { name: name.clone() }) =>
+            {
+                return Err(format!(
                     "the credential's environment variable `{name}` is not set or is empty in the daemon's \
                      environment; export it and restart the daemon, or disable the miner"
-                ),
-                CredentialRef::File { path } => format!(
+                ));
+            }
+            Some(CredentialRef::File { path }) if !Path::new(path).is_file() => {
+                return Err(format!(
                     "the credential's file `{path}` does not exist; create it, or disable the miner"
-                ),
-            });
+                ));
+            }
+            Some(CredentialRef::Oauth) if requirement.is_none() => {
+                return Err(format!(
+                    "the source `{}` does not sign in with OAuth, so `oauth` is not a credential it can use; \
+                     use `--credential-env` or `--credential-file`, or unset the credential",
+                    miner.source
+                ));
+            }
+            _ => {}
+        }
+        if let Some(requirement) = requirement
+            && !self.signed_in(&miner.source, requirement).await
+        {
+            return Err(format!(
+                "the source `{0}` is not signed in; run `memcastle source auth {0}`",
+                miner.source
+            ));
         }
         Ok(())
+    }
+
+    /// What the installed source `name` declares under `[permissions.oauth]`, if it is installed and declares it.
+    async fn oauth_requirement(&self, name: &str) -> Option<crate::domain::OAuthRequirement> {
+        self.store
+            .get_source_package(name)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|record| record.manifest.permissions.oauth)
+    }
+
+    /// Whether `source` has a credential it could use, asked off the async runtime because the store may be a system
+    /// service.
+    async fn signed_in(&self, source: &str, requirement: crate::domain::OAuthRequirement) -> bool {
+        use crate::domain::AccessTokens as _;
+        let credentials = self.credentials.clone();
+        let source = source.to_string();
+        tokio::task::spawn_blocking(move || credentials.is_signed_in(&source, &requirement))
+            .await
+            .unwrap_or(false)
     }
 
     /// A miner for display: its state, and what has been mined from it.
@@ -665,6 +715,25 @@ impl AppServices {
                     .to_string(),
             );
         }
+        let credential = match &miner.credential {
+            Some(c) => Some(CredentialView {
+                kind: match c {
+                    CredentialRef::Env { .. } => "env",
+                    CredentialRef::File { .. } => "file",
+                    CredentialRef::Oauth => "oauth",
+                }
+                .to_string(),
+                // For `oauth`, "resolves" means signed in: the same question the activation check asks.
+                available: match (c, self.oauth_requirement(&miner.source).await) {
+                    (CredentialRef::Oauth, Some(requirement)) => {
+                        self.signed_in(&miner.source, requirement).await
+                    }
+                    (CredentialRef::Oauth, None) => false,
+                    (other, _) => credential_available(other),
+                },
+            }),
+            None => None,
+        };
         Ok(MinerView {
             name: miner.name.clone(),
             source: miner.source.clone(),
@@ -673,14 +742,7 @@ impl AppServices {
             reason,
             locator: miner.locator.clone(),
             wing: miner.wing.clone(),
-            credential: miner.credential.as_ref().map(|c| CredentialView {
-                kind: match c {
-                    CredentialRef::Env { .. } => "env",
-                    CredentialRef::File { .. } => "file",
-                }
-                .to_string(),
-                available: credential_available(c),
-            }),
+            credential,
             scope: miner.scope.clone(),
             trigger: miner.trigger.clone(),
             config: miner.config.clone(),
@@ -713,6 +775,8 @@ fn credential_available(credential: &CredentialRef) -> bool {
     match credential {
         CredentialRef::Env { name } => std::env::var_os(name).is_some_and(|v| !v.is_empty()),
         CredentialRef::File { path } => Path::new(path).is_file(),
+        // Whether a sign-in exists is the daemon's to answer, not a file or a variable to look at.
+        CredentialRef::Oauth => false,
     }
 }
 

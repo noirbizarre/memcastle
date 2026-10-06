@@ -354,6 +354,7 @@ memcastle source install <FILE | DIR | NAME[@VERSION]> [--registry <LOCATION>] [
 memcastle source update [<NAME>] [--check] [--yes]
 memcastle source list
 memcastle source show <NAME>
+memcastle source auth <NAME>
 memcastle source enable <NAME>
 memcastle source disable <NAME>
 memcastle source remove <NAME> [--yes]
@@ -412,11 +413,45 @@ A version that asks for permissions the installed one did not is not installed u
 `--check` only lists what has an update.
 `enable` and `disable` turn a source on or off, and a bundled source needs no consent to be enabled: it ships with
 MemCastle, and `show` prints what it may do.
-`disable` keeps the files and `remove` deletes them; a bundled source cannot be removed, only disabled.
+`disable` keeps the files and `remove` deletes them, along with the source's stored credentials; a bundled source cannot
+be removed, only disabled.
 What a source mined stays in the palace.
 `list` and `show` are reads, so they take `--mode` and a `disabled` session cannot use them;
 the other commands are administrative: `--mode` is accepted (it is a global flag) but ignored by them,
 and no MCP tool exists for any of them.
+
+#### `source auth`
+
+```sh
+memcastle source auth <NAME>
+```
+
+Signs an installed source in with OAuth, for a source that cannot be reached with a static token.
+Only a source whose manifest declares `[permissions.oauth]` ([Writing a mining source](writing-sources.md#signing-in-with-oauth))
+can be signed in, and `source show` and `source list` say which are, and whether they are.
+It is not `memcastle auth`, which manages the daemon's own bearer token.
+
+The daemon runs the flow and keeps the result, so this command only tells you what to do and waits.
+A source that declares a device authorization endpoint uses the device flow:
+the command prints a page and a code, you open the page on any device and type the code,
+and the command returns when you have finished.
+Otherwise it uses the browser flow with PKCE: the command opens your browser (or prints the address when it cannot),
+you agree, and the provider redirects to a port the daemon opened on its own machine,
+so the browser must be on the machine the daemon runs on.
+In a terminal the browser is opened for you; without one, the instructions are printed and nothing is opened.
+Instructions and progress go to standard error, so standard output holds only the result, which carries no token:
+`{"source", "signed_in", "expires_at", "scopes", "stored_in"}`, where `stored_in` is `keyring` or `file`.
+The command waits up to ten minutes (the device code's own lifetime when the provider sets a shorter one) and fails with
+`memcastle::credential::flow_failed` when you decline, the code expires, or the provider refuses.
+
+There is no `login`, `logout` or `status` subcommand: the source name is enough to choose the flow,
+`source show` is the status, and the daemon renews the credential itself.
+Run `source auth` again to sign in as someone else, which replaces the stored credential and any sign-in still waiting.
+`source remove` forgets the credential, and so does a provider that revokes it, in which case the next run fails with
+`memcastle::credential::required` and the command to run.
+The tokens are kept in the platform credential store when there is one, and in an owner-only file otherwise
+(see [Credentials](configuration.md#credentials)).
+Like installing a source, it is administrative: `--mode` is ignored and no MCP tool exists for it.
 
 ### `miner`
 
@@ -424,7 +459,7 @@ and no MCP tool exists for any of them.
 memcastle miner list
 memcastle miner get <NAME>
 memcastle miner set <NAME> [--source <SOURCE>] [--locator <WHERE>] [--wing <WING>]
-                           [--credential-env <VAR> | --credential-file <PATH>]
+                           [--credential-env <VAR> | --credential-file <PATH> | --credential-oauth]
                            [--scope <KEY=VALUES>]... [--unset-scope <KEY>]...
                            [--trigger manual|event|schedule [--trigger-setting <KEY=VALUE>]...]
                            [--setting <KEY=VALUE>]... [--unset-setting <KEY>]...
@@ -452,6 +487,10 @@ An enabled miner is checked before anything is written (its source usable, its c
 `directory` an absolute `--locator`), and a change that would widen the scope is refused unless `--allow-broaden` is
 given.
 `--credential-env` and `--credential-file` say where the credential is read from; the secret itself is never an argument.
+`--credential-oauth` says the source signs in with OAuth, so the daemon uses the sign-in `source auth` made;
+it is refused for a source that does not declare one.
+A miner for a source that signs in is not ready until the source is signed in, whatever its `credential` says, and the
+reason names `memcastle source auth <source>`.
 The file is edited in place: its comments and the other tables are kept.
 `enable` and `disable` are `set` for the enabled state alone, and `enable` runs the same checks.
 `remove` deletes the definition and asks first in a terminal, `--yes` skips it; what the miner mined and its source's

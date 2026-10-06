@@ -1,4 +1,4 @@
-//! The sources that ship with MemCastle (docs/adr/039), packaged by the script the release runs: a bundle of unpacked
+//! The sources that ship with MemCastle (docs/adr/040), packaged by the script the release runs: a bundle of unpacked
 //! packages a daemon runs in place from the start, and the archives a release attaches for the official registry.
 //!
 //! This is what keeps "official sources ship with releases" from being a claim about the release workflow that only a

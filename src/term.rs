@@ -202,6 +202,38 @@ pub fn confirm(question: &str, action: &str, assume_yes: bool) -> Result<()> {
     confirm_with(assume_yes, is_interactive(), action, || ask(question))
 }
 
+/// Open `url` in the user's browser, best effort, and say whether something was started.
+///
+/// Only an `https` address (or `http` to this machine) is opened: the address comes from a provider's answer through
+/// the daemon, and handing a program an arbitrary one (a `file:` path, a custom scheme) would let that answer start
+/// whatever is registered for it. Always paired with printing the address, because a headless host has no browser.
+#[must_use]
+pub fn open_in_browser(url: &str) -> bool {
+    if !crate::domain::is_secure_endpoint(url) {
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    let (program, args): (&str, Vec<&str>) = ("open", vec![url]);
+    #[cfg(windows)]
+    let (program, args): (&str, Vec<&str>) = ("rundll32", vec!["url.dll,FileProtocolHandler", url]);
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let (program, args): (&str, Vec<&str>) = ("xdg-open", vec![url]);
+    let Ok(mut child) = std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    // Reaped on a thread of its own, so a launcher that lingers neither delays the command nor leaves a zombie.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    true
+}
+
 /// [`confirm`] with the terminal probed and the prompt injected, so the
 /// decision table can be tested without a terminal.
 fn confirm_with(

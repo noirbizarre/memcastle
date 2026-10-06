@@ -110,6 +110,8 @@ pub struct SetFlags<'a> {
     pub credential_env: Option<&'a str>,
     /// `--credential-file`.
     pub credential_file: Option<&'a str>,
+    /// `--credential-oauth`.
+    pub credential_oauth: bool,
     /// `--scope`, as `KEY=VALUES`.
     pub scope: &'a [String],
     /// `--unset-scope`.
@@ -184,7 +186,9 @@ impl SetFlags<'_> {
             (None, Some(path)) => Some(crate::domain::CredentialRef::File {
                 path: path.to_string(),
             }),
-            (None, None) => None,
+            (None, None) => self
+                .credential_oauth
+                .then_some(crate::domain::CredentialRef::Oauth),
         };
         for raw in self.scope {
             let (key, value) = split_pair("--scope", raw)?;
@@ -268,6 +272,21 @@ mod tests {
         .into_patch()
         .expect_err("not a pair");
         assert!(error.to_string().contains("--scope"), "{error}");
+    }
+
+    #[test]
+    fn the_oauth_flag_is_a_credential_reference_that_names_nothing_secret() {
+        let patch = SetFlags {
+            credential_oauth: true,
+            ..SetFlags::default()
+        }
+        .into_patch()
+        .expect("patch");
+        assert_eq!(patch.credential, Some(crate::domain::CredentialRef::Oauth));
+        assert_eq!(
+            serde_json::to_value(patch.credential).unwrap(),
+            json!({"type": "oauth"})
+        );
     }
 
     #[test]

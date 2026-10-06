@@ -804,6 +804,7 @@ async fn cmd_source(
             )
         }
         SourceCommand::Install(args) => cmd_source_install(config, args).await,
+        SourceCommand::Auth(args) => cmd_source_auth(config, &args.name).await,
         SourceCommand::Enable(args) => {
             let source = client(config, None)
                 .set_source_enabled(&args.name, true)
@@ -845,6 +846,87 @@ async fn cmd_source(
     }
 }
 
+/// `memcastle source auth <name>`: sign an installed source in with OAuth.
+///
+/// The daemon runs the flow, keeps the tokens and renews them; this only tells the user what to do, opens the browser
+/// when there is one, and waits. The instructions go to stderr like every prompt, so stdout holds the one answer, and
+/// that answer carries no token.
+async fn cmd_source_auth(config: &Config, name: &str) -> Result<()> {
+    use memcastle::app::{FlowKind, FlowStatus};
+
+    // Administrative, like `source install`: no memory mode.
+    let daemon = client(config, None);
+    let challenge = daemon.begin_source_auth(name).await?;
+    let painter = Painter::for_stderr();
+    match challenge.kind {
+        FlowKind::Device => {
+            let page = challenge
+                .verification_uri
+                .as_deref()
+                .unwrap_or("the provider's page");
+            eprintln!("To sign `{name}` in, open {page}");
+            if let Some(code) = &challenge.user_code {
+                eprintln!("and enter the code: {}", painter.accent(code));
+            }
+            // The page with the code filled in, when the provider has one, saves typing it.
+            if let Some(url) = &challenge.url
+                && term::is_interactive()
+                && term::open_in_browser(url)
+            {
+                eprintln!("(opened it in your browser)");
+            }
+        }
+        FlowKind::Browser => {
+            let url = challenge.url.as_deref().unwrap_or_default();
+            if term::is_interactive() && term::open_in_browser(url) {
+                eprintln!("Opened your browser to sign `{name}` in. If it did not open, go to:");
+            } else {
+                eprintln!("To sign `{name}` in, open this address in a browser on this machine:");
+            }
+            eprintln!("{url}");
+            // The provider redirects to a port the daemon opened on its own machine.
+            eprintln!(
+                "{}",
+                painter.dim("The browser must be on the machine the daemon runs on.")
+            );
+        }
+    }
+    eprintln!(
+        "{}",
+        painter.dim(&format!(
+            "Waiting for you to finish (within {} minutes)...",
+            challenge.expires_in.div_ceil(60)
+        ))
+    );
+    // A long poll, repeated: the daemon holds each request for a few seconds and then says it is still waiting, so no
+    // proxy or timeout sits between the user and the end of their sign-in.
+    let signed_in = loop {
+        match daemon.wait_source_auth(name, &challenge.flow).await? {
+            FlowStatus::Pending => {}
+            FlowStatus::SignedIn(done) => break done,
+        }
+    };
+    print_for_terminal_or_json(
+        |painter, _| {
+            let scopes = if signed_in.scopes.is_empty() {
+                String::new()
+            } else {
+                format!(" (scopes: {})", signed_in.scopes.join(", "))
+            };
+            format!(
+                "{} source {name}{scopes}; credentials are kept in the {}",
+                painter.ok("Signed in"),
+                if signed_in.stored_in == "keyring" {
+                    "platform keyring"
+                } else {
+                    "credentials file"
+                }
+            )
+        },
+        &signed_in,
+    )
+}
+
 /// `memcastle miner ...`: configure what the daemon mines.
 ///
 /// Every subcommand is an HTTP call to the daemon's miner routes, the same ones MCP's read-only tools sit beside, so
@@ -872,6 +954,7 @@ async fn cmd_miner(config: &Config, command: MinerCommand) -> Result<()> {
                 wing: args.wing.as_deref(),
                 credential_env: args.credential_env.as_deref(),
                 credential_file: args.credential_file.as_deref(),
+                credential_oauth: args.credential_oauth,
                 scope: &args.scope,
                 unset_scope: &args.unset_scope,
                 trigger: args.trigger.as_deref(),
