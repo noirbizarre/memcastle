@@ -262,6 +262,11 @@ Limits to know about:
 - **A session whose export exceeds 16 MiB is skipped.**
   A program's output is capped at that size for every source, and a session that large is usually one whose tool outputs
   dominate; it is not an error, so it does not stop the sessions after it.
+- **A command's output is captured through files, not pipes.**
+  OpenCode can exit before a large answer has drained from a pipe, which cuts it off while the exit status is still 0.
+  The host therefore has the program write to a scratch file it reads back, so a long list of sessions or a large export
+  arrives whole.
+  If a discovery answer is still not valid JSON, the job's error quotes how many bytes arrived and how they began.
 - **Each command takes a few seconds on a large database**, and a job's calls are limited to 60 seconds each
   (`mining.source_timeout_secs`).
 - **The legacy JSON history** that OpenCode wrote before 1.2 under `storage/` is not read.

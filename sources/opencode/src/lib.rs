@@ -306,10 +306,14 @@ impl Guest for OpenCode {
             return Err(failure("db", &run));
         }
         let Some(Value::Array(rows)) = json_from(&run.stdout, '[') else {
-            return Err(SourceError::Failed(
-                "`opencode db --format json` did not answer with a JSON array; this source needs OpenCode 1.2 or later"
-                    .to_string(),
-            ));
+            // What came back is quoted, so a cut-off answer is told apart from an old OpenCode (which has no `db`
+            // command to answer with JSON at all) instead of both being blamed on the version.
+            let seen: String = run.stdout.trim().chars().take(STDERR_CHARS).collect();
+            return Err(SourceError::Failed(format!(
+                "`opencode db --format json` did not answer with a complete JSON array ({} bytes, starting {seen:?}); \
+                 either its output was cut off or this source needs OpenCode 1.2 or later",
+                run.stdout.len()
+            )));
         };
         let mut candidates = Vec::new();
         for row in &rows {

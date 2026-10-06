@@ -3,7 +3,8 @@
 //! The granted names are matched exactly, there is no shell, the child sees only the environment the manifest listed
 //! (plus `PATH`, to be found), and the run is bounded in time and in output.
 
-use std::io::{Read, Write};
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -39,6 +40,41 @@ pub(super) struct ProcessGrant {
     pub timeout: Duration,
 }
 
+/// An anonymous scratch file for one of a program's output streams.
+fn scratch_file(program: &str) -> Result<File, ProcessError> {
+    tempfile::tempfile().map_err(|source| {
+        ProcessError::Failed(format!(
+            "no scratch file could be created to capture the output of `{program}`: {source}; check that the \
+             temporary directory (`TMPDIR`) exists and has free space"
+        ))
+    })
+}
+
+/// A second handle on `file` for the child to write through; both share one offset and one length.
+fn clone_file(file: &File, program: &str) -> Result<File, ProcessError> {
+    file.try_clone().map_err(|source| {
+        ProcessError::Failed(format!(
+            "the output of `{program}` could not be captured: {source}"
+        ))
+    })
+}
+
+/// Everything the program wrote to `file`, up to one byte past the cap (so the caller can tell it was exceeded).
+fn read_back(file: &mut File, program: &str) -> Result<Vec<u8>, ProcessError> {
+    let failed = |source: std::io::Error| {
+        ProcessError::Failed(format!(
+            "the output of `{program}` could not be read back: {source}"
+        ))
+    };
+    // The handle shares its offset with the child's, which is at the end of what it wrote.
+    file.seek(SeekFrom::Start(0)).map_err(failed)?;
+    let mut bytes = Vec::new();
+    file.take(MAX_OUTPUT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(failed)?;
+    Ok(bytes)
+}
+
 /// Run `program` if `grant` allows it.
 pub(super) fn run(
     grant: &ProcessGrant,
@@ -56,6 +92,13 @@ pub(super) fn run(
             }
         )));
     }
+    // Output goes to anonymous files, not pipes: a CLI built on Bun (OpenCode) can exit before a large write to a pipe
+    // has drained, so the answer is cut at a multiple of 64 KiB while the exit status is still 0, and a source then
+    // parses half a document. A file is written synchronously, so what the program printed is what we read. The files
+    // are unlinked on creation: there is no path to leak and nothing to clean up, and they are the host's scratch, not
+    // something the guest is granted.
+    let mut stdout_file = scratch_file(program)?;
+    let mut stderr_file = scratch_file(program)?;
     let mut command = Command::new(program);
     command
         .args(args)
@@ -65,8 +108,8 @@ pub(super) fn run(
         } else {
             Stdio::null()
         })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stdout(Stdio::from(clone_file(&stdout_file, program)?))
+        .stderr(Stdio::from(clone_file(&stderr_file, program)?));
     // `PATH` so the program is found, `HOME` (and `SystemRoot` on Windows) so tools find their own configuration.
     // No other variable is inherited, so a token in the daemon's environment is not one a granted `git` can read
     // unless the manifest asked for it.
@@ -90,41 +133,35 @@ pub(super) fn run(
             }
         })
     });
-    let reader = |stream: Option<Box<dyn Read + Send>>| {
-        std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            if let Some(stream) = stream {
-                let _ = stream.take(MAX_OUTPUT_BYTES + 1).read_to_end(&mut bytes);
-            }
-            bytes
-        })
+    let too_much = || {
+        ProcessError::Failed(format!(
+            "`{program}` produced more than {} MiB of output",
+            MAX_OUTPUT_BYTES / 1024 / 1024
+        ))
     };
-    let stdout = reader(
-        child
-            .stdout
-            .take()
-            .map(|s| Box::new(s) as Box<dyn Read + Send>),
-    );
-    let stderr = reader(
-        child
-            .stderr
-            .take()
-            .map(|s| Box::new(s) as Box<dyn Read + Send>),
-    );
 
     let deadline = Instant::now() + grant.timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() >= deadline => {
-                // Killed, and the reader threads are left to end when the pipes close: waiting on them could
-                // outlive the limit if the child left a grandchild holding a pipe.
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(ProcessError::Failed(format!(
                     "`{program}` did not finish within {}s and was stopped",
                     grant.timeout.as_secs()
                 )));
+            }
+            // A file, unlike a pipe, does not make a chatty program wait for a reader, so the cap is enforced while it
+            // runs: otherwise an endless writer would fill the disk until the time limit.
+            Ok(None)
+                if [&stdout_file, &stderr_file]
+                    .iter()
+                    .any(|file| file.metadata().is_ok_and(|m| m.len() > MAX_OUTPUT_BYTES)) =>
+            {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(too_much());
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(5)),
             Err(source) => {
@@ -137,13 +174,11 @@ pub(super) fn run(
     if let Some(writer) = writer {
         let _ = writer.join();
     }
-    let stdout = stdout.join().unwrap_or_default();
-    let stderr = stderr.join().unwrap_or_default();
+    let stdout = read_back(&mut stdout_file, program)?;
+    let stderr = read_back(&mut stderr_file, program)?;
+    // The program may have written its last bytes between the final size check and its exit.
     if stdout.len() as u64 > MAX_OUTPUT_BYTES || stderr.len() as u64 > MAX_OUTPUT_BYTES {
-        return Err(ProcessError::Failed(format!(
-            "`{program}` produced more than {} MiB of output",
-            MAX_OUTPUT_BYTES / 1024 / 1024
-        )));
+        return Err(too_much());
     }
     Ok(Output {
         status: status.code().unwrap_or(-1),
@@ -241,6 +276,39 @@ mod tests {
         assert!(
             matches!(error, ProcessError::Failed(ref m) if m.contains("more than 16 MiB")),
             "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_large_answer_comes_back_whole_and_so_does_standard_error() {
+        // Well past a pipe's 64 KiB buffer, which is where a CLI that exits early used to be cut off.
+        let output = run(
+            &grant(&["sh"]),
+            "sh",
+            &[
+                "-c".to_string(),
+                "head -c 2097152 /dev/zero; echo oops >&2".to_string(),
+            ],
+            None,
+        )
+        .unwrap();
+        assert_eq!(output.stdout.len(), 2 * 1024 * 1024);
+        assert_eq!(String::from_utf8_lossy(&output.stderr).trim(), "oops");
+    }
+
+    #[test]
+    fn a_program_that_writes_without_end_is_stopped_at_the_cap_not_at_the_time_limit() {
+        let mut granted = grant(&["yes"]);
+        granted.timeout = Duration::from_secs(60);
+        let started = Instant::now();
+        let error = run(&granted, "yes", &[], None).unwrap_err();
+        assert!(
+            matches!(error, ProcessError::Failed(ref m) if m.contains("more than 16 MiB")),
+            "{error:?}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "the cap was enforced only by the time limit"
         );
     }
 

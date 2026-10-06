@@ -312,6 +312,23 @@ async fn a_machine_without_opencode_is_told_what_is_missing_and_a_failing_openco
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_cut_off_discovery_answer_is_quoted_and_not_blamed_only_on_the_opencode_version() {
+    let history = History::new().await;
+    let adapter = adapter();
+    let source = adapter.identify(None).unwrap();
+
+    std::fs::write(history.data("cut"), "").unwrap();
+    let error = adapter
+        .discover(&source, &json!(null), 10)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("cut off"), "{error}");
+    assert!(error.contains("ses_al"), "what arrived is quoted: {error}");
+    assert!(error.contains("bytes"), "{error}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_cursor_the_source_did_not_write_is_refused_and_never_reaches_the_query() {
     let _history = History::new().await;
     let adapter = adapter();
