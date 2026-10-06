@@ -1,7 +1,7 @@
 name: 📚 Documentation
 
 # A pull request builds the site, so a broken page, a bad link or a mistake in the source registry
-# (`docs/registry/memcastle-index.json`, which is published with it) fails there. Only `main` deploys, so the registry
+# (`docs/registry.json`, which is published with it) fails there. Only `main` deploys, so the registry
 # is updated by merging a pull request and not by cutting a release (docs/adr/039).
 on:
   pull_request:

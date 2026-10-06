@@ -156,8 +156,7 @@ pub const DEFAULT_GITHUB_API: &str = "https://api.github.com";
 /// The official source registry, published with the documentation site on every release (docs/adr/039).
 ///
 /// The one default that can reach the network, and only when someone asks to search, install or update a source.
-pub const OFFICIAL_REGISTRY: &str =
-    "https://noirbizarre.github.io/memcastle/registry/memcastle-index.json";
+pub const OFFICIAL_REGISTRY: &str = "https://noirbizarre.github.io/memcastle/registry.json";
 
 const DEFAULT_BIND: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 /// The default listener port.

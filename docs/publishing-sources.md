@@ -252,8 +252,8 @@ agent.
 
 ## The official registry
 
-The official registry is a static file in this repository, [`docs/registry/memcastle-index.json`](https://github.com/noirbizarre/memcastle/blob/main/docs/registry/memcastle-index.json),
-published with the documentation at `https://noirbizarre.github.io/memcastle/registry/memcastle-index.json`.
+The official registry is a static file in this repository, [`docs/registry.json`](https://github.com/noirbizarre/memcastle/blob/main/docs/registry.json),
+published with the documentation at `https://noirbizarre.github.io/memcastle/registry.json`.
 It lists no versions: it names the GitHub repositories that publish sources (`pi` and `opencode` are published by this one),
 and the daemon reads their releases.
 Registering a source, or changing where it comes from, is therefore a pull request to that file, merged and deployed like

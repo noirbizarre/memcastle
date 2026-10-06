@@ -11,7 +11,7 @@
 #                              resolves to when a daemon with no bundle installs `pi` or `opencode`
 #
 # There is no registry index here. The official registry is a static file in the documentation
-# (`docs/registry/memcastle-index.json`) that names this repository, and a daemon reads its releases, so publishing a
+# (`docs/registry.json`) that names this repository, and a daemon reads its releases, so publishing a
 # source is attaching `<name>-<version>.tar.gz` to a release, and registering one is a pull request (docs/adr/039).
 #
 # Bundled sources are ordinary packages (docs/adr/033), not code linked into the binary: this is the same

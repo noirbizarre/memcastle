@@ -56,8 +56,8 @@ at all except from a release archive by hand.
   A directory holding source *projects* (a manifest and no `source.wasm`, as `sources/` in a checkout does) is not a bundle.
   `mining.bundled_dir` and `assets.dir` still point the daemon at one.
 - **The official registry is a static file in the documentation, and is the default.**
-  `docs/registry/memcastle-index.json` is edited by pull request and published with the documentation site at
-  `https://noirbizarre.github.io/memcastle/registry/memcastle-index.json`: the documentation workflow builds it on every
+  `docs/registry.json` is edited by pull request and published with the documentation site at
+  `https://noirbizarre.github.io/memcastle/registry.json`: the documentation workflow builds it on every
   pull request, so a mistake fails there, and deploys on every push to `main`, so the registry changes when a pull
   request is merged and never because a release was cut.
   `mining.registries` defaults to it, so `memcastle source search` and `install <name>` work on any installation, and a
