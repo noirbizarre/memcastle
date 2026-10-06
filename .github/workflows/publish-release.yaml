@@ -6,19 +6,69 @@ name: 📦 Publish Release
 # Release" alone would not.
 run-name: 📦 Publish Release ${{ inputs.tag }}
 
+# Where the run was dispatched decides whether it publishes. gh-ship dispatches
+# it on the release tag, so a tag run builds, attests and uploads exactly as
+# before. A run dispatched on a branch is a trial: it builds the legs and
+# reports their time and size, and never reaches the `publish` job, whatever
+# inputs it is given. That makes a trial safe to run on any branch, and means
+# no input can turn a trial into a release by mistake. Through `workflow_call`
+# the caller's ref decides, so a caller running on a branch gets a trial too.
+#
+#   gh workflow run publish-release.yaml --ref <branch> -f tag=trial \
+#     -f targets=aarch64-apple-darwin -f lto=thin -f codegen_units=16 -f timings=true
+#
+# The optional inputs below exist for trials only; the `plan` job refuses them
+# on a tag, so a release is always built from `Cargo.toml` and the full matrix.
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: The tag being released
+        description: >-
+          The tag being released. On a branch it is only a label for the asset names: pass `trial`
         required: true
         type: string
+      lto:
+        description: "Trial only: override [profile.release] lto (fat, thin or off; empty keeps Cargo.toml)"
+        required: false
+        default: ""
+        type: string
+      codegen_units:
+        description: "Trial only: override [profile.release] codegen-units (empty keeps Cargo.toml)"
+        required: false
+        default: ""
+        type: string
+      targets:
+        description: "Trial only: comma-separated targets to build (empty builds all five)"
+        required: false
+        default: ""
+        type: string
+      timings:
+        description: "Trial only: pass --timings to cargo and upload its report"
+        required: false
+        default: false
+        type: boolean
 
   workflow_call:
     inputs:
       tag:
         required: true
         type: string
+      lto:
+        required: false
+        default: ""
+        type: string
+      codegen_units:
+        required: false
+        default: ""
+        type: string
+      targets:
+        required: false
+        default: ""
+        type: string
+      timings:
+        required: false
+        default: false
+        type: boolean
 
 # The upload authenticates as a GitHub App and carries its own permissions.
 # These cover `actions/checkout` alone, which only reads.
@@ -46,33 +96,95 @@ env:
   RUSTUP_TOOLCHAIN: "1.98.1"
 
 jobs:
+  # Decides what the run does before any expensive runner starts: which legs to
+  # build, and whether this is a release. The matrix lives here, as JSON,
+  # because a job-level `if` cannot read `matrix` and so cannot skip a leg;
+  # filtering the list before `build` is the one way to build a subset.
+  plan:
+    name: 🗺️ Plan
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      publish: ${{ steps.plan.outputs.publish }}
+    steps:
+      - name: Choose the legs and whether to publish
+        id: plan
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          LTO: ${{ inputs.lto }}
+          CODEGEN_UNITS: ${{ inputs.codegen_units }}
+          TARGETS: ${{ inputs.targets }}
+        run: |
+          set -euo pipefail
+
+          # `ext` is emitted on every leg, empty where it does not apply, and
+          # `smoke` marks the legs whose binary the runner can execute.
+          #
+          # Runners are named images, not `-latest`: the toolchain, linker and
+          # SDK a release is built with come from the image, so a `-latest`
+          # that moves between two releases changes the binary.
+          matrix='[
+            { "target": "x86_64-unknown-linux-gnu", "runner": "ubuntu-24.04", "asset": "linux-amd64", "cross": true, "ext": "", "smoke": true },
+            { "target": "aarch64-unknown-linux-gnu", "runner": "ubuntu-24.04", "asset": "linux-arm64", "cross": true, "ext": "", "smoke": false },
+            { "target": "x86_64-apple-darwin", "runner": "macos-15", "asset": "darwin-amd64", "cross": false, "ext": "", "smoke": false },
+            { "target": "aarch64-apple-darwin", "runner": "macos-15", "asset": "darwin-arm64", "cross": false, "ext": "", "smoke": true },
+            { "target": "x86_64-pc-windows-msvc", "runner": "windows-2022", "asset": "windows-amd64", "cross": false, "ext": ".exe", "smoke": true }
+          ]'
+
+          publish=false
+          if [ "${REF_TYPE}" = "tag" ]; then publish=true; fi
+
+          # A release must come from `Cargo.toml` and the whole matrix: an
+          # override that reached a tag would ship a binary nobody reviewed.
+          if [ "${publish}" = "true" ] && [ -n "${LTO}${CODEGEN_UNITS}${TARGETS}" ]; then
+            echo "::error::lto, codegen_units and targets are for trials only; a run on a tag publishes from Cargo.toml and every target. Dispatch the trial on a branch."
+            exit 1
+          fi
+
+          case "${LTO}" in
+            "" | fat | thin | off) ;;
+            *) echo "::error::lto must be fat, thin or off, not '${LTO}'"; exit 1 ;;
+          esac
+          if [ -n "${CODEGEN_UNITS}" ] && ! [[ "${CODEGEN_UNITS}" =~ ^[0-9]+$ ]]; then
+            echo "::error::codegen_units must be a whole number, not '${CODEGEN_UNITS}'"
+            exit 1
+          fi
+
+          # A misspelt target would otherwise select nothing and let the run
+          # "succeed" having built nothing.
+          wanted="${TARGETS// /}"
+          unknown="$(jq -r --arg wanted "${wanted}" \
+            '(($wanted | split(",") | map(select(. != ""))) - (map(.target))) | join(", ")' <<<"${matrix}")"
+          if [ -n "${unknown}" ]; then
+            echo "::error::unknown targets: ${unknown}"
+            exit 1
+          fi
+
+          selected="$(jq -c --arg wanted "${wanted}" \
+            '($wanted | split(",") | map(select(. != ""))) as $w
+             | if ($w | length) == 0 then . else map(select(.target as $t | $w | index($t))) end
+             | {include: .}' <<<"${matrix}")"
+
+          {
+            echo "matrix=${selected}"
+            echo "publish=${publish}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "publish=${publish}, matrix=${selected}"
+
   build:
     name: 🏗️ ${{ matrix.target }}
+    needs: plan
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
-      matrix:
-        # `ext` is emitted on every leg, empty where it does not apply. Omitting
-        # it on the non-Windows ones would make `${{ matrix.ext }}` reference a
-        # property that is not in the matrix type whenever no Windows target is
-        # selected — an actionlint error, not a runtime one, so it would only
-        # surface in the consuming project's CI.
-        #
-        # Runners are named images, not `-latest`: the toolchain, linker and
-        # SDK a release is built with come from the image, so a `-latest`
-        # that moves between two releases changes the binary.
-        include:
-          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-24.04, asset: linux-amd64, cross: true, ext: "" }
-          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04, asset: linux-arm64, cross: true, ext: "" }
-          - { target: x86_64-apple-darwin, runner: macos-15, asset: darwin-amd64, cross: false, ext: "" }
-          - { target: aarch64-apple-darwin, runner: macos-15, asset: darwin-arm64, cross: false, ext: "" }
-          - { target: x86_64-pc-windows-msvc, runner: windows-2022, asset: windows-amd64, cross: false, ext: ".exe" }
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
         with:
           # Build exactly what is being released, not a branch tip that
-          # may have moved since.
-          ref: ${{ inputs.tag }}
+          # may have moved since. A trial has no tag, so it builds the commit
+          # the run was dispatched on.
+          ref: ${{ github.ref_type == 'tag' && inputs.tag || github.sha }}
           # The upload authenticates via a separately-installed `gh`; nothing
           # in this job shells out to `git push`.
           persist-credentials: false
@@ -82,6 +194,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+        id: cache
 
       # `cross` is only needed on the Linux legs, so it is installed
       # conditionally here rather than added to mise.toml, which would pull it
@@ -127,14 +240,68 @@ jobs:
         shell: bash
         run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "${GITHUB_ENV}"
 
+      # Trial overrides, as cargo's own `CARGO_PROFILE_RELEASE_*` variables so
+      # `Cargo.toml` is never edited: `cross` forwards every `CARGO_*` variable
+      # into its container, and rust-cache hashes them into its key, so each
+      # setting gets its own cache and a timing never reuses another's build.
+      # The `plan` job has already refused these on a tag.
+      - name: Apply the trial overrides
+        if: inputs.lto != '' || inputs.codegen_units != ''
+        shell: bash
+        env:
+          LTO: ${{ inputs.lto }}
+          CODEGEN_UNITS: ${{ inputs.codegen_units }}
+        run: |
+          if [ -n "${LTO}" ]; then echo "CARGO_PROFILE_RELEASE_LTO=${LTO}" >> "${GITHUB_ENV}"; fi
+          if [ -n "${CODEGEN_UNITS}" ]; then echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=${CODEGEN_UNITS}" >> "${GITHUB_ENV}"; fi
+
+      # The wall-clock time is measured around the build alone, so the summary
+      # below compares what the profile changes and not runner start-up.
       - name: Build
         shell: bash
+        env:
+          TIMINGS: ${{ inputs.timings }}
         run: |
+          # An array, not an unquoted string, so an empty flag list adds no
+          # empty argument for cargo to reject.
+          flags=()
+          if [ "${TIMINGS}" = "true" ]; then flags+=(--timings); fi
+          started="$(date +%s)"
           if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --release --locked --target ${{ matrix.target }}
+            cross build --release --locked "${flags[@]}" --target ${{ matrix.target }}
           else
-            cargo build --release --locked --target ${{ matrix.target }}
+            cargo build --release --locked "${flags[@]}" --target ${{ matrix.target }}
           fi
+          echo "BUILD_SECONDS=$(( $(date +%s) - started ))" >> "${GITHUB_ENV}"
+
+      # What a trial is for: one table row per leg on the run's summary page.
+      # Run on a release too, where it is free and shows the build time.
+      - name: Report the build
+        shell: bash
+        env:
+          LTO: ${{ inputs.lto }}
+          CODEGEN_UNITS: ${{ inputs.codegen_units }}
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: |
+          bin="target/${{ matrix.target }}/release/memcastle${{ matrix.ext }}"
+          bytes="$(wc -c < "${bin}" | tr -d ' ')"
+          {
+            echo "### ${{ matrix.target }}"
+            echo
+            echo "| lto | codegen units | cache hit | build | size |"
+            echo "| --- | --- | --- | --- | --- |"
+            echo "| ${LTO:-Cargo.toml} | ${CODEGEN_UNITS:-Cargo.toml} | ${CACHE_HIT:-false} | $(( BUILD_SECONDS / 60 ))m$(( BUILD_SECONDS % 60 ))s | ${bytes} B ($(awk -v b="${bytes}" 'BEGIN { printf "%.1f MiB", b / 1048576 }')) |"
+            echo
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      # A lighter LTO can change what the binary does, not only how big it is,
+      # so a leg whose binary the runner can execute proves it starts. The
+      # others (arm64 Linux, x86_64 macOS on an arm runner) have no way to.
+      - name: Smoke-test the binary
+        if: matrix.smoke
+        shell: bash
+        run: |
+          "target/${{ matrix.target }}/release/memcastle${{ matrix.ext }}" --version
 
       - name: Stage the asset
         shell: bash
@@ -143,15 +310,30 @@ jobs:
           cp "target/${{ matrix.target }}/release/memcastle${{ matrix.ext }}" \
              "dist/memcastle_${{ inputs.tag }}_${{ matrix.asset }}${{ matrix.ext }}"
 
+      # A trial's binaries exist only to compare sizes, so they expire fast;
+      # `0` is the repository default, which a release keeps. Written as
+      # `!= 'tag' && 3 || 0` because a leading `0` would be falsy and fall
+      # through to the other branch.
       - uses: actions/upload-artifact@v7
         with:
           name: asset-${{ matrix.asset }}
           path: dist/*
           if-no-files-found: error
+          retention-days: ${{ github.ref_type != 'tag' && 3 || 0 }}
+
+      - uses: actions/upload-artifact@v7
+        if: inputs.timings
+        with:
+          name: timings-${{ matrix.asset }}
+          path: target/cargo-timings/
+          if-no-files-found: warn
+          retention-days: 7
 
   publish:
     name: 🚀 Publish
-    needs: build
+    needs: [plan, build]
+    # Only a run on a tag releases: see the header. A trial stops after `build`.
+    if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-24.04
 
     # `id-token` lets the job ask GitHub to sign an attestation as this

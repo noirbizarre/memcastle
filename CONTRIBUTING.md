@@ -115,6 +115,27 @@ CI does not rebuild the release to check this, because two LTO release builds ar
 Bump the toolchain in `RUSTUP_TOOLCHAIN` and the `dtolnay/rust-toolchain` refs together.
 See [ADR-013](docs/adr/013-release-packaging-and-asset-resolution.md) for the reasoning.
 
+### Trying a release build without publishing
+
+Where 📦 Publish Release is dispatched decides whether it publishes.
+gh-ship dispatches it on the release tag, which builds, attests and uploads as above.
+A run dispatched on a branch is a trial: it builds the legs, writes a table of build time and binary size to the run's
+summary, and never reaches the publish job.
+
+```sh
+gh workflow run publish-release.yaml --ref <branch> -f tag=trial \
+  -f targets=aarch64-apple-darwin -f lto=thin -f codegen_units=16 -f timings=true
+```
+
+On a branch, `tag` is only a label for the asset names.
+The optional inputs exist for trials only, and a run on a tag refuses them:
+
+- `targets` is a comma-separated subset of the five targets; empty builds all of them;
+- `lto` (`fat`, `thin` or `off`) and `codegen_units` override `[profile.release]` without editing `Cargo.toml`;
+- `timings` passes `--timings` to cargo and uploads its report as the `timings-<platform>` artifact.
+
+A trial's binaries expire after three days, since they exist only to compare sizes.
+
 The pinned release workflow is template-owned (see below), so a change that belongs to every project generated
 from the template should be made in rust.tpl.
 
