@@ -193,6 +193,24 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.98.1
         with:
           targets: ${{ matrix.target }}
+
+      # Trial overrides, as cargo's own `CARGO_PROFILE_RELEASE_*` variables so
+      # `Cargo.toml` is never edited: `cross` forwards every `CARGO_*` variable
+      # into its container. This step must come before rust-cache, which hashes
+      # the environment into its key when it runs: set afterwards, every
+      # setting shared one cache and a trial restored another trial's build,
+      # so its timing was no longer a cold build. The `plan` job has already
+      # refused these on a tag.
+      - name: Apply the trial overrides
+        if: inputs.lto != '' || inputs.codegen_units != ''
+        shell: bash
+        env:
+          LTO: ${{ inputs.lto }}
+          CODEGEN_UNITS: ${{ inputs.codegen_units }}
+        run: |
+          if [ -n "${LTO}" ]; then echo "CARGO_PROFILE_RELEASE_LTO=${LTO}" >> "${GITHUB_ENV}"; fi
+          if [ -n "${CODEGEN_UNITS}" ]; then echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=${CODEGEN_UNITS}" >> "${GITHUB_ENV}"; fi
+
       - uses: Swatinem/rust-cache@v2
         id: cache
 
@@ -239,21 +257,6 @@ jobs:
         if: endsWith(matrix.target, 'windows-msvc')
         shell: bash
         run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "${GITHUB_ENV}"
-
-      # Trial overrides, as cargo's own `CARGO_PROFILE_RELEASE_*` variables so
-      # `Cargo.toml` is never edited: `cross` forwards every `CARGO_*` variable
-      # into its container, and rust-cache hashes them into its key, so each
-      # setting gets its own cache and a timing never reuses another's build.
-      # The `plan` job has already refused these on a tag.
-      - name: Apply the trial overrides
-        if: inputs.lto != '' || inputs.codegen_units != ''
-        shell: bash
-        env:
-          LTO: ${{ inputs.lto }}
-          CODEGEN_UNITS: ${{ inputs.codegen_units }}
-        run: |
-          if [ -n "${LTO}" ]; then echo "CARGO_PROFILE_RELEASE_LTO=${LTO}" >> "${GITHUB_ENV}"; fi
-          if [ -n "${CODEGEN_UNITS}" ]; then echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=${CODEGEN_UNITS}" >> "${GITHUB_ENV}"; fi
 
       # The wall-clock time is measured around the build alone, so the summary
       # below compares what the profile changes and not runner start-up.
