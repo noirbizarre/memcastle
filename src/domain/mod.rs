@@ -9,6 +9,7 @@
 
 pub mod auth;
 mod checkpoint;
+mod credential;
 mod drawer;
 mod entity;
 mod extraction;
@@ -27,6 +28,7 @@ mod source_index;
 mod source_package;
 
 pub use checkpoint::{CheckpointDestination, CheckpointItem, CheckpointPayload, FactMutation};
+pub use credential::{AccessTokens, SourceAuth};
 pub use drawer::{
     Drawer, DrawerHistory, Origin, Provenance, Source, SourceKind, content_hash, sha256_hex,
 };
@@ -65,10 +67,10 @@ pub use source::{
 pub use source_index::{INDEX_FORMAT, IndexSignature, IndexedSource, IndexedVersion, SourceIndex};
 pub use source_package::{
     BuildSection, CONTRACT_VERSION, Compatibility, FilesystemPermissions, MANIFEST_FORMAT,
-    MAX_SOURCE_NAME_LEN, ManifestSource, PackageTransitionError, Permissions, ResourceLimits,
-    SourceManifest, SourceOrigin, SourcePackageEvent, SourcePackageRecord, SourcePackageState,
-    SourceState, TestSection, contract_compatibility, contract_version, is_valid_source_name,
-    version_compatibility,
+    MAX_SOURCE_NAME_LEN, ManifestSource, OAuthRequirement, PackageTransitionError, Permissions,
+    ResourceLimits, SourceManifest, SourceOrigin, SourcePackageEvent, SourcePackageRecord,
+    SourcePackageState, SourceState, TestSection, contract_compatibility, contract_version,
+    is_secure_endpoint, is_valid_source_name, version_compatibility,
 };
 
 /// The channels a write can come through, recorded as `Job::requested_by` and

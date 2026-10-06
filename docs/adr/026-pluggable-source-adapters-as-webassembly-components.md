@@ -204,3 +204,13 @@ The contract's `source-ref` record names the source's name `source`, not `provid
 That is a breaking change before 1.0, so the contract is `0.2.0`.
 An installed source built for `0.1` is `unavailable` with a reason that says to rebuild it, and the three reference
 sources are rebuilt.
+
+## Note, 2026-10-06: contract 0.3.0
+
+The `host` interface gains `access-token`, which hands a source a current access token for the OAuth sign-in its manifest
+declares under `[permissions.oauth]` ([ADR-039](039-oauth-credentials-for-mining-sources.md)).
+It is a permission like the others: part of the consent digest, refused to a source that did not declare it, and never
+available to `normalize`.
+That is a breaking change before 1.0, so the contract is `0.3.0`.
+An installed source built for `0.2` is `unavailable` with a reason that says to rebuild it, and the three reference
+sources are rebuilt.

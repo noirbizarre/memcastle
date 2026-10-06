@@ -1,4 +1,4 @@
-// The MemCastle source contract, version 0.2.0 (docs/adr/026, docs/writing-sources.md).
+// The MemCastle source contract, version 0.3.0 (docs/adr/026, docs/writing-sources.md).
 //
 // A source is a WebAssembly Component implementing the `source` world. It is the same logical contract as the
 // native `SourceAdapter` trait: the host calls `identify`, `discover`, `read` and `normalize`, and does everything
@@ -6,7 +6,7 @@
 //
 // Cursors and metadata cross the boundary as JSON text, so the contract does not need to change for a source to
 // carry richer ones. `contract` in `memcastle-source.toml` names the version of this file a source was built for.
-package memcastle:source@0.2.0;
+package memcastle:source@0.3.0;
 
 interface types {
     /// The identity of a place that is mined.
@@ -90,6 +90,14 @@ interface host {
     /// Run a program named in `permissions.process`, by exact name and without a shell. The host refuses any other
     /// program, bounds the run by the source's time limit, and caps the size of what it returns.
     run-process: func(program: string, args: list<string>, stdin: option<list<u8>>) -> result<process-output, string>;
+
+    /// A current access token for the OAuth sign-in the manifest declares under `[permissions.oauth]`, or an error
+    /// saying why there is none (the source was never signed in, the provider revoked it, the provider is unreachable).
+    ///
+    /// The host runs the sign-in (`memcastle source auth <source>`), keeps the tokens and renews them; a source only ever
+    /// sees the access token, and asks again for each call it makes, because one may have expired since. It is refused
+    /// when the manifest declares no sign-in, and `normalize` never gets one.
+    access-token: func() -> result<string, string>;
 }
 
 interface adapter {

@@ -136,7 +136,12 @@ pub fn render_sources(
                     source.state.to_string(),
                     yes_no(source.capabilities.incremental),
                     yes_no(source.capabilities.retains_raw),
-                    yes_no(source.capabilities.needs_credentials),
+                    // A source that signs in says whether it has, so the next command is obvious from the list.
+                    match &source.auth {
+                        Some(auth) if auth.signed_in => "signed in".to_string(),
+                        Some(_) => "not signed in".to_string(),
+                        None => yes_no(source.capabilities.needs_credentials),
+                    },
                     // Built-in sources are native code under MemCastle's own authority: nothing was granted.
                     match source.origin {
                         crate::mining::SourceOrigin::Builtin => "built in".to_string(),
@@ -231,6 +236,34 @@ pub fn render_source(source: &crate::mining::AdapterInfo, painter: Painter) -> S
             lines.push(format!("  signed by:    key {key}"));
         }
         lines.push(format!("  permissions:  {}", source.permissions.describe()));
+    }
+    if let Some(auth) = &source.auth {
+        let flows = auth.flows.join(" or ");
+        if auth.signed_in {
+            let until = auth.expires_at.map_or_else(String::new, |at| {
+                format!(
+                    ", access token valid until {}",
+                    at.format("%Y-%m-%d %H:%M UTC")
+                )
+            });
+            lines.push(format!(
+                "  sign-in:      {} at {}{until}; scopes: {}",
+                painter.ok("signed in"),
+                auth.provider,
+                if auth.scopes.is_empty() {
+                    "none".to_string()
+                } else {
+                    auth.scopes.join(", ")
+                }
+            ));
+        } else {
+            lines.push(format!(
+                "  sign-in:      {} at {} ({flows} flow); run `memcastle source auth {}`",
+                painter.warn("not signed in"),
+                auth.provider,
+                source.name
+            ));
+        }
     }
     if let Some(reason) = &source.unavailable_reason {
         lines.push(format!(
@@ -813,6 +846,7 @@ mod tests {
             permissions: crate::domain::Permissions::default(),
             registry: None,
             signed_by: None,
+            auth: None,
         }
     }
 
@@ -821,6 +855,40 @@ mod tests {
         info.version = Some("1.2.3".to_string());
         info.permissions.network = true;
         info
+    }
+
+    #[test]
+    fn a_source_that_signs_in_says_whether_it_has_and_the_command_when_it_has_not() {
+        let mut info = package("slack");
+        info.auth = Some(crate::domain::SourceAuth {
+            signed_in: false,
+            expires_at: None,
+            scopes: vec![],
+            provider: "auth.example.com".to_string(),
+            flows: vec!["device".to_string(), "browser".to_string()],
+        });
+        let out = render_source(&info, Painter::PLAIN);
+        assert!(
+            out.contains("not signed in at auth.example.com (device or browser flow)"),
+            "{out}"
+        );
+        assert!(out.contains("memcastle source auth slack"), "{out}");
+
+        info.auth.as_mut().unwrap().signed_in = true;
+        info.auth.as_mut().unwrap().scopes = vec!["read".to_string()];
+        let out = render_source(&info, Painter::PLAIN);
+        assert!(
+            out.contains("signed in at auth.example.com") && out.contains("scopes: read"),
+            "{out}"
+        );
+        assert!(!out.contains("memcastle source auth"), "{out}");
+
+        let report = crate::app::SourcesReport {
+            adapters: vec![info],
+            sources: vec![],
+        };
+        let list = render_sources(&report, Painter::PLAIN, Some(200));
+        assert!(list.contains("signed in"), "{list}");
     }
 
     #[test]

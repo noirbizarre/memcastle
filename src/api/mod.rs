@@ -87,6 +87,16 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
             "/api/source-packages/{name}/disable",
             post(source_packages::disable),
         )
+        // Signing a source in with OAuth is administrative for the same reason: it lets installed code act on someone's
+        // account, so there is no MCP tool, and the answers carry a code to type and never a token (docs/adr/039).
+        .route(
+            "/api/source-packages/{name}/auth",
+            post(source_packages::auth_begin),
+        )
+        .route(
+            "/api/source-packages/{name}/auth/{flow}/wait",
+            post(source_packages::auth_wait),
+        )
         // Registries are administrative for the same reason: they make the daemon fetch code from elsewhere, and what
         // they install runs under the permissions the user agreed to (docs/adr/033).
         .route("/api/source-registry/search", get(source_registry::search))

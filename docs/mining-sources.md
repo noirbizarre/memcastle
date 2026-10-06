@@ -68,7 +68,9 @@ MemCastle keeps, for each source:
 - the **cursor**: where the last run stopped, in the adapter's own terms.
   A later job continues from it, which is what makes mining incremental;
 - the **last job** that advanced it and when;
-- a **credential reference**, if the source needs one: the name of an environment variable or the path of a file.
+- a **credential reference**, if the source needs one: the name of an environment variable, the path of a file, or
+  `oauth` for a source that signs in with OAuth and whose tokens the daemon keeps and renews
+  ([Credentials](configuration.md#credentials)).
   A secret is never stored, logged or returned, see [Authentication](authentication.md);
 
 and for each document of a source, the **revision** last filed and the **chunks** it became.
@@ -317,4 +319,6 @@ An adapter whose cursor does not parse returns `memcastle::source::cursor_invali
 
 A model that suits the planned adapters for chat and issue trackers:
 the cursor is the service's own page token or timestamp, `external_id` is the service's id for the message or issue,
-the revision is its `updated_at` or etag, and `needs_credentials` is set, with the credential stored as a reference.
+the revision is its `updated_at` or etag, and `needs_credentials` is set, with the credential stored as a reference
+(or, for a source that signs in with OAuth, declared in the manifest and asked of the host at run time:
+[Signing in with OAuth](writing-sources.md#signing-in-with-oauth)).

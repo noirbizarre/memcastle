@@ -210,7 +210,9 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `GET /api/source-packages/{name}` | One source, built in or installed: capabilities, state, permissions. | none |
 | `POST /api/source-packages/{name}/enable` | Allow an installed source to be mined. Idempotent. | none |
 | `POST /api/source-packages/{name}/disable` | Stop an installed source from being mined. Idempotent. | none |
-| `DELETE /api/source-packages/{name}` | Remove an installed source and its files: `{"removed": name}`. | none |
+| `DELETE /api/source-packages/{name}` | Remove an installed source, its files and its stored credentials: `{"removed": name}`. | none |
+| `POST /api/source-packages/{name}/auth` | Start signing an installed source in with OAuth, and say what the user must do: `{flow, kind, user_code?, verification_uri?, url?, expires_in}`. Replaces a sign-in already waiting for the same source. | none |
+| `POST /api/source-packages/{name}/auth/{flow}/wait` | Wait, up to `timeout` seconds, for the sign-in `flow` to finish: `{"status": "pending"}` until it does, then `{"status": "signed_in", source, signed_in, expires_at, scopes, stored_in}`. A sign-in that was declined or expired is an error answer. | query string: `timeout` (seconds, at most 30) |
 | `GET /api/source-registry/search` | Search the bundled sources and the configured registries: `{entries, warnings}`, each entry with the version an install would take and what is installed. | query string: `q`, `registry` |
 | `GET /api/source-registry/sources/{name}` | Download and verify a source and say what installing it would do, installing nothing: `{name, version, description, origin, registry, signed_by, archive_digest, permissions, consent_digest, replaces}`. | query string: `version`, `registry` |
 | `POST /api/source-registry/install` | Install a source by name from the bundle or a registry. Answers `{source, replaced}`. | JSON body: `name`, `version?`, `registry?`, `consent?`, `enable?` |
@@ -448,6 +450,29 @@ A built-in source cannot be disabled or removed (`memcastle::source::builtin`, `
 (`memcastle::source::not_enabled`).
 `POST /api/jobs` refuses a `mine` for such a source the same way, at submission.
 
+### Signing sources in
+
+A source that cannot be reached with a static token declares an OAuth sign-in in its manifest ([Writing a mining source](writing-sources.md#signing-in-with-oauth)),
+and two routes under `/api/source-packages/{name}` run it ([ADR-039](adr/039-oauth-credentials-for-mining-sources.md)).
+`POST .../auth` starts the flow, which the daemon runs and finishes on its own, and answers what the user must do:
+for the device flow (`kind: "device"`) a `user_code` to type at `verification_uri`,
+with a `url` that has the code filled in when the provider offers one;
+for the browser flow (`kind: "browser"`) a `url` to open, whose redirect lands on a one-shot listener the daemon opens on
+the loopback address of its own machine, so that flow needs a browser on the daemon's machine.
+`POST .../auth/{flow}/wait` is a long poll a client repeats until it is told the outcome.
+Both answers carry no token, and are sent with `Cache-Control: no-store`.
+
+They are guarded by [authentication](authentication.md) like every other route, and have no MCP tool:
+starting a sign-in lets installed code act on someone's account, so an agent must not be able to begin one.
+A source that does not declare a sign-in (a built-in one included) is `400` with `memcastle::credential::oauth_unsupported`,
+a sign-in that was declined, expired or refused is `502` with `memcastle::credential::flow_failed`,
+and a `wait` for a sign-in that was replaced, forgotten or already reported is the same code.
+A run of a source that is not signed in fails with `memcastle::credential::required`,
+which a `409` reports when a miner is asked to run,
+and a credential that could not be renewed just now with `memcastle::credential::refresh_failed`, a `502`.
+`GET /api/sources` and `GET /api/source-packages/{name}` add `auth` to a source that signs in:
+`{signed_in, expires_at?, scopes, provider, flows}`.
+
 ### Miners
 
 The `/api/miners` routes manage the `[[miners]]` section of the daemon's configuration file
@@ -467,6 +492,7 @@ A `409` is a change that would widen a scope (`memcastle::miner::scope_broadened
 (`memcastle::miner::disabled`), a run of one that cannot run as configured (`memcastle::miner::not_runnable`),
 and a configuration file that cannot be read or was edited under the request (`memcastle::miner::config_file`).
 A credential is shown as `{kind, available}`: the variable's name or the file's path is not given back.
+`kind` is `env`, `file` or `oauth`, and for `oauth` `available` says whether the source is signed in.
 
 ### The database admin endpoint
 

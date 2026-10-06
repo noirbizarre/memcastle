@@ -116,12 +116,16 @@ impl AppServices {
         let manifest = package.manifest.clone();
         let bytes = package.component.clone();
         let mining = self.mining.clone();
-        tokio::task::spawn_blocking(move || WasmAdapter::load(&manifest, &bytes, &mining))
-            .await
-            .map_err(|e| Error::SourceFailed {
-                name: name.clone(),
-                message: format!("loading was interrupted: {e}"),
-            })??;
+        let credentials: std::sync::Arc<dyn crate::domain::AccessTokens> =
+            std::sync::Arc::new(self.credentials.clone());
+        tokio::task::spawn_blocking(move || {
+            WasmAdapter::load_with(&manifest, &bytes, &mining, Some(credentials))
+        })
+        .await
+        .map_err(|e| Error::SourceFailed {
+            name: name.clone(),
+            message: format!("loading was interrupted: {e}"),
+        })??;
 
         let sources_dir = self.mining.sources_dir();
         package::install(&sources_dir, &package)?;
@@ -148,7 +152,9 @@ impl AppServices {
         };
         self.store.save_source_package(&record).await?;
         Ok(InstalledSource {
-            source: describe_package(&record, &sources_dir),
+            source: self
+                .with_sign_in(describe_package(&record, &sources_dir))
+                .await,
             replaced: existing.is_some(),
         })
     }
@@ -172,7 +178,9 @@ impl AppServices {
             return Ok(builtin);
         }
         let record = self.installed(name).await?;
-        Ok(describe_package(&record, &self.mining.sources_dir()))
+        Ok(self
+            .with_sign_in(describe_package(&record, &self.mining.sources_dir()))
+            .await)
     }
 
     /// Turn the installed source `name` on or off.
@@ -200,7 +208,9 @@ impl AppServices {
         }
         let Ok(next) = record.state.apply(event) else {
             // Already where the event would put it: nothing to change.
-            return Ok(describe_package(&record, &sources_dir));
+            return Ok(self
+                .with_sign_in(describe_package(&record, &sources_dir))
+                .await);
         };
         self.store
             .set_source_package_state(name, next, Utc::now())
@@ -209,7 +219,9 @@ impl AppServices {
             state: next,
             ..record
         };
-        Ok(describe_package(&record, &sources_dir))
+        Ok(self
+            .with_sign_in(describe_package(&record, &sources_dir))
+            .await)
     }
 
     /// Remove the installed source `name`: its row and its files. What it mined stays in the palace.
@@ -220,6 +232,9 @@ impl AppServices {
     pub async fn remove_source_package(&self, name: &str) -> Result<()> {
         self.installed(name).await?;
         self.store.delete_source_package(name).await?;
+        // A credential belongs to the installed source: one left behind would be picked up by whatever is installed
+        // under the same name next, which may be a different publisher's.
+        self.forget_source_credential(name).await?;
         package::remove(&self.mining.sources_dir(), name)
     }
 

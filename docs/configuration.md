@@ -14,6 +14,7 @@ so a dotfiles repository or a shell profile written once works on both.
 | Config file | `~/.config/memcastle/config.toml` | `XDG_CONFIG_HOME`, or `--config` / `MEMCASTLE_CONFIG` |
 | Palace (persistent data) | `~/.local/share/memcastle/default` | `XDG_DATA_HOME`, or `--palace` / `MEMCASTLE_PALACE_PATH` / `palace.path` |
 | Daemon registry (runtime state) | `~/.local/state/memcastle/run/` | `XDG_STATE_HOME` |
+| OAuth credential files (only when no keyring is used) | `~/.local/share/memcastle/credentials/` | `XDG_DATA_HOME`, or `credentials.dir` |
 | Package assets (not user data) | `<prefix>/share/memcastle`, or none | `--assets-dir` / `MEMCASTLE_ASSETS_DIR` / `assets.dir` |
 
 The last row is not a place you keep anything.
@@ -145,6 +146,11 @@ source_timeout_secs = 60    # the longest one call may run; a source's own limit
 trust = "optional"
 # trusted_keys = ["Zm9vYmFy..."]
 
+# Where the tokens of a source signed in with OAuth are kept; see "Credentials".
+[credentials]
+backend = "auto"           # "auto" (the platform keyring, else a file), "keyring" or "file"
+# dir = "/home/alice/.local/share/memcastle/credentials"   # for the file store
+
 # What the daemon mines, by name; see "Miners". Written by `memcastle miner set`, or by hand.
 [[miners]]
 name = "docs"
@@ -238,6 +244,8 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `mining.trust` (`optional` or `required`) | `MEMCASTLE_MINING_TRUST` | `optional` |
 | `mining.trusted_keys` (a list of base64 public keys) | `MEMCASTLE_MINING_TRUSTED_KEYS` (comma-separated) | none |
 | `mining.bundled_dir` (an absolute path) | `MEMCASTLE_MINING_BUNDLED_DIR` | `share/memcastle/sources` of the installation |
+| `credentials.backend` (`auto`, `keyring` or `file`) | `MEMCASTLE_CREDENTIALS_BACKEND` | `auto` |
+| `credentials.dir` (an absolute path) | `MEMCASTLE_CREDENTIALS_DIR` | `$XDG_DATA_HOME/memcastle/credentials` |
 | `store.sync` (`every`, `never` or an interval over 100ms) | `MEMCASTLE_STORE_SYNC` | `every` |
 | `store.mode` and remote settings | none | `embedded` |
 
@@ -562,7 +570,7 @@ source = "signal"                 # the source adapter: `directory`, or an insta
 enabled = true                    # default true
 locator = "+336..."               # where in the source to read; the source decides what it means
 wing = "signal"                   # the wing its drawers go to, when it should not be the source's default
-credential = { type = "env", name = "SIGNAL_TOKEN" }   # or { type = "file", path = "/run/secrets/signal" }
+credential = { type = "env", name = "SIGNAL_TOKEN" }   # or { type = "file", path = "/run/secrets/signal" }, or { type = "oauth" }
 
 [miners.scope]                    # a filter the source understands: strings, numbers, booleans, lists of strings
 contacts = ["+336..."]
@@ -585,12 +593,16 @@ A key that is not listed is an error, not an ignored typo: `enable = false` must
   Pointing it at another `source` or `locator` is a different source with its own cursor, and `miner set` says so.
   Removing a miner, or disabling it, never deletes what it mined.
 - **Secrets.** A secret is never written in the file.
-  `credential` names where it comes from: an environment variable of the daemon, or a file.
+  `credential` names where it comes from: an environment variable of the daemon, a file,
+  or `{ type = "oauth" }` for a source that signs in with OAuth (see [Credentials](#credentials)), which names nothing
+  because the daemon keeps the tokens itself.
   A key in `scope`, `config` or `trigger` that reads like a secret (`password`, `token`, `secret`, `api_key`, ...)
-  is refused, and the daemon reports a credential only as `env` or `file` and whether it resolves,
-  never its name or path.
-  Resolving a credential and handing it to a source is the source's side of the contract, which does not take one yet;
+  is refused, and the daemon reports a credential only as `env`, `file` or `oauth` and whether it resolves
+  (for `oauth`, whether the source is signed in), never its name or path.
+  Handing an `env` or `file` credential to a source is the source's side of the contract, which does not take one yet;
   today the daemon checks that it resolves, so an enabled miner whose variable is unset is `unavailable`, with the fix.
+  An OAuth sign-in is handed over: a source that declares one is given a fresh access token on each call that asks,
+  and a miner for it is `unavailable` until `memcastle source auth <source>` has been run, whatever its `credential` says.
 - **Validation.** The shape of every entry is checked when the file is loaded, so a bad entry stops the daemon starting
   like a bad `[embeddings]` section.
   An *enabled* miner is also held to what running needs, when it is created or changed: the source is built in or
@@ -633,6 +645,36 @@ The environment and command-line overrides are not part of the file, so they are
   change them: there is nowhere to keep them.
   `memcastle` always knows the file: `--config`, `MEMCASTLE_CONFIG`, or `~/.config/memcastle/config.toml`,
   which is created by the first `miner set`.
+
+## Credentials
+
+A mining source that cannot be reached with a static token declares an OAuth sign-in in its manifest,
+and `memcastle source auth <source>` signs it in ([ADR-039](adr/039-oauth-credentials-for-mining-sources.md)).
+The daemon keeps what that produces, renews it when a run needs it, and hands the source an access token for each call;
+the source never owns a store of its own, and the tokens are never in this file, the palace database, the logs, or
+anything a REST or MCP answer returns.
+
+`credentials.backend` chooses where the tokens are kept:
+
+- `auto` (the default) uses the platform's credential store when one works: the Keychain on macOS, the Credential Manager
+  on Windows, the Secret Service on Linux (GNOME Keyring, KWallet and the like).
+  It is probed on first use and not at startup, since probing can prompt for a keychain password,
+  and when it does not work (a Linux server with no desktop session, a container) the tokens go to an owner-only file instead.
+  A credential is looked for in both, so one written to the file while the keyring was down is still found when it is back.
+- `keyring` uses the platform store only, and signing in fails where there is none.
+- `file` uses `credentials.dir` only: one `<source>.json` per source, the directory `0700` and each file `0600` on Unix,
+  written to a temporary file and renamed so that a crash never leaves half a token.
+  It is the setting for a headless host: the files are exactly as private as the account that runs the daemon.
+  The directory defaults to `$XDG_DATA_HOME/memcastle/credentials`, and must be absolute.
+
+What is kept is the refresh token, which is what lets a source stay signed in for months,
+with the scopes granted and a fingerprint of the client, endpoints and scopes the manifest declared at the time.
+The short-lived access token is held in the daemon's memory, and is written down only for a provider that issues no
+refresh token, until it expires.
+If an update to a source changes its client, its endpoints or its scopes, the stored credential no longer matches,
+counts as missing, and the source asks to be signed in again under the new terms.
+A credential is shared by every palace on the machine that uses the same keyring or directory, since it belongs to the
+installed source and not to a palace.
 
 ## Web dashboard
 

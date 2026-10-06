@@ -20,6 +20,7 @@ use crate::app::{
     AppServices, AuthPolicy, ConfigReport, DbEndpoint, MinerRegistry, RuntimeContext,
 };
 use crate::config::{Config, Secret};
+use crate::credential::Credentials;
 use crate::embed::Embeddings;
 use crate::error::{Error, Result};
 use crate::extract::Extraction;
@@ -97,7 +98,12 @@ pub async fn run(config: Config) -> Result<()> {
     let embeddings = Embeddings::from_config(&config.embeddings)?;
     // Likewise for `[extraction]`: a half-written section fails startup.
     let extraction = Extraction::from_config(&config.extraction)?;
+    // One handle for the scheduler's mining jobs (which ask for access tokens) and the services (which sign sources in
+    // and report whether they are). Nothing is read or written until a source that signs in is touched, so a daemon
+    // with no such source never starts the platform keyring.
+    let credentials = Credentials::from_config(&config.credentials);
     let mut scheduler = Scheduler::new(store.clone(), config.jobs.max_concurrency)
+        .with_credentials(Arc::new(credentials.clone()))
         .with_embeddings(embeddings.clone())
         .with_extraction(extraction.clone())
         .with_mining(config.effective_mining())
@@ -133,6 +139,7 @@ pub async fn run(config: Config) -> Result<()> {
     let backend_info = backend.describe();
     let backend_info_kind = backend_info.kind.to_string();
     let app = AppServices::new(store, Arc::clone(&scheduler))
+        .with_credentials(credentials)
         .with_mining(config.effective_mining())
         .with_embeddings(embeddings)
         .with_extraction(extraction)

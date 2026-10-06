@@ -33,6 +33,7 @@ pub mod audit;
 pub mod checkpoint;
 pub mod client;
 pub mod config;
+pub mod credential;
 pub mod dbadmin;
 pub mod dedup;
 pub mod distribution;

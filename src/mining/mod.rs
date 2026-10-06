@@ -80,6 +80,10 @@ pub struct AdapterInfo {
     /// The key whose signature on the package was verified when it was installed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signed_by: Option<String>,
+    /// Where it stands on signing in, for a source that declares `[permissions.oauth]`. Filled by the application
+    /// layer, which is the one that can ask where credentials are kept; `None` for every other source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<crate::domain::SourceAuth>,
 }
 
 fn enabled() -> SourceState {
@@ -107,7 +111,7 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: MiningParams) -> Resul
         wing: wing.as_deref(),
         full,
     };
-    let adapter = registry::resolve(ctx.store(), ctx.mining(), name).await?;
+    let adapter = registry::resolve(ctx.store(), ctx.mining(), ctx.credentials(), name).await?;
     pipeline::mine(&adapter, ctx, job, request).await
 }
 

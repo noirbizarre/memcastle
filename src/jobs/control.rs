@@ -13,7 +13,7 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{DedupConfig, MiningConfig};
-use crate::domain::{Job, JobId, JobProgress};
+use crate::domain::{AccessTokens, Job, JobId, JobProgress};
 use crate::embed::Embeddings;
 use crate::error::Result;
 use crate::extract::Extraction;
@@ -87,6 +87,9 @@ pub struct JobContext {
     extraction: Extraction,
     /// Deduplication settings (`[dedup]`), for the handlers that write drawers and entities.
     dedup: DedupConfig,
+    /// The access tokens of the sources that sign in with OAuth, for the mining handler. None unless the scheduler
+    /// was given them.
+    credentials: Option<Arc<dyn AccessTokens>>,
 }
 
 impl JobContext {
@@ -102,7 +105,21 @@ impl JobContext {
             mining: MiningConfig::default(),
             extraction: Extraction::disabled(),
             dedup: DedupConfig::default(),
+            credentials: None,
         }
+    }
+
+    /// Give this context the access tokens of the sources that sign in with OAuth.
+    #[must_use]
+    pub fn with_credentials(mut self, credentials: Option<Arc<dyn AccessTokens>>) -> Self {
+        self.credentials = credentials;
+        self
+    }
+
+    /// The access tokens a source that signs in is given, if this daemon has any.
+    #[must_use]
+    pub fn credentials(&self) -> Option<&Arc<dyn AccessTokens>> {
+        self.credentials.as_ref()
     }
 
     /// Give this context the daemon's deduplication settings.
