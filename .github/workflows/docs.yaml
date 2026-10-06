@@ -7,6 +7,9 @@ on:
       - docs/**
       - zensical.toml
       - .github/workflows/docs.yaml
+  # The registry of official sources (docs/adr/039) is the index of the latest release, so the site follows releases.
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -31,6 +34,23 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           cache: true
+
+      # The official source registry (docs/adr/039): the index the latest release published, served as a static file
+      # beside the pages at `registry/memcastle-index.json`, which is `mining.registries`' default. The archives it
+      # lists stay release assets. Every deployment replaces the whole site, so every deployment carries the index; a
+      # repository with no release that has one yet simply has no registry page, which `source search` reports as a
+      # registry it could not read.
+      - name: Fetch the source registry index
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p docs/registry
+          if gh release view --json assets --jq '.assets[].name' 2>/dev/null | grep -qx memcastle-index.json; then
+            gh release download --pattern memcastle-index.json --dir docs/registry --clobber
+          else
+            echo "::notice::no release has published a source registry index yet"
+          fi
 
       - name: Build the site
         run: mise run docs:build

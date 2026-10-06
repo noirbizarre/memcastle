@@ -42,6 +42,7 @@ impl IntoResponse for ApiError {
             | Error::SourceIncompatible { .. }
             | Error::SourceConsentRequired { .. }
             | Error::SourceBuiltin { .. }
+            | Error::SourceBundled { .. }
             // A miner definition the caller wrote is theirs to fix.
             | Error::MinerInvalid { .. }
             // The trust policy is the daemon's configuration, but the package was the caller's choice.

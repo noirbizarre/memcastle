@@ -493,7 +493,7 @@ impl DaemonClient {
         self.send(request).await
     }
 
-    /// Search the bundled sources and the configured registries.
+    /// Search the configured registries.
     ///
     /// # Errors
     ///

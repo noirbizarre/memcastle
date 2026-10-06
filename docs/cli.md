@@ -386,11 +386,14 @@ Each package's URL is `--base-url` plus the file name, or just the file name whe
 Publishing the same archive again refreshes its entry; a different archive under a version already listed is refused.
 
 The rest talk to the daemon, which is the one that reads registries and downloads packages.
-`search` lists what the bundled sources and the configured registries offer, whose name or description contains
-`<QUERY>`, with the version `install` would take and what is installed already; a registry that cannot be read is a
-warning, so it does not hide the others.
+`search` lists what the configured registries offer (the [official one](publishing-sources.md#the-official-registry)
+unless `mining.registries` says otherwise), whose name or description contains `<QUERY>`, with the version `install` would
+take and what is installed already, bundled sources included; a registry that cannot be read is a warning, so it does not
+hide the others.
 `install` takes a package file, a source project directory (it is built and packaged first), or a name,
-optionally pinned as `name@1.2.0`, resolved from the bundled sources and then the configured registries in order.
+optionally pinned as `name@1.2.0`, resolved from the configured registries in order.
+A name the release already ships (`pi`, `opencode`) is installed from the start: `install` refuses it with
+`memcastle::source::bundled`, and `memcastle source enable <NAME>` is what it needs.
 Write `./name` for a path that looks like a name.
 `--registry` consults only that location (a URL, or an absolute path) instead of the usual ones, and the trust policy
 still applies to what it serves.
@@ -401,12 +404,16 @@ A package that asks for nothing is installed without asking.
 `--enable` turns the source on once installed; otherwise it is `installed` and `memcastle source enable <NAME>` is needed
 before it can be mined.
 Installing a name that is already installed replaces it and keeps its state.
-`update` installs the newest version of the sources that came from the bundle or a registry, from the same place, and
-keeps their state; a source installed from a file has no upstream and is left alone.
+`update` installs the newest version of the sources that came from a registry, from the same place, and keeps their
+state; a source installed from a file has no upstream and is left alone, and a bundled source is updated with MemCastle
+(`update <NAME>` for one is refused with `memcastle::source::bundled`, and a bare `update` skips it).
 A version that asks for permissions the installed one did not is not installed until you agree to them (a prompt, or
 `--yes`); without either the command says what is waiting and exits non-zero.
 `--check` only lists what has an update.
-`disable` keeps the files and `remove` deletes them; what a source mined stays in the palace.
+`enable` and `disable` turn a source on or off, and a bundled source needs no consent to be enabled: it ships with
+MemCastle, and `show` prints what it may do.
+`disable` keeps the files and `remove` deletes them; a bundled source cannot be removed, only disabled.
+What a source mined stays in the palace.
 `list` and `show` are reads, so they take `--mode` and a `disabled` session cannot use them;
 the other commands are administrative: `--mode` is accepted (it is a global flag) but ignored by them,
 and no MCP tool exists for any of them.

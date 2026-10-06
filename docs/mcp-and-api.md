@@ -211,9 +211,9 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `POST /api/source-packages/{name}/enable` | Allow an installed source to be mined. Idempotent. | none |
 | `POST /api/source-packages/{name}/disable` | Stop an installed source from being mined. Idempotent. | none |
 | `DELETE /api/source-packages/{name}` | Remove an installed source and its files: `{"removed": name}`. | none |
-| `GET /api/source-registry/search` | Search the bundled sources and the configured registries: `{entries, warnings}`, each entry with the version an install would take and what is installed. | query string: `q`, `registry` |
+| `GET /api/source-registry/search` | Search the configured registries: `{entries, warnings}`, each entry with the version an install would take and what is installed. | query string: `q`, `registry` |
 | `GET /api/source-registry/sources/{name}` | Download and verify a source and say what installing it would do, installing nothing: `{name, version, description, origin, registry, signed_by, archive_digest, permissions, consent_digest, replaces}`. | query string: `version`, `registry` |
-| `POST /api/source-registry/install` | Install a source by name from the bundle or a registry. Answers `{source, replaced}`. | JSON body: `name`, `version?`, `registry?`, `consent?`, `enable?` |
+| `POST /api/source-registry/install` | Install a source by name from a registry. Answers `{source, replaced}`; a name the release ships is refused (`memcastle::source::bundled`). | JSON body: `name`, `version?`, `registry?`, `consent?`, `enable?` |
 | `GET /api/source-registry/updates` | The installed sources that have a newer version: `{updates, warnings}`. | none |
 | `POST /api/source-registry/update` | Update one source, or every source with an update. Answers a list of `{name, from, to, status}`, where `status` is `updated`, `current`, `needs_consent` (with `permissions` and `digest`) or `failed` (with `message`). | JSON body: `name?`, `consent?` |
 | `GET /api/db` | Whether the [database admin endpoint](database-access.md) is listening, and where. | none |
@@ -432,8 +432,8 @@ and have no MCP tool: an agent must not be able to install code or widen its own
 Installing, enabling, disabling, removing and updating are not gated by a memory mode, which guards access to memory;
 listing and showing (`GET /api/sources` and `GET .../{name}`) are reads, so a `disabled` session is refused them.
 
-The `/api/source-registry` routes find sources in the bundle and in the registries configured under `mining.registries`,
-and install or update them by name ([Publishing and installing sources](publishing-sources.md)).
+The `/api/source-registry` routes find sources in the registries configured under `mining.registries`
+(the official one by default), and install or update them by name ([Publishing and installing sources](publishing-sources.md)).
 They are the only routes through which the daemon reaches out for code, so they are held to the same rules:
 guarded by authentication, no MCP tool, and the same consent to the permissions of exactly the package that was fetched
 ([ADR-033](adr/033-source-distribution.md)).
@@ -443,7 +443,10 @@ A package that fails verification is `502` with `memcastle::source::integrity`, 
 `memcastle::source::not_in_registry`, and one the trust policy refuses is `400` with `memcastle::source::untrusted`.
 A package that asks for permissions is refused with `memcastle::source::consent_required` (a `400`) unless `consent`
 carries the digest of exactly those permissions, which the refusal's `help` names.
-A built-in source cannot be disabled or removed (`memcastle::source::builtin`, `400`); an unknown name is a `404`
+A built-in source cannot be disabled or removed (`memcastle::source::builtin`, `400`).
+A bundled source is installed from the start, so it can be enabled and disabled like any other, and without consent,
+but it cannot be installed from a registry, updated or removed (`memcastle::source::bundled`, `400`);
+an unknown name is a `404`
 (`memcastle::source::not_found`); enabling a source that is `unavailable`, or mining one that is not enabled, is a `409`
 (`memcastle::source::not_enabled`).
 `POST /api/jobs` refuses a `mine` for such a source the same way, at submission.

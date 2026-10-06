@@ -136,9 +136,9 @@ max_documents = 2000        # documents one job files; the next job continues fr
 # sources_dir = "/home/alice/.local/share/memcastle/sources"
 source_memory_mib = 256     # the most memory one call into an installed source may use
 source_timeout_secs = 60    # the longest one call may run; a source's own limits can only lower these
-# Where `memcastle source search|install <name>|update` look, after the sources bundled with MemCastle: an https URL, a
-# file:// URL or an absolute path to a memcastle-index.json (or a directory holding one). Empty by default, so nothing
-# reaches the network for sources unless you ask it to.
+# Where `memcastle source search|install <name>|update` look: an https URL, a file:// URL or an absolute path to a
+# memcastle-index.json (or a directory holding one). The official registry by default; a list here replaces it, and
+# `[]` means none. It is read only when you run one of those commands.
 # registries = ["https://example.org/memcastle/index.json"]
 # "optional" installs an unsigned package and refuses a bad signature from a key you trust; "required" installs only
 # what a key in `trusted_keys` signed. Keys are the public keys `memcastle source keygen` prints.
@@ -234,7 +234,7 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `mining.sources_dir` (an absolute path) | `MEMCASTLE_MINING_SOURCES_DIR` | `$XDG_DATA_HOME/memcastle/sources` |
 | `mining.source_memory_mib` (16 to 4096) | `MEMCASTLE_MINING_SOURCE_MEMORY_MIB` | `256` |
 | `mining.source_timeout_secs` (1 to 3600) | `MEMCASTLE_MINING_SOURCE_TIMEOUT_SECS` | `60` |
-| `mining.registries` (a list of URLs or absolute paths) | `MEMCASTLE_MINING_REGISTRIES` (comma-separated) | none |
+| `mining.registries` (a list of URLs or absolute paths) | `MEMCASTLE_MINING_REGISTRIES` (comma-separated; empty for none) | the [official registry](publishing-sources.md#the-official-registry) |
 | `mining.trust` (`optional` or `required`) | `MEMCASTLE_MINING_TRUST` | `optional` |
 | `mining.trusted_keys` (a list of base64 public keys) | `MEMCASTLE_MINING_TRUSTED_KEYS` (comma-separated) | none |
 | `mining.bundled_dir` (an absolute path) | `MEMCASTLE_MINING_BUNDLED_DIR` | `share/memcastle/sources` of the installation |
@@ -534,7 +534,7 @@ This is the one root for everything a package ships, in the same layout wherever
 
 | Under the root | What | Read by |
 |---|---|---|
-| `sources/` | the bundled mining sources and their `memcastle-index.json` | the daemon, for `source install <name>` (see [Publishing and installing sources](publishing-sources.md#bundled-sources)) |
+| `sources/<name>/` | the bundled mining sources, unpacked: a `memcastle-source.toml` and a `source.wasm` each | the daemon, which lists them as installed and runs them in place (see [Publishing and installing sources](publishing-sources.md#bundled-sources)) |
 | `integrations/<id>/` | the Pi and OpenCode integrations: a `memcastle-integration.toml` and a bundled `dist/` | `memcastle integration` (see [Integrations](integrations.md)) |
 | `skills/` | the shared agent skills | `memcastle integration`, which copies them beside an integration |
 | `web/dist/` | the built [web dashboard](web.md) | the daemon, under `/ui`, when `web.enable` is set |
@@ -542,9 +542,10 @@ This is the one root for everything a package ships, in the same layout wherever
 A standalone binary has none (the dashboard is not built into it, so with `web.enable` it answers a page that says the
 files are missing), so you only need the setting to point at a package unpacked somewhere else, or at a
 checkout of the repository to install the integrations as built there.
-The bundled sources are taken from `<root>/sources` when it holds a `memcastle-index.json`, and `mining.bundled_dir`
-outranks that.
-A root with no such index, like a checkout, leaves the sources to the installed assets.
+The bundled sources are taken from `<root>/sources` when a directory in it holds a `memcastle-source.toml` and a
+`source.wasm`, and `mining.bundled_dir` outranks that.
+A root with no such package, like a checkout (whose `sources/` holds projects, with their component under `dist/`),
+leaves the sources to the installed assets.
 `memcastle integration` reads the root from the same three places as the daemon; `--assets-dir` is accepted by its
 `list`, `install` and `update` commands.
 

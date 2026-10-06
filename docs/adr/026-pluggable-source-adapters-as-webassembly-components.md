@@ -11,6 +11,8 @@ and [ADR-019](019-shared-integration-contract.md) (a conformance suite both impl
 It adds a registry of installed sources, which ADR-023 left open ("nothing precludes a registry later").
 Partly superseded by [ADR-028](028-pi-history-is-an-installed-webassembly-source.md): `pi-sessions` is an installed
 source and no longer a built-in adapter, so the passages below that keep it built in describe the original decision.
+Amended by [ADR-039](039-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md):
+a source that ships with MemCastle is installed from the start and needs enabling, not installing.
 
 ## Context
 

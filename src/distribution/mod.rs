@@ -1,4 +1,4 @@
-//! Finding, fetching and verifying source packages from the bundle and from registries (docs/adr/033).
+//! Finding, fetching and verifying source packages from registries (docs/adr/033, docs/adr/039).
 //!
 //! `crate::source` is what a package *is* and how to make one; `crate::mining::wasm` is how one *runs*; this module is
 //! how one *arrives*: reading an index, choosing a version, downloading the archive, and proving it is the archive the
@@ -6,26 +6,23 @@
 //! nothing about installing them: that is `crate::app`, which is also the only caller, so nothing here touches the
 //! store or the jobs (AGENTS.md, invariants 9 and 10).
 //!
-//! Three kinds of source share the one model. A built-in one is compiled in and never arrives. A *bundled* one is an
-//! ordinary package shipped beside the binary, described by an index that ships with it. A *registry* one comes from an
-//! index the user configured. The index format and the verification are the same for the last two; only the trust
-//! policy differs (a bundled package is as trusted as the MemCastle that carries it).
+//! Only a source that is neither built in nor bundled ever arrives: a built-in one is compiled in, and a bundled one is
+//! installed from the start, unpacked beside the binary (`crate::mining::bundled`), so neither is fetched from anywhere
+//! and neither is held to the trust policy. What comes from here is a package from an index the user configured, and
+//! every such package is held to the same checks.
 
 mod location;
 mod trust;
 
-use std::path::PathBuf;
-
-use crate::assets::InstallSearch;
 use crate::config::MiningConfig;
-use crate::domain::{IndexedSource, IndexedVersion, SourceIndex, SourceOrigin, sha256_hex};
+use crate::domain::{IndexedSource, IndexedVersion, SourceIndex, sha256_hex};
 use crate::error::{Error, Result};
 use crate::source::package::SourcePackage;
 
 pub use location::Location;
 pub use trust::TrustPolicy;
 
-/// The index's file name, in a registry's directory and in the bundle.
+/// The index's file name, in a registry's directory.
 pub const INDEX_FILE: &str = "memcastle-index.json";
 
 /// The largest index read: a list of names and digests, not a payload.
@@ -51,8 +48,6 @@ pub struct Fetched {
 pub struct Registry {
     /// The location as configured, which is what a record of an install keeps to find it again.
     pub label: String,
-    /// Whether this is the bundle or a registry the user configured.
-    pub origin: SourceOrigin,
     /// The index itself.
     pub index: SourceIndex,
     base: Location,
@@ -71,7 +66,7 @@ impl Registry {
     /// # Errors
     ///
     /// [`Error::SourceRegistryUnavailable`] when it cannot be read or is not an index this MemCastle understands.
-    pub async fn load(label: &str, origin: SourceOrigin) -> Result<Self> {
+    pub async fn load(label: &str) -> Result<Self> {
         let base = Location::parse(label)
             .map_err(|reason| unavailable(label, reason))?
             .as_index(INDEX_FILE);
@@ -84,7 +79,6 @@ impl Registry {
         let index = SourceIndex::parse(&text).map_err(|reason| unavailable(label, reason))?;
         Ok(Self {
             label: label.to_string(),
-            origin,
             index,
             base,
         })
@@ -92,8 +86,7 @@ impl Registry {
 
     /// Download the archive of `entry` (a version of `name`) and verify it.
     ///
-    /// The SHA-256 is always checked; the signature is checked as `policy` says, except for the bundle, whose
-    /// provenance is the release that carries it.
+    /// The SHA-256 is always checked, and so is the signature, as `policy` says.
     ///
     /// # Errors
     ///
@@ -123,11 +116,7 @@ impl Registry {
                 ),
             });
         }
-        let signed_by = if self.origin == SourceOrigin::Bundled {
-            None
-        } else {
-            policy.check(name, &archive, entry.signature.as_ref())?
-        };
+        let signed_by = policy.check(name, &archive, entry.signature.as_ref())?;
         Ok(Fetched {
             archive,
             archive_digest,
@@ -156,27 +145,7 @@ pub fn verify_identity(package: &SourcePackage, name: &str, entry: &IndexedVersi
     Ok(())
 }
 
-/// Where the bundled index is, when this installation has one.
-///
-/// `mining.bundled_dir` when set; otherwise `sources/` under the first installed asset directory that has an index
-/// (the layout of `docs/adr/013`). `None` is normal: a binary run from a build directory ships no bundle.
-#[must_use]
-pub fn bundled_index(mining: &MiningConfig) -> Option<PathBuf> {
-    let directories = match &mining.bundled_dir {
-        Some(dir) => vec![dir.clone()],
-        None => InstallSearch::from_process()
-            .candidates()
-            .into_iter()
-            .map(|dir| dir.join("sources"))
-            .collect(),
-    };
-    directories
-        .into_iter()
-        .map(|dir| dir.join(INDEX_FILE))
-        .find(|index| index.is_file())
-}
-
-/// Every index the daemon consults, in precedence order: the bundle first, then the configured registries.
+/// Every index the daemon consults, in the order they are configured.
 #[derive(Debug, Clone, Default)]
 pub struct Catalog {
     /// The indexes that could be read.
@@ -186,7 +155,7 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    /// Read the bundle and the configured registries, or only `only` when it is given.
+    /// Read the configured registries, or only `only` when it is given.
     ///
     /// `only` is an explicit choice (`--registry`), so it replaces the lot rather than adding to it, and a failure to
     /// read it is an error and not a warning.
@@ -199,20 +168,13 @@ impl Catalog {
             // The one place a location arrives from a request rather than a configuration file: it is checked
             // against the same scheme rules, and what it serves is held to the same trust policy.
             return Ok(Self {
-                registries: vec![Registry::load(location, SourceOrigin::Registry).await?],
+                registries: vec![Registry::load(location).await?],
                 warnings: Vec::new(),
             });
         }
         let mut catalog = Self::default();
-        if let Some(index) = bundled_index(mining) {
-            let label = index.display().to_string();
-            match Registry::load(&label, SourceOrigin::Bundled).await {
-                Ok(registry) => catalog.registries.push(registry),
-                Err(error) => catalog.warnings.push(error.to_string()),
-            }
-        }
         for location in &mining.registries {
-            match Registry::load(location, SourceOrigin::Registry).await {
+            match Registry::load(location).await {
                 Ok(registry) => catalog.registries.push(registry),
                 Err(error) => catalog.warnings.push(error.to_string()),
             }
@@ -278,7 +240,7 @@ mod tests {
         let published = entry(b"archive");
         write_registry(directory.path(), b"archive", &published);
 
-        let registry = Registry::load(directory.path().to_str().unwrap(), SourceOrigin::Registry)
+        let registry = Registry::load(directory.path().to_str().unwrap())
             .await
             .unwrap();
         let (found, source) = (
@@ -303,7 +265,7 @@ mod tests {
         // The registry serves different bytes than it published.
         write_registry(directory.path(), b"substituted", &published);
 
-        let registry = Registry::load(directory.path().to_str().unwrap(), SourceOrigin::Registry)
+        let registry = Registry::load(directory.path().to_str().unwrap())
             .await
             .unwrap();
         let policy = TrustPolicy::from_config(&MiningConfig::default()).unwrap();
@@ -317,7 +279,7 @@ mod tests {
     #[tokio::test]
     async fn an_unreadable_or_malformed_index_names_its_location() {
         let directory = tempfile::tempdir().unwrap();
-        let missing = Registry::load(directory.path().to_str().unwrap(), SourceOrigin::Registry)
+        let missing = Registry::load(directory.path().to_str().unwrap())
             .await
             .unwrap_err();
         assert!(
@@ -326,7 +288,7 @@ mod tests {
         );
 
         std::fs::write(directory.path().join(INDEX_FILE), "{ not json").unwrap();
-        let malformed = Registry::load(directory.path().to_str().unwrap(), SourceOrigin::Registry)
+        let malformed = Registry::load(directory.path().to_str().unwrap())
             .await
             .unwrap_err();
         assert!(
@@ -346,7 +308,6 @@ mod tests {
                 directory.path().join("gone").to_str().unwrap().to_string(),
                 directory.path().to_str().unwrap().to_string(),
             ],
-            bundled_dir: Some(directory.path().join("no-bundle")),
             ..MiningConfig::default()
         };
 
@@ -357,32 +318,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_bundle_comes_first_and_is_found_in_its_directory() {
-        let bundle = tempfile::tempdir().unwrap();
-        let registry = tempfile::tempdir().unwrap();
-        write_registry(bundle.path(), b"archive", &entry(b"archive"));
-        write_registry(registry.path(), b"archive", &entry(b"archive"));
-        let mining = MiningConfig {
-            registries: vec![registry.path().to_str().unwrap().to_string()],
-            bundled_dir: Some(bundle.path().to_path_buf()),
-            ..MiningConfig::default()
-        };
-
-        let catalog = Catalog::open(&mining, None).await.unwrap();
-        let (first, _) = catalog.locate("demo").unwrap();
-        assert_eq!(first.origin, SourceOrigin::Bundled);
-        assert_eq!(catalog.registries.len(), 2);
-    }
-
-    #[tokio::test]
     async fn an_explicitly_chosen_registry_replaces_the_rest_and_must_be_readable() {
-        let bundle = tempfile::tempdir().unwrap();
-        write_registry(bundle.path(), b"archive", &entry(b"archive"));
+        let directory = tempfile::tempdir().unwrap();
+        write_registry(directory.path(), b"archive", &entry(b"archive"));
+        // The configured registry is readable; the one asked for is not, and replaces it.
         let mining = MiningConfig {
-            bundled_dir: Some(bundle.path().to_path_buf()),
+            registries: vec![directory.path().to_str().unwrap().to_string()],
             ..MiningConfig::default()
         };
-        let nowhere = bundle.path().join("nowhere");
+        let nowhere = directory.path().join("nowhere");
         let error = Catalog::open(&mining, Some(nowhere.to_str().unwrap()))
             .await
             .unwrap_err();

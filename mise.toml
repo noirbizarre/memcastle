@@ -382,9 +382,9 @@ done
 """
 
 [tasks."sources:package"]
-description = "Package the sources that ship with releases, with their index, into target/bundled-sources"
-# The script `publish-release.yaml` runs: what a release bundles is what a developer can build and install from
-# (`mining.bundled_dir = target/bundled-sources`).
+description = "Package the sources that ship with releases (bundle, archives and registry index) into target/bundled-sources"
+# The script `publish-release.yaml` runs: what a release bundles is what a developer can build and run from
+# (`mining.bundled_dir = target/bundled-sources/sources`).
 depends = ["build"]
 run = "packaging/sources/build.sh target/debug/memcastle target/bundled-sources"
 

@@ -147,8 +147,14 @@ pub struct ServerConfig {
 }
 
 /// The default listener address: loopback only, never a wildcard.
-/// The directory under the assets root that holds the bundled source packages and their index.
+/// The directory under the assets root that holds the bundled source packages, one unpacked package per directory.
 const ASSETS_SOURCES_DIR: &str = "sources";
+
+/// The official source registry, published with the documentation site on every release (docs/adr/039).
+///
+/// The one default that can reach the network, and only when someone asks to search, install or update a source.
+pub const OFFICIAL_REGISTRY: &str =
+    "https://noirbizarre.github.io/memcastle/registry/memcastle-index.json";
 
 const DEFAULT_BIND: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 /// The default listener port.
@@ -519,15 +525,17 @@ pub struct MiningConfig {
     /// The longest, in seconds, one call into a WebAssembly source may run. A source's own `[limits]` can ask for
     /// less, never more.
     pub source_timeout_secs: u64,
-    /// The registry indexes `memcastle source search` and `install <name>` consult, in order: an `https://` URL, a
-    /// `file://` URL or a path to a `memcastle-index.json` (docs/adr/033). Empty by default, so a daemon never
-    /// reaches the network for sources unless asked to.
+    /// The registry indexes `memcastle source search`, `install <name>` and `update` consult, in order: an `https://`
+    /// URL, a `file://` URL or a path to a `memcastle-index.json` (docs/adr/033). The official registry by default
+    /// (docs/adr/039); a list set here replaces it, and an empty one means no registry. It is read only when a user
+    /// runs one of those commands, never at startup.
     pub registries: Vec<String>,
     /// What a package from a registry must prove before it is installed.
     pub trust: TrustMode,
     /// The public keys (base64, as `memcastle source keygen` prints them) whose signatures are trusted.
     pub trusted_keys: Vec<String>,
-    /// Where the sources shipped with MemCastle live. Unset means `share/memcastle/sources` of the installed assets.
+    /// Where the sources shipped with MemCastle live, one unpacked package per directory. Unset means
+    /// `share/memcastle/sources` of the installed assets.
     pub bundled_dir: Option<PathBuf>,
 }
 
@@ -550,7 +558,7 @@ impl Default for MiningConfig {
             sources_dir: None,
             source_memory_mib: DEFAULT_MINING_SOURCE_MEMORY_MIB,
             source_timeout_secs: DEFAULT_MINING_SOURCE_TIMEOUT_SECS,
-            registries: Vec::new(),
+            registries: vec![OFFICIAL_REGISTRY.to_string()],
             trust: TrustMode::default(),
             trusted_keys: Vec::new(),
             bundled_dir: None,
@@ -794,7 +802,7 @@ impl Config {
     }
 
     /// The `[mining]` settings the daemon runs with: `mining.bundled_dir`, or else `sources/` under `assets.dir` when
-    /// that directory carries a bundle index.
+    /// that directory carries bundled packages.
     ///
     /// `assets.dir` is the one data root for everything MemCastle ships (docs/adr/034), so pointing it at a package
     /// layout must also point the bundled sources there. A root with no bundle (a development worktree holds source
@@ -807,8 +815,7 @@ impl Config {
             && let Some(root) = &self.assets.dir
         {
             let sources = root.join(ASSETS_SOURCES_DIR);
-            // The file name is the one `distribution::INDEX_FILE` names; config may not call `distribution`.
-            if sources.join("memcastle-index.json").is_file() {
+            if !crate::source::package::installed_names(&sources).is_empty() {
                 mining.bundled_dir = Some(sources);
             }
         }
@@ -1550,16 +1557,36 @@ mod tests {
         }
     }
 
+    /// `<root>/sources/demo/` holding a manifest and a component: what a release's bundle holds.
+    fn write_bundled_package(root: &std::path::Path) {
+        let package = root.join("sources/demo");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("memcastle-source.toml"), "").unwrap();
+        std::fs::write(package.join("source.wasm"), b"\0asm").unwrap();
+    }
+
+    #[test]
+    fn a_worktrees_source_projects_are_not_a_bundle() {
+        // `sources/pi/` in a checkout has a manifest and no component: a project, to be built, not a package.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("sources/pi");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join("memcastle-source.toml"), "").unwrap();
+        let mut config = Config::default();
+        config.assets.dir = Some(root.path().to_path_buf());
+
+        assert_eq!(config.effective_mining().bundled_dir, None);
+    }
+
     #[test]
     fn no_assets_directory_is_configured_by_default() {
         assert_eq!(Config::default().assets.dir, None);
     }
 
     #[test]
-    fn the_assets_directory_supplies_the_bundled_sources_when_it_carries_an_index() {
+    fn the_assets_directory_supplies_the_bundled_sources_when_it_carries_unpacked_packages() {
         let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir(root.path().join("sources")).unwrap();
-        std::fs::write(root.path().join("sources/memcastle-index.json"), "{}").unwrap();
+        write_bundled_package(root.path());
         let mut config = Config::default();
         config.assets.dir = Some(root.path().to_path_buf());
 
@@ -1583,8 +1610,7 @@ mod tests {
     #[test]
     fn an_explicit_bundled_dir_outranks_the_assets_directory() {
         let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir(root.path().join("sources")).unwrap();
-        std::fs::write(root.path().join("sources/memcastle-index.json"), "{}").unwrap();
+        write_bundled_package(root.path());
         let mut config = Config::default();
         config.assets.dir = Some(root.path().to_path_buf());
         config.mining.bundled_dir = Some(PathBuf::from("/explicit"));
@@ -2430,11 +2456,13 @@ mod tests {
     }
 
     #[test]
-    fn registry_settings_default_to_no_network_and_come_from_the_file_then_the_environment() {
+    fn registry_settings_default_to_the_official_registry_and_come_from_the_file_then_the_environment()
+     {
         let defaults = MiningConfig::default();
-        assert!(
-            defaults.registries.is_empty(),
-            "a daemon never reaches a registry unless asked to"
+        assert_eq!(
+            defaults.registries,
+            [OFFICIAL_REGISTRY],
+            "the official registry is the default, and the only one"
         );
         assert_eq!(defaults.trust, TrustMode::Optional);
         assert!(defaults.trusted_keys.is_empty() && defaults.bundled_dir.is_none());
@@ -2474,6 +2502,20 @@ mod tests {
         assert_eq!(config.mining.bundled_dir, Some(bundle));
         config.palace.path = std::env::temp_dir();
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn an_empty_registry_list_opts_out_of_the_official_registry() {
+        let from_file: Config = toml::from_str("[mining]\nregistries = []").unwrap();
+        assert!(from_file.mining.registries.is_empty());
+
+        let mut config = Config::default();
+        config
+            .apply_overrides_from(env(&[("MEMCASTLE_MINING_REGISTRIES", "")]))
+            .unwrap();
+        assert!(config.mining.registries.is_empty());
+        // The official location is itself a location the daemon accepts.
+        Config::default().validate().unwrap();
     }
 
     #[test]

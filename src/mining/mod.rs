@@ -10,7 +10,8 @@
 //! - [`adapter`] is the contract a source implements; [`adapters`] holds the sources MemCastle ships
 //!   (`directory`), and [`wasm`] runs the ones a user installs as WebAssembly components
 //!   (docs/adr/026). Source-specific discovery and reading live in those and nowhere else.
-//! - [`registry`] turns a source name into one or the other, behind the same contract.
+//! - [`registry`] turns a source name into one or the other, behind the same contract, and [`bundled`] reads the packages
+//!   that ship unpacked beside the binary, which are installed from the start (docs/adr/039).
 //! - [`pipeline`] is the one loop every source goes through: cursor, revision check, chunking, idempotent filing,
 //!   cursor commit, checkpoint. It knows no source by name.
 //! - [`chunk`] cuts a canonical document into drawer-sized texts.
@@ -21,6 +22,7 @@
 
 pub mod adapter;
 pub mod adapters;
+pub mod bundled;
 pub mod chunk;
 pub mod pipeline;
 pub mod registry;
@@ -44,7 +46,8 @@ pub struct MiningParams {
     pub full: bool,
 }
 
-/// Where a source comes from: built in, a local package, a bundled one or one from a registry (docs/adr/033).
+/// Where a source comes from: built in, a local package, a bundled one or one from a registry (docs/adr/033,
+/// docs/adr/039).
 pub use crate::domain::SourceOrigin;
 
 /// A source adapter the daemon can mine, as `memcastle sources` and `GET /api/sources` describe it.
@@ -74,7 +77,7 @@ pub struct AdapterInfo {
     /// What it was granted: nothing for a built-in source, which is native code under MemCastle's own authority.
     #[serde(default)]
     pub permissions: Permissions,
-    /// The index a bundled or registry source was installed from, which is what `update` asks about newer versions.
+    /// The index a registry source was installed from, which is what `update` asks about newer versions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registry: Option<String>,
     /// The key whose signature on the package was verified when it was installed.

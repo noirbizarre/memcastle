@@ -14,7 +14,10 @@ use crate::domain::{
 };
 use crate::error::{Error, Result};
 use crate::mining::AdapterInfo;
-use crate::mining::registry::{BUILTIN_NAMES, describe_package, unavailable_reason};
+use crate::mining::bundled::Bundle;
+use crate::mining::registry::{
+    BUILTIN_NAMES, component_dir, describe_installed, lookup, unavailable_reason,
+};
 use crate::mining::wasm::WasmAdapter;
 use crate::source::manifest::check_compatible;
 use crate::source::package;
@@ -148,7 +151,7 @@ impl AppServices {
         };
         self.store.save_source_package(&record).await?;
         Ok(InstalledSource {
-            source: describe_package(&record, &sources_dir),
+            source: describe_installed(&record, &self.mining),
             replaced: existing.is_some(),
         })
     }
@@ -172,7 +175,7 @@ impl AppServices {
             return Ok(builtin);
         }
         let record = self.installed(name).await?;
-        Ok(describe_package(&record, &self.mining.sources_dir()))
+        Ok(describe_installed(&record, &self.mining))
     }
 
     /// Turn the installed source `name` on or off.
@@ -180,19 +183,23 @@ impl AppServices {
     /// Idempotent: enabling an enabled source answers with it, unchanged. A source that is unavailable cannot be
     /// enabled, because it would not run; the error says why.
     ///
+    /// A bundled source asks for no consent: it is as trusted as the MemCastle that ships it, so turning it on is the
+    /// whole decision, and its permissions are shown by `memcastle source show`. (A package from a file or a registry
+    /// was consented to when it was installed.)
+    ///
     /// # Errors
     ///
     /// [`Error::SourceBuiltin`] for a built-in source, [`Error::SourceNotFound`], [`Error::SourceNotEnabled`] when
     /// enabling a source that is unavailable, and store errors.
     pub async fn set_source_enabled(&self, name: &str, enabled: bool) -> Result<AdapterInfo> {
         let record = self.installed(name).await?;
-        let sources_dir = self.mining.sources_dir();
         let event = if enabled {
             SourcePackageEvent::Enable
         } else {
             SourcePackageEvent::Disable
         };
-        if enabled && let Some(reason) = unavailable_reason(&record, &sources_dir) {
+        let dir = component_dir(&record, &self.mining);
+        if enabled && let Some(reason) = unavailable_reason(&record, &dir) {
             return Err(Error::SourceNotEnabled {
                 name: record.name,
                 state: format!("{}: {reason}", SourceState::Unavailable),
@@ -200,38 +207,61 @@ impl AppServices {
         }
         let Ok(next) = record.state.apply(event) else {
             // Already where the event would put it: nothing to change.
-            return Ok(describe_package(&record, &sources_dir));
+            return Ok(describe_installed(&record, &self.mining));
         };
-        self.store
-            .set_source_package_state(name, next, Utc::now())
-            .await?;
         let record = SourcePackageRecord {
             state: next,
+            updated_at: Utc::now(),
             ..record
         };
-        Ok(describe_package(&record, &sources_dir))
+        if record.origin == SourceOrigin::Bundled {
+            // A bundled source has no row until the user first decides about it, and updating a row that is not there
+            // would silently keep it `installed`; the upsert writes the state and nothing the bundle supplies later.
+            self.store.save_source_package(&record).await?;
+        } else {
+            self.store
+                .set_source_package_state(name, next, record.updated_at)
+                .await?;
+        }
+        Ok(describe_installed(&record, &self.mining))
     }
 
     /// Remove the installed source `name`: its row and its files. What it mined stays in the palace.
     ///
+    /// A bundled source cannot be removed, since it comes with MemCastle and would be back with the next start;
+    /// disabling it is what turns it off. A package file installed over a bundled source can be removed, which brings
+    /// the bundled one back.
+    ///
     /// # Errors
     ///
-    /// [`Error::SourceBuiltin`], [`Error::SourceNotFound`], and store or I/O errors.
+    /// [`Error::SourceBuiltin`], [`Error::SourceBundled`], [`Error::SourceNotFound`], and store or I/O errors.
     pub async fn remove_source_package(&self, name: &str) -> Result<()> {
-        self.installed(name).await?;
+        let record = self.installed(name).await?;
+        if record.origin == SourceOrigin::Bundled && self.is_bundled(name) {
+            return Err(Error::SourceBundled {
+                name: name.to_string(),
+                action: "removed".to_string(),
+            });
+        }
         self.store.delete_source_package(name).await?;
         package::remove(&self.mining.sources_dir(), name)
     }
 
+    /// Whether this installation ships a source called `name`.
+    pub(super) fn is_bundled(&self, name: &str) -> bool {
+        Bundle::find(&self.mining).is_some_and(|bundle| bundle.contains(name))
+    }
+
     /// The installed source `name`, refusing built-in names with their own error.
+    ///
+    /// A bundled source is installed from the start, so it is found here without ever having been installed.
     pub(super) async fn installed(&self, name: &str) -> Result<SourcePackageRecord> {
         if BUILTIN_NAMES.contains(&name) {
             return Err(Error::SourceBuiltin {
                 name: name.to_string(),
             });
         }
-        self.store
-            .get_source_package(name)
+        lookup(&self.store, &self.mining, name)
             .await?
             .ok_or_else(|| Error::SourceNotFound {
                 name: name.to_string(),

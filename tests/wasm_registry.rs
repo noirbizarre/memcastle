@@ -1,5 +1,6 @@
 //! Source registries end to end (docs/adr/033): a daemon that searches, installs and updates sources by name from a
-//! registry or from the bundle, and holds what it fetches to the index's digest and the configured trust policy.
+//! registry, and holds what it fetches to the index's digest and the configured trust policy. A source that ships with
+//! MemCastle (docs/adr/039) is installed from the start and is never touched by a registry.
 //!
 //! The registry is a directory on disk (a registry whose location is a path, which is also what offline installation
 //! is), written with the same library calls `memcastle source index` makes. The package is the reference source under
@@ -461,28 +462,126 @@ async fn a_package_installed_from_a_file_has_no_upstream_and_is_never_updated() 
     fixture.daemon.shutdown().await;
 }
 
+/// A bundle the way a release lays it out: `<root>/<NAME>/` holding the manifest and the component, unpacked.
+fn unpacked_bundle(version: &str) -> tempfile::TempDir {
+    let (component, manifest) = reference();
+    let bundle = tempfile::tempdir().unwrap();
+    let package = bundle.path().join(NAME);
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(
+        package.join("memcastle-source.toml"),
+        manifest.replace("version = \"0.1.0\"", &format!("version = \"{version}\"")),
+    )
+    .unwrap();
+    std::fs::write(package.join("source.wasm"), component).unwrap();
+    bundle
+}
+
 #[tokio::test(flavor = "multi_thread")]
-async fn bundled_sources_install_with_no_registry_and_ignore_the_trust_policy_the_bundle_carries() {
+async fn a_source_that_ships_with_memcastle_is_installed_from_the_start_and_a_registry_never_replaces_it()
+ {
     let key = signing::generate().unwrap();
-    let bundle = Registry::new();
-    bundle.publish(&archive("0.1.0", false, ">=0.2"));
-    // No registry is configured and trust is required, yet the bundle is as trusted as the MemCastle carrying it.
-    let fixture = Fixture::start_with(vec![], Some(bundle.path()), |mining| {
+    let registry = Registry::new();
+    // The registry offers the same name, newer, unsigned: nothing it says may reach the bundled one.
+    registry.publish(&archive("0.1.5", false, ">=0.2"));
+    let bundle = unpacked_bundle("0.1.0");
+    let fixture = Fixture::start_with(vec![registry.label()], Some(bundle.path()), |mining| {
         mining.trust = TrustMode::Required;
         mining.trusted_keys = vec![signing::public_key_text(&key.verifying_key())];
     })
     .await;
 
-    let (_, found) = fixture.get("/api/source-registry/search").await;
-    assert_eq!(found["entries"][0]["origin"], "bundled", "{found}");
-    let installed = fixture.install(false).await;
-    assert_eq!(installed["source"]["origin"], "bundled");
+    // Installed from the start, and off until the user turns it on.
+    let listed = fixture.listed().await;
+    assert_eq!(listed["origin"], "bundled", "{listed}");
+    assert_eq!(listed["state"], "installed", "{listed}");
+    assert_eq!(listed["version"], "0.1.0", "{listed}");
 
-    // A newer release of MemCastle carries a newer bundle, and `update` finds it by origin, not by path.
-    bundle.publish(&archive("0.1.1", false, ">=0.2"));
+    // A search says so, and offers no update from a registry for what is updated with MemCastle.
+    let (_, found) = fixture.get("/api/source-registry/search").await;
+    let entry = &found["entries"][0];
+    assert_eq!(entry["installed"]["version"], "0.1.0", "{found}");
+    assert_eq!(entry["update_available"], false, "{found}");
+
+    // Neither install, update nor removal goes through a registry or the package routes.
+    let (status, body) = fixture
+        .post("/api/source-registry/install", json!({"name": NAME}))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["code"], "memcastle::source::bundled");
+    let (status, body) = fixture
+        .post("/api/source-registry/update", json!({"name": NAME}))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["code"], "memcastle::source::bundled");
     let (_, outcomes) = fixture.post("/api/source-registry/update", json!({})).await;
-    assert_eq!(outcomes[0]["status"], "updated", "{outcomes}");
-    assert_eq!(fixture.listed().await["version"], "0.1.1");
+    assert_eq!(
+        outcomes,
+        json!([]),
+        "an update of everything leaves the bundled sources alone"
+    );
+    let removed = fixture
+        .client
+        .delete(fixture.url(&format!("/api/source-packages/{NAME}")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(removed.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        removed.json::<Value>().await.unwrap()["code"],
+        "memcastle::source::bundled"
+    );
+
+    // Enabling is the whole decision: no consent, and no trust policy, since the release is what vouches for it.
+    let (status, enabled) = fixture
+        .post(&format!("/api/source-packages/{NAME}/enable"), json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{enabled}");
+    assert_eq!(enabled["state"], "enabled");
+    assert_eq!(fixture.listed().await["state"], "enabled");
+    assert!(
+        !fixture.sources_dir.join(NAME).exists(),
+        "a bundled source runs where the release put it and is never copied"
+    );
+    fixture.daemon.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_package_file_installed_over_a_bundled_source_wins_and_removing_it_brings_the_bundled_one_back()
+ {
+    let bundle = unpacked_bundle("0.1.0");
+    let fixture = Fixture::start_with(vec![], Some(bundle.path()), |_| {}).await;
+    let own = archive("0.1.7", false, ">=0.2");
+    let digest = memcastle::source::package::inspect(&own)
+        .unwrap()
+        .manifest
+        .permissions
+        .normalized()
+        .consent_digest(NAME);
+
+    let response = fixture
+        .client
+        .post(fixture.url("/api/source-packages"))
+        .query(&[("consent", digest.as_str())])
+        .body(own)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let listed = fixture.listed().await;
+    assert_eq!(listed["origin"], "package", "{listed}");
+    assert_eq!(listed["version"], "0.1.7", "{listed}");
+
+    let removed = fixture
+        .client
+        .delete(fixture.url(&format!("/api/source-packages/{NAME}")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(removed.status(), StatusCode::OK);
+    let listed = fixture.listed().await;
+    assert_eq!(listed["origin"], "bundled", "{listed}");
+    assert_eq!(listed["version"], "0.1.0", "{listed}");
     fixture.daemon.shutdown().await;
 }
 

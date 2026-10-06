@@ -5,6 +5,9 @@
 Accepted.
 Completes [ADR-026](026-pluggable-source-adapters-as-webassembly-components.md),
 which defined the package and the runtime and left distribution to this decision.
+Amended by [ADR-039](039-bundled-sources-are-installed-from-the-start-and-the-official-registry-is-published.md):
+a bundled source is installed from the start and no longer arrives through an index, `install` and `update` are for
+registry sources, and `mining.registries` defaults to the official registry.
 
 ## Context
 

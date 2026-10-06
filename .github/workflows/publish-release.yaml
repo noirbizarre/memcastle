@@ -194,22 +194,47 @@ jobs:
           merge-multiple: true
           path: dist
 
-      # The sources that ship with MemCastle (docs/adr/033): independently
-      # packaged WebAssembly components, not linked into the binary. They are
-      # portable, so one build serves every platform. The script is the one
-      # `mise run sources:package` runs, and tests/wasm_bundle.rs runs it too,
-      # so what is bundled is checked before a tag. The Linux binary is the
-      # one a runner can execute.
+      # The sources that ship with MemCastle (docs/adr/033, docs/adr/039):
+      # independently packaged WebAssembly components, not linked into the
+      # binary. They are portable, so one build serves every platform. The
+      # script is the one `mise run sources:package` runs, and
+      # tests/wasm_bundle.rs runs it too, so what is bundled is checked before
+      # a tag. The Linux binary is the one a runner can execute.
+      #
+      # It writes three things: `sources/`, the unpacked packages every
+      # package of MemCastle carries and the daemon runs in place;
+      # `archives/`, the same packages as release assets; and
+      # `memcastle-index.json`, the registry index. The index extends the one
+      # of the latest published release, so the registry keeps every version
+      # it ever offered, and its URLs point at this release's assets. The
+      # documentation site publishes it (docs.yaml).
       - uses: dtolnay/rust-toolchain@1.98.1
         with:
           targets: wasm32-wasip2
       - name: Package the bundled sources
         env:
           TAG: ${{ inputs.tag }}
+          # The latest published release, which is not this one: it is still a draft.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           chmod +x "dist/memcastle_${TAG}_linux-amd64"
-          packaging/sources/build.sh "dist/memcastle_${TAG}_linux-amd64" stage-sources
+          # Releases before the registry have no index to extend, and the first one that has it starts it. Once the
+          # latest release lists one, failing to download it must fail the job: carrying on would silently drop every
+          # version published so far from the registry.
+          mkdir previous-index
+          if gh release view --json assets --jq '.assets[].name' 2>/dev/null | grep -qx memcastle-index.json; then
+            gh release download --pattern memcastle-index.json --dir previous-index
+          fi
+          SOURCES_BASE_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}" \
+          SOURCES_PREVIOUS_INDEX="${PWD}/previous-index/memcastle-index.json" \
+            packaging/sources/build.sh "dist/memcastle_${TAG}_linux-amd64" stage-sources
+          # What the registry serves: the archives and the index are release assets, and the index is what the
+          # documentation site publishes.
+          cp stage-sources/memcastle-index.json dist/
+          if compgen -G "stage-sources/archives/*" > /dev/null; then
+            cp stage-sources/archives/* dist/
+          fi
 
       # The agent integrations (docs/adr/034): Pi and OpenCode, each bundled into one self-contained file, with the
       # shared skills they read. Nothing is published to npm: the bundles are release assets and package content, and
@@ -233,12 +258,12 @@ jobs:
 
       # The native-package layout (docs/adr/013): the executable under `bin/`,
       # the documentation under `share/doc/memcastle/`, the bundled sources
-      # under `share/memcastle/sources/`, the integrations and skills under
+      # under `share/memcastle/sources/` (unpacked, one directory each), the integrations and skills under
       # `share/memcastle/{integrations,skills}/` and the dashboard under
       # `share/memcastle/web/`, so unpacking at a prefix
       # (`tar -xzf ... --strip-components=1 -C /usr/local`) puts each file
-      # where a package manager would, and `memcastle source install <name>`
-      # finds the bundle beside the binary, and so does
+      # where a package manager would, and the daemon finds the bundle beside
+      # the binary, and so does
       # `memcastle integration install pi`.
       #
       # Every flag that follows exists so the same inputs give the same bytes:
@@ -261,22 +286,25 @@ jobs:
             install -d -m 755 "${root}/bin" "${root}/share/doc/memcastle" "${root}/share/memcastle/sources"
             install -m 755 "dist/memcastle_${TAG}_${asset}" "${root}/bin/memcastle"
             install -m 644 LICENSE README.md "${root}/share/doc/memcastle/"
-            install -m 644 stage-sources/* "${root}/share/memcastle/sources/"
+            cp -r stage-sources/sources/. "${root}/share/memcastle/sources/"
             cp -r stage-integrations/integrations stage-integrations/skills "${root}/share/memcastle/"
             cp -r stage-web/web "${root}/share/memcastle/"
-            find "${root}/share/memcastle/integrations" "${root}/share/memcastle/skills" "${root}/share/memcastle/web" -type d -exec chmod 755 {} +
-            find "${root}/share/memcastle/integrations" "${root}/share/memcastle/skills" "${root}/share/memcastle/web" -type f -exec chmod 644 {} +
+            find "${root}/share/memcastle/sources" "${root}/share/memcastle/integrations" "${root}/share/memcastle/skills" "${root}/share/memcastle/web" -type d -exec chmod 755 {} +
+            find "${root}/share/memcastle/sources" "${root}/share/memcastle/integrations" "${root}/share/memcastle/skills" "${root}/share/memcastle/web" -type f -exec chmod 644 {} +
             tar -C stage --sort=name --format=gnu --mtime="@${epoch}" \
               --owner=0 --group=0 --numeric-owner -cf - "${name}" \
               | gzip -n -9 > "dist/memcastle_${TAG}_${asset}.tar.gz"
           done
 
-          # The bundled sources on their own (docs/adr/033): they are portable, so one asset serves the AUR package
+          # The bundled sources on their own (docs/adr/039): they are portable, so one asset serves the AUR package
           # and the Homebrew formula, whose recipes fetch a single raw binary and would otherwise ship none. One
-          # top-level directory, which makepkg extracts as it is and Homebrew strips.
+          # top-level directory, which makepkg extracts as it is and Homebrew strips; inside it, one directory for
+          # each unpacked package.
           name="memcastle-sources-${TAG}"
           install -d -m 755 "stage/${name}"
-          install -m 644 stage-sources/* "stage/${name}/"
+          cp -r stage-sources/sources/. "stage/${name}/"
+          find "stage/${name}" -type d -exec chmod 755 {} +
+          find "stage/${name}" -type f -exec chmod 644 {} +
           tar -C stage --sort=name --format=gnu --mtime="@${epoch}" \
             --owner=0 --group=0 --numeric-owner -cf - "${name}" \
             | gzip -n -9 > "dist/memcastle_${TAG}_sources.tar.gz"
@@ -312,7 +340,7 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
         run: |
-          SOURCES_DIR="${PWD}/stage-sources" INTEGRATIONS_DIR="${PWD}/stage-integrations" WEB_DIR="${PWD}/stage-web" \
+          SOURCES_DIR="${PWD}/stage-sources/sources" INTEGRATIONS_DIR="${PWD}/stage-integrations" WEB_DIR="${PWD}/stage-web" \
             packaging/nfpm/build.sh "${TAG}" dist
 
       # Before upload, so a broken package never reaches the draft release.
