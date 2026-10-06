@@ -58,5 +58,6 @@ flowchart LR
 
 - [Architecture](architecture.md): how MemCastle is built and why.
 - [Development](development.md): building, testing and the local workflow.
+- [Retrieval evaluation](retrieval-evaluation.md): measuring retrieval quality and latency, and comparing changes.
 - [Architecture Decisions](adr/README.md): the reasoning behind the choices that shaped it.
 - [Contributing](https://github.com/noirbizarre/memcastle/blob/main/CONTRIBUTING.md): commits, releases and pull requests.

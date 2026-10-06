@@ -43,3 +43,10 @@ path = "junit.xml"
 [[profile.default.overrides]]
 filter = "binary(/^wasm_/)"
 slow-timeout = { period = "60s", terminate-after = 6 }
+
+# The retrieval evaluation seeds a real daemon with a corpus (every drawer is a write plus a vector insert) and then runs
+# every query under four configurations: about half a minute on a laptop, and several times that under coverage
+# instrumentation on a loaded runner. That is work in progress, not a hang (docs/retrieval-evaluation.md).
+[[profile.default.overrides]]
+filter = "test(retrieval_eval::suite::)"
+slow-timeout = { period = "60s", terminate-after = 6 }

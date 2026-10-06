@@ -8,3 +8,7 @@ sources/pi/fixtures/** -text
 # OpenCode fixtures compare file contents byte for byte, and the stand-in `opencode` is a shell script that must keep
 # its line endings to run.
 sources/opencode/fixtures/** -text
+
+# Retrieval evaluation datasets are hashed byte for byte (the report records the SHA-256), so a checkout that rewrites
+# line endings (Windows `autocrlf`) would change the dataset identity and every baseline comparison with it.
+tests/fixtures/retrieval/** -text

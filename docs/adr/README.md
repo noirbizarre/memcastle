@@ -125,3 +125,10 @@ The history is the value.
   it signs in as the database console does (user `memcastle`, the token as the password, checked by every request),
   carries a memory mode, and a hook holds `web/` to HTTP
   (amends ADR-013, ADR-014, ADR-015 and ADR-034)
+- [ADR-036](036-retrieval-evaluation-framework.md) — retrieval is evaluated by an HTTP-only harness under
+  `tests/in_process/retrieval_eval/`, so nothing ships in the binary or a release;
+  a small bundled dataset runs in the everyday suite against a committed quality baseline,
+  vectors come from the harness so engine quality is not confounded with model quality,
+  time is seeded in epochs over HTTP, timings are reported and never gated,
+  and LongMemEval is a converter for a file the user downloads
+  (relates to ADR-021, ADR-032)
