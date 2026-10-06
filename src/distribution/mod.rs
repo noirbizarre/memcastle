@@ -52,6 +52,29 @@ pub struct Fetched {
     pub signed_by: Option<String>,
 }
 
+/// The GitHub API a registry's repositories are read through, and the token to present to it, if there is one.
+#[derive(Debug, Clone, Copy)]
+pub struct GitHubApi<'a> {
+    /// The API's base URL (`mining.github_api_url`).
+    pub url: &'a str,
+    /// A bearer token for it (`GH_TOKEN` or `GITHUB_TOKEN`), which lifts the unauthenticated rate limit.
+    pub token: Option<&'a str>,
+}
+
+impl<'a> GitHubApi<'a> {
+    /// The API the configuration names.
+    #[must_use]
+    pub fn from_config(mining: &'a MiningConfig) -> Self {
+        Self {
+            url: &mining.github_api_url,
+            token: mining
+                .github_token
+                .as_ref()
+                .map(crate::domain::Secret::expose),
+        }
+    }
+}
+
 /// One index and where it came from.
 #[derive(Debug, Clone)]
 pub struct Registry {
@@ -81,7 +104,7 @@ impl Registry {
     /// # Errors
     ///
     /// [`Error::SourceRegistryUnavailable`] when it cannot be read or is not an index this MemCastle understands.
-    pub async fn load(label: &str, github_api: &str) -> Result<Self> {
+    pub async fn load(label: &str, github: &GitHubApi<'_>) -> Result<Self> {
         let base = Location::parse(label)
             .map_err(|reason| unavailable(label, reason))?
             .as_index(INDEX_FILE);
@@ -92,7 +115,7 @@ impl Registry {
         let text =
             String::from_utf8(bytes).map_err(|_| unavailable(label, "it is not UTF-8 text"))?;
         let mut index = SourceIndex::parse(&text).map_err(|reason| unavailable(label, reason))?;
-        let warnings = resolve_repositories(&mut index, github_api).await;
+        let warnings = resolve_repositories(&mut index, github).await;
         Ok(Self {
             label: label.to_string(),
             index,
@@ -146,7 +169,7 @@ impl Registry {
 ///
 /// One request for each distinct repository, however many sources it publishes. A source whose repository cannot be
 /// read is removed from the index, since listing it with no versions would only say "it lists no versions".
-async fn resolve_repositories(index: &mut SourceIndex, github_api: &str) -> Vec<String> {
+async fn resolve_repositories(index: &mut SourceIndex, github: &GitHubApi<'_>) -> Vec<String> {
     let mut warnings = Vec::new();
     let mut releases: std::collections::HashMap<String, Option<Vec<github::Release>>> =
         std::collections::HashMap::new();
@@ -158,7 +181,7 @@ async fn resolve_repositories(index: &mut SourceIndex, github_api: &str) -> Vec<
         if releases.contains_key(&repository) {
             continue;
         }
-        let listing = read_releases(github_api, &repository).await;
+        let listing = read_releases(github, &repository).await;
         releases.insert(
             repository.clone(),
             match listing {
@@ -190,15 +213,24 @@ async fn resolve_repositories(index: &mut SourceIndex, github_api: &str) -> Vec<
 }
 
 async fn read_releases(
-    github_api: &str,
+    github: &GitHubApi<'_>,
     repository: &str,
 ) -> std::result::Result<Vec<github::Release>, String> {
-    let url = github::releases_url(github_api, repository);
+    let url = github::releases_url(github.url, repository);
     let location = Location::parse(&url)?;
+    // The token goes to this request only: it is to the API the token is for, and the archive downloads that follow are
+    // plain public files.
     let bytes = location
-        .read(MAX_RELEASES_BYTES)
+        .read_as(MAX_RELEASES_BYTES, github.token)
         .await
-        .map_err(|reason| format!("its releases cannot be read: {reason}"))?;
+        .map_err(|reason| {
+            let hint = if github.token.is_none() && (reason.contains("403") || reason.contains("429")) {
+                "; GitHub limits requests with no token, so set `GH_TOKEN` or `GITHUB_TOKEN` for the daemon"
+            } else {
+                ""
+            };
+            format!("its releases cannot be read: {reason}{hint}")
+        })?;
     serde_json::from_slice(&bytes)
         .map_err(|e| format!("{url} did not answer with a list of releases: {e}"))
 }
@@ -245,7 +277,7 @@ impl Catalog {
         if let Some(location) = only {
             // The one place a location arrives from a request rather than a configuration file: it is checked
             // against the same scheme rules, and what it serves is held to the same trust policy.
-            let registry = Registry::load(location, &mining.github_api_url).await?;
+            let registry = Registry::load(location, &GitHubApi::from_config(mining)).await?;
             return Ok(Self {
                 warnings: registry.warnings.clone(),
                 registries: vec![registry],
@@ -253,7 +285,7 @@ impl Catalog {
         }
         let mut catalog = Self::default();
         for location in &mining.registries {
-            match Registry::load(location, &mining.github_api_url).await {
+            match Registry::load(location, &GitHubApi::from_config(mining)).await {
                 Ok(registry) => catalog.registries.push(registry),
                 Err(error) => catalog.warnings.push(error.to_string()),
             }
@@ -289,6 +321,10 @@ impl Catalog {
 mod tests {
     use super::*;
     use crate::domain::{CONTRACT_VERSION, IndexedSource};
+
+    fn api(url: &str) -> GitHubApi<'_> {
+        GitHubApi { url, token: None }
+    }
 
     fn entry(archive: &[u8]) -> IndexedVersion {
         IndexedVersion {
@@ -327,9 +363,12 @@ mod tests {
         let published = entry(b"archive");
         write_registry(directory.path(), b"archive", &published);
 
-        let registry = Registry::load(directory.path().to_str().unwrap(), "https://api.github.com")
-            .await
-            .unwrap();
+        let registry = Registry::load(
+            directory.path().to_str().unwrap(),
+            &api("https://api.github.com"),
+        )
+        .await
+        .unwrap();
         let (found, source) = (
             registry.index.find("demo").is_some(),
             registry.index.find("demo").unwrap(),
@@ -352,9 +391,12 @@ mod tests {
         // The registry serves different bytes than it published.
         write_registry(directory.path(), b"substituted", &published);
 
-        let registry = Registry::load(directory.path().to_str().unwrap(), "https://api.github.com")
-            .await
-            .unwrap();
+        let registry = Registry::load(
+            directory.path().to_str().unwrap(),
+            &api("https://api.github.com"),
+        )
+        .await
+        .unwrap();
         let policy = TrustPolicy::from_config(&MiningConfig::default()).unwrap();
         let error = registry
             .fetch("demo", &published, &policy)
@@ -366,19 +408,24 @@ mod tests {
     #[tokio::test]
     async fn an_unreadable_or_malformed_index_names_its_location() {
         let directory = tempfile::tempdir().unwrap();
-        let missing = Registry::load(directory.path().to_str().unwrap(), "https://api.github.com")
-            .await
-            .unwrap_err();
+        let missing = Registry::load(
+            directory.path().to_str().unwrap(),
+            &api("https://api.github.com"),
+        )
+        .await
+        .unwrap_err();
         assert!(
             matches!(missing, Error::SourceRegistryUnavailable { .. }),
             "{missing}"
         );
 
         std::fs::write(directory.path().join(INDEX_FILE), "{ not json").unwrap();
-        let malformed =
-            Registry::load(directory.path().to_str().unwrap(), "https://api.github.com")
-                .await
-                .unwrap_err();
+        let malformed = Registry::load(
+            directory.path().to_str().unwrap(),
+            &api("https://api.github.com"),
+        )
+        .await
+        .unwrap_err();
         assert!(
             malformed
                 .to_string()
@@ -524,7 +571,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         write_registry_naming(directory.path(), "owner/name");
 
-        let registry = Registry::load(directory.path().to_str().unwrap(), &github)
+        let registry = Registry::load(directory.path().to_str().unwrap(), &api(&github))
             .await
             .unwrap();
         assert!(registry.warnings.is_empty(), "{:?}", registry.warnings);
@@ -548,7 +595,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         write_registry_naming(directory.path(), "owner/name");
 
-        let registry = Registry::load(directory.path().to_str().unwrap(), &github)
+        let registry = Registry::load(directory.path().to_str().unwrap(), &api(&github))
             .await
             .unwrap();
         let entry = registry.index.find("demo").unwrap().versions[0].clone();
@@ -589,7 +636,7 @@ mod tests {
         )
         .unwrap();
 
-        let registry = Registry::load(directory.path().to_str().unwrap(), &github)
+        let registry = Registry::load(directory.path().to_str().unwrap(), &api(&github))
             .await
             .unwrap();
         assert!(
@@ -650,10 +697,128 @@ mod tests {
             });
         }
 
-        let warnings = resolve_repositories(&mut index, &base).await;
+        let warnings = resolve_repositories(&mut index, &api(&base)).await;
 
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert_eq!(index.sources.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn the_github_token_is_sent_with_the_releases_request_and_with_nothing_else() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        // Records the `Authorization` header of every request, by path.
+        let seen =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::<(String, Option<String>)>::new()));
+        let record = seen.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let archive = b"archive".to_vec();
+        let releases = serde_json::json!([{
+            "tag_name": "v1", "draft": false, "prerelease": false,
+            "assets": [{
+                "name": "demo-1.0.0.tar.gz", "state": "uploaded", "size": archive.len(),
+                "digest": format!("sha256:{}", sha256_hex(&archive)),
+                "browser_download_url": format!("{base}/download/demo-1.0.0.tar.gz"),
+            }],
+        }])
+        .to_string()
+        .into_bytes();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let (record, archive, releases) =
+                    (record.clone(), archive.clone(), releases.clone());
+                tokio::spawn(async move {
+                    let mut buffer = [0_u8; 4096];
+                    let n = stream.read(&mut buffer).await.unwrap_or(0);
+                    let text = String::from_utf8_lossy(&buffer[..n]).to_string();
+                    let path = text.split_whitespace().nth(1).unwrap_or("").to_string();
+                    let authorization = text
+                        .lines()
+                        .find_map(|line| line.strip_prefix("authorization: "))
+                        .map(|value| value.trim().to_string());
+                    record.lock().unwrap().push((path.clone(), authorization));
+                    let body = if path.starts_with("/repos/") {
+                        releases
+                    } else {
+                        archive
+                    };
+                    let head = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = stream.write_all(head.as_bytes()).await;
+                    let _ = stream.write_all(&body).await;
+                });
+            }
+        });
+        let directory = tempfile::tempdir().unwrap();
+        write_registry_naming(directory.path(), "owner/name");
+
+        let github = GitHubApi {
+            url: &base,
+            token: Some("ghp_secret"),
+        };
+        let registry = Registry::load(directory.path().to_str().unwrap(), &github)
+            .await
+            .unwrap();
+        let entry = registry.index.find("demo").unwrap().versions[0].clone();
+        let policy = TrustPolicy::from_config(&MiningConfig::default()).unwrap();
+        registry.fetch("demo", &entry, &policy).await.unwrap();
+
+        let seen = seen.lock().unwrap().clone();
+        let listing = seen
+            .iter()
+            .find(|(path, _)| path.starts_with("/repos/"))
+            .unwrap();
+        assert_eq!(listing.1.as_deref(), Some("Bearer ghp_secret"), "{seen:?}");
+        let download = seen
+            .iter()
+            .find(|(path, _)| path.starts_with("/download/"))
+            .unwrap();
+        assert_eq!(
+            download.1, None,
+            "an archive download is a public file: {seen:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refusal_for_want_of_a_token_says_which_variables_would_lift_it() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let mut buffer = [0_u8; 2048];
+                let _ = stream.read(&mut buffer).await;
+                let _ = stream
+                    .write_all(
+                        b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .await;
+            }
+        });
+        let mut index = SourceIndex::new(None);
+        index.sources.push(IndexedSource {
+            name: "demo".into(),
+            description: "demo".into(),
+            homepage: None,
+            license: None,
+            repository: Some("owner/name".into()),
+            versions: Vec::new(),
+        });
+
+        let without = resolve_repositories(&mut index.clone(), &api(&base)).await;
+        assert!(without[0].contains("GH_TOKEN"), "{without:?}");
+        // With a token the hint would be wrong: the limit is not what is being hit.
+        let with = resolve_repositories(
+            &mut index,
+            &GitHubApi {
+                url: &base,
+                token: Some("t"),
+            },
+        )
+        .await;
+        assert!(!with[0].contains("GH_TOKEN"), "{with:?}");
     }
 }

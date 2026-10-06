@@ -304,7 +304,15 @@ then refuses with `memcastle::source::incompatible`.
 A repository that cannot be read (it does not exist, or GitHub's unauthenticated limit of 60 requests an hour for an
 address is spent) is a warning that names it, its sources are left out, and every other source in the registry still
 answers.
-`mining.github_api_url` points the daemon at another API, such as a GitHub Enterprise server.
+
+Set `GH_TOKEN` or `GITHUB_TOKEN` in the daemon's environment (`GH_TOKEN` wins, as it does for `gh`) to lift that limit.
+The token is sent as a bearer token to the releases request and to nothing else: not to the archive downloads, not to a
+registry that is not GitHub, and not across a redirect to another host.
+A token with no scopes is enough, since the releases of a public repository are public, and a token for a private
+repository lets the daemon read its releases.
+It is read from the environment only, never from the configuration file, and it is not logged, reported or stored.
+`mining.github_api_url` points the daemon at another API, such as a GitHub Enterprise server, and the token is then
+presented to that server.
 
 ## When something goes wrong
 

@@ -540,6 +540,11 @@ pub struct MiningConfig {
     /// `owner/name` are read from `<this>/repos/owner/name/releases`. Another value is a GitHub Enterprise server, or a
     /// stand-in for one in a test.
     pub github_api_url: String,
+    /// A token presented to `github_api_url` (and only to it) when a registry entry's releases are read, so the
+    /// unauthenticated rate limit does not apply. Read from `GH_TOKEN`, else `GITHUB_TOKEN`; never from the file, never
+    /// serialised, and redacted in `Debug`.
+    #[serde(skip)]
+    pub github_token: Option<Secret>,
     /// Where the sources shipped with MemCastle live, one unpacked package per directory. Unset means
     /// `share/memcastle/sources` of the installed assets.
     pub bundled_dir: Option<PathBuf>,
@@ -568,6 +573,7 @@ impl Default for MiningConfig {
             trust: TrustMode::default(),
             trusted_keys: Vec::new(),
             github_api_url: DEFAULT_GITHUB_API.to_string(),
+            github_token: None,
             bundled_dir: None,
         }
     }
@@ -1063,6 +1069,14 @@ impl Config {
         if let Some(raw) = lookup("MEMCASTLE_MINING_TRUSTED_KEYS") {
             self.mining.trusted_keys = split_list(&raw);
         }
+        // The variables `gh` and GitHub Actions already set, `GH_TOKEN` first as `gh` does. A secret, so no
+        // `parse_override`; an empty one (a secret manager that resolved to nothing) means no token.
+        self.mining.github_token = ["GH_TOKEN", "GITHUB_TOKEN"]
+            .iter()
+            .filter_map(|name| lookup(name))
+            .map(|token| token.trim().to_string())
+            .find(|token| !token.is_empty())
+            .map(Secret::new);
         if let Some(url) = lookup("MEMCASTLE_MINING_GITHUB_API_URL") {
             self.mining.github_api_url = url;
         }
@@ -2621,6 +2635,49 @@ mod tests {
         assert_eq!(config.mining.bundled_dir, Some(bundle));
         config.palace.path = std::env::temp_dir();
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn a_github_token_comes_from_gh_token_then_github_token_and_never_reaches_a_log_or_a_file() {
+        let token = |vars: &[(&str, &str)]| {
+            let mut config = Config::default();
+            config.apply_overrides_from(env(vars)).unwrap();
+            config.mining.github_token
+        };
+        assert!(token(&[]).is_none());
+        assert_eq!(
+            token(&[("GITHUB_TOKEN", " ghs_actions ")])
+                .as_ref()
+                .map(Secret::expose),
+            Some("ghs_actions")
+        );
+        // `gh` prefers `GH_TOKEN`, so a machine set up for it behaves the same here.
+        assert_eq!(
+            token(&[("GITHUB_TOKEN", "ghs_actions"), ("GH_TOKEN", "ghp_user")])
+                .as_ref()
+                .map(Secret::expose),
+            Some("ghp_user")
+        );
+        // A variable a secret manager resolved to nothing is not a token, and does not hide the other one.
+        assert_eq!(
+            token(&[("GH_TOKEN", "  "), ("GITHUB_TOKEN", "ghs_actions")])
+                .as_ref()
+                .map(Secret::expose),
+            Some("ghs_actions")
+        );
+
+        let mut config = Config::default();
+        config.mining.github_token = Some(Secret::new("ghp_very_secret"));
+        assert!(!format!("{config:?}").contains("ghp_very_secret"));
+        assert!(
+            !toml::to_string(&config)
+                .unwrap()
+                .contains("ghp_very_secret")
+        );
+        // And the file cannot set it: a token in a file is one more place to leak it from.
+        let from_file: Config =
+            toml::from_str("[mining]\ngithub_token = \"x\"").unwrap_or_default();
+        assert!(from_file.mining.github_token.is_none());
     }
 
     #[test]

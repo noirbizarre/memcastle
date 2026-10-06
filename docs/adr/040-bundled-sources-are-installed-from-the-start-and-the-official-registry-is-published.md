@@ -75,6 +75,9 @@ at all except from a release archive by hand.
   it and `search` may offer a version that `install` then refuses.
   A repository that cannot be read is a warning that names it and its sources are left out, so the rest of the registry,
   and an exhausted unauthenticated rate limit, never fail a search outright.
+  `GH_TOKEN`, else `GITHUB_TOKEN`, lifts the rate limit: it is read from the daemon's environment only (never the file),
+  held as a `Secret`, and sent as a bearer token to the releases request alone, so an archive download, another registry
+  and a redirect to another host never see it.
 - **The network is still only reached on request.**
   The registry and the repositories it names are read when a user runs `search`, `install <name>` or `update`, never at
   startup or by a background check, and every package they serve is held to its SHA-256 and to `mining.trust` like any
@@ -91,8 +94,8 @@ at all except from a release archive by hand.
   registry-installed copy in place: the installed copy wins until it is removed.
 - The registry does not depend on a release: it is deployed with the documentation, and a release only has to attach
   `<name>-<version>.tar.gz` for the version to be found.
-- The integrity of an official package rests on GitHub's digest and TLS, with no signature to check, and on the
-  unauthenticated API rate limit (60 requests an hour for an address) for availability.
+- The integrity of an official package rests on GitHub's digest and TLS, with no signature to check, and its availability
+  on the API rate limit: 60 requests an hour for an address with no token, much more with `GH_TOKEN`.
 
 ## Alternatives rejected
 

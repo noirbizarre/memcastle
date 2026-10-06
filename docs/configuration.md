@@ -244,6 +244,7 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `mining.source_timeout_secs` (1 to 3600) | `MEMCASTLE_MINING_SOURCE_TIMEOUT_SECS` | `60` |
 | `mining.registries` (a list of URLs or absolute paths) | `MEMCASTLE_MINING_REGISTRIES` (comma-separated; empty for none) | the [official registry](publishing-sources.md#the-official-registry) |
 | `mining.github_api_url` (an `https://` URL) | `MEMCASTLE_MINING_GITHUB_API_URL` | `https://api.github.com` |
+| none (never in the file) | `GH_TOKEN`, else `GITHUB_TOKEN` | no token: GitHub's unauthenticated rate limit applies |
 | `mining.trust` (`optional` or `required`) | `MEMCASTLE_MINING_TRUST` | `optional` |
 | `mining.trusted_keys` (a list of base64 public keys) | `MEMCASTLE_MINING_TRUSTED_KEYS` (comma-separated) | none |
 | `mining.bundled_dir` (an absolute path) | `MEMCASTLE_MINING_BUNDLED_DIR` | `share/memcastle/sources` of the installation |
