@@ -47,7 +47,7 @@ does not classify.
 integrations/
   pi/            TypeScript/bun — the primary V1 integration (Phase 2); scaffolded
   opencode/      TypeScript/bun — an OpenCode plugin (Phase 3); scaffolded
-  claude-code/   MCP + skills only, pragmatic/best-effort (Phase 4); planned
+  claude-code/   Claude Code local-marketplace plugin with native MCP and commands
   common/        test-only: the tests that need two integrations side by side, and the harness they share
 ```
 
@@ -89,6 +89,8 @@ memory mode is off.
 
 - [`opencode/docs/research.md`](opencode/docs/research.md) maps OpenCode's plugin hooks, MCP client and skills onto
   MemCastle operations, and records where OpenCode has no clean equivalent.
+- [`claude-code/docs/research.md`](claude-code/docs/research.md) records Claude Code's supported declarative plugin API
+  and the lifecycle gaps that it cannot safely emulate.
 
 ## Non-goals
 
@@ -111,3 +113,5 @@ mode re-selected if the daemon forgets it.
 Tracked as GitHub issues under the
 "Phase 2 — Pi integration", "Phase 3 — OpenCode integration", and
 "Phase 4 — Claude Code integration" milestones.
+The Claude Code package is shipped through its local marketplace mechanism with native HTTP MCP, shared skills, prompt
+hooks, and explicit commands; its README documents the unsupported automatic lifecycle work as gaps.

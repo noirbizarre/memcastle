@@ -28,7 +28,7 @@ out="${1:-}"
 
 # Which integrations ship is a packaging decision and does not constrain the runtime (docs/adr/034): any directory
 # under `integrations/` with a `memcastle-integration.toml` and a `dist/` could be added here.
-BUNDLED=(pi opencode)
+BUNDLED=(pi opencode claude-code)
 
 cd "$(dirname "$0")/../.."
 root="$PWD"
@@ -79,6 +79,11 @@ EOF
 
 # OpenCode 1 treats every export of a plugin module as a plugin; the entry exports only `default`, and bun keeps it so.
 bundle opencode src/index.ts --external '@opencode-ai/*' --external '@opencode/*'
+
+# Claude Code loads declarative plugin assets itself, so no JavaScript runtime is bundled.
+rm -rf integrations/claude-code/dist
+mkdir -p integrations/claude-code/dist
+cp -R integrations/claude-code/plugin/. integrations/claude-code/dist/
 
 if [ -z "${out}" ]; then
   exit 0

@@ -1,0 +1,14 @@
+{
+  "name": "memcastle-local",
+  "owner": {
+    "name": "MemCastle"
+  },
+  "plugins": [
+    {
+      "name": "memcastle",
+      "source": ".",
+      "description": "MemCastle native MCP connection and lifecycle instructions for Claude Code",
+      "version": "0.1.0"
+    }
+  ]
+}

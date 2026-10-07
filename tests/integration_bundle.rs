@@ -74,8 +74,11 @@ fn the_package_holds_each_integration_bundled_beside_its_manifest_and_the_skills
     let package = package();
 
     assert_eq!(names(&package), ["integrations", "skills"]);
-    assert_eq!(names(&package.join("integrations")), ["opencode", "pi"]);
-    for id in ["pi", "opencode"] {
+    assert_eq!(
+        names(&package.join("integrations")),
+        ["claude-code", "opencode", "pi"]
+    );
+    for id in ["pi", "opencode", "claude-code"] {
         let dir = package.join("integrations").join(id);
         // `dist/` and the manifest, plus a `skills/` directory only for an integration with skills of its own.
         let own: Vec<String> = names(&dir)

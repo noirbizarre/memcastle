@@ -7,7 +7,7 @@ It decides *when* to call MemCastle and does nothing else; every call goes to th
 What each integration must do is the [Integration contract](integration-contract.md).
 This page is about getting one onto your machine.
 
-MemCastle ships the integrations for **Pi** and **OpenCode**, and `memcastle integration` installs them.
+MemCastle ships the integrations for **Pi**, **OpenCode**, and **Claude Code**, and `memcastle integration` installs them.
 Nothing is downloaded and no npm package is involved:
 the integrations are part of the MemCastle release, built and versioned with it.
 
@@ -51,9 +51,9 @@ flowchart TB
 |---|---|---|---|---|
 | `pi` | Pi (`@earendil-works/pi-coding-agent`) | 1.0 and later | 0.2 and later | [Pi](integrations-pi.md) |
 | `opencode` | [OpenCode](https://opencode.ai) | 1.18.29 and later, including 2.x | 0.2 and later | [OpenCode](integrations-opencode.md) |
+| `claude-code` | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | 2.1.83 and later | 0.2 and later | [Claude Code](integrations-claude-code.md) |
 
 `memcastle integration list` shows the same ranges for the MemCastle you run, since they come from the integrations it ships.
-Claude Code has no integration yet; it connects as a plain [MCP client](mcp-clients.md).
 
 ## Requirements
 
@@ -74,6 +74,7 @@ The daemon does not have to be running to install one; it has to be running when
 memcastle integration list
 memcastle integration install pi
 memcastle integration install opencode
+memcastle integration install claude-code
 ```
 
 `install` does five things, in this order, and stops at the first one that fails:
@@ -103,6 +104,7 @@ working if the package that shipped it is gone.
 | `~/.local/share/memcastle/agents/<id>/` | the bundled integration, its `skills/<name>/` directories, `.memcastle-install.json` | `remove` |
 | Pi: its own settings, through `pi install` | one package entry pointing at that directory | `remove` |
 | OpenCode: `~/.config/opencode/plugins/memcastle.ts` | a one-line file that re-exports the installed bundle | `remove` |
+| Claude Code: its plugin registry, through `claude plugin` | `memcastle@memcastle-local` and its local marketplace | `remove` |
 
 `~/.local/share` and `~/.config` are the defaults; `XDG_DATA_HOME`, `XDG_CONFIG_HOME` and, for OpenCode,
 `OPENCODE_CONFIG_DIR` move them.
@@ -113,6 +115,8 @@ Everything else in the agent's configuration is left exactly as it was:
   Pi does, through `pi install` and `pi remove`, so the packages you already have stay.
 - MemCastle never opens `opencode.json` and never adds an `mcp.memcastle` entry.
   The plugin connects to the daemon itself, and an MCP entry next to it would list every tool twice.
+- MemCastle never opens a Claude Code settings file.
+  It uses `claude plugin marketplace add`, `claude plugin install`, and their matching removal commands.
 - A `plugins/memcastle.ts` that MemCastle did not write is never overwritten or deleted.
   The installer stops with [`conflict`](#troubleshooting) instead.
 - MemCastle never writes your [authentication token](authentication.md) anywhere.

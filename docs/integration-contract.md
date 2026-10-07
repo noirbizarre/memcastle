@@ -1,6 +1,6 @@
 # Integration contract
 
-An integration is the glue that makes one agent (Pi, OpenCode, later Claude Code) use MemCastle at the right moments.
+An integration is the glue that makes one agent (Pi, OpenCode, or Claude Code) use MemCastle at the right moments.
 This page is the contract every integration satisfies, and the checklist for writing a new one.
 It exists so that a capability is implemented once, in MemCastle, and each client is then validated against the same
 expectations instead of rediscovering the architecture.
@@ -15,14 +15,17 @@ flowchart LR
     subgraph client["One per agent: lifecycle"]
         pi["integrations/pi"]
         oc["integrations/opencode"]
+        cc["integrations/claude-code"]
     end
     skills["skills/: reusable agent instructions"]
     surface["MCP tools and REST API"]
     core["MemCastle core: behaviour and persistence"]
     pi --> surface
     oc --> surface
+    cc --> surface
     pi -.-> skills
     oc -.-> skills
+    cc -.-> skills
     surface --> core
 ```
 

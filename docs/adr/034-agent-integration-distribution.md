@@ -66,6 +66,8 @@ That directory is the natural place for integrations too, and the same rule make
   Pi: `pi install`, `pi list` and `pi remove` on the installed directory, so Pi alone edits its `settings.json`.
   OpenCode: one `plugins/memcastle.ts` carrying a marker, removed only when the marker is there, and never overwritten
   when it is not.
+  Claude Code: `claude plugin marketplace add`, `claude plugin install`, and their matching removal commands for the
+  uniquely named local marketplace; its settings files are never opened.
   Neither adapter opens `opencode.json`, adds an `mcp.memcastle` entry or writes a token.
 - **Compatibility is checked before anything is written**, against `CARGO_PKG_VERSION` and the agent's `--version`.
   An agent whose version cannot be read is refused when the manifest requires a range, because guessing installs
@@ -111,7 +113,8 @@ That directory is the natural place for integrations too, and the same rule make
 
 ## Consequences
 
-- A release is larger by the two bundles (about 0.7 MB each) and the skills, and building one needs bun.
+- A release is larger by the Pi and OpenCode bundles, the Claude Code declarative plugin assets, and the skills, and
+  building the JavaScript integrations needs bun.
   `mise run integrations:check` builds the bundles and installs them from both layouts, so a release that cannot be
   installed fails before a tag.
 - The integration's version in `memcastle-integration.toml` is maintained by hand with its compatibility ranges.
@@ -124,4 +127,5 @@ That directory is the natural place for integrations too, and the same rule make
   installer.
   The tests stand in for the programs, so a change to one of those commands is found by running the installer against
   the real agent, not by the suite.
-- Claude Code (#6) adds an adapter and a `kind`, a manifest and a bundle, and nothing to the installer's shape.
+- Claude Code adds an adapter and a `kind`, a manifest and declarative plugin assets, and nothing to the installer's
+  shape.

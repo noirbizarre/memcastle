@@ -26,6 +26,9 @@ pub enum AgentKind {
     Pi,
     /// OpenCode.
     Opencode,
+    /// Claude Code.
+    #[serde(rename = "claude-code")]
+    ClaudeCode,
 }
 
 impl AgentKind {
@@ -35,6 +38,7 @@ impl AgentKind {
         match self {
             Self::Pi => "pi",
             Self::Opencode => "opencode",
+            Self::ClaudeCode => "claude",
         }
     }
 }
@@ -244,9 +248,13 @@ pub fn validate(manifest: &IntegrationManifest) -> Result<()> {
             )));
         }
         // OpenCode loads whatever file its plugin shim names, so without an entry there is nothing to name.
-        None if manifest.agent.kind == AgentKind::Opencode => {
+        None if matches!(
+            manifest.agent.kind,
+            AgentKind::Opencode | AgentKind::ClaudeCode
+        ) =>
+        {
             return Err(invalid(
-                "agent.entry is required for an OpenCode integration",
+                "agent.entry is required for an OpenCode or Claude Code integration",
             ));
         }
         _ => {}
