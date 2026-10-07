@@ -14,7 +14,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use assert_cmd::cargo::cargo_bin;
-use common::{TestDaemon, mcp, wait_for_registry};
+use common::{TestDaemon, mcp};
 use hmac::{Hmac, KeyInit, Mac};
 use memcastle::config::{Config, StoreConfig};
 use memcastle::store::StoreSync;
@@ -851,10 +851,9 @@ impl Restartable {
         }
     }
 
-    async fn start(&self) -> Running {
-        let palace_path = self.dir.path().join("palace");
+    fn config(&self) -> Config {
         let mut config = Config::default();
-        config.palace.path = palace_path.clone();
+        config.palace.path = self.dir.path().join("palace");
         config.jobs.max_concurrency = 1;
         config.server.bind = "127.0.0.1".parse().unwrap();
         config.server.port = 0;
@@ -863,12 +862,40 @@ impl Restartable {
             sync: StoreSync::Never,
         };
         config.config_file = Some(self.dir.path().join("config.toml"));
-        let handle = tokio::spawn(memcastle::server::run(config));
-        let info = wait_for_registry(&palace_path).await;
-        Running {
-            base_url: format!("http://{}", info.bind_addr),
-            handle,
+        config
+    }
+
+    /// Start a daemon on the palace, retrying while the previous one's storage lock is still held.
+    ///
+    /// The embedded engine can keep SurrealKV's file lock for a moment after an in-process daemon has stopped
+    /// (see `store::tests`), and a start that loses that race fails at once with the task's error. Waiting for the
+    /// registry file alone would then hang for a minute and hide why, so the task is watched too: a start that died is
+    /// retried, and the last error is what the test reports when the lock never clears.
+    async fn start(&self) -> Running {
+        let palace_path = self.dir.path().join("palace");
+        let mut last_error = String::new();
+        for _ in 0..40 {
+            let mut handle = tokio::spawn(memcastle::server::run(self.config()));
+            loop {
+                if let Some(info) = memcastle::server::lifecycle::read_if_live(&palace_path) {
+                    return Running {
+                        base_url: format!("http://{}", info.bind_addr),
+                        handle,
+                    };
+                }
+                if handle.is_finished() {
+                    last_error = match (&mut handle).await {
+                        Ok(Ok(())) => "the daemon stopped before it registered".to_string(),
+                        Ok(Err(error)) => error.to_string(),
+                        Err(error) => format!("the daemon task panicked: {error}"),
+                    };
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
+        panic!("the daemon would not start on the palace again: {last_error}");
     }
 }
 
@@ -1132,6 +1159,9 @@ async fn the_clients_trigger_methods_speak_the_same_routes_the_cli_prints() {
 
     let enabled = client.set_trigger_enabled("t", true).await.unwrap();
     assert_eq!(enabled.trigger.status, TriggerStatus::Active);
+    // A run joins another only while that one is still queued. Without the only job slot taken, the idle scheduler can
+    // start the first run between the two fires, and the second would queue a new job instead of coalescing.
+    let occupier = occupy_the_scheduler(&daemon).await;
     assert!(matches!(
         client.fire_trigger("t").await.unwrap(),
         FireOutcome::Queued { .. }
@@ -1140,6 +1170,7 @@ async fn the_clients_trigger_methods_speak_the_same_routes_the_cli_prints() {
         client.fire_trigger("t").await.unwrap(),
         FireOutcome::Coalesced { .. }
     ));
+    release_the_scheduler(&daemon, &occupier).await;
     let off = client.set_trigger_enabled("t", false).await.unwrap();
     assert!(!off.trigger.enabled);
 
