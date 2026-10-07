@@ -19,8 +19,9 @@ It remembered nothing between jobs: mining the same tree twice filed it twice, a
 source that is not a directory had nowhere to go.
 
 Issues #85 and #39 ask for more than a second reader.
-Phase 5 plans adapters for Slack, ChatGPT, Claude, Codex, OpenCode, GitHub and Atlassian, and the transcripts of the
+Phase 5 planned adapters for Slack, ChatGPT, Claude, Codex, OpenCode, GitHub and Atlassian, and the transcripts of the
 agents MemCastle already serves.
+Claude Code, Pi and OpenCode history are now installed WebAssembly sources; the remaining names are future work.
 Each of those would otherwise bring its own idea of "what is new", "what is the same document" and "where did I stop",
 and the second adapter would be the first to disagree with the first.
 

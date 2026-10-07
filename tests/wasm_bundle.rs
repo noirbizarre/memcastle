@@ -46,7 +46,7 @@ fn the_release_script_writes_the_unpacked_bundle_and_the_archives_the_official_r
     let out = default_bundle();
     let out = out.path();
 
-    for name in ["pi", "opencode"] {
+    for name in ["pi", "opencode", "claude"] {
         let package = out.join("sources").join(name);
         assert!(package.join("memcastle-source.toml").is_file(), "{name}");
         assert!(package.join("source.wasm").is_file(), "{name}");
@@ -95,7 +95,7 @@ async fn the_bundled_sources_are_installed_from_the_start_and_only_need_enabling
         .json()
         .await
         .unwrap();
-    for name in ["pi", "opencode"] {
+    for name in ["pi", "opencode", "claude"] {
         let source = listed["adapters"]
             .as_array()
             .unwrap()

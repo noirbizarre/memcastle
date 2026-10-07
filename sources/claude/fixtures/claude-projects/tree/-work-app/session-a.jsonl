@@ -1,0 +1,6 @@
+{"type":"user","uuid":"u1","sessionId":"session-a","timestamp":"2026-07-14T14:27:20.000Z","cwd":"/work/app","message":{"role":"user","content":"How do I rotate the signing keys?"}}
+{"type":"assistant","uuid":"a1","sessionId":"session-a","timestamp":"2026-07-14T14:27:30.000Z","cwd":"/work/app","message":{"role":"assistant","content":[{"type":"text","text":"I will inspect the rotation script."},{"type":"tool_use","name":"Read","input":{"path":"rotate.sh"}},{"type":"thinking","thinking":"PRIVATE-REASONING"}]}}
+{"type":"user","uuid":"u2","sessionId":"session-a","timestamp":"2026-07-14T14:27:31.000Z","cwd":"/work/app","message":{"role":"user","content":[{"type":"tool_result","content":"SECRET-TOOL-OUTPUT"}]}}
+{"type":"assistant","uuid":"a2","sessionId":"session-a","timestamp":"2026-07-14T14:27:40.000Z","cwd":"/work/app","message":{"role":"assistant","content":"Run the rotation script with the new key id."}}
+{"type":"system","subtype":"compact_boundary","sessionId":"session-a","cwd":"/work/app","compactMetadata":{"trigger":"auto"}}
+not json

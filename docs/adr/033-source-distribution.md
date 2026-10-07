@@ -91,10 +91,10 @@ And a user must not need Rust, Python or Node to install a published source, whi
   `memcastle source index` adds archives to an index (creating it, signing with `--sign`),
   and the result is uploaded anywhere.
   Both are local and need no daemon, like `init`, `build` and `test`.
-- **Releases bundle `pi` and `opencode`.**
+- **Releases bundle `pi`, `opencode` and `claude`.**
   `packaging/sources/build.sh` packages them and writes their index with the same commands a third party runs;
   the release tarballs and the `.deb` and `.rpm` put the result under `share/memcastle/sources/`.
-  `directory` is the worked example of the built-in source and is not bundled, and Claude has no source yet (#88).
+   `directory` is the worked example of the built-in source and is not bundled; `claude` is a bundled history source (#88).
   Which sources ship is a line in that script and does not constrain the runtime.
 - **There is no MCP tool.**
   Searching, installing and updating make the daemon fetch and run code,

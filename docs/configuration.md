@@ -660,7 +660,27 @@ A key that is not listed is an error, not an ignored typo: `enable = false` must
   exactly as `memcastle mine <source> key=value` would ([ADR-042](adr/042-mine-takes-a-source-and-its-options.md)).
   A scalar is its text and a list of strings is comma-joined; a key the source does not declare, a key in both tables
   and a nested table make the miner not runnable, so the daemon never mines more than a filter says.
-  `directory` declares `since`, `pi` declares `since` and `dir`, and `opencode` declares `since` and `dir`.
+   `directory` declares `since`; `pi`, `opencode` and `claude` declare `since` and `dir`.
+
+### Claude Code history miner
+
+The bundled `claude` source reads only session transcripts under `~/.claude/projects`.
+Define a miner explicitly; no Claude Code client or source installation creates one:
+
+```toml
+[[miners]]
+name = "claude-history"
+source = "claude"
+locator = "/home/alice/.claude/projects"
+enabled = true
+
+[miners.scope]
+since = "2026-09"
+dir = "/home/alice/src/*"
+```
+
+`since` narrows by transcript modification time and `dir` matches the working directory recorded in each transcript.
+Use a separate miner or run `memcastle mine claude --full` when a restored transcript predates its cursor.
 
 ### Changing miners while the daemon runs
 

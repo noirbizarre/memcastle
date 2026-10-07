@@ -75,7 +75,7 @@ fn the_official_registry_published_with_the_docs_is_an_index_this_memcastle_read
     let text = std::fs::read_to_string(root().join("docs/registry.json")).unwrap();
     let index = memcastle::domain::SourceIndex::parse(&text).unwrap();
 
-    for name in ["pi", "opencode"] {
+    for name in ["pi", "opencode", "claude"] {
         let source = index
             .find(name)
             .unwrap_or_else(|| panic!("the official registry does not list `{name}`"));

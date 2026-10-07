@@ -10,7 +10,7 @@ ships with MemCastle).
 
 ## Context
 
-ADR-033 shipped `pi` and `opencode` as ordinary packages beside the binary, with an index, and made them *installable
+ADR-033 shipped `pi`, `opencode` and `claude` as ordinary packages beside the binary, with an index, and made them *installable
 by name with no registry*.
 That kept one lifecycle for every origin, and it cost the user a step that decides nothing:
 the source is on the same disk as the daemon, so `memcastle source install pi` fetched a file from one directory into
@@ -64,7 +64,7 @@ at all except from a release archive by hand.
   standalone binary can install the official sources the same way as any other.
   Setting `mining.registries` replaces the default, and `registries = []` opts out.
 - **A registry entry may name a GitHub repository instead of listing versions.**
-  The registry then says only which repositories publish sources (`pi` and `opencode` name this one),
+The registry then says only which repositories publish sources (`pi`, `opencode` and `claude` name this one),
   and the daemon reads each repository's releases through the GitHub API (`mining.github_api_url`),
   one request for each repository however many sources it publishes.
   The versions are the non-draft, non-prerelease releases' assets named `<name>-<version>.tar.gz` (what `source package`

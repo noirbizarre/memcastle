@@ -3,6 +3,13 @@
   "name": "MemCastle official sources",
   "sources": [
     {
+      "name": "claude",
+      "description": "Claude Code session history (JSONL transcripts under ~/.claude/projects), one document per session",
+      "homepage": "https://noirbizarre.github.io/memcastle/mining-sources/#claude",
+      "license": "MIT",
+      "repository": "noirbizarre/memcastle"
+    },
+    {
       "name": "opencode",
       "description": "OpenCode coding-agent session history, acquired through the opencode CLI, one document per session",
       "homepage": "https://noirbizarre.github.io/memcastle/mining-sources/#opencode",
