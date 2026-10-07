@@ -611,15 +611,17 @@ A key that is not listed is an error, not an ignored typo: `enable = false` must
 - **Validation.** The shape of every entry is checked when the file is loaded, so a bad entry stops the daemon starting
   like a bad `[embeddings]` section.
   An *enabled* miner is also held to what running needs, when it is created or changed: the source is built in or
-  installed and enabled, the credential resolves, and for `directory` the `locator` is an absolute path and there is no
-  `scope` or `config`.
+  installed and enabled, the credential resolves, every `scope` and `config` key is one the source declares as an option,
+  and for `directory` the `locator` is an absolute path.
   A disabled miner may name a source that is not installed yet, so a configuration can be written ahead of the install.
 - **Trigger.** Only `manual` is acted on, by `memcastle miner run <name>`.
   `event` and `schedule` are stored and validated, and reported as not acted on, so a definition written now keeps its
   meaning when triggers arrive.
-- **Scope.** A scope is stored and reported, but no source applies one yet,
-  so `miner run` refuses a miner that has a `scope` or `config`
-  rather than mine more than the filter says.
+- **Scope.** A scope and the `config` table are the options of a run: `miner run` passes them to the source
+  exactly as `memcastle mine <source> key=value` would ([ADR-042](adr/042-mine-takes-a-source-and-its-options.md)).
+  A scalar is its text and a list of strings is comma-joined; a key the source does not declare, a key in both tables
+  and a nested table make the miner not runnable, so the daemon never mines more than a filter says.
+  `directory` declares `since`, `pi` declares `since` and `dir`, and `opencode` declares `since` and `dir`.
 
 ### Changing miners while the daemon runs
 

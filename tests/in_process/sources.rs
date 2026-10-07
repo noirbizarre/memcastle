@@ -360,3 +360,71 @@ async fn mining_a_source_is_a_write_and_listing_sources_is_a_read() {
     assert_eq!(disabled.status(), StatusCode::FORBIDDEN);
     daemon.shutdown().await;
 }
+
+#[tokio::test]
+async fn an_option_the_source_does_not_declare_is_refused_at_submission_naming_what_it_accepts() {
+    let daemon = TestDaemon::start().await;
+    let client = reqwest::Client::new();
+    let dir = tempfile::tempdir().unwrap();
+
+    for body in [
+        // The directory wire form and the named one are the same source, so both are held to its options.
+        json!({ "type": "mine", "path": dir.path(), "options": { "dates": "2026-09" } }),
+        json!({ "type": "mine", "source": "directory", "locator": dir.path(), "options": { "dir": "/x" } }),
+    ] {
+        let response = submit(&client, &daemon.base_url, body).await;
+        assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+        let text = response.text().await.unwrap();
+        assert!(
+            text.contains("unknown option") && text.contains("`since`"),
+            "the answer must say what is accepted: {text}"
+        );
+    }
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_directory_source_lists_the_options_it_accepts() {
+    let daemon = TestDaemon::start().await;
+    let client = reqwest::Client::new();
+    let listed = sources(&client, &daemon.base_url).await;
+    let directory = listed["adapters"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|adapter| adapter["name"] == "directory")
+        .expect("the built-in source is listed");
+    assert_eq!(directory["options"][0]["name"], "since", "{directory}");
+    assert_eq!(directory["options"][0]["type"], "date", "{directory}");
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_since_option_mines_only_what_changed_at_or_after_it() {
+    let daemon = TestDaemon::start().await;
+    let client = reqwest::Client::new();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("new.txt"), "fresh words").unwrap();
+
+    let run = |options: Value| {
+        let client = client.clone();
+        let base = daemon.base_url.clone();
+        let root = dir.path().to_path_buf();
+        async move {
+            let response = submit(
+                &client,
+                &base,
+                json!({ "type": "mine", "path": root, "full": true, "options": options, "requested_by": "test" }),
+            )
+            .await;
+            assert!(response.status().is_success(), "{}", response.status());
+            let job: Job = response.json().await.expect("job");
+            wait_for_job_status(&client, &base, job.id, JobStatus::Completed).await
+        }
+    };
+    let included = run(json!({ "since": "2000-01-01" })).await;
+    assert_eq!(included.result.as_ref().unwrap()["documents"], 1);
+    let excluded = run(json!({ "since": "2999-01" })).await;
+    assert_eq!(excluded.result.as_ref().unwrap()["documents"], 0);
+    daemon.shutdown().await;
+}

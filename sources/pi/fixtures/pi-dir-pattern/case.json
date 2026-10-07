@@ -1,0 +1,63 @@
+{
+  "name": "pi-dir-pattern",
+  "description": "A `*` in `dir` stands for any run of characters, so a pattern keeps every working directory under a prefix.",
+  "locator": "../pi-sessions/tree",
+  "options": {
+    "dir": "/home/me/*"
+  },
+  "limit": 2,
+  "documents": [
+    {
+      "external_id": "--home-me-notes--/2026-07-16T10-00-00-000Z_019f8000.jsonl",
+      "title": "Summarize the repository state.",
+      "kind": "transcript",
+      "tags": [
+        "transcript",
+        "pi"
+      ],
+      "room": "notes",
+      "segments": [
+        "# Pi session 019f8000-0000-7000-8000-000000000002\nworking directory: /home/me/notes\n\n",
+        "### bashExecution · 2026-07-16T10:00:03.000Z\n[bash: git status]\n\n",
+        "### user · 2026-07-16T10:00:09.000Z\nSummarize the repository state.\n\n"
+      ]
+    },
+    {
+      "external_id": "--home-me-project--/2026-07-14T14-27-12-546Z_019f6106.jsonl",
+      "title": "How do I rotate the signing keys?",
+      "kind": "transcript",
+      "tags": [
+        "transcript",
+        "pi"
+      ],
+      "room": "project",
+      "segments": [
+        "# Pi session 019f6106-5422-783d-a568-61a5b1a4a98a\nworking directory: /home/me/project\n\n",
+        "### user · 2026-07-14T14:27:20.000Z\nHow do I rotate the signing keys?\n\n",
+        "### assistant · 2026-07-14T14:27:30.000Z\nLet me look at the script first.\n[tool call: read]\n\n",
+        "### assistant · 2026-07-14T14:27:40.000Z\nRun the rotation script with the new key id.\n\n"
+      ]
+    },
+    {
+      "external_id": "--home-me-project--/2026-07-15T09-00-00-000Z_019f7000.jsonl",
+      "title": "Did the rotation work?",
+      "kind": "transcript",
+      "tags": [
+        "transcript",
+        "pi"
+      ],
+      "room": "project",
+      "segments": [
+        "# Pi session 019f7000-0000-7000-8000-000000000001\nworking directory: /home/me/project\n\n",
+        "### user · 2026-07-15T09:00:05.000Z\nDid the rotation work?\n\n",
+        "### assistant · 2026-07-15T09:00:10.000Z\nYes, the new key is live.\n\n"
+      ]
+    }
+  ],
+  "skipped": [
+    "--home-me-project--/empty.jsonl",
+    "--home-me-project--/notes.txt",
+    "--home-me-project--/nested/deep.jsonl",
+    "auth.json"
+  ]
+}

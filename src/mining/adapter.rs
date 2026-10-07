@@ -17,7 +17,7 @@
 use std::future::Future;
 
 use crate::domain::{
-    Candidate, CanonicalDocument, Cursor, RawDocument, SourceCapabilities, SourceRef,
+    Candidate, CanonicalDocument, Cursor, Options, RawDocument, SourceCapabilities, SourceRef,
 };
 use crate::error::Result;
 
@@ -42,7 +42,7 @@ pub struct Discovery {
 /// component loaded at run time (docs/adr/026); the strings it returns are borrowed from the adapter rather than
 /// `'static` so that a loaded source can own its name.
 pub trait SourceAdapter: Send + Sync {
-    /// The adapter's name, as users give it (`--source`) and as it is stored on the source.
+    /// The adapter's name, as users give it (`memcastle mine <name>`) and as it is stored on the source.
     fn name(&self) -> &str;
 
     /// One line saying what the adapter reads, for `memcastle sources` and the API.
@@ -53,13 +53,18 @@ pub trait SourceAdapter: Send + Sync {
 
     /// The source `locator` names, or the adapter's default when `None`, checked to exist.
     ///
-    /// The one place a locator is validated and normalised (a path made canonical, say), so that two spellings of
-    /// the same place become the same source and share a cursor.
+    /// The one place a locator and the run's `options` are validated and normalised (a path made canonical, a date
+    /// parsed), so that two spellings of the same place become the same source and share a cursor. The returned
+    /// [`SourceRef`] carries the normalised options on to `discover` and `read`.
+    ///
+    /// A filter that selects a different slice of the same place (a `dir` within a history) must be folded into the
+    /// source's `account` or `locator` here, so each slice keeps a cursor of its own; a filter that only narrows
+    /// (`since`) must not be, or every value would re-read everything (docs/adr/041).
     ///
     /// # Errors
     ///
-    /// An error when the locator is not valid for this adapter or what it names cannot be reached.
-    fn identify(&self, locator: Option<&str>) -> Result<SourceRef>;
+    /// An error when the locator or an option is not valid for this adapter or what it names cannot be reached.
+    fn identify(&self, locator: Option<&str>, options: &Options) -> Result<SourceRef>;
 
     /// The wing drawers are filed under when the caller does not choose one.
     fn default_wing(&self, source: &SourceRef) -> String;

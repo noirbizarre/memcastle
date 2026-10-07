@@ -117,6 +117,107 @@ fn path_of(source: &SourceRef, key: &str) -> PathBuf {
         .fold(PathBuf::from(&source.locator), |path, part| path.join(part))
 }
 
+/// The number of days in `month` of `year`.
+fn days_in_month(year: i64, month: i64) -> i64 {
+    match month {
+        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
+/// Days from 1970-01-01 to a civil date (after Howard Hinnant), the inverse of the conversion to a date.
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = year - i64::from(month <= 2);
+    let era = year.div_euclid(400);
+    let year_of_era = year.rem_euclid(400);
+    let month_index = (month + 9) % 12;
+    let day_of_year = (153 * month_index + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+/// A `since` value (`2026-09`, `2026-09-14` or an RFC 3339 time) as epoch milliseconds, UTC.
+///
+/// Written out rather than taken from a crate: it is all a source needs of a calendar, and a component carries what it
+/// links.
+fn parse_since(value: &str) -> Result<i64, String> {
+    let value = value.trim();
+    let bad = || {
+        format!("`{value}` is not a date; use `2026-09`, `2026-09-14` or an RFC 3339 time")
+    };
+    let number = |text: &str, digits: usize| -> Option<i64> {
+        if text.len() == digits && text.bytes().all(|byte| byte.is_ascii_digit()) {
+            text.parse().ok()
+        } else {
+            None
+        }
+    };
+    let (date, time) = match value.find(['T', 't']) {
+        Some(at) => (&value[..at], Some(&value[at + 1..])),
+        None => (value, None),
+    };
+    let mut parts = date.split('-');
+    let year = parts.next().and_then(|part| number(part, 4)).ok_or_else(bad)?;
+    let month = parts
+        .next()
+        .and_then(|part| number(part, 2))
+        .filter(|month| (1..=12).contains(month))
+        .ok_or_else(bad)?;
+    let day = match parts.next() {
+        Some(part) => number(part, 2).ok_or_else(bad)?,
+        None => 1,
+    };
+    if parts.next().is_some() || day < 1 || day > days_in_month(year, month) {
+        return Err(bad());
+    }
+    let mut seconds = days_from_civil(year, month, day) * 86_400;
+    let mut fraction_ms = 0;
+    if let Some(time) = time {
+        // The zone is `Z` or `+HH:MM`/`-HH:MM`; without one the time would mean something different on every machine.
+        let (clock, offset) = if let Some(clock) = time.strip_suffix(['Z', 'z']) {
+            (clock, 0)
+        } else {
+            let at = time.rfind(['+', '-']).ok_or_else(bad)?;
+            let (clock, zone) = time.split_at(at);
+            let sign = if zone.starts_with('-') { -1 } else { 1 };
+            let (hours, minutes) = zone[1..].split_once(':').ok_or_else(bad)?;
+            let hours = number(hours, 2).ok_or_else(bad)?;
+            let minutes = number(minutes, 2).ok_or_else(bad)?;
+            (clock, sign * (hours * 3600 + minutes * 60))
+        };
+        let (whole, fraction) = match clock.split_once('.') {
+            Some((whole, fraction)) => (whole, Some(fraction)),
+            None => (clock, None),
+        };
+        let mut fields = whole.split(':');
+        let mut next = |limit: i64| {
+            fields
+                .next()
+                .and_then(|part| number(part, 2))
+                .filter(|field| *field < limit)
+        };
+        let (hour, minute, second) = (
+            next(24).ok_or_else(bad)?,
+            next(60).ok_or_else(bad)?,
+            next(60).ok_or_else(bad)?,
+        );
+        if fields.next().is_some() {
+            return Err(bad());
+        }
+        seconds += hour * 3600 + minute * 60 + second - offset;
+        if let Some(fraction) = fraction {
+            if fraction.is_empty() || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(bad());
+            }
+            let padded: String = fraction.chars().chain("000".chars()).take(3).collect();
+            fraction_ms = padded.parse().map_err(|_| bad())?;
+        }
+    }
+    Ok(seconds * 1000 + fraction_ms)
+}
+
 /// FNV-1a over the body, with its length: a revision must change when the content does, and nothing more is asked of
 /// it. A real source would use a stronger hash, or the source's own etag.
 fn revision_of(body: &str) -> String {
@@ -129,7 +230,27 @@ fn revision_of(body: &str) -> String {
 }
 
 impl Guest for Directory {
-    fn identify(locator: Option<String>) -> Result<SourceRef, SourceError> {
+    fn identify(
+        locator: Option<String>,
+        options: Vec<(String, String)>,
+    ) -> Result<SourceRef, SourceError> {
+        let mut normalised = Vec::new();
+        for (key, value) in options {
+            match key.as_str() {
+                // Only narrows what is read, so it is not part of the identity: an earlier `since` next time continues
+                // from the same cursor, and `--full` is how to reach back.
+                "since" => {
+                    parse_since(&value).map_err(SourceError::InvalidInput)?;
+                    // Checked now, kept as typed: `discover` parses it again, so a value that passes here cannot fail there.
+                    normalised.push((key, value.trim().to_string()));
+                }
+                other => {
+                    return Err(SourceError::InvalidInput(format!(
+                        "the directory source has no option `{other}`; it accepts `since`"
+                    )));
+                }
+            }
+        }
         let Some(locator) = locator else {
             return Err(SourceError::InvalidInput(
                 "the directory source needs a directory to mine".to_string(),
@@ -146,6 +267,7 @@ impl Guest for Directory {
             source: NAME.to_string(),
             account: None,
             locator,
+            options: normalised,
         })
     }
 
@@ -163,6 +285,15 @@ impl Guest for Directory {
         let after = parse_cursor(&cursor)?;
         let mut entries = Vec::new();
         walk(Path::new(&source.locator), "", &mut entries);
+        let since = source
+            .options
+            .iter()
+            .find(|(key, _)| key == "since")
+            .and_then(|(_, value)| parse_since(value).ok());
+        if let Some(since) = since {
+            let floor = since.saturating_mul(1_000_000);
+            entries.retain(|entry| entry.mtime_ns >= floor);
+        }
         // Oldest first, ties broken by path, so files saved in the same instant are neither skipped nor read twice.
         entries.sort_by(|a, b| (a.mtime_ns, &a.key).cmp(&(b.mtime_ns, &b.key)));
         entries.retain(|entry| {

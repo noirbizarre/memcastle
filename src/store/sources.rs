@@ -281,11 +281,7 @@ mod tests {
     }
 
     fn reference(locator: &str) -> SourceRef {
-        SourceRef {
-            source: "demo".into(),
-            account: None,
-            locator: locator.into(),
-        }
+        SourceRef::new("demo", None, locator)
     }
 
     fn document(source: SourceId, external_id: &str, revision: &str) -> SourceDocumentRecord {

@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 
 use crate::domain::{
-    Candidate, CanonicalDocument, Cursor, NameKind, RawDocument, Segment, SourceCapabilities,
-    SourceKind, SourceRef, validate_name,
+    Candidate, CanonicalDocument, Cursor, NameKind, OptionKind, OptionSpec, Options, RawDocument,
+    Segment, SourceCapabilities, SourceKind, SourceRef, parse_since, validate_name,
 };
 use crate::error::{Error, Result};
 
@@ -21,6 +21,16 @@ use crate::project::{project_wing, wing_from_directory};
 
 /// The adapter's name.
 pub const NAME: &str = "directory";
+
+/// The options a run of the `directory` source accepts.
+#[must_use]
+pub fn options() -> Vec<OptionSpec> {
+    vec![OptionSpec::new(
+        "since",
+        "only files modified at or after this date (`2026-09`, `2026-09-14` or an RFC 3339 time)",
+        OptionKind::Date,
+    )]
+}
 
 /// Directories never worth mining — build output, VCS metadata, dependency trees. Skipped by name at any depth,
 /// the same cheap denylist mempalace-rs's miner uses before anything fancier (gitignore-awareness) is worth the
@@ -74,7 +84,7 @@ impl SourceAdapter for DirectoryAdapter {
         }
     }
 
-    fn identify(&self, locator: Option<&str>) -> Result<SourceRef> {
+    fn identify(&self, locator: Option<&str>, options: &Options) -> Result<SourceRef> {
         let Some(locator) = locator else {
             return Err(Error::invalid_input(
                 "path",
@@ -89,11 +99,26 @@ impl SourceAdapter for DirectoryAdapter {
                 format!("{} is not a directory", canonical.display()),
             ));
         }
-        Ok(SourceRef {
-            source: NAME.to_string(),
-            account: None,
-            locator: canonical.display().to_string(),
-        })
+        // `since` only narrows what is read, so it is not part of the identity: a run with an earlier `since` than the
+        // last continues from the same cursor and `--full` is how to reach back. It is stored as an RFC 3339 instant so
+        // that `discover` has one form to read, whatever spelling the user typed.
+        let mut normalised = Options::new();
+        for (key, value) in options {
+            match key.as_str() {
+                "since" => {
+                    let since = parse_since(value)
+                        .map_err(|message| Error::invalid_input("since", message))?;
+                    normalised.insert(key.clone(), since.to_rfc3339());
+                }
+                other => {
+                    return Err(Error::invalid_input(
+                        "options",
+                        format!("the directory source has no option `{other}`; it accepts `since`"),
+                    ));
+                }
+            }
+        }
+        Ok(SourceRef::new(NAME, None, canonical.display().to_string()).with_options(normalised))
     }
 
     fn default_wing(&self, source: &SourceRef) -> String {
@@ -124,6 +149,15 @@ impl SourceAdapter for DirectoryAdapter {
             self.max_file_bytes,
             &mut entries,
         );
+        if let Some(since) = source.options.get("since") {
+            // `identify` wrote this value, so it parses; a source built by hand with a bad one reads everything, which
+            // is the safe side of a filter. Saturating, because nanoseconds since 1970 run out in 2262: a `since`
+            // beyond that must keep nothing, not wrap round to keep everything.
+            if let Ok(instant) = DateTime::parse_from_rfc3339(since) {
+                let floor = instant.timestamp().saturating_mul(1_000_000_000);
+                entries.retain(|entry| entry.mtime_ns >= floor);
+            }
+        }
         let (candidates, exhausted) = page(entries, after.as_ref(), limit);
         Ok(Discovery {
             candidates,
@@ -230,7 +264,7 @@ mod tests {
     }
 
     fn source_of(dir: &Path) -> SourceRef {
-        adapter().identify(dir.to_str()).unwrap()
+        adapter().identify(dir.to_str(), &Options::new()).unwrap()
     }
 
     async fn all(dir: &Path) -> Vec<String> {
@@ -378,12 +412,92 @@ mod tests {
         assert_ne!(first.revision, changed.revision);
     }
 
+    fn since(value: &str) -> Options {
+        Options::from([("since".to_string(), value.to_string())])
+    }
+
+    #[tokio::test]
+    async fn since_leaves_out_the_files_not_modified_since_that_date() {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, date) in [
+            ("old.txt", "2026-01-10T00:00:00Z"),
+            ("new.txt", "2026-09-20T00:00:00Z"),
+        ] {
+            let file = std::fs::File::create(dir.path().join(name)).unwrap();
+            std::io::Write::write_all(&mut &file, b"x").unwrap();
+            let at = DateTime::parse_from_rfc3339(date).unwrap();
+            file.set_modified(std::time::SystemTime::from(at)).unwrap();
+        }
+        let found = |value: &str| {
+            let source = adapter()
+                .identify(dir.path().to_str(), &since(value))
+                .unwrap();
+            async move {
+                adapter()
+                    .discover(&source, &Cursor::Null, 100)
+                    .await
+                    .unwrap()
+                    .candidates
+                    .into_iter()
+                    .map(|c| c.external_id)
+                    .collect::<Vec<_>>()
+            }
+        };
+        assert_eq!(
+            found("2026-09").await,
+            ["new.txt"],
+            "a month is its first day"
+        );
+        assert_eq!(
+            found("2026-01-10").await,
+            ["old.txt", "new.txt"],
+            "the date itself is included"
+        );
+        assert!(found("2027-01").await.is_empty());
+    }
+
+    #[test]
+    fn since_does_not_change_which_source_a_directory_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let plain = source_of(dir.path());
+        let narrowed = adapter()
+            .identify(dir.path().to_str(), &since("2026-09"))
+            .unwrap();
+        assert_eq!(
+            plain.id(),
+            narrowed.id(),
+            "a narrower run must continue the same cursor, not start one of its own"
+        );
+        assert_eq!(narrowed.options["since"], "2026-09-01T00:00:00+00:00");
+    }
+
+    #[test]
+    fn an_option_the_directory_source_does_not_have_or_a_bad_date_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let unknown = Options::from([("dir".to_string(), "/x".to_string())]);
+        let error = adapter()
+            .identify(dir.path().to_str(), &unknown)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("`dir`") && error.contains("`since`"),
+            "{error}"
+        );
+        let error = adapter()
+            .identify(dir.path().to_str(), &since("last week"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("`last week`"), "{error}");
+    }
+
     #[test]
     fn identifying_a_relative_or_trailing_slash_spelling_gives_the_same_source() {
         let dir = tempfile::tempdir().unwrap();
-        let plain = adapter().identify(dir.path().to_str()).unwrap();
+        let plain = adapter()
+            .identify(dir.path().to_str(), &Options::new())
+            .unwrap();
         let slashed = adapter()
-            .identify(Some(&format!("{}/", dir.path().display())))
+            .identify(Some(&format!("{}/", dir.path().display())), &Options::new())
             .unwrap();
         assert_eq!(
             plain.id(),
@@ -397,17 +511,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert!(
             adapter()
-                .identify(dir.path().join("nope").to_str())
+                .identify(dir.path().join("nope").to_str(), &Options::new())
                 .is_err()
         );
         let file = dir.path().join("f.txt");
         std::fs::write(&file, "x").unwrap();
         assert!(matches!(
-            adapter().identify(file.to_str()),
+            adapter().identify(file.to_str(), &Options::new()),
             Err(Error::InvalidInput { .. })
         ));
         assert!(matches!(
-            adapter().identify(None),
+            adapter().identify(None, &Options::new()),
             Err(Error::InvalidInput { .. })
         ));
     }

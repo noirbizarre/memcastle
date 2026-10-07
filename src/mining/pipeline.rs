@@ -42,6 +42,8 @@ use super::chunk::chunk;
 pub struct Request<'a> {
     /// The source's locator, or `None` for the adapter's default.
     pub locator: Option<&'a str>,
+    /// What the run was asked beyond that (`since`, `dir`); only the adapter knows what they mean.
+    pub options: &'a crate::domain::Options,
     /// The wing to file under, or `None` for the adapter's default.
     pub wing: Option<&'a str>,
     /// Ignore the stored cursor and start from the beginning.
@@ -83,7 +85,7 @@ pub async fn mine<A: SourceAdapter>(
 ) -> Result<JobOutcome> {
     let store = ctx.store();
     let settings = ctx.mining();
-    let reference = adapter.identify(request.locator)?;
+    let reference = adapter.identify(request.locator, request.options)?;
 
     let wing_name = request
         .wing

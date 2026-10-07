@@ -26,7 +26,7 @@ A failure comes back as an MCP error result carrying the [error body](#errors) b
 | `memcastle_diary_write` | `agent_identity`, `wing`, `content` | Write a diary entry. |
 | `memcastle_diary_read` | `agent_identity`, `wing`, `limit?` | Read an agent's newest diary entries. |
 | `memcastle_checkpoint` | `payload`, `emergency?` | Submit a durable checkpoint job. |
-| `memcastle_mine` | `path` or `source`, `locator?`, `full?`, `wing?` | Submit a job that mines a directory, or a [source](mining-sources.md) such as `pi`. |
+| `memcastle_mine` | `path` or `source`, `locator?`, `options?`, `full?`, `wing?` | Submit a job that mines a directory, or a [source](mining-sources.md) such as `pi`. |
 | `memcastle_miner_list` | none | The configured [miners](configuration.md#miners): name, source, state, scope, trigger and last run. Read-only. |
 | `memcastle_miner_get` | `name` | One configured miner, and why it cannot run when it cannot. Read-only. |
 | `memcastle_audit` | `wing?` | Submit a read-only consistency audit job. |
@@ -46,6 +46,8 @@ A `limit` of `0` means the default, on the CLI and REST as well.
 because the daemon does not share your shell's working directory.
 Give exactly one of `path` and `source`: a source is mined incrementally from where its last run stopped,
 and `full` reads it again from the beginning.
+`options` is an object of strings for the source (`{"since": "2026-09", "dir": "/work/app"}`);
+each source declares the keys it accepts in `GET /api/sources`, and any other key is refused with a `400` that lists them.
 Mining, checkpoint, audit and repair return the submitted job immediately;
 poll it with `memcastle_job_get` to see its progress and result.
 
@@ -601,7 +603,7 @@ The reasoning is in [ADR-024](adr/024-entity-extraction-as-an-enrich-job.md).
 
 | `type` | Other fields |
 |---|---|
-| `mine` | `path` (absolute directory) or `source` (a [source](mining-sources.md) by name) with `locator?`, then `wing?` and `full?` |
+| `mine` | `path` (absolute directory) or `source` (a [source](mining-sources.md) by name) with `locator?`, then `options?` (an object of strings), `wing?` and `full?` |
 | `checkpoint` | `payload` (see [above](#checkpoint-payload)), `emergency?` |
 | `audit` | `wing?` |
 | `embed` | `wing?`; fills the embeddings that are missing, and needs an `[embeddings]` provider (REST and CLI only, no MCP tool) |
@@ -618,10 +620,12 @@ curl -s -X POST http://127.0.0.1:8420/api/jobs \
 ```sh
 curl -s -X POST http://127.0.0.1:8420/api/jobs \
   -H 'Content-Type: application/json' \
-  -d '{"type": "mine", "source": "pi"}'
+  -d '{"type": "mine", "source": "opencode", "options": {"since": "2026-09", "dir": "/work/app"}}'
 ```
 
-An unknown `source` is a `400` that names the known ones.
+An unknown `source` is a `400` that names the known ones, and an `options` key the source does not declare is a `400` that
+names the ones it accepts.
+Each entry of `adapters` lists them as `options: [{name, description, type}]`.
 `GET /api/sources` lists the adapters and the sources that have been mined:
 
 ```json

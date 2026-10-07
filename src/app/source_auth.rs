@@ -168,6 +168,7 @@ mod tests {
                 ..Permissions::default()
             },
             limits: Default::default(),
+            options: Default::default(),
             build: None,
             test: None,
         }

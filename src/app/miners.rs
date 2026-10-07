@@ -437,9 +437,10 @@ impl AppServices {
 
     /// Submit the mining job for a miner.
     ///
-    /// Refused when the miner is disabled or cannot run, and when it has a scope or settings: no source applies them
-    /// yet, so running it could only mine more than the filter says, and the daemon never does that silently. The
-    /// job mines the miner's source and locator, so it continues from the cursor the same source already has.
+    /// Refused when the miner is disabled or cannot run. The miner's scope and settings are passed to the source as the
+    /// run's options, exactly as `memcastle mine <source> key=value` would; a key the source does not declare makes the
+    /// miner not runnable rather than being ignored. The job mines the miner's source and locator, so it continues from
+    /// the cursor the same source already has.
     ///
     /// Gated as a **write**, like any mining.
     ///
@@ -470,26 +471,18 @@ impl AppServices {
         if let Err(reason) = self.check_activation(&miner).await {
             return Err(not_runnable(reason));
         }
-        if !miner.scope.is_empty() || !miner.config.is_empty() {
-            return Err(not_runnable(
-                "it has a scope or settings, and no source applies them yet, so a run would ignore them; \
-                 remove them, or mine by hand with `memcastle mine`"
-                    .to_string(),
-            ));
-        }
-        let Some(locator) = miner.locator.clone() else {
-            return Err(not_runnable(
-                "it has no locator; set one with `memcastle miner set <name> --locator <where>`"
-                    .to_string(),
-            ));
-        };
+        // The scope and the settings are the run's options; `check_activation` has already checked their keys against
+        // what the source declares, so what reaches the source is what the miner says.
+        let options = miner.options().map_err(not_runnable)?;
         self.submit_mine(
             MiningSource::Named {
                 source: miner.source.clone(),
-                locator: Some(locator),
+                // A source may need none (`opencode` reads its own history); the ones that do refuse it at activation.
+                locator: miner.locator.clone(),
             },
             miner.wing.clone(),
             full,
+            options,
             requested_by,
             mode,
         )
@@ -578,7 +571,9 @@ impl AppServices {
     /// What an enabled miner needs in order to run: a usable source, a locator the source can use, a credential that
     /// resolves. The reason is a sentence that says what to do.
     async fn check_activation(&self, miner: &MinerDefinition) -> std::result::Result<(), String> {
-        crate::mining::registry::ensure_minable(&self.store, &self.mining, &miner.source)
+        // The scope and the settings are what a run passes as options, so their keys are the source's to accept.
+        let options = miner.options()?;
+        crate::mining::registry::ensure_minable(&self.store, &self.mining, &miner.source, &options)
             .await
             .map_err(|e| e.to_string())?;
         if miner.source == "directory" {
@@ -594,12 +589,6 @@ impl AppServices {
                     "the locator `{locator}` is relative; give an absolute path, since the daemon resolves it \
                      against its own working directory"
                 ));
-            }
-            if !miner.scope.is_empty() || !miner.config.is_empty() {
-                return Err(
-                    "the directory source has no scope or settings; remove `scope` and `config`"
-                        .to_string(),
-                );
             }
         }
         self.check_credential(miner).await?;
@@ -708,12 +697,6 @@ impl AppServices {
                     .unwrap_or_default(),
                 miner.name
             ));
-        }
-        if !miner.scope.is_empty() || !miner.config.is_empty() {
-            warnings.push(
-                "the scope and settings are stored but no source applies them yet, so `miner run` refuses this miner"
-                    .to_string(),
-            );
         }
         let credential = match &miner.credential {
             Some(c) => Some(CredentialView {

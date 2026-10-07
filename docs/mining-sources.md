@@ -107,26 +107,34 @@ next job continues from the cursor.
 
 ```sh
 memcastle sources                        # what can be mined, and what has been
-memcastle mine ~/project                 # a directory
-memcastle mine --source pi               # Pi session history, from its default location (once installed, below)
-memcastle mine --source pi --locator /backups/pi/sessions
-memcastle mine --source pi --full
-memcastle mine --source opencode         # OpenCode session history, through the `opencode` command (once installed)
+memcastle mine ~/project                 # a directory (the shorthand for `memcastle mine directory ~/project`)
+memcastle mine pi                        # Pi session history, from its default location (once installed, below)
+memcastle mine pi /backups/pi/sessions
+memcastle mine pi dir=/work/app --full
+memcastle mine opencode since=2026-09 dir=/path/to/workspace   # OpenCode session history (once installed)
 ```
+
+The first word is a source, and what follows is that source's own: at most one place to read, then `key=value` options
+that the source declares (`memcastle sources` lists them; an unknown key is refused before anything is queued).
+A word that is not shaped like a source name (`.`, `~/project`, `./pi`) is a directory.
+See [`mine`](cli.md#mine) for the whole grammar.
 
 `memcastle sources` (`GET /api/sources`) lists the adapters (built in and installed, with their state), then each source
 that has been mined with its document count, last job and last run.
-Over HTTP, a source job is `{"type": "mine", "source": "pi", "locator": "...", "full": false}` on
-`POST /api/jobs`, and over MCP `memcastle_mine` takes `source`, `locator` and `full` beside `path` and `wing`.
+Over HTTP, a source job is `{"type": "mine", "source": "pi", "locator": "...", "options": {"since": "2026-09"},
+"full": false}`
+on `POST /api/jobs`, and over MCP `memcastle_mine` takes `source`, `locator`, `options` and `full` beside `path` and `wing`.
+The command line's grammar is only a way to type that request: the daemon, REST and MCP take the resolved source,
+place and options.
 Mining is a write, so a [read-only or disabled session](memory-modes.md) cannot start it.
 
 ### Remembering what to mine
 
-`memcastle mine` names a place every time.
+`memcastle mine` names a source and where to read every time.
 A **miner** is a named definition of one, kept as `[[miners]]` in the configuration file:
 a source, a locator, a scope, a trigger and a reference to a credential
 ([Configuration](configuration.md#miners), [`memcastle miner`](cli.md#miner)).
-`memcastle miner run <name>` submits the same job `mine` would,
+`memcastle miner run <name>` submits the same job `mine` would, with the miner's scope and settings as the options,
 so a miner continues from the cursor its source already has.
 The cursor belongs to the source, which is the `source` and `locator`, and not to the miner:
 renaming, disabling, re-scoping or removing a miner never loses it or what it mined.
@@ -169,7 +177,8 @@ and named by that path, so `wing/files/src/lib.rs` addresses it.
 ### `pi`
 
 The conversation history of the [Pi](https://github.com/badlogic/pi-mono) coding agent, read straight from its session
-files: `~/.pi/agent/sessions/<working directory>/<session>.jsonl`, or the folder named by `--locator`.
+files: `~/.pi/agent/sessions/<working directory>/<session>.jsonl`,
+or the folder you name as the place to read (`memcastle mine pi <folder>`).
 It works on sessions of any age and with no Pi process running.
 This is how Pi's *history* gets into MemCastle; the live integration (`integrations/pi/`) is a separate thing that talks
 to the daemon over MCP and decides *when* to ask for mining, and never reads these files itself.
@@ -178,7 +187,7 @@ It ships with your MemCastle and is installed already: turn it on, and mine it:
 
 ```sh
 memcastle source enable pi
-memcastle mine --source pi
+memcastle mine pi
 ```
 
 A build that was not installed from a release (a checkout, `cargo install`) has no bundle.
@@ -193,9 +202,21 @@ memcastle source install sources/pi --enable
 Installing it from a registry or a directory lists what the source asks for and needs your consent to exactly that;
 `memcastle source show pi` lists the same for the bundled one, which is enabled without it.
 It asks for read-only access to the folder it is asked to mine and to `~/.pi/agent/sessions`,
-and the one environment variable `HOME` (to find that folder when no `--locator` is given).
+and the one environment variable `HOME` (to find that folder when no place is given).
 It asks for no network, runs no program, writes no file and needs no credentials.
 `memcastle source test sources/pi` runs its conformance cases, and CI does the same on every change.
+
+Two options narrow what is read.
+`since=2026-09` keeps the sessions whose file was modified at or after the date,
+and `dir=/work/app` keeps the sessions that
+were started in that working directory (read from each session's header).
+A `dir` may be a pattern: `*` matches any run of characters, `/` included,
+so `'dir=/work/*'` is every working directory under `/work`.
+The path is cleaned up the way Pi records it, so a trailing slash, a `.` or a `..` makes no difference, and
+`memcastle mine` resolves links in the part that exists before it reaches the daemon.
+A session file with no readable header has no directory, so a `dir` never selects it.
+`dir` is part of the source's identity, so every directory has a cursor of its own;
+`since` only narrows and shares the source's cursor.
 
 Each session is one document, identified by its path under the sessions folder (`<working directory>/<session file>`),
 filed in the wing `pi` (or the one you give), in a room named after the session's working directory, and named by its
@@ -233,7 +254,7 @@ It ships with MemCastle like `pi` (or install it from a checkout with `memcastle
 
 ```sh
 memcastle source enable opencode
-memcastle mine --source opencode
+memcastle mine opencode
 ```
 
 Installing it from a registry or a directory lists what the source asks for and needs your consent to exactly that;
@@ -269,8 +290,21 @@ Discovery asks `opencode db` for the sessions whose `time_updated` is past the c
 has written to since is read again and one that has not is not.
 A session that grew files only its new tail, and renaming a session changes none of what is already filed.
 A session with no messages is skipped, and is read again when it gets some.
-`--locator` is only a name for the history being mined; without one, the source is identified by the database path
-`opencode db path` prints, so a moved `XDG_DATA_HOME` is a different source with a cursor of its own.
+The place to read (`memcastle mine opencode <name>`) is only a name for the history being mined; without one,
+the source is
+identified by the database path `opencode db path` prints,
+so a moved `XDG_DATA_HOME` is a different source with a cursor of its own.
+
+Two options narrow what is read.
+`since=2026-09` keeps the sessions whose `time_updated` is at or after the date,
+and `dir=/path/to/workspace` keeps the sessions
+whose recorded project directory is that path, or matches it when it holds a `*` (any run of characters, `/` included:
+`'dir=/work/*'` is every project under `/work`).
+Both sides are compared without a trailing slash and with `.` and `..` resolved, so how the path is spelled makes no difference.
+Quote a pattern in a shell, which would otherwise expand the star itself.
+`dir` selects a different slice of the history,
+so it is part of the source's identity and every directory has a cursor of its own;
+`since` only narrows, so it shares the cursor of the unfiltered source (`--full` reads back past it).
 
 Limits to know about:
 

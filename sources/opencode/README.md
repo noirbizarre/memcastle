@@ -22,7 +22,7 @@ part of this component or of MemCastle.
 PATH="$PWD/sources/opencode/fixtures/bin:$PATH" memcastle source test sources/opencode
 memcastle source package sources/opencode                # sources/opencode/dist/opencode-0.1.0.tar.gz
 memcastle source install sources/opencode/dist/opencode-0.1.0.tar.gz --enable
-memcastle mine --source opencode
+memcastle mine opencode                       # or: memcastle mine opencode since=2026-09 dir=/path/to/workspace
 ```
 
 The build needs the `wasm32-wasip2` target (`rustup target add wasm32-wasip2`).

@@ -8,14 +8,16 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::{SourceCapabilities, sha256_hex};
+use std::collections::BTreeMap;
+
+use super::{OptionKind, OptionSpec, SourceCapabilities, sha256_hex};
 
 /// The version of the source contract (the WIT world `memcastle:source`) this MemCastle implements.
 ///
 /// While the major version is `0`, a source built for `0.N` runs only on a host that implements `0.N`; from `1.0` a
 /// source runs on any host of the same major version whose minor is at least the source's. A patch version is
 /// documentation only and never affects compatibility. See [`contract_compatibility`].
-pub const CONTRACT_VERSION: &str = "0.3.0";
+pub const CONTRACT_VERSION: &str = "0.4.0";
 
 /// What a source package declares about itself: `memcastle-source.toml`.
 ///
@@ -28,7 +30,7 @@ pub struct SourceManifest {
     /// not know is refused as incompatible, so a manifest that means something new is never half-understood.
     #[serde(default = "default_format")]
     pub format: u32,
-    /// Identity: the name users give as `--source`, its version and a line saying what it reads.
+    /// Identity: the name users give to `memcastle mine`, its version and a line saying what it reads.
     pub source: ManifestSource,
     /// Which contract and which MemCastle versions it was built for.
     pub compatibility: Compatibility,
@@ -42,12 +44,42 @@ pub struct SourceManifest {
     /// Resource ceilings it asks for, clamped by the host's own.
     #[serde(default)]
     pub limits: ResourceLimits,
+    /// The options a run of it accepts, by key: `memcastle mine <name> key=value`. Not permissions, so they are no
+    /// part of what a user consents to, and a source that declares none accepts none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub options: BTreeMap<String, ManifestOption>,
     /// How `memcastle source build` produces the component. Development-time only: the daemon never runs it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build: Option<BuildSection>,
     /// Where `memcastle source test` finds its conformance cases. Development-time only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub test: Option<TestSection>,
+}
+
+/// `[options.<name>]`: one option a source accepts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManifestOption {
+    /// One line saying what the option does.
+    pub description: String,
+    /// What its value looks like: `string` (the default), `path` or `date`.
+    #[serde(default, rename = "type")]
+    pub kind: OptionKind,
+}
+
+impl SourceManifest {
+    /// The options this source declares, in key order, as the daemon checks a run against them and a person reads them.
+    #[must_use]
+    pub fn option_specs(&self) -> Vec<OptionSpec> {
+        self.options
+            .iter()
+            .map(|(name, option)| OptionSpec {
+                name: name.clone(),
+                description: option.description.clone(),
+                kind: option.kind,
+            })
+            .collect()
+    }
 }
 
 /// `[source]`.
@@ -823,11 +855,12 @@ mod tests {
 
     #[test]
     fn contracts_are_compatible_by_minor_before_one_point_zero() {
-        assert!(contract_compatibility("0.3").is_ok());
-        assert!(contract_compatibility("0.3.7").is_ok());
+        assert!(contract_compatibility("0.4").is_ok());
+        assert!(contract_compatibility("0.4.7").is_ok());
         assert!(contract_compatibility("0.1").is_err());
         assert!(contract_compatibility("0.2").is_err());
-        assert!(contract_compatibility("0.4").is_err());
+        assert!(contract_compatibility("0.3").is_err());
+        assert!(contract_compatibility("0.5").is_err());
         assert!(contract_compatibility("0.0").is_err());
         assert!(contract_compatibility("1.1").is_err());
         assert!(contract_compatibility("nonsense").is_err());
@@ -924,7 +957,7 @@ mod tests {
             "digest": "d",
             "manifest": {
                 "source": {"name": "x", "version": "1.0.0", "description": "x"},
-                "compatibility": {"contract": "0.3", "memcastle": ">=0.1"}
+                "compatibility": {"contract": "0.4", "memcastle": ">=0.1"}
             },
             "installed_at": "2026-01-01T00:00:00Z",
             "updated_at": "2026-01-01T00:00:00Z"

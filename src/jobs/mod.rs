@@ -759,11 +759,21 @@ impl Scheduler {
             matches!(job.kind, JobKind::Mine { .. } | JobKind::Checkpoint { .. });
         let outcome = match job.kind.clone() {
             JobKind::Demo { steps } => demo::run(&ctx, &mut job, demo::DemoParams { steps }).await,
-            JobKind::Mine { source, wing, full } => {
+            JobKind::Mine {
+                source,
+                wing,
+                full,
+                options,
+            } => {
                 crate::mining::run(
                     &ctx,
                     &mut job,
-                    crate::mining::MiningParams { source, wing, full },
+                    crate::mining::MiningParams {
+                        source,
+                        wing,
+                        full,
+                        options,
+                    },
                 )
                 .await
             }

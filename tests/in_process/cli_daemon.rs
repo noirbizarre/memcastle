@@ -168,6 +168,115 @@ async fn mining_a_relative_path_works_when_the_daemon_runs_somewhere_else() {
     daemon.shutdown().await;
 }
 
+/// `memcastle mine <args>` from `cwd` against `daemon`, as the job it submitted.
+async fn mine_job(daemon: &TestDaemon, cwd: &std::path::Path, args: &[&str]) -> Job {
+    let output = memcastle(daemon)
+        .current_dir(cwd)
+        .arg("mine")
+        .args(args)
+        .output()
+        .await
+        .expect("run memcastle");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("the job as JSON")
+}
+
+#[tokio::test]
+async fn mining_the_directory_source_by_name_is_the_same_job_as_the_path_shorthand() {
+    let daemon = TestDaemon::start().await;
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(project.path().join("notes.txt"), "remember the milk").unwrap();
+
+    for args in [&["directory", "."][..], &["."][..]] {
+        let job = mine_job(&daemon, project.path(), args).await;
+        let JobKind::Mine {
+            source: MiningSource::Directory { path },
+            options,
+            ..
+        } = &job.kind
+        else {
+            panic!("expected a directory mine job, got {:?}", job.kind);
+        };
+        assert!(path.is_absolute(), "{args:?}: {path:?}");
+        assert!(options.is_empty(), "{args:?}");
+    }
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn key_value_arguments_reach_the_job_as_options() {
+    let daemon = TestDaemon::start().await;
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(project.path().join("notes.txt"), "remember the milk").unwrap();
+
+    for args in [
+        &["directory", ".", "since=2026-09"][..],
+        &[".", "since=2026-09"][..],
+        // Order is free: the place may come after the options.
+        &["directory", "since=2026-09", "."][..],
+    ] {
+        let job = mine_job(&daemon, project.path(), args).await;
+        let JobKind::Mine { options, .. } = &job.kind else {
+            panic!("expected a mine job, got {:?}", job.kind);
+        };
+        assert_eq!(options["since"], "2026-09", "{args:?}");
+    }
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn an_unknown_option_is_refused_by_the_daemon_and_names_what_is_accepted() {
+    let daemon = TestDaemon::start().await;
+    let output = memcastle(&daemon)
+        .args(["mine", "directory", ".", "dates=2026-09"])
+        .output()
+        .await
+        .expect("run memcastle");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unknown option") && stderr.contains("since"),
+        "{stderr}"
+    );
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_word_that_is_neither_a_source_nor_a_directory_lists_the_sources() {
+    let daemon = TestDaemon::start().await;
+    let output = memcastle(&daemon)
+        .args(["mine", "no-such-thing"])
+        .output()
+        .await
+        .expect("run memcastle");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("neither a source nor a directory") && stderr.contains("directory"),
+        "{stderr}"
+    );
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_old_source_and_locator_flags_are_gone() {
+    let daemon = TestDaemon::start().await;
+    let output = memcastle(&daemon)
+        .args(["mine", "--source", "pi"])
+        .output()
+        .await
+        .expect("run memcastle");
+    assert!(
+        !output.status.success(),
+        "`--source` was removed: the source is the first word"
+    );
+    daemon.shutdown().await;
+}
+
 #[tokio::test]
 async fn a_piped_status_against_a_healthy_daemon_is_json_without_asking_and_exits_zero() {
     let daemon = TestDaemon::start().await;

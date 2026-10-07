@@ -117,6 +117,45 @@ fn default_enabled() -> bool {
 }
 
 impl MinerDefinition {
+    /// What a run of this miner passes to its source as options: the `scope`, then the `config`, flattened to the
+    /// strings every client sends (`memcastle mine <source> key=value`), so a miner run and the same run by hand are the
+    /// same request.
+    ///
+    /// A scalar is its text, a list of strings is comma-joined. A key in both tables is refused rather than letting one
+    /// quietly win, and so is a nested table, which has no one-string form.
+    ///
+    /// # Errors
+    ///
+    /// A sentence naming the key and what to change.
+    pub fn options(&self) -> Result<super::Options, String> {
+        let mut options = super::Options::new();
+        for (table, entries) in [("scope", &self.scope), ("config", &self.config)] {
+            for (key, value) in entries {
+                let text = match value {
+                    Value::String(text) => text.clone(),
+                    Value::Bool(flag) => flag.to_string(),
+                    Value::Number(number) => number.to_string(),
+                    Value::Array(items) if items.iter().all(Value::is_string) => items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    Value::Null | Value::Array(_) | Value::Object(_) => {
+                        return Err(format!(
+                            "`{table}.{key}` is not a string, number, boolean or list of strings, so a run cannot pass it to the source"
+                        ));
+                    }
+                };
+                if options.insert(key.clone(), text).is_some() {
+                    return Err(format!(
+                        "`{key}` is set in both `scope` and `config`; a source takes it once, so keep one"
+                    ));
+                }
+            }
+        }
+        Ok(options)
+    }
+
     /// Check what can be checked without knowing the source: names, shapes and the rules that keep a secret out of
     /// the file. What needs the source (is it installed, does its locator make sense) is checked at activation.
     ///

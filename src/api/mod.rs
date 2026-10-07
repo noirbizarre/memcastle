@@ -489,11 +489,16 @@ async fn submit_job(
 ) -> Result<impl IntoResponse, ApiError> {
     let body = parse_submit_body(&raw)?;
     let job = match body.kind {
-        JobKind::Mine { source, wing, full } => {
+        JobKind::Mine {
+            source,
+            wing,
+            full,
+            options,
+        } => {
             // Gated as a write inside `submit_mine`: mining files drawers.
             state
                 .app
-                .submit_mine(source, wing, full, &body.requested_by, mode)
+                .submit_mine(source, wing, full, options, &body.requested_by, mode)
                 .await?
         }
         JobKind::Demo { steps } => state.app.submit_demo(steps, &body.requested_by).await?,

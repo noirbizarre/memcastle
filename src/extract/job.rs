@@ -281,6 +281,7 @@ mod tests {
                 },
                 wing: Some("docs".to_string()),
                 full: false,
+                options: Default::default(),
             },
             Priority::Background,
             "test",
@@ -297,6 +298,7 @@ mod tests {
                 },
                 wing: Some("docs".to_string()),
                 full: false,
+                options: Default::default(),
             },
         )
         .await

@@ -44,6 +44,8 @@ pub struct MiningParams {
     pub wing: Option<String>,
     /// Ignore the source's cursor and read everything again.
     pub full: bool,
+    /// What the run was asked beyond the source and where to read (`since`, `dir`).
+    pub options: crate::domain::Options,
 }
 
 /// Where a source comes from: built in, a local package, a bundled one or one from a registry (docs/adr/033,
@@ -56,7 +58,7 @@ pub use crate::domain::SourceOrigin;
 /// source is, so an older daemon's answer still reads.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AdapterInfo {
-    /// The name to give as `--source`.
+    /// The name to give to `memcastle mine`.
     pub name: String,
     /// What it reads.
     pub description: String,
@@ -87,6 +89,10 @@ pub struct AdapterInfo {
     /// layer, which is the one that can ask where credentials are kept; `None` for every other source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth: Option<crate::domain::SourceAuth>,
+    /// The options a run of it accepts (`memcastle mine <name> key=value`). Absent from an older daemon's answer, which
+    /// reads as accepting none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<crate::domain::OptionSpec>,
 }
 
 fn enabled() -> SourceState {
@@ -101,7 +107,12 @@ fn enabled() -> SourceState {
 /// Returns an error if the source is unknown or not enabled, the source cannot be reached or read, or a store
 /// write fails.
 pub async fn run(ctx: &JobContext, job: &mut Job, params: MiningParams) -> Result<JobOutcome> {
-    let MiningParams { source, wing, full } = params;
+    let MiningParams {
+        source,
+        wing,
+        full,
+        options,
+    } = params;
     // A directory job and a `directory` source job are the same source: one wire form predates the other.
     let (name, locator) = match &source {
         MiningSource::Directory { path } => {
@@ -111,6 +122,7 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: MiningParams) -> Resul
     };
     let request = pipeline::Request {
         locator: locator.as_deref(),
+        options: &options,
         wing: wing.as_deref(),
         full,
     };
@@ -149,6 +161,7 @@ mod tests {
                 },
                 wing: Some("docs".to_string()),
                 full: false,
+                options: Default::default(),
             },
             Priority::Background,
             requested_by,
@@ -158,10 +171,21 @@ mod tests {
     }
 
     fn params_of(job: &Job) -> MiningParams {
-        let JobKind::Mine { source, wing, full } = job.kind.clone() else {
+        let JobKind::Mine {
+            source,
+            wing,
+            full,
+            options,
+        } = job.kind.clone()
+        else {
             unreachable!("every test job is a mine job")
         };
-        MiningParams { source, wing, full }
+        MiningParams {
+            source,
+            wing,
+            full,
+            options,
+        }
     }
 
     async fn run_job(
@@ -320,6 +344,7 @@ mod tests {
             },
             wing: Some("0b8c1e8e-7a52-4a1c-9d0e-6f0a3b2c1d4e".into()),
             full: false,
+            options: Default::default(),
         };
 
         let outcome = run_job(&store, &mut job, MiningConfig::default()).await;
@@ -346,6 +371,7 @@ mod tests {
             },
             wing: Some("docs".into()),
             full: true,
+            options: Default::default(),
         };
         run_job(&store, &mut job, MiningConfig::default())
             .await
@@ -753,6 +779,7 @@ mod tests {
             },
             wing: None,
             full: true,
+            options: Default::default(),
         };
         assert_eq!(
             run_job(&store, &mut full, MiningConfig::default())
@@ -774,6 +801,7 @@ mod tests {
                 },
                 wing: None,
                 full: false,
+                options: Default::default(),
             },
             Priority::Background,
             "test",
@@ -843,12 +871,12 @@ mod tests {
             }
         }
 
-        fn identify(&self, _locator: Option<&str>) -> Result<crate::domain::SourceRef> {
-            Ok(crate::domain::SourceRef {
-                source: "transcript".into(),
-                account: None,
-                locator: "memory".into(),
-            })
+        fn identify(
+            &self,
+            _locator: Option<&str>,
+            _options: &crate::domain::Options,
+        ) -> Result<crate::domain::SourceRef> {
+            Ok(crate::domain::SourceRef::new("transcript", None, "memory"))
         }
 
         fn default_wing(&self, _source: &crate::domain::SourceRef) -> String {
@@ -934,6 +962,7 @@ mod tests {
                 },
                 wing: None,
                 full: false,
+                options: Default::default(),
             },
             Priority::Background,
             "test",
@@ -942,6 +971,7 @@ mod tests {
         let ctx = JobContext::new(job.id, JobControl::default(), store.clone()).with_mining(mining);
         let request = pipeline::Request {
             locator: None,
+            options: &Default::default(),
             wing: None,
             full: false,
         };

@@ -7,7 +7,7 @@ description = "the text files under a directory, one document per file (the refe
 
 [compatibility]
 # The contract (wit/memcastle-source.wit) this component was built against, and the MemCastle versions it runs on.
-contract = "0.3"
+contract = "0.4"
 memcastle = ">=0.2"
 
 [capabilities]
@@ -18,6 +18,11 @@ needs_credentials = false
 # Nothing is granted that is not listed. This source reads the directory it is asked to mine, and nothing else.
 [permissions.filesystem]
 read = ["locator"]
+
+# What `memcastle mine directory-wasm <path> key=value` accepts. Options are not permissions: they ask for nothing.
+[options.since]
+type = "date"
+description = "only files modified at or after this date (`2026-09`, `2026-09-14` or an RFC 3339 time)"
 
 [build]
 # `--target-dir` pins the output where `output` says it is, whatever CARGO_TARGET_DIR the builder has set.

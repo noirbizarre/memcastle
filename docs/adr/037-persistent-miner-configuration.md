@@ -127,3 +127,10 @@ Six decisions follow, and each has an alternative that is easier for one of the 
 It names nothing, so the file still holds no secret, and it is shown as `oauth` with whether the source is signed in.
 A miner for a source that declares a sign-in is unavailable until the source is signed in, whatever its `credential` says.
 An `env` or `file` credential is still only checked and not yet handed to a source.
+
+## Note, 2026-10-07: scope and settings are applied
+
+`miner run` now passes the miner's scope and `config` to its source as the options of the run, and `directory` no longer
+refuses to be enabled with them ([ADR-042](042-mine-takes-a-source-and-its-options.md)).
+A key the source does not declare makes the miner not runnable.
+Where this record says that no adapter applies them, that was true until contract `0.4.0`.

@@ -20,7 +20,7 @@ use wasmtime::{Config, Engine, Store, Trap};
 
 use crate::config::MiningConfig;
 use crate::domain::{
-    AccessTokens, Candidate, CanonicalDocument, Cursor, Permissions, RawDocument, Segment,
+    AccessTokens, Candidate, CanonicalDocument, Cursor, Options, Permissions, RawDocument, Segment,
     SourceCapabilities, SourceKind, SourceManifest, SourceRef, sha256_hex,
 };
 use crate::error::{Error, Result};
@@ -322,6 +322,11 @@ fn to_wit(source: &SourceRef) -> wit::SourceRef {
         source: source.source.clone(),
         account: source.account.clone(),
         locator: source.locator.clone(),
+        options: source
+            .options
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
     }
 }
 
@@ -330,6 +335,7 @@ fn from_wit(source: wit::SourceRef) -> SourceRef {
         source: source.source,
         account: source.account,
         locator: source.locator,
+        options: source.options.into_iter().collect(),
     }
 }
 
@@ -356,14 +362,18 @@ impl SourceAdapter for WasmAdapter {
         self.inner.capabilities
     }
 
-    fn identify(&self, locator: Option<&str>) -> Result<SourceRef> {
+    fn identify(&self, locator: Option<&str>, options: &Options) -> Result<SourceRef> {
         self.blocking(|inner| {
             // The host hands over the canonical path of a directory it is about to grant, so that `identify` is the
             // one place two spellings of a place become one source, as for a built-in adapter.
             let locator = locator.map(|locator| inner.grant_locator(locator));
             inner
                 .call(true, locator.as_deref(), |store, guest| {
-                    guest.call_identify(store, locator.as_deref())
+                    let options: Vec<(String, String)> = options
+                        .iter()
+                        .map(|(key, value)| (key.clone(), value.clone()))
+                        .collect();
+                    guest.call_identify(store, locator.as_deref(), &options)
                 })
                 .map(from_wit)
         })

@@ -14,8 +14,8 @@ to ask for mining.
 memcastle source test sources/pi                         # build, then run fixtures/ in the daemon's own sandbox
 memcastle source package sources/pi                      # sources/pi/dist/pi-0.1.0.tar.gz
 memcastle source install sources/pi/dist/pi-0.1.0.tar.gz --enable
-memcastle mine --source pi                               # ~/.pi/agent/sessions
-memcastle mine --source pi --locator /backups/pi/sessions
+memcastle mine pi                                        # ~/.pi/agent/sessions
+memcastle mine pi /backups/pi/sessions                 # or: memcastle mine pi since=2026-09 dir=/work/app
 ```
 
 The build needs the `wasm32-wasip2` target (`rustup target add wasm32-wasip2`).

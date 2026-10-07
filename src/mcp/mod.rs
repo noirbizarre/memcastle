@@ -366,6 +366,11 @@ struct MineArgs {
     full: bool,
     /// The wing to file mined drawers under. Defaults to the directory name, or to the source's own default.
     wing: Option<String>,
+    /// Options for the source, as text: for `opencode`, `{"since": "2026-09", "dir": "/work/app"}`. Each source
+    /// declares the keys it accepts (`GET /api/sources` lists them); an unknown key is refused. `since` (a date) is
+    /// accepted by `directory`, `pi` and `opencode`.
+    #[serde(default)]
+    options: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -734,7 +739,7 @@ impl McpTools {
         let job = match source {
             Ok(source) => {
                 self.app
-                    .submit_mine(source, args.wing, args.full, CHANNEL, mode)
+                    .submit_mine(source, args.wing, args.full, args.options, CHANNEL, mode)
                     .await
             }
             Err(error) => Err(error),

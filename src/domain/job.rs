@@ -5,13 +5,14 @@
 //! the *legal transitions* — claiming, leasing, and execution are the
 //! scheduler's concern, not the domain's.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{CheckpointPayload, JobId};
+use super::{CheckpointPayload, JobId, Options};
 
 /// A job's place in its lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,6 +146,11 @@ pub enum JobKind {
         /// reading, not duplicates. Absent from the wire when `false`.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         full: bool,
+        /// What this run was asked beyond the source and where to read (`since`, `dir`): validated against what the
+        /// source declares before the job is queued, and checked again by the source's own `identify`. A sibling of
+        /// `wing` and `full` rather than part of [`MiningSource`], so a job queued before options existed still reads.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        options: Options,
     },
     /// Persist an already-classified batch of checkpoint items — durable,
     /// resumable writes only; classification into destination buckets
@@ -855,6 +861,36 @@ mod tests {
     }
 
     #[test]
+    fn a_mine_job_carries_its_options_on_the_wire_and_one_queued_before_them_still_reads() {
+        let kind = JobKind::Mine {
+            source: MiningSource::Named {
+                source: "opencode".into(),
+                locator: None,
+            },
+            wing: None,
+            full: false,
+            options: Options::from([
+                ("since".to_string(), "2026-09".to_string()),
+                ("dir".to_string(), "/work/app".to_string()),
+            ]),
+        };
+        let json = serde_json::to_value(&kind).unwrap();
+        assert_eq!(
+            json["options"],
+            serde_json::json!({"dir": "/work/app", "since": "2026-09"})
+        );
+        let back: JobKind = serde_json::from_value(json).unwrap();
+        assert!(matches!(back, JobKind::Mine { ref options, .. } if options.len() == 2));
+
+        // A job already on disk has no `options`: it must read as having none, or a daemon upgrade would orphan it.
+        let old: JobKind = serde_json::from_value(
+            serde_json::json!({"type": "mine", "source": "pi", "wing": null}),
+        )
+        .unwrap();
+        assert!(matches!(old, JobKind::Mine { ref options, .. } if options.is_empty()));
+    }
+
+    #[test]
     fn mine_job_kind_serializes_to_the_same_wire_shape_as_before_the_source_seam() {
         let kind = JobKind::Mine {
             source: MiningSource::Directory {
@@ -862,6 +898,7 @@ mod tests {
             },
             wing: Some("docs".to_string()),
             full: false,
+            options: Default::default(),
         };
 
         // `MiningSource` must stay invisible on the wire: existing callers
@@ -882,6 +919,7 @@ mod tests {
                 source: MiningSource::Directory { .. },
                 wing: Some(ref w),
                 full: false,
+                ..
             } if w == "docs"
         ));
     }
@@ -921,6 +959,7 @@ mod tests {
             },
             wing: None,
             full: true,
+            options: Default::default(),
         };
         let json = serde_json::to_value(&kind).unwrap();
         assert_eq!(

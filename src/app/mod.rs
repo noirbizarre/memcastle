@@ -26,8 +26,8 @@ use crate::config::DedupConfig;
 use crate::config::MiningConfig;
 use crate::domain::{
     CheckpointDestination, CheckpointPayload, Drawer, DrawerId, FactMutation, Job, JobId, JobKind,
-    JobStatus, MemoryMode, MiningSource, NameKind, Priority, Provenance, Source, SourceKind,
-    validate_name,
+    JobStatus, MemoryMode, MiningSource, NameKind, Options, Priority, Provenance, Source,
+    SourceKind, validate_name,
 };
 use crate::embed::Embeddings;
 use crate::error::{Error, Result};
@@ -675,11 +675,12 @@ impl AppServices {
         source: MiningSource,
         wing: Option<String>,
         full: bool,
+        options: Options,
         requested_by: &str,
         mode: MemoryMode,
     ) -> Result<Job> {
         Self::require_write(mode, "mine")?;
-        let source = self.checked_mining_source(source).await?;
+        let source = self.checked_mining_source(source, &options).await?;
         // Up front, like the path: a bad wing name is a 400 at submission,
         // not a job that fails once it starts. A wing derived from the
         // directory name is left alone, since the caller did not choose it.
@@ -688,7 +689,12 @@ impl AppServices {
         }
         self.scheduler
             .submit(
-                JobKind::Mine { source, wing, full },
+                JobKind::Mine {
+                    source,
+                    wing,
+                    full,
+                    options,
+                },
                 Priority::Background,
                 requested_by,
             )
@@ -697,7 +703,14 @@ impl AppServices {
 
     /// Validate a mining source at submission, and give the `directory`
     /// source adapter its one canonical form.
-    async fn checked_mining_source(&self, source: MiningSource) -> Result<MiningSource> {
+    ///
+    /// The run's option keys are checked against what the source declares, so that a typo is a 4xx at the request and
+    /// not a job that fails once it starts (or one that ignores it).
+    async fn checked_mining_source(
+        &self,
+        source: MiningSource,
+        options: &Options,
+    ) -> Result<MiningSource> {
         let path = match source {
             MiningSource::Directory { path } => path,
             MiningSource::Named { source, locator } if source == "directory" => {
@@ -712,10 +725,24 @@ impl AppServices {
             MiningSource::Named { source, locator } => {
                 // Unknown, disabled and unavailable sources are refused here, as a 4xx at the request, rather
                 // than as a job that fails once it starts.
-                crate::mining::registry::ensure_minable(&self.store, &self.mining, &source).await?;
+                crate::mining::registry::ensure_minable(
+                    &self.store,
+                    &self.mining,
+                    &source,
+                    options,
+                )
+                .await?;
                 return Ok(MiningSource::Named { source, locator });
             }
         };
+        // The built-in source's own options (`since`), checked the same way a named source's are.
+        crate::mining::registry::ensure_minable(
+            &self.store,
+            &self.mining,
+            crate::mining::adapters::directory::NAME,
+            options,
+        )
+        .await?;
         // Validated here, like `submit_repair`'s `based_on_job`: a relative path
         // would be resolved against the *daemon's* working directory, not the
         // caller's, and mine the wrong tree or fail minutes later as a job.
@@ -1704,6 +1731,7 @@ mod tests {
                 },
                 None,
                 false,
+                Default::default(),
                 "test",
                 MemoryMode::Full,
             )
@@ -1744,6 +1772,7 @@ mod tests {
                         },
                         Some(bad.into()),
                         false,
+                        Default::default(),
                         "test",
                         MemoryMode::Full
                     )
@@ -1914,7 +1943,9 @@ mod tests {
     async fn mining_is_a_write_so_read_only_and_disabled_sessions_cannot_submit_it() {
         let app = test_app().await;
         for mode in [MemoryMode::ReadOnly, MemoryMode::Disabled] {
-            let result = app.submit_mine(anything(), None, false, "test", mode).await;
+            let result = app
+                .submit_mine(anything(), None, false, Default::default(), "test", mode)
+                .await;
             assert_mode_forbidden(&result, mode);
         }
         assert!(
@@ -1924,9 +1955,16 @@ mod tests {
                 .is_empty(),
             "a rejected mine must not leave a job behind"
         );
-        app.submit_mine(anything(), None, false, "test", MemoryMode::Full)
-            .await
-            .expect("full-mode mine is accepted");
+        app.submit_mine(
+            anything(),
+            None,
+            false,
+            Default::default(),
+            "test",
+            MemoryMode::Full,
+        )
+        .await
+        .expect("full-mode mine is accepted");
     }
 
     fn anything() -> MiningSource {
@@ -1947,6 +1985,7 @@ mod tests {
                 },
                 None,
                 true,
+                Default::default(),
                 "test",
                 MemoryMode::Full,
             )
@@ -1962,6 +2001,7 @@ mod tests {
                 },
                 None,
                 false,
+                Default::default(),
                 "test",
                 MemoryMode::Full,
             )
@@ -1987,6 +2027,7 @@ mod tests {
                 },
                 None,
                 false,
+                Default::default(),
                 "test",
                 MemoryMode::Full,
             )
@@ -2011,6 +2052,7 @@ mod tests {
                     },
                     None,
                     false,
+                    Default::default(),
                     "test",
                     MemoryMode::Full,
                 )

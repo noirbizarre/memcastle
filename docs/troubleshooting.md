@@ -288,7 +288,7 @@ Check the job's `result`:
 `memcastle job show <id>` reports how many `documents` were handled, how many were `unchanged` (already filed, so
 skipped), `skipped` (not readable) and whether the run was `truncated` at the document limit, in which case run it again.
 A source that was mined before remembers where it stopped, so a second `mine` that reports `"documents": 0` has nothing
-new to read; `memcastle mine --full` reads it from the beginning.
+new to read; `memcastle mine <source> --full` reads it from the beginning.
 Skipped directories, large files and non-UTF-8 files are listed in [What mining reads](storage.md#what-mining-reads).
 The path given to `mine`, and the sessions directory of `pi`, are read by the daemon, so they must exist on the
 daemon's machine.
@@ -298,7 +298,7 @@ Over MCP and REST it must be absolute; the CLI makes it absolute for you.
 
 A source's stored cursor is not one its adapter can continue from, for example after a change to how that adapter keeps
 its place.
-Mine it again from the beginning with `memcastle mine --source <name> --full`: unchanged documents are recognised and
+Mine it again from the beginning with `memcastle mine <name> --full`: unchanged documents are recognised and
 skipped, so nothing is duplicated.
 
 ### `memcastle::source::*`
@@ -345,7 +345,7 @@ a relative `locator` for `directory`, and a key in `scope` or `config` that read
 The daemon keeps the last miners that were valid (`memcastle miner list` shows the error beside them) and will not
 write until the file is fixed: correct the entry it names, then `memcastle miner reload`.
 `not_runnable` and `disabled` come from `memcastle miner run`: `memcastle miner get <name>` says why the miner is not
-`ready`, and a miner with a `scope` or `config` is refused because no source applies them yet.
+`ready`, and a miner whose `scope` or `config` names a key its source does not declare is refused.
 A miner that never shows up in `memcastle miner list` after you edited the file by hand is in a file the daemon was not
 started from; `miner list` prints the path it reads.
 

@@ -233,7 +233,9 @@ async fn sessions_are_discovered_one_directory_down_and_only_jsonl_files_never_t
         .unwrap();
     }
     let adapter = adapter();
-    let source = adapter.identify(root.path().to_str()).unwrap();
+    let source = adapter
+        .identify(root.path().to_str(), &Default::default())
+        .unwrap();
 
     let found = adapter.discover(&source, &json!(null), 10).await.unwrap();
 
@@ -250,7 +252,9 @@ async fn a_blank_session_file_is_skipped_at_read_time() {
     let root = tempfile::tempdir().unwrap();
     write(root.path(), "a.jsonl", "  \n", 1_000);
     let adapter = adapter();
-    let source = adapter.identify(root.path().to_str()).unwrap();
+    let source = adapter
+        .identify(root.path().to_str(), &Default::default())
+        .unwrap();
     let found = adapter.discover(&source, &json!(null), 10).await.unwrap();
     assert!(
         adapter
@@ -265,7 +269,9 @@ async fn a_blank_session_file_is_skipped_at_read_time() {
 async fn a_read_session_carries_its_identity_provenance_and_start_time() {
     let tree = root().join("sources/pi/fixtures/pi-sessions/tree");
     let adapter = adapter();
-    let source = adapter.identify(tree.to_str()).unwrap();
+    let source = adapter
+        .identify(tree.to_str(), &Default::default())
+        .unwrap();
     let found = adapter.discover(&source, &json!(null), 100).await.unwrap();
     let candidate = found
         .candidates
@@ -314,7 +320,9 @@ async fn a_header_time_that_is_not_rfc_3339_does_not_fail_the_session() {
 "#;
     write(root.path(), "p/a.jsonl", body, 1_000);
     let adapter = adapter();
-    let source = adapter.identify(root.path().to_str()).unwrap();
+    let source = adapter
+        .identify(root.path().to_str(), &Default::default())
+        .unwrap();
     let found = adapter.discover(&source, &json!(null), 10).await.unwrap();
 
     let raw = adapter
@@ -330,7 +338,7 @@ async fn a_header_time_that_is_not_rfc_3339_does_not_fail_the_session() {
 async fn a_locator_that_is_not_a_directory_is_refused_and_the_default_is_pis_own_directory() {
     let adapter = adapter();
     let error = adapter
-        .identify(Some("/nonexistent/pi/sessions"))
+        .identify(Some("/nonexistent/pi/sessions"), &Default::default())
         .unwrap_err();
     assert!(
         error.to_string().contains("/nonexistent/pi/sessions"),
@@ -339,7 +347,7 @@ async fn a_locator_that_is_not_a_directory_is_refused_and_the_default_is_pis_own
 
     // With no locator the source looks where Pi keeps its sessions: it is found on a machine that has Pi and refused,
     // naming that place, on one that has not.
-    match adapter.identify(None) {
+    match adapter.identify(None, &Default::default()) {
         Ok(source) => assert!(
             source.locator.ends_with(".pi/agent/sessions"),
             "{}",
@@ -514,4 +522,192 @@ async fn the_installed_pi_source_mines_history_idempotently_with_provenance_and_
     assert_eq!(fixture.search("certificate revocation").await.len(), 1);
 
     fixture.daemon.shutdown().await;
+}
+
+fn options(pairs: &[(&str, &str)]) -> std::collections::BTreeMap<String, String> {
+    pairs
+        .iter()
+        .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+        .collect()
+}
+
+async fn found(adapter: &WasmAdapter, tree: &Path, pairs: &[(&str, &str)]) -> Vec<String> {
+    let source = adapter.identify(tree.to_str(), &options(pairs)).unwrap();
+    adapter
+        .discover(&source, &json!(null), 100)
+        .await
+        .unwrap()
+        .candidates
+        .into_iter()
+        .map(|c| c.external_id)
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dir_keeps_only_the_sessions_started_in_that_working_directory() {
+    let tree = root().join("sources/pi/fixtures/pi-sessions/tree");
+    let adapter = adapter();
+    let all = found(&adapter, &tree, &[]).await;
+    let project = found(&adapter, &tree, &[("dir", "/home/me/project")]).await;
+    let notes = found(&adapter, &tree, &[("dir", "/home/me/notes/")]).await;
+
+    assert!(
+        all.len() > project.len() && !project.is_empty(),
+        "{all:?} {project:?}"
+    );
+    assert!(
+        project.iter().all(|id| id.contains("project")),
+        "{project:?}"
+    );
+    assert_eq!(
+        notes.len(),
+        1,
+        "a trailing slash is the same directory: {notes:?}"
+    );
+    assert!(
+        found(&adapter, &tree, &[("dir", "/home/me")])
+            .await
+            .is_empty(),
+        "an exact match, not a prefix"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn each_dir_is_a_source_of_its_own_and_since_is_not() {
+    let tree = root().join("sources/pi/fixtures/pi-sessions/tree");
+    let adapter = adapter();
+    let identify =
+        |pairs: &[(&str, &str)]| adapter.identify(tree.to_str(), &options(pairs)).unwrap();
+
+    let plain = identify(&[]);
+    assert_ne!(
+        plain.id(),
+        identify(&[("dir", "/home/me/project")]).id(),
+        "one directory's run must not move another's cursor"
+    );
+    assert_ne!(
+        identify(&[("dir", "/home/me/project")]).id(),
+        identify(&[("dir", "/home/me/notes")]).id()
+    );
+    assert_eq!(
+        plain.id(),
+        identify(&[("since", "2026-09")]).id(),
+        "a narrowing filter continues the same cursor"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn since_leaves_out_sessions_not_modified_since_that_date() {
+    let tree = root().join("sources/pi/fixtures/pi-sessions/tree");
+    let adapter = adapter();
+    // The fixtures were checked out today, so a far past date keeps them and a far future one keeps none.
+    let all = found(&adapter, &tree, &[]).await;
+    assert_eq!(
+        found(&adapter, &tree, &[("since", "2000-01-01")]).await,
+        all
+    );
+    assert!(
+        found(&adapter, &tree, &[("since", "2999-01")])
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unknown_option_or_a_bad_date_is_refused_and_says_what_was_expected() {
+    let tree = root().join("sources/pi/fixtures/pi-sessions/tree");
+    let adapter = adapter();
+    let unknown = adapter
+        .identify(tree.to_str(), &options(&[("dates", "2026")]))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        unknown.contains("`dates`") && unknown.contains("`since`") && unknown.contains("`dir`"),
+        "{unknown}"
+    );
+    let bad = adapter
+        .identify(tree.to_str(), &options(&[("since", "last week")]))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        bad.contains("`last week`") && bad.contains("2026-09"),
+        "{bad}"
+    );
+    let empty = adapter
+        .identify(tree.to_str(), &options(&[("dir", " ")]))
+        .unwrap_err()
+        .to_string();
+    assert!(empty.contains("`dir`"), "{empty}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_star_in_dir_matches_any_run_of_characters_and_a_spelling_does_not_matter() {
+    let tree = root().join("sources/pi/fixtures/pi-sessions/tree");
+    let adapter = adapter();
+    let all = found(&adapter, &tree, &[]).await;
+    let project = found(&adapter, &tree, &[("dir", "/home/me/project")]).await;
+
+    // A session file with no header has no directory to match, so no `dir` takes it: the blank one is left out.
+    let with_a_header: Vec<String> = all
+        .iter()
+        .filter(|id| !id.ends_with("empty.jsonl"))
+        .cloned()
+        .collect();
+    assert_eq!(
+        found(&adapter, &tree, &[("dir", "/home/me/*")]).await,
+        with_a_header,
+        "every directory under /home/me"
+    );
+    assert_eq!(
+        found(&adapter, &tree, &[("dir", "/home/*/project")]).await,
+        project,
+        "a star in the middle"
+    );
+    assert_eq!(
+        found(&adapter, &tree, &[("dir", "*/pro*")]).await,
+        project,
+        "a pattern may start with a star"
+    );
+    assert!(
+        found(&adapter, &tree, &[("dir", "/home/me/x*")])
+            .await
+            .is_empty()
+    );
+    for spelling in [
+        "/home/me/project/",
+        "/home/me//project",
+        "/home/me/./project",
+        "/home/me/other/../project",
+    ] {
+        assert_eq!(
+            found(&adapter, &tree, &[("dir", spelling)]).await,
+            project,
+            "{spelling}"
+        );
+    }
+    let identify = |dir: &str| {
+        adapter
+            .identify(tree.to_str(), &options(&[("dir", dir)]))
+            .unwrap()
+            .id()
+    };
+    assert_eq!(
+        identify("/home/me/project/"),
+        identify("/home/me/project"),
+        "two spellings of one directory share a cursor"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dir_that_names_no_place_is_refused_rather_than_matching_nothing() {
+    let tree = root().join("sources/pi/fixtures/pi-sessions/tree");
+    let adapter = adapter();
+    let relative = adapter
+        .identify(tree.to_str(), &options(&[("dir", "work/app")]))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        relative.contains("not an absolute path") && relative.contains("`work/app`"),
+        "{relative}"
+    );
 }

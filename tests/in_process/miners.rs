@@ -219,7 +219,7 @@ async fn an_invalid_miner_is_refused_before_anything_is_written() {
             "a directory with a scope",
             "scoped",
             json!({ "source": "directory", "locator": dir.path(), "scope": { "groups": ["a"] } }),
-            "no scope or settings",
+            "unknown option `groups`",
         ),
         (
             "a credential that does not resolve",
@@ -564,7 +564,7 @@ async fn a_miner_that_cannot_run_says_why_and_is_not_run() {
         (StatusCode::CONFLICT, "memcastle::miner::disabled")
     );
 
-    // A miner a hand edit gave a scope the directory source cannot apply: running it would mine more than it says.
+    // A miner a hand edit gave a scope the directory source does not declare: running it would mine more than it says.
     let text = std::fs::read_to_string(&daemon.config_path).unwrap();
     std::fs::write(
         &daemon.config_path,
@@ -580,7 +580,10 @@ async fn a_miner_that_cannot_run_says_why_and_is_not_run() {
         (StatusCode::CONFLICT, "memcastle::miner::not_runnable")
     );
     assert!(
-        error["error"].as_str().unwrap().contains("no scope"),
+        error["error"]
+            .as_str()
+            .unwrap()
+            .contains("unknown option `groups`"),
         "{error}"
     );
 
@@ -588,6 +591,69 @@ async fn a_miner_that_cannot_run_says_why_and_is_not_run() {
     assert_eq!(
         (status, code(&error)),
         (StatusCode::NOT_FOUND, "memcastle::miner::not_found")
+    );
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_miners_scope_and_settings_are_the_options_of_its_run() {
+    let daemon = TestDaemon::start().await;
+    let dir = notes_dir();
+    // `since` is the one option the directory source declares, so a scope key by that name is a filter it applies; the
+    // file `notes_dir` writes is dated sixteen minutes into 1970.
+    let (status, created) = put(
+        &daemon,
+        "docs",
+        json!({ "source": "directory", "locator": dir.path(), "scope": { "since": "1970-01" } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+
+    let client = reqwest::Client::new();
+    let job: Job = client
+        .post(format!("{}/api/miners/docs/run", daemon.base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .expect("a job");
+    let done = wait_for_job_status(&client, &daemon.base_url, job.id, JobStatus::Completed).await;
+    let wire = serde_json::to_value(&done.kind).unwrap();
+    assert_eq!(
+        wire["options"],
+        json!({ "since": "1970-01" }),
+        "the run passes the scope on, as `memcastle mine directory <path> since=1970-01` would: {wire}"
+    );
+    assert_eq!(
+        done.result.as_ref().unwrap()["created"],
+        1,
+        "the file is dated 1970-01-01 00:16, after the scope's date, so it is still mined"
+    );
+
+    // A date in the far future filters the same file out: the scope is applied, not just carried. A second miner,
+    // because changing a scope's value would widen it, which the daemon refuses.
+    let (status, created) = put(
+        &daemon,
+        "later",
+        json!({ "source": "directory", "locator": dir.path(), "scope": { "since": "2999-01" } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let job: Job = client
+        .post(format!("{}/api/miners/later/run", daemon.base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .expect("a job");
+    let done = wait_for_job_status(&client, &daemon.base_url, job.id, JobStatus::Completed).await;
+    assert_eq!(
+        done.result.as_ref().unwrap()["documents"],
+        0,
+        "{:?}",
+        done.result
     );
     daemon.shutdown().await;
 }

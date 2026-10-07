@@ -70,6 +70,19 @@ pub fn validate(manifest: &SourceManifest, reserved: &[&str]) -> Result<()> {
     if let Err(reason) = contract_version(&manifest.compatibility.contract) {
         return Err(invalid(format!("compatibility.contract: {reason}")));
     }
+    for (key, option) in &manifest.options {
+        // The key is typed on a command line next to paths, so the CLI tells the two apart by this very rule.
+        if !crate::domain::is_option_key(key) {
+            return Err(invalid(format!(
+                "options.{key} must be lowercase letters, digits, `-` or `_`, starting with a letter"
+            )));
+        }
+        if option.description.trim().is_empty() || option.description.contains('\n') {
+            return Err(invalid(format!(
+                "options.{key}.description must be one non-empty line"
+            )));
+        }
+    }
     for entry in &manifest.permissions.filesystem.read {
         let ok = entry == "locator"
             || entry.starts_with("~/")
@@ -161,7 +174,7 @@ version = "0.1.0"
 description = "demo documents"
 
 [compatibility]
-contract = "0.3"
+contract = "0.4"
 memcastle = ">=0.1"
 
 [permissions.filesystem]
@@ -218,7 +231,7 @@ read = ["locator"]
 
     #[test]
     fn a_manifest_for_another_contract_is_valid_but_incompatible() {
-        let manifest = with(|text| text.replace("\"0.3\"", "\"0.9\"")).unwrap();
+        let manifest = with(|text| text.replace("\"0.4\"", "\"0.9\"")).unwrap();
         let error = check_compatible(&manifest).unwrap_err();
         assert!(matches!(error, Error::SourceIncompatible { .. }), "{error}");
     }
@@ -246,7 +259,7 @@ read = ["locator"]
                 "source.description",
             ),
             (
-                GOOD.replace("contract = \"0.3\"", "contract = \"x\""),
+                GOOD.replace("contract = \"0.4\"", "contract = \"x\""),
                 "compatibility.contract",
             ),
             (

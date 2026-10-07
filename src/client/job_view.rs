@@ -30,6 +30,7 @@ fn parameters(kind: &JobKind, painter: Painter) -> Vec<String> {
             source,
             wing: w,
             full,
+            options,
         } => {
             match source {
                 MiningSource::Directory { path } => {
@@ -41,6 +42,10 @@ fn parameters(kind: &JobKind, painter: Painter) -> Vec<String> {
                         lines.push(field(painter, "Locator", locator));
                     }
                 }
+            }
+            // One line per option, so `since=2026-09` is there to be confirmed, as the locator and wing are.
+            for (key, value) in options {
+                lines.push(field(painter, &format!("Option {key}"), value));
             }
             wing(&mut lines, w);
             if *full {
@@ -145,6 +150,7 @@ mod tests {
                 },
                 wing: Some("project".to_string()),
                 full: false,
+                options: Default::default(),
             },
             Priority::Background,
             "cli",
@@ -225,6 +231,7 @@ mod tests {
                 },
                 wing: None,
                 full: true,
+                options: Default::default(),
             },
             Priority::Background,
             "cli",

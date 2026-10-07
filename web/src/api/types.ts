@@ -226,18 +226,30 @@ export interface ErrorBody {
 
 /** What a job submission may contain: the `type`-tagged body of `POST /api/jobs`. */
 export type JobRequest =
-  | { type: "mine"; path: string; wing?: string; full?: boolean }
-  | { type: "mine"; source: string; locator?: string; wing?: string; full?: boolean }
+  | { type: "mine"; path: string; options?: MineOptions; wing?: string; full?: boolean }
+  | { type: "mine"; source: string; locator?: string; options?: MineOptions; wing?: string; full?: boolean }
   | { type: "audit"; wing?: string }
   | { type: "repair"; dry_run: boolean; based_on_job?: string }
   | { type: "embed"; wing?: string }
   | { type: "extract"; wing?: string }
+
+/** What a run of a source is asked beyond where to read (`since`, `dir`): strings, which the source parses. */
+export type MineOptions = Record<string, string>
+
+/** One option a source declares, as `GET /api/sources` lists it. */
+export interface OptionSpec {
+  name: string
+  description: string
+  type?: "string" | "path" | "date"
+}
 
 export interface AdapterInfo {
   name: string
   description: string
   state: string
   version?: string
+  /** Absent from an older daemon, which accepts none. */
+  options?: OptionSpec[]
 }
 
 export interface SourcesReport {

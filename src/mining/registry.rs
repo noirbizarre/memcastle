@@ -13,8 +13,9 @@ use std::sync::Arc;
 
 use crate::config::MiningConfig;
 use crate::domain::{
-    AccessTokens, Cursor, Permissions, RawDocument, SourceCapabilities, SourceOrigin,
-    SourcePackageRecord, SourcePackageState, SourceRef, SourceState, sha256_hex,
+    AccessTokens, Cursor, OptionSpec, Options, Permissions, RawDocument, SourceCapabilities,
+    SourceOrigin, SourcePackageRecord, SourcePackageState, SourceRef, SourceState, sha256_hex,
+    unknown_option,
 };
 use crate::error::{Error, Result};
 use crate::source::manifest::check_compatible;
@@ -64,10 +65,10 @@ impl SourceAdapter for AnySource {
         }
     }
 
-    fn identify(&self, locator: Option<&str>) -> Result<SourceRef> {
+    fn identify(&self, locator: Option<&str>, options: &Options) -> Result<SourceRef> {
         match self {
-            Self::Directory(a) => a.identify(locator),
-            Self::Wasm(a) => a.identify(locator),
+            Self::Directory(a) => a.identify(locator, options),
+            Self::Wasm(a) => a.identify(locator, options),
         }
     }
 
@@ -116,7 +117,7 @@ impl SourceAdapter for AnySource {
     }
 }
 
-fn describe(adapter: &impl SourceAdapter) -> AdapterInfo {
+fn describe(adapter: &impl SourceAdapter, options: Vec<OptionSpec>) -> AdapterInfo {
     AdapterInfo {
         name: adapter.name().to_string(),
         description: adapter.description().to_string(),
@@ -129,6 +130,7 @@ fn describe(adapter: &impl SourceAdapter) -> AdapterInfo {
         registry: None,
         signed_by: None,
         auth: None,
+        options,
     }
 }
 
@@ -137,7 +139,7 @@ fn describe(adapter: &impl SourceAdapter) -> AdapterInfo {
 pub fn builtin_adapters() -> Vec<AdapterInfo> {
     // Capabilities and descriptions do not depend on configuration, so default-configured adapters answer.
     let directory = DirectoryAdapter::new(0);
-    vec![describe(&directory)]
+    vec![describe(&directory, directory::options())]
 }
 
 /// Why an installed source cannot run here, or `None` when it can.
@@ -185,6 +187,7 @@ pub fn describe_package(record: &SourcePackageRecord, sources_dir: &Path) -> Ada
         registry: record.registry.clone(),
         signed_by: record.signed_by.clone(),
         auth: None,
+        options: record.manifest.option_specs(),
     }
 }
 
@@ -296,19 +299,38 @@ pub async fn list_adapters(
 ///
 /// # Errors
 ///
-/// [`Error::InvalidInput`] naming the known sources when there is no such source, and [`Error::SourceNotEnabled`]
-/// when it exists but is disabled or unavailable.
+/// [`Error::InvalidInput`] naming the known sources when there is no such source, or the accepted options when `options`
+/// holds a key the source does not declare, and [`Error::SourceNotEnabled`] when it exists but is disabled or
+/// unavailable.
 pub async fn ensure_minable(
     store: &SurrealStore,
     mining: &MiningConfig,
     source: &str,
+    options: &Options,
 ) -> Result<()> {
     if BUILTIN_NAMES.contains(&source) {
-        return Ok(());
+        return check_options(source, &directory::options(), options);
     }
     match lookup(store, mining, source).await? {
-        Some(record) => minable_package(&record, &component_dir(&record, mining)),
+        Some(record) => {
+            minable_package(&record, &component_dir(&record, mining))?;
+            check_options(source, &record.manifest.option_specs(), options)
+        }
         None => Err(unknown(store, mining, source).await),
+    }
+}
+
+/// Refuse a run's option keys the source does not declare, before a job is queued for them.
+///
+/// Values are the source's to judge in `identify`; only the names are checked here, which is what lets a typo
+/// (`dates=2026`) be a 4xx at the request rather than a job that fails, or worse, one that silently ignores it.
+fn check_options(source: &str, accepted: &[OptionSpec], options: &Options) -> Result<()> {
+    match unknown_option(options, accepted) {
+        Some(message) => Err(Error::invalid_input(
+            "options",
+            format!("{message} for the source `{source}` (`memcastle sources` lists them)"),
+        )),
+        None => Ok(()),
     }
 }
 
@@ -350,7 +372,7 @@ async fn unknown(store: &SurrealStore, mining: &MiningConfig, source: &str) -> E
 ///
 /// # Errors
 ///
-/// As [`ensure_minable`], [`Error::CredentialRequired`] when the source signs in with OAuth and nobody has signed it
+/// As [`ensure_minable`] without the options, [`Error::CredentialRequired`] when the source signs in with OAuth and nobody has signed it
 /// in, and [`Error::SourceIncompatible`] or [`Error::SourceFailed`] when the component does not load.
 pub async fn resolve(
     store: &SurrealStore,
@@ -453,6 +475,7 @@ mod tests {
                 capabilities: SourceCapabilities::default(),
                 permissions: Permissions::default(),
                 limits: Default::default(),
+                options: Default::default(),
                 build: None,
                 test: None,
             },
@@ -474,8 +497,8 @@ mod tests {
     fn an_intact_compatible_package_has_no_reason_to_be_unavailable() {
         let dir = tempfile::tempdir().unwrap();
         install_component(dir.path(), b"component");
-        assert_eq!(unavailable_reason(&record("0.3"), dir.path()), None);
-        let described = describe_package(&record("0.3"), dir.path());
+        assert_eq!(unavailable_reason(&record("0.4"), dir.path()), None);
+        let described = describe_package(&record("0.4"), dir.path());
         assert_eq!(described.state, SourceState::Enabled);
         assert_eq!(described.version.as_deref(), Some("1.0.0"));
     }
@@ -495,11 +518,11 @@ mod tests {
     #[test]
     fn a_package_whose_component_is_missing_or_altered_says_which() {
         let dir = tempfile::tempdir().unwrap();
-        let missing = unavailable_reason(&record("0.3"), dir.path()).unwrap();
+        let missing = unavailable_reason(&record("0.4"), dir.path()).unwrap();
         assert!(missing.contains("missing"), "{missing}");
 
         install_component(dir.path(), b"something else");
-        let altered = unavailable_reason(&record("0.3"), dir.path()).unwrap();
+        let altered = unavailable_reason(&record("0.4"), dir.path()).unwrap();
         assert!(altered.contains("no longer matches"), "{altered}");
     }
 
@@ -507,13 +530,13 @@ mod tests {
     fn a_disabled_package_is_not_minable_and_the_state_is_named() {
         let dir = tempfile::tempdir().unwrap();
         install_component(dir.path(), b"component");
-        let mut disabled = record("0.3");
+        let mut disabled = record("0.4");
         disabled.state = SourcePackageState::Disabled;
         let error = minable_package(&disabled, dir.path())
             .unwrap_err()
             .to_string();
         assert!(error.contains("disabled"), "{error}");
-        assert!(minable_package(&record("0.3"), dir.path()).is_ok());
+        assert!(minable_package(&record("0.4"), dir.path()).is_ok());
         let unavailable = minable_package(&record("0.9"), dir.path())
             .unwrap_err()
             .to_string();

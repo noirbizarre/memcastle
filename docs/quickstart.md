@@ -64,7 +64,7 @@ Without `--wing`, memories are filed under the wing the directory's project file
 directory.
 Mining remembers what it has read, so running it again files only what changed.
 It can also read other sources, such as your Pi session history
-(`memcastle mine --source pi`, once you have installed that source), see [Mining sources](mining-sources.md).
+(`memcastle mine pi`, once you have installed that source), see [Mining sources](mining-sources.md).
 [What mining reads](storage.md#what-mining-reads) says which files are skipped.
 
 You can also write memories directly.

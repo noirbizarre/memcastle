@@ -287,11 +287,13 @@ async fn identify_names_the_database_opencode_reports_unless_a_locator_names_the
     let _history = History::new().await;
     let adapter = adapter();
 
-    let default = adapter.identify(None).unwrap();
+    let default = adapter.identify(None, &Default::default()).unwrap();
     assert_eq!(default.source, "opencode");
     assert_eq!(default.locator, "/fixture/opencode/opencode.db");
 
-    let named = adapter.identify(Some("work-laptop")).unwrap();
+    let named = adapter
+        .identify(Some("work-laptop"), &Default::default())
+        .unwrap();
     assert_eq!(named.locator, "work-laptop");
 }
 
@@ -301,12 +303,18 @@ async fn a_machine_without_opencode_is_told_what_is_missing_and_a_failing_openco
     let adapter = adapter();
 
     std::fs::write(history.data("fail"), "").unwrap();
-    let failing = adapter.identify(None).unwrap_err().to_string();
+    let failing = adapter
+        .identify(None, &Default::default())
+        .unwrap_err()
+        .to_string();
     assert!(failing.contains("database is locked"), "{failing}");
     assert!(failing.contains("opencode db path"), "{failing}");
 
     history.uninstall();
-    let missing = adapter.identify(None).unwrap_err().to_string();
+    let missing = adapter
+        .identify(None, &Default::default())
+        .unwrap_err()
+        .to_string();
     assert!(missing.contains("opencode"), "{missing}");
     assert!(missing.contains("PATH"), "{missing}");
 }
@@ -315,7 +323,7 @@ async fn a_machine_without_opencode_is_told_what_is_missing_and_a_failing_openco
 async fn a_cut_off_discovery_answer_is_quoted_and_not_blamed_only_on_the_opencode_version() {
     let history = History::new().await;
     let adapter = adapter();
-    let source = adapter.identify(None).unwrap();
+    let source = adapter.identify(None, &Default::default()).unwrap();
 
     std::fs::write(history.data("cut"), "").unwrap();
     let error = adapter
@@ -332,7 +340,7 @@ async fn a_cut_off_discovery_answer_is_quoted_and_not_blamed_only_on_the_opencod
 async fn a_cursor_the_source_did_not_write_is_refused_and_never_reaches_the_query() {
     let _history = History::new().await;
     let adapter = adapter();
-    let source = adapter.identify(None).unwrap();
+    let source = adapter.identify(None, &Default::default()).unwrap();
 
     for hostile in [
         json!({"updated": 1, "id": "x' OR '1'='1"}),
@@ -353,7 +361,7 @@ async fn a_cursor_the_source_did_not_write_is_refused_and_never_reaches_the_quer
 async fn a_read_session_carries_its_identity_provenance_and_start_time() {
     let _history = History::new().await;
     let adapter = adapter();
-    let source = adapter.identify(None).unwrap();
+    let source = adapter.identify(None, &Default::default()).unwrap();
 
     let first = adapter
         .read(&source, &candidate("ses_alpha"))
@@ -384,7 +392,7 @@ async fn a_read_session_carries_its_identity_provenance_and_start_time() {
 async fn a_notice_printed_before_an_export_is_ignored() {
     let _history = History::new().await;
     let adapter = adapter();
-    let source = adapter.identify(None).unwrap();
+    let source = adapter.identify(None, &Default::default()).unwrap();
 
     let raw = adapter
         .read(&source, &candidate("ses_delta"))
@@ -400,7 +408,7 @@ async fn a_notice_printed_before_an_export_is_ignored() {
 async fn a_session_that_is_empty_or_gone_since_discovery_is_skipped_not_an_error() {
     let _history = History::new().await;
     let adapter = adapter();
-    let source = adapter.identify(None).unwrap();
+    let source = adapter.identify(None, &Default::default()).unwrap();
 
     for id in ["ses_charlie", "ses_deleted", "-rf"] {
         assert!(
@@ -565,4 +573,185 @@ async fn the_installed_opencode_source_mines_history_incrementally_with_provenan
     assert_eq!(fixture.search("certificate revocation").await.len(), 1);
 
     fixture.daemon.shutdown().await;
+}
+
+fn options(pairs: &[(&str, &str)]) -> std::collections::BTreeMap<String, String> {
+    pairs
+        .iter()
+        .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+        .collect()
+}
+
+async fn found(adapter: &WasmAdapter, pairs: &[(&str, &str)]) -> Vec<String> {
+    let source = adapter.identify(None, &options(pairs)).unwrap();
+    adapter
+        .discover(&source, &json!(null), 100)
+        .await
+        .unwrap()
+        .candidates
+        .into_iter()
+        .map(|c| c.external_id)
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dir_and_since_narrow_the_query_and_combine() {
+    let _history = History::new().await;
+    let adapter = adapter();
+
+    assert_eq!(found(&adapter, &[]).await.len(), 4);
+    assert_eq!(
+        found(&adapter, &[("dir", "/home/me/notes")]).await,
+        ["ses_bravo", "ses_charlie"]
+    );
+    assert_eq!(
+        found(&adapter, &[("since", "2026-07-17")]).await,
+        ["ses_charlie", "ses_delta"]
+    );
+    assert_eq!(
+        found(
+            &adapter,
+            &[("since", "2026-07-17"), ("dir", "/home/me/notes")]
+        )
+        .await,
+        ["ses_charlie"],
+        "both filters apply"
+    );
+    // An RFC 3339 time with an offset is the instant it names: 2026-07-15 02:00 at +02:00 is the 15th 00:00 UTC.
+    assert_eq!(
+        found(&adapter, &[("since", "2026-07-15T02:00:00+02:00")]).await,
+        ["ses_bravo", "ses_charlie", "ses_delta"]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_quote_in_dir_is_data_and_never_part_of_the_query() {
+    let _history = History::new().await;
+    let adapter = adapter();
+    // The stand-in reads the literal back out of the query text, so an unescaped quote would end the literal early and
+    // leave the rest as query: it would fail to be read, not come back empty.
+    assert!(
+        found(&adapter, &[("dir", "/x' OR '1'='1")])
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn each_dir_is_a_source_of_its_own_and_since_is_not() {
+    let _history = History::new().await;
+    let adapter = adapter();
+    let identify = |pairs: &[(&str, &str)]| adapter.identify(None, &options(pairs)).unwrap();
+
+    let plain = identify(&[]);
+    assert_ne!(plain.id(), identify(&[("dir", "/home/me/project")]).id());
+    assert_ne!(
+        identify(&[("dir", "/home/me/project")]).id(),
+        identify(&[("dir", "/home/me/notes")]).id()
+    );
+    assert_eq!(plain.id(), identify(&[("since", "2026-09")]).id());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unknown_option_a_bad_date_or_a_control_character_is_refused() {
+    let _history = History::new().await;
+    let adapter = adapter();
+    let refused = |pairs: &[(&str, &str)]| {
+        adapter
+            .identify(None, &options(pairs))
+            .unwrap_err()
+            .to_string()
+    };
+
+    let unknown = refused(&[("dates", "2026")]);
+    assert!(
+        unknown.contains("`dates`") && unknown.contains("`since`") && unknown.contains("`dir`"),
+        "{unknown}"
+    );
+    let bad = refused(&[("since", "2026-02-30")]);
+    assert!(
+        bad.contains("2026-02-30") && bad.contains("not a date"),
+        "{bad}"
+    );
+    assert!(refused(&[("dir", "/a\nb")]).contains("`dir`"));
+    assert!(refused(&[("dir", "")]).contains("`dir`"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_star_in_dir_matches_any_run_of_characters_and_a_spelling_does_not_matter() {
+    let _history = History::new().await;
+    let adapter = adapter();
+    let project = ["ses_alpha", "ses_delta"];
+
+    assert_eq!(
+        found(&adapter, &[("dir", "/home/me/*")]).await.len(),
+        4,
+        "every directory under /home/me"
+    );
+    assert_eq!(
+        found(&adapter, &[("dir", "/home/*/project")]).await,
+        project,
+        "a star in the middle"
+    );
+    assert_eq!(
+        found(&adapter, &[("dir", "*/pro*")]).await,
+        project,
+        "a pattern may start with a star"
+    );
+    assert!(found(&adapter, &[("dir", "/home/me/x*")]).await.is_empty());
+    for spelling in [
+        "/home/me/project/",
+        "/home/me//project",
+        "/home/me/./project",
+        "/home/me/other/../project",
+    ] {
+        assert_eq!(
+            found(&adapter, &[("dir", spelling)]).await,
+            project,
+            "{spelling}"
+        );
+    }
+    let identify = |dir: &str| {
+        adapter
+            .identify(None, &options(&[("dir", dir)]))
+            .unwrap()
+            .id()
+    };
+    assert_eq!(identify("/home/me/project/"), identify("/home/me/project"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn only_a_star_is_a_wildcard_in_dir_and_a_quote_or_bracket_is_a_character() {
+    let _history = History::new().await;
+    let adapter = adapter();
+    // `?` and `[` are syntax in `GLOB`: they are escaped, so they match themselves and nothing else.
+    assert!(
+        found(&adapter, &[("dir", "/home/me/proj?ct")])
+            .await
+            .is_empty()
+    );
+    assert!(
+        found(&adapter, &[("dir", "/home/me/pr[a-z]j")])
+            .await
+            .is_empty()
+    );
+    assert!(
+        found(&adapter, &[("dir", "/home/me/o'brien")])
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dir_that_names_no_place_is_refused_rather_than_matching_nothing() {
+    let _history = History::new().await;
+    let adapter = adapter();
+    let relative = adapter
+        .identify(None, &options(&[("dir", "work/app")]))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        relative.contains("not an absolute path") && relative.contains("`work/app`"),
+        "{relative}"
+    );
 }

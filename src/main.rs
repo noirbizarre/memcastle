@@ -29,7 +29,7 @@ use cli::{
 use memcastle::app::{DbEndpointRequest, DbEndpointStatus, WakeUpBudget};
 use memcastle::client::{DaemonClient, SetFlags, StatusView};
 use memcastle::config::{Config, Overrides};
-use memcastle::domain::{MemoryMode, MiningSource, NameKind, PalacePath, validate_name};
+use memcastle::domain::{MemoryMode, NameKind, PalacePath, validate_name};
 use memcastle::store::SurrealStore;
 use memcastle::term::{self, Painter};
 use memcastle::{Error, Result};
@@ -583,28 +583,20 @@ async fn cmd_wake_up(config: &Config, mode: Option<MemoryMode>, args: WakeUpArgs
 }
 
 async fn cmd_mine(config: &Config, mode: Option<MemoryMode>, args: MineArgs) -> Result<()> {
-    let source = match (args.path, args.source) {
-        // Made absolute here, against *this* shell's working directory: the
-        // daemon would otherwise resolve `./project` against its own, which is
-        // wherever it was started and usually not where the user is standing.
-        (Some(path), None) => MiningSource::Directory {
-            path: std::path::absolute(&path)
-                .map_err(|source| Error::io(path.display().to_string(), source))?,
-        },
-        (_, Some(source)) => MiningSource::Named {
-            source,
-            locator: args.locator,
-        },
-        // clap requires one of the two, so this is unreachable from the command line.
-        (None, None) => {
-            return Err(Error::invalid_input(
-                "path",
-                "give a directory to mine, or `--source`",
-            ));
-        }
+    use memcastle::client::mine;
+
+    let parsed = mine::parse(args.target, args.args)?;
+    let daemon = client(config, mode);
+    // The list of sources is asked for only when the first word could be one: a path or `directory` needs no lookup,
+    // and a plain `memcastle mine ./project` costs the one request it always did.
+    let adapters = if parsed.needs_sources() {
+        Some(daemon.list_sources().await?.adapters)
+    } else {
+        None
     };
-    let job = client(config, mode)
-        .submit_mine(source, args.wing, args.full)
+    let (source, options) = mine::build(parsed, adapters.as_deref())?;
+    let job = daemon
+        .submit_mine(source, options, args.wing, args.full)
         .await?;
     print_submitted(&job)
 }
