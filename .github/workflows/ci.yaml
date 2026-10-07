@@ -286,6 +286,16 @@ jobs:
           COVERAGE: "1"
         run: mise run integrations:check
 
+      # bun and vitest write paths relative to their own package (`src/audit-core.ts`), which Codecov cannot tell
+      # apart between `pi` and `opencode`, or from the daemon's own `src/`. Prefixing them makes each file unique.
+      - name: Make the integrations coverage paths relative to the repository
+        if: ${{ !cancelled() }}
+        run: |
+          for report in integrations/*/coverage/lcov.info; do
+            package="$(dirname "$(dirname "$report")")"
+            sed -i "s|^SF:|SF:$package/|" "$report"
+          done
+
       - name: Upload integrations coverage to Codecov
         if: ${{ !cancelled() }}
         uses: codecov/codecov-action@v7
@@ -317,6 +327,16 @@ jobs:
           # Makes the task run `test:cover`, which writes lcov beside each package.
           COVERAGE: "1"
         run: mise run web:check
+
+      # bun and vitest write paths relative to their own package (`src/audit-core.ts`), which Codecov cannot tell
+      # apart between `pi` and `opencode`, or from the daemon's own `src/`. Prefixing them makes each file unique.
+      - name: Make the web coverage paths relative to the repository
+        if: ${{ !cancelled() }}
+        run: |
+          for report in web/coverage/lcov.info; do
+            package="$(dirname "$(dirname "$report")")"
+            sed -i "s|^SF:|SF:$package/|" "$report"
+          done
 
       - name: Upload web coverage to Codecov
         if: ${{ !cancelled() }}
