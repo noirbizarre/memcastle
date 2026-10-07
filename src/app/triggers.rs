@@ -1106,7 +1106,8 @@ mod tests {
         let existing = definition("name = \"t\"\nminer = \"m\"\ntype = \"poll\"\nevery = \"5m\"\n");
         let patch = TriggerPatch {
             kind: Some(TriggerMechanism::Watch),
-            settings: serde_json::json!({"path": "/n"})
+            // Absolute on every platform: `/n` has no drive letter, so it is relative on Windows.
+            settings: serde_json::json!({"path": std::env::temp_dir()})
                 .as_object()
                 .cloned()
                 .unwrap(),

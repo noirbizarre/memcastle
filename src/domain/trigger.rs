@@ -750,11 +750,21 @@ mod tests {
                 .expect_err("relative")
                 .contains("absolute")
         );
-        let quick = trigger(
-            "name = \"t\"\nminer = \"m\"\ntype = \"watch\"\npath = \"/n\"\ndebounce = \"1ms\"\n",
+        // Absolute on every platform: `/n` has no drive letter, so it is relative on Windows.
+        let absolute = std::env::temp_dir().display().to_string();
+        let quick = trigger(&format!(
+            "name = \"t\"\nminer = \"m\"\ntype = \"watch\"\npath = '{absolute}'\ndebounce = \"1ms\"\n"
+        ));
+        let error = quick
+            .validate()
+            .expect_err("a debounce shorter than a write burst");
+        assert!(
+            error.contains("debounce"),
+            "refused for its debounce and not its path: {error}"
         );
-        assert!(quick.validate().is_err());
-        let good = trigger("name = \"t\"\nminer = \"m\"\ntype = \"watch\"\npath = \"/n\"\n");
+        let good = trigger(&format!(
+            "name = \"t\"\nminer = \"m\"\ntype = \"watch\"\npath = '{absolute}'\n"
+        ));
         assert!(matches!(
             good.plan(),
             Ok(TriggerPlan::Watch { recursive: true, debounce, .. }) if debounce == DEFAULT_DEBOUNCE
