@@ -163,8 +163,8 @@ Only `directory` is compiled into MemCastle.
 the repository and shipped alongside each release (release archives and the `.deb` and `.rpm` carry them, unpacked, under
 `share/memcastle/sources/`), so they are installed from the start and `memcastle source enable pi` is all one needs, with
 no registry and no network:
-no Pi, OpenCode or Claude Code code is part of the core, and they run under the same sandbox and the same pipeline as any source a
-user writes.
+no Pi, OpenCode or Claude Code code is part of the core, and they run under the same sandbox and the same pipeline as
+any source a user writes.
 Other sources are found in [registries](publishing-sources.md).
 `directory` and `pi` have a modification-time watermark as their cursor:
 files are ordered by modification time, then by path, and the cursor is the last one done.
@@ -275,8 +275,8 @@ is given.
 It asks for no network, process, write or credential permission.
 The reader lists only `.jsonl` files exactly one project directory below that root and does not follow symlinks.
 
-Each session is one `transcript` document, identified by its path under the projects root, filed in wing `claude` and in a
-room named after its recorded working directory.
+Each session is one `transcript` document, identified by its path under the projects root, filed in wing `claude` and
+in a room named after its recorded working directory.
 It has the `transcript` and `claude` tags; provenance is the transcript file and its recorded session id, working directory
 and start timestamp when present.
 The source keeps ordered user and assistant text plus compact tool-use markers such as `[tool: Read]`.

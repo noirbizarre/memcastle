@@ -13,8 +13,8 @@ agent = ">=2.1.83"
 
 [agent]
 kind = "claude-code"
-# Claude Code registers the directory that contains `.claude-plugin/marketplace.json`.
-entry = "."
+# The installer registers this file's parent directory with Claude Code.
+entry = ".claude-plugin/marketplace.json"
 
 [[assets]]
 from = "dist"

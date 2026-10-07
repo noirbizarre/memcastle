@@ -201,13 +201,24 @@ impl Agent for ClaudeCode<'_> {
     }
 
     fn registration(&self, dir: &Path, manifest: &IntegrationManifest) -> Registration {
-        let entry = manifest.agent.entry.as_deref().unwrap_or(".");
+        let entry = manifest
+            .agent
+            .entry
+            .as_deref()
+            .unwrap_or(".claude-plugin/marketplace.json");
         Registration {
             method: "claude-code-marketplace".to_string(),
             // The integration id describes the package; the marketplace exposes the plugin as `memcastle`.
             target: format!("memcastle@{}", Self::MARKETPLACE),
             // The receipt keeps the precise local marketplace directory for later removal.
-            entry: Some(dir.join(entry).display().to_string()),
+            entry: Some(
+                dir.join(entry)
+                    // The manifest validator guarantees an entry file, so its parent is the installed copy.
+                    .parent()
+                    .unwrap_or(dir)
+                    .display()
+                    .to_string(),
+            ),
         }
     }
 
