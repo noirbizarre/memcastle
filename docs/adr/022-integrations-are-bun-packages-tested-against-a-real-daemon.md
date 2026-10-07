@@ -33,7 +33,8 @@ OpenCode needs one connection per OpenCode session, Pi has its own persistent-co
   There is no workspace root and nothing shared between packages.
 - **Each package carries its own copy of the small client** (`daemon`, `session`, `modes`, `failures`).
   It is about two hundred lines, and what differs between ecosystems is exactly what a shared copy would have to abstract.
-- **The MCP transport is the official SDK,** `@modelcontextprotocol/sdk`,
+- **The MCP transport is an existing client library, never hand-written:** `@modelcontextprotocol/sdk` for OpenCode,
+  and, since [ADR-044](044-pi-integration-uses-pis-mcp-client-library.md), Pi's own `@earendil-works/pi-mcp` for Pi,
   over the daemon's streamable HTTP endpoint with one handshake per agent session.
   The packages do not speak the protocol by hand.
 - **Tests run against a real daemon.** A package's suite starts `memcastle serve` on an OS-assigned port in a temporary

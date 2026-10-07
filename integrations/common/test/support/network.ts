@@ -2,7 +2,7 @@
 //
 // An `off` session must make no request at all, and "no request" can only be proved by watching the wire:
 // asserting that nothing was injected would also pass for a session whose request failed. Both integrations reach the
-// daemon through `fetch` (the MCP SDK's transport and the health check alike), so one wrapper sees everything.
+// daemon through `fetch` (the MCP client's transport, the MCP SDK's for OpenCode and Pi's own for Pi, and the health check alike), so one wrapper sees everything.
 //
 // Attribution is by `AsyncLocalStorage`, because the actors run concurrently in one process and a background wake-up
 // or review started by one of them must still be counted as that actor's, long after the handler that started it

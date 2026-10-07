@@ -16,6 +16,8 @@
 #
 # Needs bun. The agents' own SDKs stay external: the agent provides them (they are type-only imports, plus OpenCode's
 # optional `tool` helper), and a second copy in the bundle would be a second copy of its classes.
+# Pi supplies only the packages listed in its docs (docs/packages.md); every other `@earendil-works/*` package, such as
+# the MCP client library `@earendil-works/pi-mcp`, is not provided to an extension and so is bundled.
 set -euo pipefail
 
 if [ "$#" -gt 1 ]; then
@@ -53,7 +55,11 @@ bundle() {
   test -f "${dir}/dist/$(basename "${entry%.ts}").js" || { echo "error: bundling ${id} produced no output" >&2; exit 1; }
 }
 
-bundle pi src/extension.ts --external '@earendil-works/*'
+bundle pi src/extension.ts \
+  --external '@earendil-works/pi-coding-agent' \
+  --external '@earendil-works/pi-ai' \
+  --external '@earendil-works/pi-agent-core' \
+  --external '@earendil-works/pi-tui'
 # Pi reads its entry points from the `package.json` of the package it installs, which here is the installed copy.
 # No `dependencies`: the bundle has everything, and Pi does not install a local package's dependencies anyway.
 version="$(sed -n 's/^version = "\(.*\)"$/\1/p' integrations/pi/memcastle-integration.toml | head -n 1)"

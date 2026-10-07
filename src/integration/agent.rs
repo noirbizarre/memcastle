@@ -690,7 +690,7 @@ to = "."
         let cases = [
             ("1.0.1", "1.0.1"),
             ("v1.18.34\n", "1.18.34"),
-            ("pi coding agent 0.99.2", "0.99.2"),
+            ("pi coding agent 1.0.2", "1.0.2"),
             ("opencode 1.18", "1.18.0"),
         ];
         for (output, expected) in cases {

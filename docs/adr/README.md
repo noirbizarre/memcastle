@@ -171,3 +171,6 @@ The history is the value.
   a webhook has its own opt-in, loopback-by-default listener authenticated by a per-trigger secret,
   bursts join a waiting run, deliveries are idempotent and restart-safe, and changing any of it is REST and CLI only
   (amends ADR-037)
+- [ADR-044](044-pi-integration-uses-pis-mcp-client-library.md) — Pi 1.0 is the minimum Pi version, and the Pi integration's
+  MCP session is built on Pi's own `@earendil-works/pi-mcp` client library (bundled) instead of the MCP SDK
+  (amends ADR-022 for Pi)

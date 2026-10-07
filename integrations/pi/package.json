@@ -13,7 +13,7 @@
     "test:cover": "bun test --timeout 60000 --coverage --coverage-reporter=lcov --coverage-dir=coverage"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": ">=1.0.0"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.0.2",
@@ -21,7 +21,7 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.0",
+    "@earendil-works/pi-mcp": "^1.0.2",
     "smol-toml": "^1.9.0"
   }
 }
