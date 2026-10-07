@@ -1,4 +1,4 @@
-# Web dashboard
+# Web UI
 
 MemCastle can serve a web dashboard for inspecting and managing a daemon.
 It is a client of the [REST API](mcp-and-api.md#rest-api), as the CLI is: it reads and writes nothing but through the

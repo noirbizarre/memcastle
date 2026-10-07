@@ -193,7 +193,7 @@ Every path, environment variable, flag and the precedence between them is in [Co
     It needs bun and node, so it is `#[ignore]`d in the basic suite and `mise run web:check` runs it.
   - `web/test/` — the dashboard's client, login, route guard, event-stream parser and live loader
     (vitest, no daemon), and the same client, login and event stream
-    against a real `memcastle serve` (`web/test/daemon`, bun), see [Web dashboard](web.md#developing-the-dashboard).
+    against a real `memcastle serve` (`web/test/daemon`, bun), see [Web UI](web.md#developing-the-dashboard).
   - `tests/wasm_conformance.rs` — the same conformance cases run against the built-in `directory` source and against the
     reference WebAssembly source built from `sources/directory/` (in-process, WebAssembly suite).
   - `tests/wasm_pi.rs` — the Pi history source (`sources/pi/`) built and run as a component: what it files and leaves out,
