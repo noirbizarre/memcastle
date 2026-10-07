@@ -240,7 +240,7 @@ curl -s http://127.0.0.1:8420/api/jobs?status=running
 
 With [`web.enable`](configuration.md#web-dashboard), the same listener also serves the dashboard's static files under
 `/ui` (`GET` and `HEAD` only).
-They are not part of the API and carry no data; see [Web dashboard](web.md) and [Authentication](authentication.md#what-is-protected)
+They are not part of the API and carry no data; see [Web UI](web.md) and [Authentication](authentication.md#what-is-protected)
 for why they are the one thing besides the liveness probe that needs no token.
 
 ### The event stream

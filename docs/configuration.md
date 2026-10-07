@@ -692,7 +692,7 @@ There is no command-line flag; `daemon start` and `daemon restart` pass the envi
 The dashboard's files are found in `web/dist/` of the [runtime assets](#runtime-assets),
 in a package and in a checkout alike.
 If they are missing, the daemon still starts, logs a warning, and answers `/ui` with a page that says how to install them.
-See [Web dashboard](web.md) for the login, the memory mode and the development workflow.
+See [Web UI](web.md) for the login, the memory mode and the development workflow.
 
 ## Not supported: other platforms' conventions
 
