@@ -245,6 +245,9 @@ run each package's `test:cover` script, which writes lcov under `web/coverage/` 
 CI uploads them to Codecov under the `web` and `integrations` flags.
 `.github/codecov.yml` also groups every report into components (core, surfaces, app, memory, sources, web, integrations)
 by path, so the Codecov page shows each area whatever flag covered it.
+Each component reflects the merged execution coverage from every reporting suite.
+Its required status permits the same 0.5% fluctuation as the project status,
+so platform and timing variation does not fail a build.
 
 ### Where the CI time goes
 

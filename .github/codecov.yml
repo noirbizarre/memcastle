@@ -58,6 +58,9 @@ component_management:
     statuses:
       - type: project
         target: auto
+        # Component statuses do not inherit the project threshold, so tolerate
+        # the small hit-set variation from merging six independent reports.
+        threshold: 0.5%
   individual_components:
     - component_id: core
       # domain, store, jobs, config
