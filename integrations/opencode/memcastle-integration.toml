@@ -23,6 +23,19 @@ entry = "index.js"
 from = "dist"
 to = "."
 
-# The wake-up, search-before-answer and checkpoint instructions the plugin injects (docs/skills.md).
-[skills]
-install = true
+# The shared skills (docs/skills.md) the plugin exposes to OpenCode, referenced from the assets root's `skills/` and not
+# copied into this directory. The plugin lists them through OpenCode's own skill discovery.
+[[skills]]
+name = "memcastle-setup"
+
+[[skills]]
+name = "search-before-answer"
+
+[[skills]]
+name = "checkpoint-instructions"
+
+[[skills]]
+name = "wake-up"
+
+[[skills]]
+name = "diary"

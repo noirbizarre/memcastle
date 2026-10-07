@@ -77,11 +77,13 @@ fn the_package_holds_each_integration_bundled_beside_its_manifest_and_the_skills
     assert_eq!(names(&package.join("integrations")), ["opencode", "pi"]);
     for id in ["pi", "opencode"] {
         let dir = package.join("integrations").join(id);
-        assert_eq!(
-            names(&dir).first().map(String::as_str),
-            Some("dist"),
-            "{id}"
-        );
+        // `dist/` and the manifest, plus a `skills/` directory only for an integration with skills of its own.
+        let own: Vec<String> = names(&dir)
+            .into_iter()
+            .filter(|n| n != "dist" && n != MANIFEST_FILE && n != "skills")
+            .collect();
+        assert!(own.is_empty(), "{id} ships unexpected files: {own:?}");
+        assert!(names(&dir).contains(&"dist".to_string()), "{id}");
         let text = std::fs::read_to_string(dir.join(MANIFEST_FILE)).unwrap();
         let parsed = manifest::parse(&text).unwrap_or_else(|e| panic!("{id}: {e}"));
         // The manifest must accept the MemCastle that ships it, or the package installs nothing.
@@ -96,6 +98,20 @@ fn the_package_holds_each_integration_bundled_beside_its_manifest_and_the_skills
             dir.join("dist").join(entry).is_file(),
             "{id}: dist/{entry} is missing"
         );
+        // A skill the manifest names is in the package where the manifest says: the shared ones beside the
+        // integrations, a local one inside the integration's own directory.
+        for skill in &parsed.skills {
+            let base = if skill.local {
+                dir.join("skills")
+            } else {
+                package.join("skills")
+            };
+            assert!(
+                base.join(&skill.name).join("SKILL.md").is_file(),
+                "{id}: skill {} is missing from the package",
+                skill.name
+            );
+        }
     }
 
     // The sources the bundle replaced, and the dependencies it inlined, must not travel with it.
@@ -179,6 +195,35 @@ fn lifecycle_from(assets: &Path) {
     let extension = package["pi"]["extensions"][0].as_str().unwrap();
     assert!(pi.join(extension).is_file(), "{extension}");
     assert!(pi.join("skills/wake-up/SKILL.md").is_file());
+    // Whatever layout `assets` is, each integration exposes exactly the skills its own manifest names.
+    for id in ["pi", "opencode"] {
+        let text =
+            std::fs::read_to_string(assets.join("integrations").join(id).join(MANIFEST_FILE))
+                .unwrap();
+        let declared: Vec<String> = manifest::parse(&text)
+            .unwrap()
+            .skills
+            .into_iter()
+            .map(|skill| skill.name)
+            .collect();
+        assert!(!declared.is_empty(), "{id} exposes no skill");
+        let mut installed = names(&machine.installed(id).join("skills"));
+        installed.sort();
+        let mut expected = declared;
+        expected.sort();
+        assert_eq!(installed, expected, "{id}");
+        for skill in &expected {
+            assert!(
+                machine
+                    .installed(id)
+                    .join("skills")
+                    .join(skill)
+                    .join("SKILL.md")
+                    .is_file(),
+                "{id}: {skill}"
+            );
+        }
+    }
     assert_eq!(machine.pi_packages(), [pi.display().to_string()]);
     // OpenCode's shim points at a file that exists.
     let shim = std::fs::read_to_string(machine.plugin_file()).unwrap();

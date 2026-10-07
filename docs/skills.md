@@ -61,9 +61,11 @@ session whose mode is `disabled`.
 The skills use the Agent Skills layout, `skills/<name>/SKILL.md` with a `name` and a `description`,
 so any client that discovers skills from a directory can use them.
 There is no package manager, and copying the directories is the whole installation.
-If you use the Pi or OpenCode integration, you do not need to: `memcastle integration install` copies the skills beside
-the integration, which reads them from there ([Agent integrations](integrations.md)).
+If you use the Pi or OpenCode integration, you do not need to: `memcastle integration install` puts the skills its
+manifest names inside the integration's copy, and the agent lists them from there ([Agent integrations](integrations.md)).
 The steps below are for a client without an integration, or for skills you want the client itself to discover.
+The two ways are independent: skills work with no integration installed, and an integration needs no copy made by hand.
+A skill you copied under the same name as one of the integration's is the one the agent uses.
 
 1. Get the skills of the release you run.
    The repository at a release tag holds the skills written for that release:
@@ -100,10 +102,13 @@ The locations are those of each client, so check the client's own documentation 
 A skills installer that takes a Git repository can be pointed at the repository instead,
 since the layout is the standard one and nothing needs to be built.
 
-A client with a MemCastle integration may load the skills for you.
-Under [`integrations/`](https://github.com/noirbizarre/memcastle/tree/main/integrations) an integration reads them
-from `skills/` and never carries its own copy of the text.
-Pi appends `search-before-answer` to the system prompt on every turn.
+A client with a MemCastle integration loads the skills for you.
+An integration names the skills it exposes in its manifest, and the shared ones are referenced by name:
+under [`integrations/`](https://github.com/noirbizarre/memcastle/tree/main/integrations) none carries its own copy of the
+text.
+Both shipped integrations expose all five, in every memory mode but `off`, which exposes none.
+Pi lists them through its own skill discovery, so each has a `/skill:<name>` command, and appends
+`search-before-answer` to the system prompt on every turn.
 OpenCode lists the skills through its own `skill` tool, from `skills/` where they are, and re-states
 `search-before-answer` in the system prompt of every request.
 Both read the same `forceMemoryRecall.level` setting (`off`, `sometimes` or `always`), which is the client's policy and
@@ -150,6 +155,8 @@ Skills taken from `main` may describe tools a released binary does not have yet,
 - every skill that calls a gated tool says what to do when the memory mode refuses it
 - a skill links only to files inside its own directory, and copying the directories into a client location leaves them
   discoverable
+- a skill never mentions an integration, so one installed alone into a client works there
+- every shared skill a shipped integration's manifest names is one `skills/` offers for a manual install
 - the setup skill calls no tool but `memcastle_status`, so it works before any daemon exists
 - every skill declares a version range with a lower bound, and the crate's own version satisfies it
 

@@ -16,10 +16,34 @@ flowchart LR
     subgraph machine[Your machine]
         A[Agent: Pi or OpenCode] -->|loads| I[Installed integration]
         I -->|MCP and HTTP| D[memcastle daemon]
-        I -.->|reads| S[Shared skills]
+        I -.->|exposes| S[Skills it names]
     end
     P[Package or checkout<br/>integrations/ and skills/] -->|memcastle integration install| I
 ```
+
+## What an integration packages
+
+An integration is the complete agent-facing MemCastle package for one agent.
+MCP and skills stay usable on their own, with no integration installed:
+
+```mermaid
+flowchart TB
+    M[MemCastle]
+    M --> MCP[MCP<br/>standalone: any MCP client]
+    M --> SK[Skills<br/>standalone: copied into any client]
+    M --> INT[Integration]
+    INT --> L[Lifecycle hooks and configuration]
+    INT --> IS[Skills it exposes]
+    INT --> A[Agent-specific assets]
+    IS -.->|by name| SK
+```
+
+- **MCP** needs no integration: [MCP clients](mcp-clients.md) connect to the daemon directly.
+- **Skills** need no integration either: [Install the skills](skills.md#install-the-skills) copies them into the
+  directory a client scans.
+- **An integration** adds the lifecycle glue, and carries the skills the agent should have, so
+  `memcastle integration install pi` is the whole setup and no separate skill installation follows.
+  Its manifest lists them, each either a [shared skill](skills.md) referenced by name or a skill of its own.
 
 ## Supported integrations
 
@@ -55,7 +79,7 @@ memcastle integration install opencode
 `install` does five things, in this order, and stops at the first one that fails:
 
 1. Finds the integration among the shipped ones and checks it against your MemCastle and your agent.
-2. Copies its files, and the [shared skills](skills.md) it reads, to `~/.local/share/memcastle/agents/<id>/`.
+2. Copies its files, and the [skills](skills.md) its manifest names, to `~/.local/share/memcastle/agents/<id>/`.
 3. Records what it copied, with a SHA-256 for each file, in a receipt beside them.
 4. Tells the agent about the copy: `pi install` for Pi, one plugin file for OpenCode.
 5. Checks the result: the entry file is there, and the agent knows the copy.
@@ -76,7 +100,7 @@ working if the package that shipped it is gone.
 
 | Where | What | Removed by |
 |---|---|---|
-| `~/.local/share/memcastle/agents/<id>/` | the bundled integration, the shared skills, `.memcastle-install.json` | `remove` |
+| `~/.local/share/memcastle/agents/<id>/` | the bundled integration, its `skills/<name>/` directories, `.memcastle-install.json` | `remove` |
 | Pi: its own settings, through `pi install` | one package entry pointing at that directory | `remove` |
 | OpenCode: `~/.config/opencode/plugins/memcastle.ts` | a one-line file that re-exports the installed bundle | `remove` |
 
@@ -93,6 +117,9 @@ Everything else in the agent's configuration is left exactly as it was:
   The installer stops with [`conflict`](#troubleshooting) instead.
 - MemCastle never writes your [authentication token](authentication.md) anywhere.
   If the daemon requires one, give the agent `MEMCASTLE_AUTH_TOKEN` in its environment.
+- MemCastle never writes into the directories where you keep your own skills (`~/.agents/skills`, `~/.claude/skills`, ...).
+  The skills of an integration live inside its installed copy, and the agent is told to read them from there.
+  A skill of yours with the same name as one of the integration's is the one the agent uses.
 
 ## Configure
 
@@ -134,18 +161,21 @@ Removing something that is not installed succeeds and says so.
 
 ## Where integrations come from
 
-Integrations and shared skills live under one **assets root**, in the same layout wherever the root is:
+Integrations and shared skills live under one **assets root**, in the same layout wherever the root is,
+in a package and in a checkout alike:
 
 ```text
 <assets root>/
 ├── integrations/
 │   ├── pi/
 │   │   ├── memcastle-integration.toml
-│   │   └── dist/
+│   │   ├── dist/
+│   │   └── skills/                (only for skills this integration alone needs)
+│   │       └── <name>/SKILL.md
 │   └── opencode/
 │       ├── memcastle-integration.toml
 │       └── dist/
-├── skills/
+├── skills/                        (the shared skills, referenced by name)
 │   └── <name>/SKILL.md
 └── sources/                       (the bundled mining sources, see below)
 ```
@@ -224,8 +254,11 @@ entry = "extension.js"
 from = "dist"
 to = "."
 
-[skills]
-install = true
+[[skills]]
+name = "wake-up"
+
+[[skills]]
+name = "search-before-answer"
 ```
 
 | Key | Meaning |
@@ -239,7 +272,15 @@ install = true
 | `agent.kind` | `pi` or `opencode`: which adapter registers it. |
 | `agent.entry` | The file the agent loads, relative to the installed copy. It must be among the installed files. Required for `opencode`. |
 | `[[assets]]` | `from` (inside the integration's directory) and `to` (inside the installed copy, `.` for its top). Paths that climb out are refused. |
-| `skills.install` | Copy the assets root's `skills/` into the installed copy, so the integration reads them from beside itself. |
+| `[[skills]]` | One skill the integration exposes to its agent, copied to `skills/<name>/` in the installed copy. Optional, and repeatable. |
+| `skills.name` | The skill's name, which is its directory name: lowercase letters, digits or `-`. Listed once. By default it is the shared `skills/<name>/` of the assets root. |
+| `skills.local` | `true` takes the skill from `skills/<name>/` of the integration's own directory instead, for a skill only this integration needs. Defaults to `false`. |
+
+Only the skills a manifest names are installed, and a named skill must have a `SKILL.md`: a missing one is
+[`assets_missing`](#troubleshooting), and nothing is written.
+Running `install` again, or `update`, after a manifest drops a skill removes it from the installed copy.
+An integration that names no skill installs none.
+The `[skills]` table that earlier manifests used (`install = true`) is refused, and the message says what to write.
 
 What the manifest cannot express, such as how an agent learns about a copy, is the adapter's job, chosen by `agent.kind`.
 Adding an agent is a new adapter and a new `kind`; the manifest format does not change.
@@ -252,9 +293,11 @@ Adding an agent is a new adapter and a new `kind`; the manifest format does not 
 - **MCP.**
   The integrations speak MCP to the daemon themselves, with the [memory mode](memory-modes.md) of the session.
   There is no MCP tool that installs, updates or removes an integration, so an agent cannot change the code it runs.
-- **Shared skills.**
+- **Skills.**
   The wake-up, search-before-answer and checkpoint instructions are the [skills](skills.md) of the release.
-  They are installed beside the integration, so they are the ones written for this MemCastle version.
+  An integration names the ones it exposes, and they are installed inside its copy, so they are the ones written for this
+  MemCastle version and no separate skill installation is needed.
+  Both shipped integrations expose all five, and the agent lists them itself.
 - **Mining sources.**
   `sources/pi` and `sources/opencode` are different things: WebAssembly sources that mine an agent's session history
   ([Mining sources](mining-sources.md)).
@@ -267,7 +310,7 @@ except `validation_failed`.
 
 | Code | What happened | What to do |
 |---|---|---|
-| `memcastle::integration::assets_missing` | No assets root: a standalone binary, or a checkout whose bundles are not built, or a package missing files. | Install MemCastle from a package, or pass `--assets-dir` and run `mise run integrations:build` first. |
+| `memcastle::integration::assets_missing` | No assets root: a standalone binary, or a checkout whose bundles are not built, or a package missing files, such as a skill the manifest names. | Install MemCastle from a package, or pass `--assets-dir` and run `mise run integrations:build` first. |
 | `memcastle::integration::not_found` | No integration of that name is shipped under the assets root. | `memcastle integration list` shows the names, and the assets root it looked in. |
 | `memcastle::integration::manifest_invalid` | A `memcastle-integration.toml` breaks a rule. The message names the key. | Fix the manifest (or reinstall the package, if you did not write it). |
 | `memcastle::integration::incompatible` | Your MemCastle or your agent is outside the range the integration declares. The message names both versions. | Upgrade the one that is too old, or use a MemCastle that ships a matching integration. |

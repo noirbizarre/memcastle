@@ -28,8 +28,8 @@ entry = "dist/index.js"
 [[assets]]
 from = "dist"
 to = "dist"
-[skills]
-install = true
+[[skills]]
+name = "wake-up"
 "#;
 
 /// Lay out an assets root with both integrations built, and the shared skills.
@@ -50,6 +50,9 @@ fn assets(root: &Path) {
     }
     std::fs::create_dir_all(root.join("skills/wake-up")).unwrap();
     std::fs::write(root.join("skills/wake-up/SKILL.md"), "# wake\n").unwrap();
+    // Shared, but named by no manifest: an integration exposes the skills it declares and no others.
+    std::fs::create_dir_all(root.join("skills/diary")).unwrap();
+    std::fs::write(root.join("skills/diary/SKILL.md"), "# diary\n").unwrap();
 }
 
 /// A machine with the fixture integrations at `assets/`.
@@ -113,6 +116,7 @@ fn the_lifecycle_installs_updates_and_removes_both_agents_from_a_development_che
             .join("skills/wake-up/SKILL.md")
             .is_file()
     );
+    assert!(!machine.installed("pi").join("skills/diary").exists());
     assert_eq!(
         machine.pi_packages(),
         [machine.installed("pi").display().to_string()]
@@ -137,6 +141,10 @@ fn the_lifecycle_installs_updates_and_removes_both_agents_from_a_development_che
         .map(|i| (i["id"].as_str().unwrap(), i["state"].as_str().unwrap()))
         .collect();
     assert_eq!(states, [("opencode", "installed"), ("pi", "installed")]);
+    // The listing says which skills each integration exposes, so a script can tell without opening the copy.
+    for integration in report["integrations"].as_array().unwrap() {
+        assert_eq!(integration["skills"], serde_json::json!(["wake-up"]));
+    }
 
     // A rebuild is a change even at the same version.
     std::fs::write(

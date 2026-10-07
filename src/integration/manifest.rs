@@ -54,9 +54,9 @@ pub struct IntegrationManifest {
     /// The files to install, relative to the integration's directory.
     #[serde(default, rename = "assets")]
     pub assets: Vec<AssetEntry>,
-    /// The shared skills the integration reads.
-    #[serde(default)]
-    pub skills: SkillsSpec,
+    /// The skills the integration exposes to its agent, shared or its own.
+    #[serde(default, rename = "skills")]
+    pub skills: Vec<SkillEntry>,
 }
 
 /// `[integration]`.
@@ -105,13 +105,17 @@ pub struct AssetEntry {
     pub to: String,
 }
 
-/// `[skills]`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// One `[[skills]]` entry: a skill copied to `skills/<name>/` in the installed copy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SkillsSpec {
-    /// Whether the shared `skills/` of the assets root are copied to `skills/` in the installed copy.
+pub struct SkillEntry {
+    /// The skill's name, which is also its directory name.
+    pub name: String,
+    /// Where it comes from: `false` is the shared `skills/<name>/` of the assets root, referenced and never duplicated in
+    /// the integration's directory; `true` is `skills/<name>/` of the integration's own directory, for a skill only
+    /// this integration needs.
     #[serde(default)]
-    pub install: bool,
+    pub local: bool,
 }
 
 fn invalid(message: impl Into<String>) -> Error {
@@ -126,6 +130,16 @@ fn invalid(message: impl Into<String>) -> Error {
 ///
 /// [`Error::IntegrationManifestInvalid`] naming the first thing wrong.
 pub fn parse(text: &str) -> Result<IntegrationManifest> {
+    // The format-1 manifests of #200 had a `[skills] install = true` table. Serde's own complaint about a table where a
+    // list is expected does not say what to write instead, so the old shape is recognised and named.
+    if let Ok(toml::Value::Table(table)) = toml::from_str::<toml::Value>(text)
+        && table.get("skills").is_some_and(toml::Value::is_table)
+    {
+        return Err(invalid(
+            "`[skills]` is no longer a table: list each skill the integration exposes as a `[[skills]]` entry with a `name` \
+             (and `local = true` for one in the integration's own `skills/` directory)",
+        ));
+    }
     let manifest: IntegrationManifest =
         toml::from_str(text).map_err(|source| invalid(source.message().to_string()))?;
     validate(&manifest)?;
@@ -205,6 +219,24 @@ pub fn validate(manifest: &IntegrationManifest) -> Result<()> {
             )));
         }
     }
+    let mut seen = std::collections::BTreeSet::new();
+    for skill in &manifest.skills {
+        // The name becomes a directory under the installed copy, so it takes the alphabet a skill directory has and
+        // cannot climb out.
+        if !is_valid_source_name(&skill.name) {
+            return Err(invalid(format!(
+                "skills.name `{}` must be 1 to {MAX_SOURCE_NAME_LEN} lowercase letters, digits or `-`, and not start or end with `-`",
+                skill.name
+            )));
+        }
+        // Two entries for one name would install one of them over the other, in an order nobody chose.
+        if !seen.insert(skill.name.as_str()) {
+            return Err(invalid(format!(
+                "skills.name `{}` is listed twice; a skill is installed once",
+                skill.name
+            )));
+        }
+    }
     match &manifest.agent.entry {
         Some(entry) if !is_contained(entry) || entry == "." => {
             return Err(invalid(format!(
@@ -246,8 +278,12 @@ entry = "extension.js"
 from = "dist"
 to = "."
 
-[skills]
-install = true
+[[skills]]
+name = "wake-up"
+
+[[skills]]
+name = "pi-notes"
+local = true
 "#;
 
     fn with(edit: impl Fn(&str) -> String) -> Result<IntegrationManifest> {
@@ -266,8 +302,37 @@ install = true
         let manifest = parse(GOOD).unwrap();
         assert_eq!(manifest.integration.id, "demo");
         assert_eq!(manifest.agent.kind, AgentKind::Pi);
-        assert!(manifest.skills.install);
+        assert_eq!(manifest.skills.len(), 2);
+        assert_eq!(manifest.skills[0].name, "wake-up");
+        // Shared is the default: a skill is local only when the manifest says so.
+        assert!(!manifest.skills[0].local);
+        assert!(manifest.skills[1].local);
         assert_eq!(manifest.assets[0].to, ".");
+    }
+
+    #[test]
+    fn a_skill_name_that_is_not_a_directory_name_is_refused() {
+        for bad in ["Wake", "-wake", "../x", "a/b", ""] {
+            let text = with(|t| t.replace("name = \"wake-up\"", &format!("name = \"{bad}\"")));
+            assert!(message(text).contains("skills.name"), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_skill_listed_twice_is_refused() {
+        let text = with(|t| t.replace("name = \"pi-notes\"\nlocal = true", "name = \"wake-up\""));
+        assert!(message(text).contains("listed twice"));
+    }
+
+    #[test]
+    fn the_old_skills_table_is_refused_with_the_form_to_write_instead() {
+        let text = with(|t| {
+            t.replace(
+                "[[skills]]\nname = \"wake-up\"\n\n[[skills]]\nname = \"pi-notes\"\nlocal = true\n",
+                "[skills]\ninstall = true\n",
+            )
+        });
+        assert!(message(text).contains("[[skills]]"));
     }
 
     #[test]
@@ -290,14 +355,14 @@ to = "dist"
 "#,
         )
         .unwrap();
-        assert!(!manifest.skills.install);
+        assert!(manifest.skills.is_empty());
         assert_eq!(manifest.compatibility.agent, None);
     }
 
     #[test]
     fn an_unknown_key_is_refused_rather_than_ignored() {
-        let text = with(|t| t.replace("[skills]", "[skils]"));
-        assert!(message(text).contains("skils"));
+        let text = with(|t| t.replace("local = true", "locl = true"));
+        assert!(message(text).contains("locl"));
     }
 
     #[test]

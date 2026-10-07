@@ -54,7 +54,7 @@
     },
     {
       "id": "native-skills",
-      "applies_to": ["opencode"],
+      "applies_to": ["pi", "opencode"],
       "description": "The shared skills offered to the host's own skill mechanism."
     },
     {

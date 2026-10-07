@@ -9,7 +9,7 @@
 # needs: `memcastle integration install <id> --assets-dir <checkout>` installs from these `dist/` directories.
 #
 # With <out-dir>: also writes the tree an OS package installs under `share/memcastle/` -
-#   <out-dir>/integrations/<id>/{memcastle-integration.toml,dist/}
+#   <out-dir>/integrations/<id>/{memcastle-integration.toml,dist/,skills/ (only if the integration has its own)}
 #   <out-dir>/skills/<name>/...
 # and checks that nothing which must not ship came along. One script for 📦 Publish Release and for
 # `mise run integrations:package`, so what a release bundles is what a developer can build and test.
@@ -88,6 +88,11 @@ for id in "${BUNDLED[@]}"; do
   mkdir -p "${out}/integrations/${id}"
   cp "integrations/${id}/memcastle-integration.toml" "${out}/integrations/${id}/"
   cp -r "integrations/${id}/dist" "${out}/integrations/${id}/dist"
+  # The skills only this integration exposes (`[[skills]]` with `local = true`) travel inside it; the shared ones below
+  # are referenced by name from the manifest and are not duplicated here.
+  if [ -d "integrations/${id}/skills" ]; then
+    cp -r "integrations/${id}/skills" "${out}/integrations/${id}/skills"
+  fi
 done
 
 # Only the skills themselves: `skills/README.md` is a working document of the repository.

@@ -54,8 +54,9 @@ The split follows what an agent does over a session, not the MCP tool list: ther
 ## Non-goals
 
 No skill registry, package manager or build step of their own — a skill is plain text, and installing is copying.
-`memcastle integration install` does that copying beside an integration
-([ADR-034](../docs/adr/034-agent-integration-distribution.md)); nothing else installs a skill.
+`memcastle integration install` does that copying into an integration's installed copy, for the skills its manifest names
+([ADR-034](../docs/adr/034-agent-integration-distribution.md)); nothing else installs a skill, and a skill stays usable
+without any integration.
 The `skills` row of the [integration contract](../docs/integration-contract.md) requires each integration to load its
 instructions from here instead of keeping its own copy, and never to load one that carries MemCastle-derived content
 into a session whose memory mode is off.

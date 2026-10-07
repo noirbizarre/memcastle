@@ -37,6 +37,11 @@ Pi does not install dependencies for a local package, which is why the extension
 There is no separate MemCastle entry to add to Pi's MCP configuration:
 the extension speaks MCP itself, and a second entry would only duplicate it.
 
+The five [MemCastle skills](skills.md) come with the integration, so no separate skill installation follows.
+The extension offers the `skills/` directory beside it to Pi when a session starts, so Pi lists them and has a
+`/skill:<name>` command for each, and it offers none in an `off` session.
+A skill of your own with the same name, in `~/.agents/skills` for example, takes precedence.
+
 ## Configuration
 
 Pi reads the extension's settings from the environment of the `pi` process.
@@ -64,8 +69,9 @@ The complete list, and what each [memory mode](memory-modes.md) does to a sessio
 - **`pi install` is refused** (`registration_failed`).
   The message is Pi's own.
   Run `pi install ~/.local/share/memcastle/agents/pi` by hand to see it in full.
-- **The wake-up is missing a skill reminder.**
+- **The wake-up is missing a skill reminder, or Pi lists no MemCastle skill.**
   Pi reports a missing skill file once per session and carries on.
   `memcastle integration install pi` restores the `skills/` directory beside the extension.
+  A session in the `off` mode lists none on purpose.
 - **Other failures.**
   See the [troubleshooting table](integrations.md#troubleshooting).

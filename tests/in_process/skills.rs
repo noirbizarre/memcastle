@@ -561,6 +561,53 @@ fn copying_the_skills_directory_into_a_client_location_leaves_every_skill_discov
 }
 
 #[test]
+fn a_skill_stands_alone_and_never_depends_on_an_agent_integration() {
+    // Skills are independently installable (docs/skills.md): one copied into a client with no integration must not tell
+    // the agent to run, or read, anything an integration provides, or it would be half-working there.
+    for skill in skills() {
+        for needle in ["memcastle integration", "integrations/", "agents/"] {
+            assert!(
+                !skill.body.contains(needle),
+                "skill `{}` mentions `{needle}`, which only exists with an integration installed",
+                skill.name
+            );
+        }
+    }
+}
+
+#[test]
+fn every_shared_skill_an_integration_names_is_one_a_client_can_also_install_by_hand() {
+    // The integration references a shared skill by name instead of carrying a copy, so what it names must be exactly
+    // what the standalone install of `skills/` offers.
+    let standalone: BTreeSet<String> = skills().into_iter().map(|skill| skill.name).collect();
+    let mut named = 0;
+    let integrations = Path::new(env!("CARGO_MANIFEST_DIR")).join("integrations");
+    for entry in std::fs::read_dir(integrations)
+        .expect("the integrations directory")
+        .flatten()
+    {
+        let file = entry
+            .path()
+            .join(memcastle::integration::manifest::MANIFEST_FILE);
+        if !file.is_file() {
+            continue;
+        }
+        let manifest = memcastle::integration::manifest::parse(&read(&file))
+            .unwrap_or_else(|error| panic!("{}: {error}", file.display()));
+        for skill in manifest.skills.iter().filter(|skill| !skill.local) {
+            assert!(
+                standalone.contains(&skill.name),
+                "{} names the shared skill `{}`, which `skills/` does not offer",
+                file.display(),
+                skill.name
+            );
+            named += 1;
+        }
+    }
+    assert!(named > 0, "no shipped integration names a shared skill");
+}
+
+#[test]
 fn the_setup_skill_calls_no_tool_but_status_so_it_works_before_any_daemon_exists() {
     let setup = skills()
         .into_iter()

@@ -79,6 +79,9 @@ The same command installs from this checkout with `--assets-dir "$PWD"`, so what
 
 An integration never keeps its own copy of agent instructions: it loads them from [`skills/`](../skills/README.md),
 which is also installable on its own (see [Agent skills](../docs/skills.md)).
+An integration's `memcastle-integration.toml` names the skills it exposes, a `[[skills]]` entry each: the shared ones by
+name, and one that only this integration needs as `local = true` from its own `skills/` directory.
+`memcastle integration install` copies them into the installed copy, so no separate skill installation follows.
 What stays here is the lifecycle: when to load a skill, when to call MemCastle, and loading none into a session whose
 memory mode is off.
 

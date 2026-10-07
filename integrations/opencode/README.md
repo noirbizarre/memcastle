@@ -154,6 +154,8 @@ Two things happen, and both read the files where they are:
   A skill of the same name the user already installed, say under `.agents/skills`, is never shadowed.
   The whole directory is exposed, which is the same as copying it into a client location as
   [the skills page](../../docs/skills.md) describes, so `wake-up`, `diary` and `memcastle-setup` are listed too.
+  In an installed copy that directory holds the skills `memcastle-integration.toml` names (all five), put there by
+  `memcastle integration install opencode`.
 - **A reminder on every request.**
   A skill that is only listed is loaded when the model decides to, which is weaker than a habit.
   So the body of `search-before-answer` is also added to the system prompt of every request, as Pi does, at the level

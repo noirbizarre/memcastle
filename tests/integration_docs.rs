@@ -73,7 +73,9 @@ fn every_key_the_manifest_accepts_is_in_the_reference_table() {
         "agent.kind",
         "agent.entry",
         "[[assets]]",
-        "skills.install",
+        "[[skills]]",
+        "skills.name",
+        "skills.local",
     ] {
         assert!(
             page.contains(&format!("| `{key}` |")),
@@ -116,6 +118,39 @@ fn every_integration_the_repository_ships_has_a_manifest_this_memcastle_accepts(
         found, 2,
         "Pi and OpenCode ship; add the new one to this count and to packaging/integrations/build.sh"
     );
+}
+
+#[test]
+fn every_skill_a_shipped_manifest_names_exists_where_the_manifest_says_it_is() {
+    // The installer refuses a missing skill at install time; this finds the typo in the basic suite instead, from a
+    // checkout with no build, because a skill needs no `dist/`.
+    let mut named = 0;
+    for entry in std::fs::read_dir(root().join("integrations"))
+        .unwrap()
+        .flatten()
+    {
+        let file = entry.path().join(manifest::MANIFEST_FILE);
+        if !file.is_file() {
+            continue;
+        }
+        let parsed = manifest::parse(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        for skill in &parsed.skills {
+            let base = if skill.local {
+                entry.path().join("skills")
+            } else {
+                root().join("skills")
+            };
+            assert!(
+                base.join(&skill.name).join("SKILL.md").is_file(),
+                "{} names the skill `{}`, and {} has no SKILL.md",
+                file.display(),
+                skill.name,
+                base.join(&skill.name).display()
+            );
+            named += 1;
+        }
+    }
+    assert!(named > 0, "no shipped integration exposes a skill");
 }
 
 #[test]
