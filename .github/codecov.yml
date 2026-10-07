@@ -60,19 +60,23 @@ component_management:
         target: auto
   individual_components:
     - component_id: core
-      name: Core (domain, store, jobs, config)
+      # domain, store, jobs, config
+      name: Core
       paths: [src/domain/**, src/store/**, src/migrate/**, src/jobs/**, src/config/**, src/events/**, src/assets/**, src/error.rs, src/lib.rs, src/term.rs, src/project.rs]
     - component_id: surfaces
-      name: Surfaces (CLI, REST, MCP, daemon)
+      # CLI, REST, MCP, daemon
+      name: Surfaces
       paths: [src/api/**, src/mcp/**, src/client/**, src/server/**, src/dbadmin/**, src/main.rs, src/cli.rs]
     - component_id: app
       name: Application services
       paths: [src/app/**]
     - component_id: memory
-      name: Memory pipeline (search, embed, extract, dedup, checkpoint, audit, repair)
+      # search, embed, extract, dedup, checkpoint, audit, repair
+      name: Memory
       paths: [src/search/**, src/embed/**, src/extract/**, src/dedup/**, src/checkpoint/**, src/audit/**, src/repair/**]
     - component_id: sources
-      name: Sources (mining, packages, distribution, credentials, integration install)
+      # mining, packages, distribution, credentials, integration install
+      name: Sources
       paths: [src/mining/**, src/source/**, src/distribution/**, src/credential/**, src/integration/**]
     - component_id: web
       name: Web dashboard
