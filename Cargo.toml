@@ -273,6 +273,12 @@ features = ["connect"]
 [target."cfg(unix)".dependencies]
 libc = "0.2.189"
 
+[lints.rust]
+# On macOS, ld warns that `__eh_frame` is over 16MB for the test binaries that link wasmtime and SurrealDB under
+# coverage, and rustc relays it as a `linker_messages` warning once per binary. It only costs unwinding speed (panics),
+# not correctness, and nothing here can shrink it, so the noise is silenced rather than left to hide real warnings.
+linker_messages = "allow"
+
 [profile.dev]
 # Full DWARF/PDB debug info (type + variable info for interactive
 # debuggers) costs real compile/link time — especially PDB generation on
