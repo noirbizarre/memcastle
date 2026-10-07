@@ -135,8 +135,29 @@ fn resolve_pattern(value: &str) -> Result<String> {
     // Joined as a path, so the separator is the platform's own: `\` on Windows, which is how a program there records
     // its working directory.
     let mut out = resolved;
-    out.extend(rest);
+    out.extend(collapse_dots(rest));
     Ok(out.to_string_lossy().into_owned())
+}
+
+/// The segments of a pattern with each `..` applied to the literal segment before it, as the sources do to the value
+/// they compare with.
+///
+/// `std::path::absolute` collapses `..` on Windows and keeps it elsewhere, so this is done here, once, for both: the
+/// same words must give the same request on every platform. A `..` that follows a `*` is kept, since what the star
+/// stands for is not known.
+fn collapse_dots(parts: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString> {
+    let mut out: Vec<std::ffi::OsString> = Vec::new();
+    for part in parts {
+        let literal_before = out
+            .last()
+            .is_some_and(|last| last != ".." && !last.to_string_lossy().contains('*'));
+        if part == ".." && literal_before {
+            out.pop();
+        } else {
+            out.push(part);
+        }
+    }
+    out
 }
 
 /// `path` without the `\\?\` prefix `canonicalize` gives a Windows path, which no program records as its working
@@ -466,8 +487,13 @@ mod tests {
         );
         assert_eq!(
             resolve_pattern(&under(&real, &["work", "*", "src", "..", "x*"])).unwrap(),
-            under(&real, &["work", "*", "src", "..", "x*"]),
-            "after a star nothing is known, so nothing is resolved"
+            under(&real, &["work", "*", "x*"]),
+            "a `..` applies to the literal segment before it, on every platform"
+        );
+        assert_eq!(
+            resolve_pattern(&under(&real, &["work", "*", "..", "x*"])).unwrap(),
+            under(&real, &["work", "*", "..", "x*"]),
+            "but not to a star, whose extent is not known"
         );
     }
 
