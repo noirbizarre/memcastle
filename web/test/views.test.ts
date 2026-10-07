@@ -8,11 +8,27 @@ import { createAppRouter } from "../src/router.ts"
 import { createSession, SESSION } from "../src/session.ts"
 import JobsView from "../src/views/JobsView.vue"
 import LaunchView from "../src/views/LaunchView.vue"
+import AppShell from "../src/layout/AppShell.vue"
+import GraphView from "../src/views/GraphView.vue"
+import OverviewView from "../src/views/OverviewView.vue"
+import PalaceView from "../src/views/PalaceView.vue"
 import DiaryView from "../src/views/DiaryView.vue"
 import MaintenanceView from "../src/views/MaintenanceView.vue"
 import SearchView from "../src/views/SearchView.vue"
 import SettingsView from "../src/views/SettingsView.vue"
-import { fakeFetch, memoryStorage, type Recorded } from "./support/fetch.ts"
+import { fakeFetch, memoryStorage, STATUS, type Recorded } from "./support/fetch.ts"
+
+// The canvas needs a real browser: a stand-in records the elements drawn and lets a test tap a node.
+const graph = vi.hoisted(() => ({ elements: [] as { data: { id: string } }[], taps: [] as ((event: { target: { id: () => string } }) => void)[], destroyed: 0 }))
+vi.mock("cytoscape", () => ({
+  default: (options: { elements: { data: { id: string } }[] }) => {
+    graph.elements = options.elements
+    return {
+      on: (_event: string, _selector: string, handler: (event: { target: { id: () => string } }) => void) => graph.taps.push(handler),
+      destroy: () => void graph.destroyed++,
+    }
+  },
+}))
 
 const CONFIG = {
   bind_addr: "127.0.0.1:8420",
@@ -370,5 +386,236 @@ describe("the launch page", () => {
 
     expect(wrapper.find("input#mine-path").exists()).toBe(true)
     expect(wrapper.findAll("button").find((candidate) => candidate.text() === "Installed source")!.attributes("disabled")).toBeDefined()
+  })
+})
+
+describe("the overview page", () => {
+  const status = { ...STATUS, drawer_count: 12, jobs_queued: 2 }
+  const answer = (request: Recorded): Answer => ((request.url.includes("/api/status") ? { body: status } : { body: [JOB, { ...JOB, status: "failed" }, { ...JOB, status: "cancelled" }] }))
+
+  it("shows the palace, its counts and how the recent jobs ended", async () => {
+    const { wrapper } = await show(OverviewView, answer)
+
+    expect(wrapper.text()).toContain("running")
+    expect(wrapper.text()).toContain("12")
+    expect(wrapper.text()).toContain("token required")
+    expect(wrapper.text()).toContain("newest 3")
+  })
+
+  it("says the palace is degraded when migrations are pending, and shows why the datastore is down", async () => {
+    const down = { ...status, datastore: { ...status.datastore, ok: false, error: "disk full", pending: ["003"] } }
+    const { wrapper } = await show(OverviewView, (request) => (request.url.includes("/api/status") ? { body: down } : { body: [] }))
+
+    expect(wrapper.text()).toContain("degraded")
+    expect(wrapper.text()).toContain("disk full")
+    expect(wrapper.text()).toContain("1 pending")
+  })
+
+  it("shows the daemon's refusal", async () => {
+    const { wrapper } = await show(OverviewView, () => ({ status: 500, body: { code: "memcastle::x", error: "no palace", help: "start it" } }))
+
+    expect(wrapper.text()).toContain("no palace")
+  })
+})
+
+describe("the palace page", () => {
+  const drawer = { id: "drawer:aaaa", name: "decision", content: "Use SurrealDB.", source: { kind: "note", uri: null, agent: "pi" }, tags: ["db"], provenance: { requested_by: "pi", job_id: null }, valid_from: "2026-10-01T00:00:00Z", valid_to: null, created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z" }
+  const summary = { id: drawer.id, name: "decision", chars: 14, preview: "Use SurrealDB.", source: drawer.source, created_at: drawer.created_at }
+  const room = { id: "room:1", name: "design", wing_name: "castle", description: null, created_at: drawer.created_at, drawers: 1 }
+  const wing = { id: "wing:1", name: "castle", description: null, created_at: drawer.created_at, rooms: 1, drawers: 1 }
+
+  const answer = (request: Recorded): Answer => {
+    const route = path(request)
+    if (route.endsWith("/history")) return { body: { drawer: drawer.id, versions: [drawer, { ...drawer, id: "drawer:bbbb", valid_to: "2026-10-02T00:00:00Z" }] } }
+    if (route.endsWith("/duplicates")) return { body: [{ drawer: "drawer:cccc", side: "older", kind: "near", similarity: 0.91 }] }
+    if (route.endsWith("/drawers")) return { body: [summary] }
+    if (route.includes("/drawers/")) return { body: drawer }
+    if (route === "/api/wings/castle") return { body: { wing, rooms: [room] } }
+    return { body: [wing] }
+  }
+  const click = async (wrapper: Awaited<ReturnType<typeof show>>["wrapper"], text: string) => {
+    await wrapper.findAll("button").find((candidate) => candidate.text().startsWith(text))!.trigger("click")
+    await flushPromises()
+  }
+
+  it("lists the wings, then the rooms of the chosen wing, then its drawers", async () => {
+    const { wrapper } = await show(PalaceView, answer)
+
+    expect(wrapper.text()).toContain("Choose a room")
+    await click(wrapper, "castle")
+    await click(wrapper, "design")
+
+    expect(wrapper.text()).toContain("Use SurrealDB.")
+    expect(wrapper.text()).toContain("14 characters")
+  })
+
+  it("opens a drawer with its history and what it resembles", async () => {
+    const { wrapper } = await show(PalaceView, answer)
+    await click(wrapper, "castle")
+    await click(wrapper, "design")
+
+    await click(wrapper, "Open")
+
+    expect(document.body.textContent).toContain("this version")
+    expect(document.body.textContent).toContain("91% similar")
+  })
+
+  it("still shows the drawer when its history cannot be read", async () => {
+    const { wrapper } = await show(PalaceView, (request) => (path(request).endsWith("/history") || path(request).endsWith("/duplicates") ? { status: 500, body: { error: "no" } } : answer(request)))
+    await click(wrapper, "castle")
+    await click(wrapper, "design")
+
+    await click(wrapper, "Open")
+
+    expect(document.body.textContent).toContain("Use SurrealDB.")
+  })
+
+  it("says so when there are no wings, and when a room is empty", async () => {
+    const empty = await show(PalaceView, () => ({ body: [] }))
+    expect(empty.wrapper.text()).toContain("No wings yet")
+
+    const { wrapper } = await show(PalaceView, (request) => (path(request).endsWith("/drawers") ? { body: [] } : answer(request)))
+    await click(wrapper, "castle")
+    await click(wrapper, "design")
+    expect(wrapper.text()).toContain("This room is empty")
+  })
+
+  it("offers more drawers when the page is full", async () => {
+    const many = Array.from({ length: 50 }, (_, index) => ({ ...summary, id: `drawer:${index}`, name: `n${index}` }))
+    const { wrapper, requests } = await show(PalaceView, (request) => (path(request).endsWith("/drawers") ? { body: many } : answer(request)))
+    await click(wrapper, "castle")
+    await click(wrapper, "design")
+
+    await click(wrapper, "Load more")
+
+    expect(requests.at(-1)!.url).toContain("limit=100")
+  })
+
+  it("shows the failure of a drawer that cannot be opened", async () => {
+    const { wrapper } = await show(PalaceView, (request) => (path(request).includes("/drawers/") ? { status: 404, body: { code: "memcastle::drawer::missing", error: "no such drawer", help: "list again" } } : answer(request)))
+    await click(wrapper, "castle")
+    await click(wrapper, "design")
+
+    await click(wrapper, "Open")
+
+    expect(wrapper.text()).toContain("no such drawer")
+  })
+})
+
+describe("the graph page", () => {
+  const nodes = [
+    { id: "entity:a", name: "Castle", kind: "project", aliases: ["keep"] },
+    { id: "entity:b", name: "SurrealDB", kind: "tool", aliases: [] },
+  ]
+  const edge = { id: "rel:1", from: "entity:a", to: "entity:b", predicate: "uses", confidence: 1, valid_from: "2026-10-01T00:00:00Z", valid_to: null, provenance: { drawer: "drawer:1", extractor: "heuristic", extracted_at: "2026-10-01T00:00:00Z" } }
+  const answer = (request: Recorded): Answer => {
+    const route = path(request)
+    if (route === "/api/graph") return { body: { nodes, edges: [edge], truncated: false } }
+    if (route.endsWith("/mentions")) return { body: [{ drawer: "drawer:1", created_at: "2026-10-01T00:00:00Z" }] }
+    return { body: nodes }
+  }
+  const mountGraph = async (reply = answer) => {
+    graph.taps.length = 0
+    const shown = await show(GraphView, reply)
+    return shown
+  }
+
+  it("draws the entities and the facts between them", async () => {
+    await mountGraph()
+
+    expect(graph.elements.map((element) => element.data.id)).toEqual(["entity:a", "entity:b", "rel:1"])
+  })
+
+  it("says so when the graph is empty, and when it was cut", async () => {
+    const empty = await mountGraph(() => ({ body: { nodes: [], edges: [], truncated: false } }))
+    expect(empty.wrapper.text()).toContain("The knowledge graph is empty")
+
+    const cut = await mountGraph(() => ({ body: { nodes, edges: [], truncated: true } }))
+    expect(cut.wrapper.text()).toContain("The graph was cut at 2 entities")
+  })
+
+  it("shows the facts and the drawers of a tapped entity", async () => {
+    const { wrapper } = await mountGraph()
+
+    graph.taps.at(-1)!({ target: { id: () => "entity:a" } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain("also keep")
+    expect(wrapper.text()).toContain("read by heuristic")
+    expect(wrapper.text()).toContain("drawer:1".slice(0, 8))
+  })
+
+  it("ignores a tap on something that is not in the view", async () => {
+    const { wrapper } = await mountGraph()
+
+    graph.taps.at(-1)!({ target: { id: () => "entity:gone" } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain("Select an entity")
+  })
+
+  it("finds an entity by name and centres the graph on it", async () => {
+    const { wrapper, requests } = await mountGraph()
+
+    await wrapper.find("input").setValue("castle")
+    await wrapper.find("form").trigger("submit")
+    await flushPromises()
+    await wrapper.findAll("button.list-item")[0]!.trigger("click")
+    await flushPromises()
+
+    expect(requests.some((request) => request.url.includes("/api/entities") && request.url.includes("name=castle"))).toBe(true)
+    expect(requests.at(-1)!.url).toContain("entity=entity%3Aa")
+    expect(wrapper.text()).toContain("Show overview")
+  })
+
+  it("shows the failure of a search", async () => {
+    const { wrapper } = await mountGraph((request) => (path(request) === "/api/entities" ? { status: 500, body: { code: "memcastle::graph::failed", error: "graph is down", help: "retry" } } : answer(request)))
+
+    await wrapper.find("form").trigger("submit")
+    await flushPromises()
+
+    expect(wrapper.text()).toContain("graph is down")
+  })
+})
+
+describe("the application shell", () => {
+  async function shell(authRequired = true) {
+    const { fetch } = fakeFetch((request) => ({ body: request.url.endsWith("/api/status") ? STATUS : [] }))
+    const session = createSession({ fetch, storage: memoryStorage() })
+    session.state.authRequired = authRequired
+    const router = createAppRouter(session)
+    await router.push("/")
+    const wrapper = mount(AppShell, { global: { plugins: [router, ToastService, [OpenVue, { theme: { preset: Aura } }]], provide: { [SESSION as symbol]: session } } })
+    await flushPromises()
+    return { wrapper, session, router }
+  }
+
+  it("links every page of the dashboard from the sidebar", async () => {
+    const { wrapper } = await shell()
+
+    expect(wrapper.findAll("a.nav-link").length).toBeGreaterThanOrEqual(8)
+    expect(wrapper.text()).toContain("Overview")
+  })
+
+  it("signs out and returns to the login page", async () => {
+    const { wrapper, router, session } = await shell()
+
+    await wrapper.find("button.sign-out").trigger("click")
+    await flushPromises()
+
+    expect(session.state.authenticated).toBe(false)
+    expect(router.currentRoute.value.name).toBe("login")
+  })
+
+  it("offers no sign out when the daemon asks for no token", async () => {
+    const { wrapper } = await shell(false)
+
+    expect(wrapper.find("button.sign-out").exists()).toBe(false)
+  })
+
+  it("says how the live updates are doing", async () => {
+    const { wrapper } = await shell()
+
+    expect(wrapper.find("[role=status]").text()).toMatch(/Live|Connecting|Manual/)
   })
 })
