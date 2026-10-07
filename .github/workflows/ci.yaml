@@ -43,7 +43,9 @@ env:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A cancelled matrix can upload only its early coverage reports, so main must
+  # finish while superseded pull-request runs still yield fast feedback.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:
