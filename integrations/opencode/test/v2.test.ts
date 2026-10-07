@@ -89,7 +89,7 @@ afterEach(() => {
 test("setup registers the lifecycle hooks and returns a cleanup function", async () => {
   const fake = fakeContext()
   const cleanup = await plugin.setup(fake.ctx)
-  expect(fake.tools.map((tool) => tool.name)).toEqual(["memcastle_checkpoint"])
+  expect(fake.tools.map((tool) => tool.name)).toEqual(["memcastle_checkpoint", "memcastle_palace_audit", "memcastle_palace_repair"])
   expect(fake.commands.map((command) => command.name)).toEqual(["memcastle-checkpoint", "memcastle-audit", "memcastle-repair"])
   expect(fake.hooks).toEqual([
     { domain: "session", name: "context" },
