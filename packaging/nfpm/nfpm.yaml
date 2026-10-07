@@ -53,7 +53,7 @@ contents:
     dst: /usr/share/memcastle/skills
     type: tree
     expand: true
-  # The web dashboard (docs/adr/035), at the same `web/dist/` a checkout has, so the daemon finds it through the one
+  # The web UI (docs/adr/035), at the same `web/dist/` a checkout has, so the daemon finds it through the one
   # assets root: built by packaging/web/build.sh, with no sources and no `node_modules`. Served only when `web.enable`.
   - src: "${WEB_DIR}/web"
     dst: /usr/share/memcastle/web

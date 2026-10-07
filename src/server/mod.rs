@@ -207,12 +207,12 @@ pub async fn run(config: Config) -> Result<()> {
         // admits its static files itself (`api::auth::is_public`), and only while this is enabled.
         router = router.merge(crate::api::web_router(Arc::clone(&assets)));
         if assets.web_is_built() {
-            info!(path = crate::api::UI_PREFIX, assets = %assets.source(), "web dashboard enabled");
+            info!(path = crate::api::UI_PREFIX, assets = %assets.source(), "web UI enabled");
         } else {
             warn!(
                 path = crate::api::UI_PREFIX,
                 assets = %assets.source(),
-                "web dashboard enabled but web/dist/index.html was not found: /ui answers a page that says how to install it \
+                "web UI enabled but web/dist/index.html was not found: /ui answers a page that says how to install it \
                  (install a package, or build it with `mise run web:build` and pass --assets-dir)"
             );
         }

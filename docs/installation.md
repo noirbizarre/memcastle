@@ -14,7 +14,7 @@ There are two ways to have MemCastle, and they run the same daemon.
   Nothing is downloaded when it first starts.
 - **A native package** (the AUR package, or a Linux distribution's own) installs the same binary into the system,
   and may also install read-only files that belong to the package rather than to the binary,
-  such as the web dashboard or a service unit.
+  such as the web UI or a service unit.
   Your package manager owns and updates them.
 
 Your configuration and your data are never part of either.
@@ -42,7 +42,7 @@ The other package assets are the agent integrations and the skills they expose, 
 `share/memcastle/skills/`; `memcastle integration install pi` copies one to your home and registers it with the agent
 (see [Agent integrations](integrations.md)).
 The same release packages carry them, and a standalone binary does not.
-The last package asset is the [web dashboard](web.md), under `share/memcastle/web/dist/`, which the daemon serves only when
+The last package asset is the [web UI](web.md), under `share/memcastle/web/dist/`, which the daemon serves only when
 you set `web.enable`.
 
 ## Install
@@ -154,7 +154,7 @@ Unpack it at a prefix to install it in the same places a package would:
 sudo tar -xzf memcastle_*_linux-amd64.tar.gz --strip-components=1 -C /usr/local
 ```
 
-The tarball carries the bundled sources, the agent integrations, the skills and the web dashboard under
+The tarball carries the bundled sources, the agent integrations, the skills and the web UI under
 `share/memcastle/`, which are package assets.
 Do not unpack it at `~/.local`: that would put the package's assets inside your data directory,
 which MemCastle ignores as an asset location on purpose.

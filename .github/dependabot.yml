@@ -59,7 +59,7 @@ updates:
         patterns: ["*"]
         update-types: [minor, patch]
 
-  # The web dashboard (docs/adr/035): a Vue application built into static files that ship with releases.
+  # The web UI (docs/adr/035): a Vue application built into static files that ship with releases.
   - package-ecosystem: bun
     directory: /web
     schedule:

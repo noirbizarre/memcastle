@@ -20,7 +20,7 @@ pub struct AssetsInfo {
     pub root: Option<String>,
 }
 
-/// The web dashboard's state.
+/// The web UI's state.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WebInfo {
     /// Whether the daemon serves `/ui` (`web.enable`).

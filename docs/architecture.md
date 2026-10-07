@@ -11,7 +11,7 @@ Behaviour that users rely on is documented in the guides and references, and lin
 > MemCastle is a long-running memory server, not a CLI process that happens to expose MCP.
 
 There is one MemCastle daemon per palace.
-Multiple AI coding-agent instances — several OpenCode sessions, Claude Code, Cursor, the web dashboard —
+Multiple AI coding-agent instances — several OpenCode sessions, Claude Code, Cursor, the web UI —
 connect to that *same* daemon, so they share exactly the same palace, job queue and search.
 
 ```mermaid
@@ -559,7 +559,7 @@ What else a release may carry falls into three kinds, kept apart on purpose:
 - **Embedded** in the binary: anything small that must match its version exactly.
   The SurrealDB schema (`surrealkit::embed_schema!`) and the data migrations (`crate::migrate`) are of this kind.
 - **Installed** by a package manager under `share/memcastle`: the sources bundled with MemCastle, the agent integrations
-  and the skills they read, and the web dashboard.
+  and the skills they read, and the web UI.
 - **User data and configuration**, under the XDG directories and never treated as assets.
 
 `assets::Assets::resolve` picks one source for the run, in this order:
@@ -753,9 +753,9 @@ Deliberately out of scope, and each is structurally possible without rework give
 - Robust cross-platform process supervision for `memcastle daemon start` and `daemon restart`
   (they are a best-effort detached spawn; use a real supervisor in production).
 - A dashboard that is more than an API client.
-  The [web dashboard](web.md) is one: a Vue application in `web/` that calls the REST API as the CLI does, is served from
+  The [web UI](web.md) is one: a Vue application in `web/` that calls the REST API as the CLI does, is served from
   the runtime assets under `/ui` only when asked to be, and reaches no storage
-  ([ADR-035](adr/035-web-dashboard.md)).
+  ([ADR-035](adr/035-web-ui.md)).
 - Any network-based asset download.
 
 Decisions and their rejected alternatives are collected in the [Architecture Decisions](adr/README.md).

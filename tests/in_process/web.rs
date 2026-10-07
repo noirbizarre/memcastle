@@ -1,4 +1,4 @@
-//! The web dashboard's routes and the REST additions it relies on, against an in-process daemon and real HTTP
+//! The web UI's routes and the REST additions it relies on, against an in-process daemon and real HTTP
 //! (docs/adr/035).
 //!
 //! The dashboard is opt-in, served from the runtime assets, and the one thing the authentication layer lets through

@@ -8,7 +8,7 @@ MemCastle is **a long-running memory server, not a CLI process that happens to e
 One daemon serves one palace; `memcastle serve` is the only command that does real work locally
 (`daemon start` just spawns it in the background) —
 every other subcommand (`status`, `search`, `mine`, `job ...`) is a thin HTTP client to that daemon,
-so a web dashboard could do everything the CLI does by calling the same API.
+so a web UI could do everything the CLI does by calling the same API.
 The one exception is `memcastle migrate`, which touches storage directly because it must work before a daemon
 exists (see invariant 1).
 Storage is unified in SurrealDB (embedded SurrealKV for local dev, remote for server deployments) —
@@ -75,8 +75,8 @@ An invariant nothing checks is a comment, and it will be violated.
    The same holds for a mining source's OAuth sign-in: the browser flow's redirect lands on a one-shot loopback listener
    outside the router, never on a public route, and no answer, log, file or database row but the credential store holds
    a token (see `docs/adr/039-oauth-credentials-for-mining-sources.md`).
-   The one other exception is the web dashboard's static files: `GET`/`HEAD` of `/ui` and below, only when `web.enable`
-   is set, named in `api::auth::is_public` and nowhere else (see `docs/adr/035-web-dashboard.md`).
+   The one other exception is the web UI's static files: `GET`/`HEAD` of `/ui` and below, only when `web.enable`
+   is set, named in `api::auth::is_public` and nowhere else (see `docs/adr/035-web-ui.md`).
    A token or secret is never logged, serialised or persisted in plaintext (`config::Secret` redacts it;
    the store holds only a digest) — see `docs/adr/014-optional-token-authentication.md`.
    Enforced by `tests/in_process/auth.rs`
@@ -170,14 +170,14 @@ An invariant nothing checks is a comment, and it will be violated.
     consent) and `tests/wasm_oauth.rs` (a source gets a token only with the declaration and the consent, and no token is
     kept anywhere but the credential store).
 
-11. **The web dashboard is a client of the REST API and nothing else, and it is opt-in** —
+11. **The web UI is a client of the REST API and nothing else, and it is opt-in** —
     everything under `web/` reaches MemCastle only over HTTP, never storage, the job code or the database admin endpoint,
     exactly as an integration does (invariant 8), and the daemon serves it only when `web.enable` is set.
     It is found through the one assets root at `web/dist/`, in a checkout and in a package alike, and what it may do
     is what the REST API lets any client do: no shutdown, source installation or token management from the page.
     Its login is the database console's (the user `memcastle`, the token as the password), checked by the same layer on
     every request; the token lives in `sessionStorage` and is never put in a URL, a cookie or a log
-    (see `docs/adr/035-web-dashboard.md`).
+    (see `docs/adr/035-web-ui.md`).
     Enforced by the `prek` `web-http-only` hook (it fails on `surrealdb`, `surrealkv`, `SurrealStore`, a `store`/`jobs`
     path or `/api/db` anywhere under `web/`, Markdown, `node_modules` and `dist` excepted),
     by `tests/in_process/web.rs` (off by default, no path leaves `web/dist`, the headers, a missing build is a 503 and
@@ -254,7 +254,7 @@ sources/        official and reference WebAssembly sources (`directory`, `pi`, `
                 tested but not compiled into MemCastle; `pi` and `opencode` ship with releases (`packaging/sources/build.sh`)
 integrations/   per-agent lifecycle adapters (Pi, OpenCode, ...), in each agent's own language, over MCP and HTTP only;
                 each carries a `memcastle-integration.toml` and is bundled into `dist/` for `memcastle integration install`
-web/            the web dashboard: a Vue 3 and OpenVue application, a client of the REST API, built into `web/dist/` and
+web/            the web UI: a Vue 3 and OpenVue application, a client of the REST API, built into `web/dist/` and
                 served under `/ui` from the assets root when `web.enable` is set (docs/web.md)
 skills/         reusable agent instructions shared by every integration; `tests/in_process/skills.rs` holds them to the
                 tools, commands and routes they name (docs/skills.md)

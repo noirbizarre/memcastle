@@ -1,4 +1,4 @@
-# ADR-035: The web dashboard is an opt-in Vue client in `web/`, served under `/ui` from the assets root, with a public shell
+# ADR-035: The web UI is an opt-in Vue client in `web/`, served under `/ui` from the assets root, with a public shell
 
 ## Status
 

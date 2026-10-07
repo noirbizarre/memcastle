@@ -25,7 +25,7 @@ mise run guards     # the architecture guard hooks, described below
 mise run integrations:check # typecheck and test each package under integrations/, and install the bundles (needs bun)
 mise run integrations:build # bundle integrations/*/src into integrations/*/dist, for `--assets-dir "$PWD"`
 mise run integrations:package # lay out what a release ships in target/bundled-integrations
-mise run web:check  # typecheck, test, build and package the web dashboard, then serve it from a real daemon (needs bun and node)
+mise run web:check  # typecheck, test, build and package the web UI, then serve it from a real daemon (needs bun and node)
 mise run web:build  # build web/ into web/dist, for `--assets-dir "$PWD"` with `web.enable`
 mise run web:dev    # the dashboard's dev server, proxying /api to the running daemon
 mise run web:package # lay out what a release ships in target/bundled-web
@@ -343,9 +343,9 @@ network or an agent's settings file or a credential, and when anything under `sr
 `src/server` (or any module but the binary) calls it.
 `tests/integration_docs.rs` holds [Agent integrations](integrations.md) to the manifest parser and the error codes.
 
-The web dashboard is held to HTTP as an integration is: the `web-http-only` hook fails on `surrealdb`, `surrealkv`,
+The web UI is held to HTTP as an integration is: the `web-http-only` hook fails on `surrealdb`, `surrealkv`,
 `SurrealStore`, a `store` or `jobs` path, or `/api/db` anywhere under `web/` (Markdown, `node_modules` and `dist` are
-skipped), see [ADR-035](adr/035-web-dashboard.md).
+skipped), see [ADR-035](adr/035-web-ui.md).
 That the dashboard's static files are the only thing besides the liveness probe that needs no token is held by
 `tests/in_process/auth.rs` and `tests/in_process/web.rs`, which walk the routes with the dashboard off and on.
 

@@ -1,4 +1,4 @@
-//! The web dashboard that ships with MemCastle (docs/adr/035), built by the script the release runs and served from
+//! The web UI that ships with MemCastle (docs/adr/035), built by the script the release runs and served from
 //! the tree it writes and from the checkout it builds in: the same `web/dist/` found through both ways of choosing the
 //! assets root.
 //!

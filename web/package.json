@@ -2,7 +2,7 @@
   "name": "memcastle-web",
   "private": true,
   "version": "0.0.0",
-  "description": "The MemCastle web dashboard: a Vue client of the daemon's REST API, served under /ui when web.enable is set",
+  "description": "The MemCastle web UI: a Vue client of the daemon's REST API, served under /ui when web.enable is set",
   "type": "module",
   "license": "MIT",
   "scripts": {

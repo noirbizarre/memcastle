@@ -8,7 +8,7 @@ and by [ADR-033](033-source-distribution.md), whose bundled sources are the firs
 (the "no `share/memcastle/` in 0.1" statements below describe the original decision)
 and by [ADR-034](034-agent-integration-distribution.md), whose integrations and skills are the second and third package
 assets and make `assets.dir` the one root for all of them
-and by [ADR-035](035-web-dashboard.md), whose dashboard is the consumer the resolver was built for
+and by [ADR-035](035-web-ui.md), whose dashboard is the consumer the resolver was built for
 
 ## Context
 

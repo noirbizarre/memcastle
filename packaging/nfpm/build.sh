@@ -61,7 +61,7 @@ mkdir -p "${SOURCES_DIR}"
 export INTEGRATIONS_DIR="${INTEGRATIONS_DIR:-${completions}/integrations-tree}"
 mkdir -p "${INTEGRATIONS_DIR}/integrations" "${INTEGRATIONS_DIR}/skills"
 
-# The web dashboard (docs/adr/035): `web/dist/` built by packaging/web/build.sh. An empty tree when the caller has none.
+# The web UI (docs/adr/035): `web/dist/` built by packaging/web/build.sh. An empty tree when the caller has none.
 export WEB_DIR="${WEB_DIR:-${completions}/web-tree}"
 mkdir -p "${WEB_DIR}/web"
 

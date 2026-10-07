@@ -107,7 +107,7 @@ pass_filenames = false
 # AGENTS.md invariant #1: the CLI, MCP, HTTP, and client layers reach storage
 # and the scheduler only through `app::AppServices` (or, for the CLI, the
 # daemon over HTTP) — never `store` or `jobs` directly — so any interface
-# (or a future one, like a web dashboard) can only ever do what that struct
+# (or a future one, like a web UI) can only ever do what that struct
 # exposes. `src/main.rs` is included, minus its one documented exception:
 # `memcastle migrate` connects to storage itself (ADR-004). The pattern also
 # catches single-line grouped imports (`use crate::{store::..}`) too; a second
@@ -174,13 +174,13 @@ entry = '''bash -c '! grep -rnP --exclude=*.md --exclude-dir=node_modules "surre
 files = '^integrations/'
 pass_filenames = false
 
-# AGENTS.md invariant #11: the web dashboard is a client of the REST API and nothing else, as the CLI is. Like an
+# AGENTS.md invariant #11: the web UI is a client of the REST API and nothing else, as the CLI is. Like an
 # integration (invariant #8), it must not open the database, reach MemCastle's `store`/`jobs` code, or use the database
 # admin endpoint (`/api/db`, ADR-015), each of which would be a second path to the palace that skips the memory-mode
 # gate and the single writer. `dist` is generated, and `node_modules` and Markdown are left out as for integrations.
 [[repos.hooks]]
 id = "web-http-only"
-name = "the web dashboard reaches MemCastle only over HTTP"
+name = "the web UI reaches MemCastle only over HTTP"
 language = "system"
 entry = '''bash -c '! grep -rnP --exclude=*.md --exclude-dir=node_modules --exclude-dir=dist --exclude=bun.lock "surrealdb|surrealkv|SurrealStore|(?<![A-Za-z0-9_])(crate|memcastle)::(\{[^}]*)?(store|jobs)\b|/api/db\b" web' '''
 files = '^web/'

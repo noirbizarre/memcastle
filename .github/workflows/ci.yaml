@@ -303,7 +303,7 @@ jobs:
           files: integrations/*/coverage/lcov.info
           flags: integrations
 
-  # The web dashboard (docs/adr/035): typechecked, tested, built, packaged by the release's own script, and served by a
+  # The web UI (docs/adr/035): typechecked, tested, built, packaged by the release's own script, and served by a
   # real daemon from an installed prefix and from the checkout. Its own job because it needs bun and node, which
   # `mise install` deliberately leaves out of [tools]. This job is local to this repository; the template does not
   # have it.

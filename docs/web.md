@@ -1,11 +1,11 @@
 # Web UI
 
-MemCastle can serve a web dashboard for inspecting and managing a daemon.
+MemCastle can serve a web UI for inspecting and managing a daemon.
 It is a client of the [REST API](mcp-and-api.md#rest-api), as the CLI is: it reads and writes nothing but through the
 routes you could call yourself, and it respects the [memory modes](memory-modes.md).
 It is off by default.
 
-The decision, and what was rejected, is in [ADR-035](adr/035-web-dashboard.md).
+The decision, and what was rejected, is in [ADR-035](adr/035-web-ui.md).
 
 ## Turning it on
 

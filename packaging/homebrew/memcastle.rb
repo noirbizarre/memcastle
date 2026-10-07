@@ -40,7 +40,7 @@ class Memcastle < Formula
     sha256 "@SHA256_INTEGRATIONS@"
   end
 
-  # The web dashboard (docs/adr/035): static files, one asset for every platform, with `web/` under its single top-level
+  # The web UI (docs/adr/035): static files, one asset for every platform, with `web/` under its single top-level
   # directory.
   resource "web" do
     url "https://github.com/noirbizarre/memcastle/releases/download/#{version}/memcastle_#{version}_web.tar.gz"
