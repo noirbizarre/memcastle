@@ -9,9 +9,10 @@
 
 use crate::common;
 
-use common::TestDaemon;
+use common::{TestDaemon, wait_for_job_status};
 use futures::{SinkExt, StreamExt};
 use memcastle::config::Secret;
+use memcastle::domain::{Job, JobStatus};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 use surrealdb::engine::any::{self, Any};
@@ -145,17 +146,15 @@ async fn starting_the_endpoint_listens_on_loopback_and_answers_the_probes() {
 async fn a_query_over_the_endpoint_sees_what_the_daemon_wrote() {
     let daemon = TestDaemon::start().await;
     // The daemon writes a job through its own API...
-    let submitted = reqwest::Client::new()
+    let response = reqwest::Client::new()
         .post(format!("{}/api/jobs", daemon.base_url))
         .json(&json!({ "type": "audit", "requested_by": "test" }))
         .send()
         .await
         .unwrap();
-    assert!(submitted.status().is_success(), "{submitted:?}");
-    let job_id = submitted.json::<Value>().await.unwrap()["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    assert!(response.status().is_success(), "{response:?}");
+    let submitted: Job = response.json().await.unwrap();
+    let job_id = submitted.id.to_string();
     let addr = open_endpoint(&daemon, None).await;
 
     // ...and Studio, on the endpoint, reads it back from the same live database.
@@ -174,6 +173,15 @@ async fn a_query_over_the_endpoint_sees_what_the_daemon_wrote() {
         .filter_map(|row| row["id"].as_str())
         .collect();
     assert!(ids.contains(&job_id.as_str()), "{ids:?} lacks {job_id}");
+    // Shutdown interrupts running jobs, so wait for the submitted audit rather
+    // than letting this endpoint test nondeterministically cover that path.
+    wait_for_job_status(
+        &reqwest::Client::new(),
+        &daemon.base_url,
+        submitted.id,
+        JobStatus::Completed,
+    )
+    .await;
     daemon.shutdown().await;
 }
 
