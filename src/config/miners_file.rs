@@ -1,18 +1,27 @@
-//! Reading and rewriting the `[[miners]]` section of the configuration file, and nothing else in it.
+//! Reading and rewriting the `[[miners]]` and `[[triggers]]` sections of the configuration file, and nothing else in it.
 //!
-//! The daemon is the only writer (`docs/adr/037-persistent-miner-configuration.md`), and it edits the file in place
-//! with `toml_edit` so everything it does not own survives: comments, the order of the other tables, the formatting
-//! of an entry that did not change. Environment and command-line overrides are never part of this file, which is why
-//! the daemon edits it and does not serialise its resolved [`Config`](super::Config).
+//! The daemon is the only writer (`docs/adr/037-persistent-miner-configuration.md`, `docs/adr/043-source-triggers.md`),
+//! and it edits the file in place with `toml_edit` so everything it does not own survives: comments, the order of the
+//! other tables, the formatting of an entry that did not change. Environment and command-line overrides are never part
+//! of this file, which is why the daemon edits it and does not serialise its resolved [`Config`](super::Config).
+//!
+//! The two sections share one file, so they share one stamp (what the file looked like) and one write lock: a miner
+//! write and a trigger write in the same moment are applied one after the other, never interleaved.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::SystemTime;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use toml_edit::{ArrayOfTables, DocumentMut, Item};
 
-use crate::domain::{MinerDefinition, validate_miners};
+use crate::domain::{MinerDefinition, TriggerDefinition, validate_miners, validate_triggers};
 use crate::error::{Error, Result};
+
+/// Serialises the daemon's own writes to the file: two registries (miners, triggers) edit the same text, and the
+/// second must read what the first wrote, not the text it started from.
+static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 /// What a file looked like when it was read: cheap to compare, so the daemon can tell "someone edited it" without
 /// reading it on every request, and a write can refuse to overwrite an edit it has not seen.
@@ -31,17 +40,43 @@ pub struct Loaded {
     pub stamp: Option<FileStamp>,
 }
 
-/// The one key of the configuration file this module reads.
-#[derive(Deserialize)]
-struct MinersOnly {
-    #[serde(default)]
-    miners: Vec<MinerDefinition>,
+/// The triggers in a file, and the file's stamp at that moment (`None` when the file does not exist yet).
+#[derive(Debug, Clone)]
+pub struct LoadedTriggers {
+    /// Every entry, in file order, already validated.
+    pub triggers: Vec<TriggerDefinition>,
+    /// The stamp to hand back to [`write_triggers`].
+    pub stamp: Option<FileStamp>,
 }
 
-/// Borrowed counterpart of [`MinersOnly`], to render a single entry exactly as the serialiser would write it.
-#[derive(Serialize)]
-struct OneMiner<'a> {
-    miners: [&'a MinerDefinition; 1],
+/// One kind of entry the file holds as an array of tables.
+trait Section: Serialize + DeserializeOwned + PartialEq + Clone {
+    /// The array's key in the file.
+    const KEY: &'static str;
+    /// The entry's name, which is its identity within the section.
+    fn name(&self) -> &str;
+    /// Check every entry and that their names are unique.
+    fn validate_all(entries: &[Self]) -> std::result::Result<(), String>;
+}
+
+impl Section for MinerDefinition {
+    const KEY: &'static str = "miners";
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn validate_all(entries: &[Self]) -> std::result::Result<(), String> {
+        validate_miners(entries)
+    }
+}
+
+impl Section for TriggerDefinition {
+    const KEY: &'static str = "triggers";
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn validate_all(entries: &[Self]) -> std::result::Result<(), String> {
+        validate_triggers(entries)
+    }
 }
 
 fn file_error(path: &Path, reason: impl std::fmt::Display) -> Error {
@@ -67,16 +102,36 @@ pub fn stamp(path: &Path) -> Result<Option<FileStamp>> {
     }
 }
 
-/// Parse the miners out of configuration text, ignoring every other section.
-fn parse(path: &Path, text: &str) -> Result<Vec<MinerDefinition>> {
-    let MinersOnly { miners } = toml::from_str(text).map_err(|e| {
+/// Parse one section out of configuration text, ignoring every other section.
+fn parse<T: Section>(path: &Path, text: &str) -> Result<Vec<T>> {
+    let mut table: toml::Table = toml::from_str(text).map_err(|e| {
         file_error(
             path,
-            format!("the `[[miners]]` section does not parse: {e}"),
+            format!("the configuration does not parse as TOML: {e}"),
         )
     })?;
-    validate_miners(&miners).map_err(|reason| file_error(path, reason))?;
-    Ok(miners)
+    let entries: Vec<T> = match table.remove(T::KEY) {
+        None => Vec::new(),
+        Some(value) => value.try_into().map_err(|e| {
+            file_error(
+                path,
+                format!("the `[[{}]]` section does not parse: {e}", T::KEY),
+            )
+        })?,
+    };
+    T::validate_all(&entries).map_err(|reason| file_error(path, reason))?;
+    Ok(entries)
+}
+
+fn read_section<T: Section>(path: &Path) -> Result<(Vec<T>, Option<FileStamp>)> {
+    // Stamped *before* reading: an edit between the two makes the stamp stale, so the next refresh reads again,
+    // where the other order could record a stamp for text that was never read.
+    let before = stamp(path)?;
+    if before.is_none() {
+        return Ok((Vec::new(), None));
+    }
+    let text = std::fs::read_to_string(path).map_err(|source| file_error(path, source))?;
+    Ok((parse(path, &text)?, before))
 }
 
 /// Read the miners from `path`. A file that does not exist has none.
@@ -86,28 +141,30 @@ fn parse(path: &Path, text: &str) -> Result<Vec<MinerDefinition>> {
 /// Returns [`Error::MinerConfigFile`] when the file cannot be read, or its `[[miners]]` section does not parse or
 /// does not validate.
 pub fn read(path: &Path) -> Result<Loaded> {
-    // Stamped *before* reading: an edit between the two makes the stamp stale, so the next refresh reads again,
-    // where the other order could record a stamp for text that was never read.
-    let before = stamp(path)?;
-    if before.is_none() {
-        return Ok(Loaded {
-            miners: Vec::new(),
-            stamp: None,
-        });
-    }
-    let text = std::fs::read_to_string(path).map_err(|source| file_error(path, source))?;
-    Ok(Loaded {
-        miners: parse(path, &text)?,
-        stamp: before,
-    })
+    let (miners, stamp) = read_section(path)?;
+    Ok(Loaded { miners, stamp })
 }
 
-/// Render one entry the way the serialiser writes it, as a table ready to sit in `[[miners]]`.
-fn render(path: &Path, miner: &MinerDefinition) -> Result<toml_edit::Table> {
-    let text = toml::to_string(&OneMiner { miners: [miner] }).map_err(|e| file_error(path, e))?;
+/// Read the triggers from `path`. A file that does not exist has none.
+///
+/// # Errors
+///
+/// Returns [`Error::MinerConfigFile`] when the file cannot be read, or its `[[triggers]]` section does not parse or
+/// does not validate.
+pub fn read_triggers(path: &Path) -> Result<LoadedTriggers> {
+    let (triggers, stamp) = read_section(path)?;
+    Ok(LoadedTriggers { triggers, stamp })
+}
+
+/// Render one entry the way the serialiser writes it, as a table ready to sit in its array.
+fn render<T: Section>(path: &Path, entry: &T) -> Result<toml_edit::Table> {
+    let value = toml::Value::try_from(entry).map_err(|e| file_error(path, e))?;
+    let mut wrapper = toml::Table::new();
+    wrapper.insert(T::KEY.to_string(), toml::Value::Array(vec![value]));
+    let text = toml::to_string(&wrapper).map_err(|e| file_error(path, e))?;
     let doc: DocumentMut = text.parse().map_err(|e| file_error(path, e))?;
     let mut table = doc
-        .get("miners")
+        .get(T::KEY)
         .and_then(Item::as_array_of_tables)
         .and_then(|tables| tables.get(0))
         .cloned()
@@ -150,12 +207,39 @@ pub fn write(
     expected: Option<FileStamp>,
     miners: &[MinerDefinition],
 ) -> Result<Option<FileStamp>> {
-    // `validate_miners` again: a write is the last place a bad definition can be stopped before it is persisted.
-    validate_miners(miners).map_err(|reason| file_error(path, reason))?;
+    write_section(path, expected, miners)
+}
+
+/// Make the file's `[[triggers]]` section equal `triggers`, exactly as [`write`] does for the miners.
+///
+/// # Errors
+///
+/// Returns [`Error::MinerConfigFile`] when the file changed since `expected`, cannot be parsed or written, or holds
+/// `triggers` in a shape that is not a list of tables.
+pub fn write_triggers(
+    path: &Path,
+    expected: Option<FileStamp>,
+    triggers: &[TriggerDefinition],
+) -> Result<Option<FileStamp>> {
+    write_section(path, expected, triggers)
+}
+
+fn write_section<T: Section>(
+    path: &Path,
+    expected: Option<FileStamp>,
+    entries: &[T],
+) -> Result<Option<FileStamp>> {
+    // A poisoned lock only means another write panicked; the file is replaced atomically, so it is still whole.
+    let _guard = WRITE_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // Validated again: a write is the last place a bad definition can be stopped before it is persisted.
+    T::validate_all(entries).map_err(|reason| file_error(path, reason))?;
     if stamp(path)? != expected {
         return Err(file_error(
             path,
-            "it changed while the daemon was editing it; run `memcastle miner reload` to read the change, then retry",
+            "it changed while the daemon was editing it; run `memcastle miner reload` (and `memcastle trigger reload`) \
+             to read the change, then retry",
         ));
     }
 
@@ -165,54 +249,62 @@ pub fn write(
         String::new()
     };
     // The same text, parsed the way the daemon reads it, so entries line up with the tables by index.
-    let existing = parse(path, &text)?;
+    let existing: Vec<T> = parse(path, &text)?;
     let mut doc: DocumentMut = text
         .parse()
         .map_err(|e| file_error(path, format!("it is not valid TOML: {e}")))?;
 
-    if miners.is_empty() {
-        doc.remove("miners");
+    if entries.is_empty() {
+        doc.remove(T::KEY);
     } else {
         // `miners = [{ ... }]` is valid TOML that `read` accepts; it becomes `[[miners]]` when rewritten.
-        if let Some(item) = doc.remove("miners") {
+        if let Some(item) = doc.remove(T::KEY) {
             let tables = item.into_array_of_tables().map_err(|_| {
                 file_error(
                     path,
-                    "`miners` is not a list of tables; write it as `[[miners]]`",
+                    format!(
+                        "`{key}` is not a list of tables; write it as `[[{key}]]`",
+                        key = T::KEY
+                    ),
                 )
             })?;
-            doc.insert("miners", Item::ArrayOfTables(tables));
+            doc.insert(T::KEY, Item::ArrayOfTables(tables));
         } else {
-            doc.insert("miners", Item::ArrayOfTables(ArrayOfTables::new()));
+            doc.insert(T::KEY, Item::ArrayOfTables(ArrayOfTables::new()));
         }
         let tables = doc
-            .get_mut("miners")
+            .get_mut(T::KEY)
             .and_then(Item::as_array_of_tables_mut)
-            .ok_or_else(|| file_error(path, "the `[[miners]]` section could not be edited"))?;
+            .ok_or_else(|| {
+                file_error(
+                    path,
+                    format!("the `[[{}]]` section could not be edited", T::KEY),
+                )
+            })?;
 
         // Edited in place, never rebuilt: `toml_edit` orders tables by the position they had in the file, and a
         // table that was rendered elsewhere carries a position of its own, which would throw it to the top.
         let mut current = existing;
         for index in (0..current.len()).rev() {
-            if !miners.iter().any(|m| m.name == current[index].name) {
+            if !entries.iter().any(|m| m.name() == current[index].name()) {
                 tables.remove(index);
                 current.remove(index);
             }
         }
-        for miner in miners {
-            match current.iter().position(|c| c.name == miner.name) {
+        for entry in entries {
+            match current.iter().position(|c| c.name() == entry.name()) {
                 // Unchanged: left alone, so its comments and formatting are exactly as the user wrote them.
-                Some(index) if current[index] == *miner => {}
+                Some(index) if current[index] == *entry => {}
                 Some(index) => {
-                    let mut table = render(path, miner)?;
+                    let mut table = render(path, entry)?;
                     if let Some(old) = tables.get_mut(index) {
-                        // The comments above the old entry are the user's, and describe the miner, not its fields.
+                        // The comments above the old entry are the user's, and describe the entry, not its fields.
                         *table.decor_mut() = old.decor().clone();
                         *old = table;
                     }
                 }
                 None => {
-                    let mut table = render(path, miner)?;
+                    let mut table = render(path, entry)?;
                     if !text.trim().is_empty() {
                         // Set apart from whatever precedes it, as a person writing the entry would.
                         table.decor_mut().set_prefix("\n");
@@ -363,7 +455,6 @@ port = 4000
             .as_object()
             .cloned()
             .expect("map");
-        rich.trigger = toml::from_str("type = \"event\"\nhook = \"x\"\n").expect("trigger");
         rich.credential = Some(crate::domain::CredentialRef::Env {
             name: "SIGNAL_TOKEN".to_string(),
         });
@@ -438,5 +529,121 @@ port = 4000
         write(&path, loaded.stamp, &[miner("a")]).expect("write");
         let mode = std::fs::metadata(&path).expect("meta").permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "the file may hold a token");
+    }
+
+    fn trigger(name: &str) -> TriggerDefinition {
+        toml::from_str(&format!(
+            "name = \"{name}\"\nminer = \"docs\"\ntype = \"poll\"\nevery = \"5m\"\n"
+        ))
+        .expect("a trigger")
+    }
+
+    const WITH_BOTH: &str = "\
+# my daemon
+[server]
+port = 4000
+
+# the docs miner
+[[miners]]
+name = \"docs\"
+source = \"directory\"
+locator = \"/data/docs\"
+
+# polls the docs
+[[triggers]]
+name = \"nightly\"
+miner = \"docs\"
+type = \"poll\"   # keep me
+every = \"1h\"
+";
+
+    #[test]
+    fn miners_and_triggers_are_read_from_the_same_file_independently() {
+        let (_dir, path) = setup(WITH_BOTH);
+        assert_eq!(read(&path).expect("miners").miners.len(), 1);
+        let triggers = read_triggers(&path).expect("triggers").triggers;
+        assert_eq!(triggers.len(), 1);
+        assert_eq!(triggers[0].name, "nightly");
+        assert!(
+            !triggers[0].enabled,
+            "a trigger the file does not enable is off"
+        );
+    }
+
+    #[test]
+    fn adding_a_trigger_keeps_the_miners_the_comments_and_the_other_tables() {
+        let (_dir, path) = setup(WITH_BOTH);
+        let loaded = read_triggers(&path).expect("read");
+        let mut triggers = loaded.triggers;
+        triggers.push(trigger("hourly"));
+        write_triggers(&path, loaded.stamp, &triggers).expect("write");
+
+        let text = std::fs::read_to_string(&path).expect("read back");
+        for kept in [
+            "# my daemon",
+            "port = 4000",
+            "# the docs miner",
+            "# polls the docs",
+            "# keep me",
+        ] {
+            assert!(text.contains(kept), "`{kept}` was lost:\n{text}");
+        }
+        assert_eq!(read_triggers(&path).expect("reread").triggers, triggers);
+        assert_eq!(
+            read(&path).expect("miners").miners.len(),
+            1,
+            "the miners are untouched"
+        );
+    }
+
+    #[test]
+    fn writing_the_miners_leaves_the_triggers_alone_and_the_other_way_round() {
+        let (_dir, path) = setup(WITH_BOTH);
+        let miners = read(&path).expect("read");
+        let mut all = miners.miners.clone();
+        all.push(miner("notes"));
+        let stamp = write(&path, miners.stamp, &all).expect("write miners");
+        assert_eq!(read_triggers(&path).expect("triggers").triggers.len(), 1);
+        write_triggers(&path, stamp, &[]).expect("remove all triggers");
+        let text = std::fs::read_to_string(&path).expect("read back");
+        assert!(
+            !text.contains("triggers") && text.contains("[[miners]]"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_trigger_that_enables_itself_in_the_file_is_read_as_enabled_and_one_that_does_not_never_is()
+    {
+        let (_dir, path) = setup(
+            "[[triggers]]\nname = \"on\"\nminer = \"m\"\ntype = \"poll\"\nevery = \"1m\"\nenabled = true\n\
+             [[triggers]]\nname = \"off\"\nminer = \"m\"\ntype = \"poll\"\nevery = \"1m\"\n",
+        );
+        let triggers = read_triggers(&path).expect("read").triggers;
+        assert_eq!(
+            triggers
+                .iter()
+                .map(|t| (t.name.as_str(), t.enabled))
+                .collect::<Vec<_>>(),
+            [("on", true), ("off", false)]
+        );
+    }
+
+    #[test]
+    fn a_bad_trigger_section_is_named_and_refused() {
+        let (_dir, path) = setup("[[triggers]]\nname = \"t\"\nminer = \"m\"\ntype = \"poll\"\n");
+        let error = read_triggers(&path).expect_err("no `every`").to_string();
+        assert!(error.contains("needs `every`"), "{error}");
+        let (_dir, path) = setup("[[triggers]]\nname = \"t\"\nminer = \"m\"\ntype = \"cron\"\n");
+        assert!(read_triggers(&path).is_err(), "an unknown type is refused");
+    }
+
+    #[test]
+    fn a_trigger_file_edited_since_it_was_read_is_never_overwritten() {
+        let (_dir, path) = setup(WITH_BOTH);
+        let loaded = read_triggers(&path).expect("read");
+        std::fs::write(&path, format!("{WITH_BOTH}# edited by hand\n")).expect("edit");
+        let error = write_triggers(&path, loaded.stamp, &[trigger("x")]).expect_err("stale");
+        assert!(error.to_string().contains("changed while"), "{error}");
     }
 }

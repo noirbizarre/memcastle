@@ -960,6 +960,73 @@ pub enum Error {
         reason: String,
     },
 
+    /// No trigger has this name.
+    #[error("no trigger is named `{name}`")]
+    #[diagnostic(
+        code(memcastle::trigger::not_found),
+        help(
+            "`memcastle trigger list` shows the configured triggers; `memcastle trigger set <name> --miner <miner> --type <type>` adds one"
+        )
+    )]
+    TriggerNotFound {
+        /// The name asked for.
+        name: String,
+    },
+
+    /// A trigger with this name already exists, and the request was to create it.
+    #[error("a trigger named `{name}` already exists")]
+    #[diagnostic(
+        code(memcastle::trigger::exists),
+        help(
+            "`memcastle trigger get {name}` shows it; `memcastle trigger set {name} ...` changes it"
+        )
+    )]
+    TriggerExists {
+        /// The name that is taken.
+        name: String,
+    },
+
+    /// A trigger's definition is not valid, so it was not saved or activated.
+    #[error("trigger `{name}` is not valid: {reason}")]
+    #[diagnostic(
+        code(memcastle::trigger::invalid),
+        help("fix the setting named above; `docs/triggers.md` describes every `[[triggers]]` key")
+    )]
+    TriggerInvalid {
+        /// The trigger.
+        name: String,
+        /// What is wrong and how to fix it.
+        reason: String,
+    },
+
+    /// A trigger cannot be switched on yet: something it needs is not set up.
+    #[error("trigger `{name}` cannot be enabled yet: {reason}")]
+    #[diagnostic(
+        code(memcastle::trigger::not_activatable),
+        help(
+            "nothing is started until every prerequisite holds; `docs/triggers.md` lists what each kind needs, and `memcastle trigger get {name}` shows where this one stands"
+        )
+    )]
+    TriggerNotActivatable {
+        /// The trigger.
+        name: String,
+        /// What is missing, and how to set it up.
+        reason: String,
+    },
+
+    /// The trigger is disabled, so it was not fired.
+    #[error("trigger `{name}` is disabled")]
+    #[diagnostic(
+        code(memcastle::trigger::disabled),
+        help(
+            "`memcastle trigger enable {name}` enables it; to mine now without a trigger, `memcastle miner run <miner>`"
+        )
+    )]
+    TriggerDisabled {
+        /// The trigger.
+        name: String,
+    },
+
     /// Installing a source needs the user's explicit agreement to the permissions it asks for.
     #[error("source `{name}` asks for permissions that were not agreed to: {permissions}")]
     #[diagnostic(
@@ -1813,6 +1880,23 @@ mod tests {
                 path: "/etc/memcastle.toml".to_string(),
                 reason: "not valid TOML".to_string(),
             },
+            Error::TriggerNotFound {
+                name: "daily".to_string(),
+            },
+            Error::TriggerExists {
+                name: "daily".to_string(),
+            },
+            Error::TriggerInvalid {
+                name: "daily".to_string(),
+                reason: "`every` is missing".to_string(),
+            },
+            Error::TriggerNotActivatable {
+                name: "daily".to_string(),
+                reason: "the webhook listener is off".to_string(),
+            },
+            Error::TriggerDisabled {
+                name: "daily".to_string(),
+            },
             Error::SourceConsentRequired {
                 name: "slack".to_string(),
                 permissions: "network".to_string(),
@@ -1982,6 +2066,11 @@ mod tests {
             | Error::MinerDisabled { .. }
             | Error::MinerNotRunnable { .. }
             | Error::MinerConfigFile { .. }
+            | Error::TriggerNotFound { .. }
+            | Error::TriggerExists { .. }
+            | Error::TriggerInvalid { .. }
+            | Error::TriggerNotActivatable { .. }
+            | Error::TriggerDisabled { .. }
             | Error::SourceConsentRequired { .. }
             | Error::SourceBuiltin { .. }
             | Error::SourceBundled { .. }

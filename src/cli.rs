@@ -148,11 +148,15 @@ pub enum Command {
     #[command(subcommand)]
     Source(SourceCommand),
     /// Configure what the daemon mines: named miners kept as `[[miners]]` in the
-    /// configuration file, each a source, a locator, a scope and a trigger.
+    /// configuration file, each a source, a locator, a scope and a credential.
     /// Administrative: changing a miner is never available to MCP clients, which
     /// can only read them.
     #[command(subcommand)]
     Miner(MinerCommand),
+    /// Configure what asks for a mining run on its own (a timetable, a poll, a
+    /// webhook, a file watcher). Every trigger starts disabled.
+    #[command(subcommand)]
+    Trigger(TriggerCommand),
     /// Install, update and remove the integrations MemCastle ships for coding
     /// agents (Pi, OpenCode). Local: needs no daemon.
     #[command(subcommand)]
@@ -513,6 +517,89 @@ pub enum MinerCommand {
     Run(MinerRunArgs),
 }
 
+/// `memcastle trigger ...`: what asks for a mining run without being told to.
+///
+/// A trigger only decides *when*: it asks for the same run `memcastle miner run` does. Nothing here starts on its own:
+/// a trigger is created disabled, and enabling it checks everything it needs first.
+#[derive(Debug, Subcommand)]
+pub enum TriggerCommand {
+    /// List the configured triggers, whether each is working, and the webhook
+    /// listener's state.
+    List,
+    /// Show one trigger in full: its settings, what it still needs, when it
+    /// last fired and what last went wrong.
+    Get(TriggerNameArgs),
+    /// Create a trigger (disabled), or change the settings named: everything
+    /// not named is left as it is. Written to the configuration file, comments
+    /// kept.
+    Set(Box<TriggerSetArgs>),
+    /// Switch a trigger on. Every prerequisite is checked first, and what is
+    /// missing is said; nothing starts until they all hold.
+    Enable(TriggerNameArgs),
+    /// Switch a trigger off. What it mined stays.
+    Disable(TriggerNameArgs),
+    /// Remove a trigger's definition and what the daemon remembers about it.
+    Remove(TriggerRemoveArgs),
+    /// Read the configuration file again now, and say what changed. The daemon
+    /// also notices an edited file by itself within a few seconds.
+    Reload,
+    /// Ask for a run through the trigger now, the way it would on its own.
+    Fire(TriggerNameArgs),
+}
+
+/// A trigger named on the command line.
+#[derive(Debug, Args)]
+pub struct TriggerNameArgs {
+    /// The trigger's name, as `memcastle trigger list` shows it.
+    pub name: String,
+}
+
+/// Arguments for `memcastle trigger remove`.
+#[derive(Debug, Args)]
+pub struct TriggerRemoveArgs {
+    /// The trigger's name, as `memcastle trigger list` shows it.
+    pub name: String,
+    #[command(flatten)]
+    pub confirm: ConfirmArgs,
+}
+
+/// Arguments for `memcastle trigger set`.
+#[derive(Debug, Args)]
+pub struct TriggerSetArgs {
+    /// The trigger's name: lowercase letters, digits, `-` and `_`.
+    pub name: String,
+    /// The miner it asks to run (`memcastle miner list`). Needed to create a
+    /// trigger.
+    #[arg(long)]
+    pub miner: Option<String>,
+    /// How it decides to: `schedule` (`every`, optionally `at`), `poll`
+    /// (`every`), `webhook` (needs a secret) or `watch` (`path`). Needed to
+    /// create a trigger.
+    #[arg(long = "type", value_parser = clap::builder::PossibleValuesParser::new(["schedule", "poll", "webhook", "watch"]))]
+    pub kind: Option<String>,
+    /// Read a webhook's shared secret from this environment variable of the
+    /// daemon. The secret itself never goes in the configuration file.
+    #[arg(long, value_name = "NAME", conflicts_with = "credential_file")]
+    pub credential_env: Option<String>,
+    /// Read a webhook's shared secret from this file.
+    #[arg(long, value_name = "PATH")]
+    pub credential_file: Option<String>,
+    /// A setting of the trigger: `KEY=VALUE`, JSON when it parses as JSON
+    /// (`every=1d`, `at=03:30`, `path=/notes`, `debounce=2s`). Repeatable.
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub setting: Vec<String>,
+    /// Remove a setting.
+    #[arg(long, value_name = "KEY")]
+    pub unset_setting: Vec<String>,
+    /// Clear a field: `credential`.
+    #[arg(long, value_name = "FIELD", value_parser = clap::builder::PossibleValuesParser::new(["credential"]))]
+    pub unset: Vec<String>,
+    /// Also switch it on, in the same step. Without this a trigger is saved
+    /// disabled.
+    #[arg(long)]
+    pub enable: bool,
+}
+
 /// A miner named on the command line.
 #[derive(Debug, Args)]
 pub struct MinerNameArgs {
@@ -576,14 +663,6 @@ pub struct MinerSetArgs {
     /// Remove a scope key, which makes the miner read more.
     #[arg(long, value_name = "KEY")]
     pub unset_scope: Vec<String>,
-    /// What starts the miner. Only `manual` is acted on yet; the others are
-    /// stored.
-    #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(["manual", "event", "schedule"]))]
-    pub trigger: Option<String>,
-    /// A setting of the trigger: `KEY=VALUE`, JSON when it parses as JSON.
-    /// Repeatable; needs `--trigger`.
-    #[arg(long, value_name = "KEY=VALUE", requires = "trigger")]
-    pub trigger_setting: Vec<String>,
     /// A source-specific setting: `KEY=VALUE`, JSON when it parses as JSON.
     /// Repeatable.
     ///
@@ -593,8 +672,8 @@ pub struct MinerSetArgs {
     /// Remove a source-specific setting.
     #[arg(long, value_name = "KEY")]
     pub unset_setting: Vec<String>,
-    /// Clear a field: one of `locator`, `wing`, `credential`, `trigger`.
-    #[arg(long, value_name = "FIELD", value_parser = clap::builder::PossibleValuesParser::new(["locator", "wing", "credential", "trigger"]))]
+    /// Clear a field: one of `locator`, `wing`, `credential`.
+    #[arg(long, value_name = "FIELD", value_parser = clap::builder::PossibleValuesParser::new(["locator", "wing", "credential"]))]
     pub unset: Vec<String>,
     /// Create the miner switched off (or switch it off).
     #[arg(long)]

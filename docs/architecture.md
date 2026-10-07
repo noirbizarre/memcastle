@@ -700,13 +700,36 @@ Installing from a registry is administrative like installing from a file: REST a
 See [Publishing and installing sources](publishing-sources.md) and [ADR-033](adr/033-source-distribution.md).
 
 **What to mine is configuration the daemon keeps in the file it was started from.**
-A miner is a named `[[miners]]` entry (a source, a locator, a scope, a trigger, a credential reference), not mined data:
+A miner is a named `[[miners]]` entry (a source, a locator, a scope, a credential reference), not mined data:
 the cursor stays on the source, so a miner can be renamed, disabled or re-scoped without losing where its source stopped.
 `app::miners` holds the last good copy, re-reads the file when it changes, and rewrites only that section in place through
 `config::miners_file`, so comments and everything else in the file survive.
 The CLI, REST and MCP's two read-only tools all call it; changing a miner has no MCP tool, like installing a source.
-Triggers, a scope and a `config` table are stored and validated but not yet acted on.
 See [Configuration](configuration.md#miners) and [ADR-037](adr/037-persistent-miner-configuration.md).
+
+**When to mine on its own is configuration too, and is opt-in.**
+A trigger is a named `[[triggers]]` entry (a miner, a type, its settings) kept in the same file, the same way, by
+`app::triggers`.
+The `trigger` module is the supervisor: it runs one task per *enabled* trigger (a timetable, a poll, a file watcher) and
+the one webhook listener, and it knows nothing of the store, the jobs or any source.
+Everything it needs it asks of the daemon through a trait that `app` implements, and everything it does ends in one call,
+the request for a run that `miner run` makes, so a trigger can cause nothing a person could not.
+The daemon starts nothing until the user enables a trigger, and what it remembers in the palace (progress, the deliveries
+it accepted) never says whether one is enabled.
+See [Triggers](triggers.md) and [ADR-043](adr/043-source-triggers.md).
+
+```mermaid
+flowchart LR
+    FILE[("[[triggers]]<br/>configuration file")] --> APP["app::triggers<br/>desired: enabled and runnable"]
+    APP --> SUP["trigger::Supervisor"]
+    SUP --> TIMER["schedule / poll task"]
+    SUP --> WATCH["watch task"]
+    SUP --> LISTEN["webhook listener<br/>own port, opt-in"]
+    TIMER & WATCH & LISTEN -->|"FireRequest"| FIRE["app: fire"]
+    FIRE -->|"join a waiting run, or queue"| RUN["request_miner_run<br/>(same as miner run)"]
+    RUN --> JOB[("mining job")]
+    FIRE --> STATE[("trigger_state<br/>trigger_delivery")]
+```
 
 ```mermaid
 flowchart LR

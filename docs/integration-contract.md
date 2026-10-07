@@ -58,7 +58,7 @@ A gap is allowed only where the last column says so, and then it must be documen
 | `persistent-session` | one MCP session | Keep one handshake open for the whole agent session | No |
 | `skills` | none | Load the shared instructions from `skills/` | No |
 | `project-context` | none, `wing` and `room` arguments | Resolve the project's wing and room from `.config/memcastle.toml` and `MEMCASTLE_*`, and pass them as ordinary arguments | No |
-| `background-mining` | `memcastle_mine` | Trigger mining on the client's own schedule, never twice for one event | Yes |
+| `background-mining` | `memcastle_mine` | Trigger mining on the client's own schedule, never twice for one event; or leave it to a daemon-side [trigger](triggers.md) | Yes |
 | `failure-reporting` | error bodies, `Job.error` | Tell the failure classes apart and show the user `help` | No |
 | `audit-repair` | `memcastle_audit`, `memcastle_repair` | Offer audit, confirm, dry-run, then apply only what was confirmed | Yes |
 
@@ -244,15 +244,21 @@ to ask).
 
 Mining is a Background (0) job, so it never delays a checkpoint, and a relative path is refused with
 `memcastle::input::invalid`.
-The daemon has no scheduler and does not deduplicate *requests*: asking twice is two jobs.
+A request from a client is a request: asking twice is two jobs.
+The daemon can also ask for runs by itself, but only when the user defines and enables a [trigger](triggers.md)
+(a timetable, a poll, a file watcher or a webhook), which is the user's decision and never an integration's; an
+integration cannot create or enable one, and installing it starts none.
 What it does deduplicate is the work: a source remembers where it stopped and which version of each document it filed,
 so the second job finds nothing new to file.
 It also does not store the same memory twice: an exact copy of a checkpoint item or a diary entry already in its room is
 not written again, and a likely copy is stored and linked, see [Deduplication](deduplication.md).
-"Once a day" and "never twice for one event" are therefore the client's to keep, and an integration never needs to read
-a source itself: it only decides when to ask.
+"Once a day" and "never twice for one event" are therefore the client's to keep when it triggers mining itself, and an
+integration never needs to read a source itself: it only decides when to ask.
+A user who would rather have the daemon keep the schedule (`memcastle trigger set ... --type schedule`) needs no
+client-side timer, and an integration that finds such a trigger running has nothing to add.
 
-Client responsibility: trigger it from the client's own mechanism, where one exists.
+Client responsibility: trigger it from the client's own mechanism, where one exists, or leave it to a daemon-side
+trigger when the user has set one up.
 Where the client has no suitable timer or event, the gap is documented and a manual trigger
 (for example `memcastle mine` from a command) is the fallback.
 

@@ -116,10 +116,6 @@ pub struct SetFlags<'a> {
     pub scope: &'a [String],
     /// `--unset-scope`.
     pub unset_scope: &'a [String],
-    /// `--trigger`.
-    pub trigger: Option<&'a str>,
-    /// `--trigger-setting`, as `KEY=VALUE`.
-    pub trigger_setting: &'a [String],
     /// `--setting`, as `KEY=VALUE`.
     pub config: &'a [String],
     /// `--unset-setting`.
@@ -202,20 +198,6 @@ impl SetFlags<'_> {
                 .config
                 .insert(key.trim().to_string(), setting_value(value));
         }
-        if let Some(kind) = self.trigger {
-            let mut trigger = crate::domain::MinerTrigger {
-                kind: serde_json::from_value(serde_json::Value::String(kind.to_string()))
-                    .map_err(|e| crate::Error::invalid_input("--trigger", e.to_string()))?,
-                ..crate::domain::MinerTrigger::default()
-            };
-            for raw in self.trigger_setting {
-                let (key, value) = split_pair("--trigger-setting", raw)?;
-                trigger
-                    .settings
-                    .insert(key.trim().to_string(), setting_value(value));
-            }
-            patch.trigger = Some(trigger);
-        }
         Ok(patch)
     }
 }
@@ -294,7 +276,6 @@ mod tests {
         let patch = SetFlags {
             source: Some("signal"),
             credential_env: Some("SIGNAL_TOKEN"),
-            trigger: Some("event"),
             disabled: true,
             ..SetFlags::default()
         }
@@ -303,10 +284,6 @@ mod tests {
         assert_eq!(patch.source.as_deref(), Some("signal"));
         assert_eq!(patch.enabled, Some(false));
         assert!(patch.locator.is_none() && patch.wing.is_none() && !patch.allow_broaden);
-        assert_eq!(
-            patch.trigger.expect("trigger").kind,
-            crate::domain::TriggerKind::Event
-        );
         // Nothing asked to change the enabled state means the patch leaves it alone.
         let untouched = SetFlags::default().into_patch().expect("patch");
         assert_eq!(untouched, MinerPatch::default());

@@ -38,6 +38,8 @@ pub enum EventKind {
     Room,
     /// An entity, its aliases or its links changed.
     Entity,
+    /// A trigger fired, failed or changed (docs/adr/043).
+    Trigger,
     /// Events were missed: re-read everything.
     Resync,
 }
@@ -52,6 +54,7 @@ impl EventKind {
             Self::Wing => "wing",
             Self::Room => "room",
             Self::Entity => "entity",
+            Self::Trigger => "trigger",
             Self::Resync => "resync",
         }
     }
@@ -154,6 +157,16 @@ impl Event {
             id: None,
             job_kind: None,
             status: None,
+        }
+    }
+
+    /// A trigger fired, failed, was defined or removed. `status` is a fixed word (`queued`, `coalesced`, `failed`,
+    /// `changed`), never a payload, a path or an error message: a client re-reads the trigger for those.
+    #[must_use]
+    pub fn trigger(action: Action, name: impl Display, status: &str) -> Self {
+        Self {
+            status: Some(status.to_owned()),
+            ..Self::about(EventKind::Trigger, action, name)
         }
     }
 
@@ -296,6 +309,7 @@ mod tests {
             EventKind::Wing,
             EventKind::Room,
             EventKind::Entity,
+            EventKind::Trigger,
             EventKind::Resync,
         ] {
             assert_eq!(serde_json::to_value(kind).unwrap(), kind.as_str());

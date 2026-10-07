@@ -27,8 +27,10 @@ A failure comes back as an MCP error result carrying the [error body](#errors) b
 | `memcastle_diary_read` | `agent_identity`, `wing`, `limit?` | Read an agent's newest diary entries. |
 | `memcastle_checkpoint` | `payload`, `emergency?` | Submit a durable checkpoint job. |
 | `memcastle_mine` | `path` or `source`, `locator?`, `options?`, `full?`, `wing?` | Submit a job that mines a directory, or a [source](mining-sources.md) such as `pi`. |
-| `memcastle_miner_list` | none | The configured [miners](configuration.md#miners): name, source, state, scope, trigger and last run. Read-only. |
+| `memcastle_miner_list` | none | The configured [miners](configuration.md#miners): name, source, state, scope and last run. Read-only. |
 | `memcastle_miner_get` | `name` | One configured miner, and why it cannot run when it cannot. Read-only. |
+| `memcastle_trigger_list` | none | The configured [triggers](triggers.md): miner, type, whether the user enabled them, whether they work, last fired and last error. Read-only. |
+| `memcastle_trigger_get` | `name` | One configured trigger, and what it still needs when it cannot be enabled yet. Read-only. |
 | `memcastle_audit` | `wing?` | Submit a read-only consistency audit job. |
 | `memcastle_repair` | `dry_run?`, `based_on_job?` | Submit a repair job; a dry run unless `dry_run` is `false`. |
 | `memcastle_job_list` | `status?` | List jobs, newest first. |
@@ -177,6 +179,14 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `DELETE /api/miners/{name}` | Remove a miner's definition; what it mined stays: `{"removed": name}`. | none |
 | `POST /api/miners/reload` | Read the configuration file again now: `{miners, added, removed, changed, enabled, disabled, broadened}`. | none |
 | `POST /api/miners/{name}/run` | Submit the miner's mining job, from the cursor its source already has. Answers the job. A write, so a read-only session is refused. | optional JSON body: `full`, `requested_by` |
+| `GET /api/triggers` | The configured [triggers](triggers.md): `{triggers, webhook, config_file?, error?}`. `webhook` is the listener's state (`enabled`, `bind`, `port`, `allow_remote`, `listening?`). A read. | none |
+| `GET /api/triggers/{name}` | One trigger: `status` (`disabled`, `active`, `failing`, `unavailable`), `reason`, `setup` (what enabling still needs), `running`, `endpoint` (a listening webhook's URL), counters, `next_due`, `last_error`. A read. | none |
+| `PUT /api/triggers/{name}` | Create the trigger **disabled**, or change the fields the body names: `{trigger, created, changed}`. Enabling needs every prerequisite, else `409`. | JSON body, all optional once the trigger exists: `miner`, `type`, `enabled`, `credential`, `settings`, `unset_settings`, `unset` |
+| `POST /api/triggers/{name}/enable` | Switch a trigger on, after checking that everything it needs is in place. Idempotent. | none |
+| `POST /api/triggers/{name}/disable` | Switch a trigger off. Idempotent. | none |
+| `DELETE /api/triggers/{name}` | Remove a trigger and what the daemon remembered about it: `{"removed": name}`. | none |
+| `POST /api/triggers/reload` | Read the configuration file again now: `{triggers, added, removed, changed}`. | none |
+| `POST /api/triggers/{name}/fire` | Ask for a run through the trigger now: `{outcome: "queued" \| "coalesced", job}`. A write, and refused (`409`) while the trigger is disabled. | none |
 | `GET /api/jobs` | List jobs, newest first. Without `kind` and `limit` it answers every job; with either it answers a bounded page. | query string: `status`, `kind` (the job's `type`, such as `mine` or `audit`), `limit` (default 50, at most 200) |
 | `POST /api/jobs` | Submit a job. | JSON body, see [below](#submitting-jobs) |
 | `GET /api/jobs/{id}` | Show one job. | none |
@@ -265,6 +275,7 @@ data: {"kind":"job","action":"updated","id":"0b2e…","job_kind":"mine","status"
 | `drawer` | a drawer is written, superseded or deleted; a mining run sends one without an `id` per document | `id`, except for a batch |
 | `wing`, `room` | one is created or deleted | `id` |
 | `entity` | an entity or its aliases changed; an extraction sweep sends one without an `id` per pass | `id`, except for a batch |
+| `trigger` | a trigger fired, joined a waiting run, failed, or was defined, changed or removed | `id` (the trigger's name), `status`: `queued`, `coalesced`, `failed` or `changed` |
 | `resync` | this connection fell behind and missed events | none |
 
 `action` is `created`, `updated` or `deleted`.
@@ -539,6 +550,31 @@ A `409` is a change that would widen a scope (`memcastle::miner::scope_broadened
 and a configuration file that cannot be read or was edited under the request (`memcastle::miner::config_file`).
 A credential is shown as `{kind, available}`: the variable's name or the file's path is not given back.
 `kind` is `env`, `file` or `oauth`, and for `oauth` `available` says whether the source is signed in.
+
+### Triggers
+
+The `/api/triggers` routes manage the `[[triggers]]` section of the daemon's configuration file
+([Triggers](triggers.md), [ADR-043](adr/043-source-triggers.md)).
+Reading is offered to MCP (`memcastle_trigger_list`, `memcastle_trigger_get`).
+Defining, changing, enabling, disabling, removing, reloading and firing a trigger are REST and CLI only: no MCP tool does
+any of them, so an agent cannot decide what the daemon does unattended.
+Every route is guarded by [authentication](authentication.md).
+Listing and showing are reads and `fire` is a write; the rest are not gated by a memory mode.
+
+A definition that does not validate is `400` with `memcastle::trigger::invalid` and nothing is written.
+A trigger that is enabled, or asked to be, while something it needs is missing is `409` with
+`memcastle::trigger::not_activatable`, whose message says what to set up; nothing is written and nothing is started.
+Firing a disabled trigger is `409` with `memcastle::trigger::disabled`, and an unknown one is `404`
+(`memcastle::trigger::not_found`).
+The trigger's shared secret is shown as `{kind, available}`, never its name, its path or its value.
+
+A webhook **delivery is not one of these routes**.
+It is `POST /hooks/{trigger}` on the separate [webhook listener](triggers.md#the-webhook-listener), which is off by
+default, loopback by default and authenticates each delivery with its trigger's own secret, so every route of this API
+stays behind the daemon's token.
+It answers `202` with `{status: "queued" | "coalesced" | "duplicate", job}`, `401` (empty) for anything it will not
+accept, `413` for a body over `webhook.max_body_bytes` and `429` with `Retry-After` while `webhook.max_concurrent`
+deliveries are in flight.
 
 ### The database admin endpoint
 

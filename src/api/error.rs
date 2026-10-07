@@ -26,6 +26,7 @@ impl IntoResponse for ApiError {
             | Error::DrawerNotFound { .. }
             | Error::SourceNotFound { .. }
             | Error::MinerNotFound { .. }
+            | Error::TriggerNotFound { .. }
             // No registry offers it, or no version of it can be installed here.
             | Error::SourceNotInRegistry { .. } => StatusCode::NOT_FOUND,
             Error::InvalidJobTransition { .. }
@@ -47,6 +48,7 @@ impl IntoResponse for ApiError {
             | Error::CredentialOauthUnsupported { .. }
             // A miner definition the caller wrote is theirs to fix.
             | Error::MinerInvalid { .. }
+            | Error::TriggerInvalid { .. }
             // The trust policy is the daemon's configuration, but the package was the caller's choice.
             | Error::SourceUntrusted { .. }
             | Error::EmbeddingsNotConfigured
@@ -89,6 +91,10 @@ impl IntoResponse for ApiError {
             | Error::MinerDisabled { .. }
             | Error::MinerNotRunnable { .. }
             | Error::MinerConfigFile { .. }
+            // The same for a trigger: it exists, but its state or its missing setup forbids the request.
+            | Error::TriggerExists { .. }
+            | Error::TriggerNotActivatable { .. }
+            | Error::TriggerDisabled { .. }
             // The request is fine; the source has not been signed in yet.
             | Error::CredentialRequired { .. }
             | Error::PalaceBusy { .. } => StatusCode::CONFLICT,

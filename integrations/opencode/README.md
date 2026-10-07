@@ -373,9 +373,21 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | `persistent-session` | Implemented: one connection per OpenCode session, kept alive, replaced with its mode re-selected when the daemon forgets it | #124, done |
 | `skills` | Implemented: `search-before-answer` and `checkpoint-instructions` are discovered natively from `skills/`, never copied, and `checkpoint-instructions` also instructs the reviewing model | #36, #34, done |
 | `project-context` | Implemented: `.config/memcastle.toml` and `MEMCASTLE_WING` / `MEMCASTLE_ROOM` resolved per session directory, used for the wake-up wing, checkpoint defaults and the search instruction | #183, done |
-| `background-mining` | Not yet | no issue yet |
+| `background-mining` | By the daemon: a `schedule` trigger (`memcastle trigger set`) the user enables asks for the `opencode` source on a timetable, so the plugin keeps no timer of its own | #125, superseded by #189 |
 | `failure-reporting` | Implemented: the five classes plus `unexpected`, shown as a toast on OpenCode 1 and logged at their severity on both; OpenCode 2 has no toast | #126, done |
 | `audit-repair` | Implemented: `/memcastle-audit` reports and plans a dry-run repair, `/memcastle-repair` applies exactly that plan; the second command is the confirmation, because OpenCode has no dialog a plugin can ask with | #127, done |
+
+### Background mining
+
+Mining OpenCode's session history on a timetable is a daemon-side [trigger](../../docs/triggers.md), not plugin code:
+the trigger decides *when* and the `opencode` source decides *how* to read.
+It is the user's to set up, and installing this plugin or the `opencode` source starts nothing:
+
+```sh
+memcastle miner set opencode --source opencode
+memcastle trigger set opencode-nightly --miner opencode --type schedule --setting every=1d --setting at=03:30
+memcastle trigger enable opencode-nightly
+```
 
 ### Gaps
 

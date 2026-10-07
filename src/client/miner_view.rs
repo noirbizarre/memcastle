@@ -28,13 +28,6 @@ fn flat(map: &serde_json::Map<String, Value>) -> String {
         .join(" ")
 }
 
-fn trigger_label(miner: &MinerView) -> String {
-    serde_json::to_value(miner.trigger.kind)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_string))
-        .unwrap_or_default()
-}
-
 fn state_label(miner: &MinerView, painter: Painter) -> String {
     match miner.state {
         MinerState::Ready => painter.ok("ready"),
@@ -53,15 +46,7 @@ pub fn render_miners(report: &MinersReport, painter: Painter, width: Option<u16>
         ));
     } else {
         out.push_str(&render_table(
-            &[
-                "NAME",
-                "SOURCE",
-                "STATE",
-                "TRIGGER",
-                "SCOPE",
-                "LAST RUN",
-                "DOCUMENTS",
-            ],
+            &["NAME", "SOURCE", "STATE", "SCOPE", "LAST RUN", "DOCUMENTS"],
             report
                 .miners
                 .iter()
@@ -70,7 +55,6 @@ pub fn render_miners(report: &MinersReport, painter: Painter, width: Option<u16>
                         miner.name.clone(),
                         miner.source.clone(),
                         state_label(miner, painter),
-                        trigger_label(miner),
                         flat(&miner.scope),
                         miner
                             .last_run_at
@@ -136,7 +120,6 @@ pub fn render_miner(miner: &MinerView, painter: Painter) -> String {
     if !miner.scope.is_empty() {
         lines.push(format!("  scope:      {}", flat(&miner.scope)));
     }
-    lines.push(format!("  trigger:    {}", trigger_label(miner)));
     if !miner.config.is_empty() {
         lines.push(format!("  config:     {}", flat(&miner.config)));
     }
@@ -147,9 +130,6 @@ pub fn render_miner(miner: &MinerView, painter: Painter) -> String {
             .last_run_at
             .map_or_else(|| "never".to_string(), local_minute)
     ));
-    for warning in &miner.warnings {
-        lines.push(format!("  {}", painter.dim(warning)));
-    }
     lines.join("\n")
 }
 
@@ -225,7 +205,7 @@ mod tests {
         view(json!({
             "name": "signal-personal", "source": "signal", "enabled": true, "state": "unavailable",
             "reason": "the credential's environment variable `SIGNAL_TOKEN` is not set",
-            "scope": { "groups": ["MemCastle", "Ops"] }, "trigger": { "type": "event" },
+            "scope": { "groups": ["MemCastle", "Ops"] },
             "credential": { "kind": "env", "available": false }, "documents": 3,
         }))
     }
@@ -242,7 +222,6 @@ mod tests {
             "signal-personal",
             "unavailable",
             "groups=MemCastle,Ops",
-            "event",
             "SIGNAL_TOKEN",
         ] {
             assert!(text.contains(expected), "`{expected}` missing:\n{text}");

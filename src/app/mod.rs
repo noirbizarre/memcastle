@@ -15,6 +15,7 @@ mod palace;
 mod source_auth;
 mod source_packages;
 mod source_registry;
+mod triggers;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -54,6 +55,10 @@ pub use source_packages::InstalledSource;
 pub use source_registry::{
     InstalledVersion, RegistryEntry, RegistryInstall, RegistryPreview, RegistrySearch,
     UpdateCandidate, UpdateCheck, UpdateOutcome, UpdateStatus,
+};
+pub use triggers::{
+    TriggerChange, TriggerHost, TriggerPatch, TriggerRegistry, TriggerView, TriggersDiff,
+    TriggersReload, TriggersReport, WebhookView,
 };
 
 /// A point-in-time summary of daemon health, for `GET /api/status`,
@@ -329,6 +334,8 @@ pub struct AppServices {
     mining: MiningConfig,
     /// The `[[miners]]` of the configuration file, read back from it and rewritten through it.
     miners: Arc<MinerRegistry>,
+    /// The `[[triggers]]` of the configuration file, and the webhook listener's settings (docs/adr/043).
+    triggers: Arc<TriggerRegistry>,
     /// The OAuth sign-ins of the sources that need one (docs/adr/039).
     credentials: crate::credential::Credentials,
     /// Where the services announce what they changed, for `GET /api/events` (docs/adr/041).
@@ -351,6 +358,7 @@ impl AppServices {
             dedup: DedupConfig::default(),
             mining: MiningConfig::default(),
             miners: Arc::new(MinerRegistry::default()),
+            triggers: Arc::new(TriggerRegistry::default()),
             credentials: crate::credential::Credentials::from_config(
                 &crate::config::CredentialsConfig::default(),
             ),

@@ -8,15 +8,19 @@ const props = defineProps<{ status: string }>()
 const severity = computed(() => {
   switch (props.status) {
     case "completed":
+    case "active":
       return "success"
     case "running":
       return "info"
     case "failed":
+    case "failing":
       return "danger"
     case "paused":
+    case "unavailable":
       return "warn"
     case "queued":
     case "cancelled":
+    case "disabled":
       return "secondary"
     default:
       return "contrast"

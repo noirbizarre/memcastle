@@ -35,6 +35,8 @@ An invariant nothing checks is a comment, and it will be violated.
    one (see `docs/adr/034-agent-integration-distribution.md`).
    `miner` (list, get, set, enable, disable, remove, reload, run) calls only `client::DaemonClient`, like every other
    daemon command: the rules for a miner live in `app::miners` (see `docs/adr/037-persistent-miner-configuration.md`).
+   `trigger` (list, get, set, enable, disable, remove, reload, fire) is the same, with its rules in `app::triggers` (see
+   `docs/adr/043-source-triggers.md`).
    `source search`, `install <name>` and `update` never fetch anything themselves: the daemon does, through
    `crate::distribution`, and the CLI calls it over REST.
    `source auth` never talks to a provider or keeps a token itself: the daemon runs the OAuth flow through
@@ -201,6 +203,32 @@ An invariant nothing checks is a comment, and it will be violated.
     silently, a credential never leaks, a cursor survives every change, REST, CLI and MCP agree)
     and by `config::miners_file`'s tests (comments and other tables survive an edit, a stale write is refused).
 
+13. **Triggers are opt-in, administrative, and only ask for a run** —
+    a trigger decides *when* a miner is run and nothing else: it ends in the one request `memcastle miner run` makes
+    (`app::miners`'s `request_miner_run`), so it can cause nothing a person could not, and it acquires, normalises and
+    stores nothing and carries no payload to a source.
+    Every trigger is disabled until the user enables it in the configuration file or with `memcastle trigger`:
+    installing a source, defining or enabling a miner, writing a trigger, recovering after a crash and re-installing never
+    enable one, and what the palace remembers about a trigger (progress, accepted deliveries) never says whether it is
+    enabled, so a restart cannot override the user's choice.
+    Enabling is refused, with what to set up, until every prerequisite holds, and a source declaring that it supports a
+    trigger kind (a capability outside the consent digest) is one of them.
+    Defining, changing, enabling, disabling, removing, reloading and firing a trigger are REST and CLI only, so an agent
+    can read the triggers (`memcastle_trigger_list`, `memcastle_trigger_get`) but cannot decide what runs unattended.
+    A webhook is delivered to a listener of its own (never a route of the main router, so invariant 6 has no exception),
+    which is off unless `[webhook] enable` is set, bound only while a webhook trigger is enabled, loopback unless
+    `allow_remote` and authentication are on, bounded in body size and concurrency, authenticated per trigger by a secret
+    referenced and never written in the file, and never logs, stores or passes on a delivery's body or a secret
+    (see `docs/adr/043-source-triggers.md`).
+    Enforced by `tests/trigger_isolation.rs` (`src/trigger` reaches no store, jobs, source or interface, only `app` and
+    the daemon's root name it, MCP calls nothing that changes or fires a trigger, the main router serves no `/hooks` route,
+    the listener logs and forwards no body or secret, and a trigger asks for a run only through the one path),
+    by `tests/in_process/auth.rs` (every `/api/triggers` route guarded, and the only trigger MCP tools are the two read-only
+    ones), by `tests/in_process/triggers.rs` (disabled by default and nothing started, enabling refused with what is
+    missing, deliveries authenticated and idempotent, bursts coalesced, restart and failure handling)
+    and by `config::miners_file`'s tests (the `[[triggers]]` section is rewritten in place, with the miners and every
+    comment kept).
+
 ## Layout
 
 ```text
@@ -211,12 +239,15 @@ src/
 ├── error.rs    the crate's error type
 ├── term.rs     terminal presentation for the CLI: colour, TTY detection and confirmation prompts
 ├── config/     typed configuration (defaults -> file -> env -> CLI -> validate) and Unix XDG paths; `miners_file`
-│               rewrites the `[[miners]]` section of the file in place and nothing else
+│               rewrites the `[[miners]]` and `[[triggers]]` sections of the file in place and nothing else
 ├── domain/     Palace/Wing/Room/Drawer/Job, checkpoint payloads, entities, memory modes — pure types, no I/O
 ├── store/      SurrealDB connection and repository methods (schema is applied from `database/schema/`)
 ├── migrate/    versioned data migrations and the version watermark, run before serving
 ├── assets/     runtime asset resolution (override, installed, embedded); never user data, never the network
 ├── dbadmin/    the database admin endpoint: SurrealDB's WebSocket protocol over the daemon's own handle
+├── trigger/    source triggers: the supervisor that runs the enabled ones (timetable, poll, file watcher) and the webhook listener;
+│               knows no store, jobs or source, reaches the daemon only through a trait `app` implements, and only `app` and
+│               `server` name it
 ├── events/     the change bus: identifiers and kinds published after a write, relayed by `GET /api/events`; pure, no store, no jobs
 ├── jobs/       the scheduler: claiming, dispatch, cooperative pause/cancel, crash recovery
 ├── project.rs  the project-local `.config/memcastle.toml` and `MEMCASTLE_WING`/`MEMCASTLE_ROOM`: a directory read, shared by
@@ -241,11 +272,12 @@ src/
 ├── dedup/      drawer deduplication: assess what a new drawer duplicates or resembles, link it, skip an exact copy
 ├── extract/    entity extraction providers (heuristic, command, OpenAI-compatible HTTP) behind one trait, and the `Extract` job handler
 ├── app/        application services — the one layer mcp/api call into (the CLI reaches it over HTTP, via `client/`);
-│               `miners` reads and rewrites the configured miners; `source_auth` signs a source in
+│               `miners` reads and rewrites the configured miners; `triggers` the configured triggers and the daemon's side of
+│               firing them; `source_auth` signs a source in
 ├── server/     the daemon composition root + lifecycle (registry file)
 ├── mcp/        MCP tool surface, over HTTP
 ├── api/        the REST API (health/status/config/jobs/search/recall/wake-up/diary/notes/wings/rooms/drawers/entities/graph/
-│               sources/source-packages/source-registry/miners/auth-token/db/shutdown; `docs/mcp-and-api.md` lists every route),
+│               sources/source-packages/source-registry/miners/triggers/auth-token/db/shutdown; `docs/mcp-and-api.md` lists every route),
 │               and `web.rs`, the dashboard's static files under `/ui` (only when `web.enable`; no store, no jobs)
 └── client/     the CLI's HTTP client for a running daemon, and the human renderings of its answers (status, tables)
 

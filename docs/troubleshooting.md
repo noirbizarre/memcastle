@@ -349,6 +349,27 @@ write until the file is fixed: correct the entry it names, then `memcastle miner
 A miner that never shows up in `memcastle miner list` after you edited the file by hand is in a file the daemon was not
 started from; `miner list` prints the path it reads.
 
+### `memcastle::trigger::*`
+
+These come from [triggers](triggers.md).
+`not_activatable` is the daemon refusing to switch a trigger on, and its message is the list of what to set up first:
+the miner (it must exist, be enabled and be able to run), a source that supports the trigger's type
+(`memcastle sources`), for a webhook the `[webhook]` listener and the shared secret's variable or file, for a watch an
+existing path.
+Nothing was started and nothing was written; fix the cause and enable it again.
+`memcastle trigger get <name>` shows the same list under `to enable:` for a disabled trigger.
+`invalid` names the setting that is wrong (a typo in a key, an `every` without a unit, a relative `path`).
+`disabled` comes from `memcastle trigger fire`: a disabled trigger is not fired; `memcastle miner run` mines without one.
+
+A trigger that is enabled and does nothing is `unavailable` or `failing` in `memcastle trigger list`, with the reason.
+A webhook that gets no deliveries: is `[webhook] enable` set, is the listener up (`trigger list` prints where it is
+listening), is the port reachable through your proxy or firewall, and does the sender sign with the same secret?
+The listener answers an empty `401` to everything it will not accept, deliberately; the daemon's log says which webhook
+could not be read at `warn`.
+A watch that stops reporting changes is usually the system's limit on file watches (on Linux,
+`fs.inotify.max_user_watches`); the trigger shows it as failing and sets the watcher up again, and a `poll` is the
+fallback.
+
 ### `memcastle::integration::*`
 
 These come from `memcastle integration` and its installation of the [Pi and OpenCode integrations](integrations.md).

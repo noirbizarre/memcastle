@@ -133,10 +133,10 @@ The history is the value.
   and LongMemEval is a converter for a file the user downloads
   (relates to ADR-021, ADR-032)
 - [ADR-037](037-persistent-miner-configuration.md) — miners are named `[[miners]]` definitions in the configuration file
-  (source, locator, scope, trigger, a credential *reference*), edited in place by the daemon with comments kept and
+  (source, locator, scope, a credential *reference*), edited in place by the daemon with comments kept and
   re-read when the file changes, read-only over MCP and administrative over REST and the CLI;
   a cursor belongs to the source a miner points at and not to its name, a scope never widens without `--allow-broaden`,
-  and triggers and scope are stored but not yet acted on
+  (triggers were stored but not acted on, until ADR-043 replaced them with `[[triggers]]`)
 - [ADR-038](038-one-output-contract-for-every-command.md) — every command with a data answer is readable in a terminal
   and JSON in a pipe, and the global `--json` forces JSON on a terminal
   (amends ADR-012, ADR-015 and ADR-016)
@@ -165,3 +165,9 @@ The history is the value.
   the source contract is `0.4.0` (`identify` takes the options, `source-ref` carries them) and the source decides which
   options are identity and which only narrow, and a miner's scope and settings become the options of its run
   (amends ADR-023, ADR-026 and ADR-037)
+- [ADR-043](043-source-triggers.md) — triggers are `[[triggers]]` entries (`schedule`, `poll`, `webhook`, `watch`), disabled
+  until the user enables them, that only decide *when* and end in the request `miner run` makes,
+  a source declares what it supports (`[triggers.<kind>]`, a capability and not a permission),
+  a webhook has its own opt-in, loopback-by-default listener authenticated by a per-trigger secret,
+  bursts join a waiting run, deliveries are idempotent and restart-safe, and changing any of it is REST and CLI only
+  (amends ADR-037)

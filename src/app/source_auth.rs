@@ -134,7 +134,7 @@ mod tests {
     use crate::credential::store::FileStore;
     use crate::credential::{Credentials, Timing};
     use crate::domain::{
-        Compatibility, CredentialRef, ManifestSource, MinerDefinition, MinerTrigger, Permissions,
+        Compatibility, CredentialRef, ManifestSource, MinerDefinition, Permissions,
         SourceCapabilities, SourceManifest, SourcePackageState, sha256_hex,
     };
 
@@ -169,6 +169,7 @@ mod tests {
             },
             limits: Default::default(),
             options: Default::default(),
+            triggers: Default::default(),
             build: None,
             test: None,
         }
@@ -242,7 +243,6 @@ mod tests {
             wing: None,
             credential,
             scope: serde_json::Map::new(),
-            trigger: MinerTrigger::default(),
             config: serde_json::Map::new(),
         }
     }

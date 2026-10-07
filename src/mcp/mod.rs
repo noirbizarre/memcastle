@@ -380,6 +380,12 @@ struct MinerNameArgs {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct TriggerNameArgs {
+    /// The trigger's name, as `memcastle_trigger_list` shows it.
+    name: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct AuditArgs {
     /// Restrict the report's embedding-count fields to one wing by name.
     /// Orphan-drawer and dangling-provenance findings are always
@@ -756,7 +762,7 @@ impl McpTools {
             open_world_hint = false
         ),
         description = "List the configured miners: for each its name, source, whether it is enabled and \
-                        can run, its scope and trigger, and when its source was last mined. Read-only: a \
+                        can run, its scope, and when its source was last mined. Read-only: a \
                         miner is added, changed, enabled or removed by the user with `memcastle miner`, \
                         never through this surface. Credentials are reported as available or not, never shown"
     )]
@@ -788,6 +794,52 @@ impl McpTools {
         tool_result(
             "memcastle_miner_get",
             self.app.show_miner(&args.name, mode).await,
+        )
+    }
+
+    #[tool(
+        title = "List triggers",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
+        description = "List the configured triggers, which ask for a mining run on their own (a timetable, a poll, \
+                        a webhook, a file watcher): for each its miner, type, whether the user enabled it, whether it \
+                        is working, when it last fired and what last went wrong. Every trigger is off until the user \
+                        enables it. Read-only: a trigger is defined, enabled, fired or removed by the user with \
+                        `memcastle trigger`, never through this surface. Secrets are reported as available or not, \
+                        never shown"
+    )]
+    async fn memcastle_trigger_list(
+        &self,
+        Extension(parts): Extension<http::request::Parts>,
+    ) -> Result<CallToolResult, McpError> {
+        let mode = self.mode_for(&parts);
+        tool_result("memcastle_trigger_list", self.app.list_triggers(mode).await)
+    }
+
+    #[tool(
+        title = "Get trigger",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
+        description = "Show one configured trigger by name, with its state and, when it is not working or not yet \
+                        possible to enable, why. Read-only, like memcastle_trigger_list"
+    )]
+    async fn memcastle_trigger_get(
+        &self,
+        Parameters(args): Parameters<TriggerNameArgs>,
+        Extension(parts): Extension<http::request::Parts>,
+    ) -> Result<CallToolResult, McpError> {
+        let mode = self.mode_for(&parts);
+        tool_result(
+            "memcastle_trigger_get",
+            self.app.show_trigger(&args.name, mode).await,
         )
     }
 
@@ -1074,7 +1126,9 @@ impl McpTools {
             "MemCastle: a shared memory palace daemon. Tools: {}. Call memcastle_set_mode once \
              at session start to switch this session to read_only or disabled memory mode \
              (defaults to full). memcastle_miner_list and memcastle_miner_get show the configured \
-             miners and are read-only: only the user changes them, with `memcastle miner`. Submitting work (mine, checkpoint, audit, repair) returns a job \
+             miners and are read-only: only the user changes them, with `memcastle miner`. \
+             memcastle_trigger_list and memcastle_trigger_get show what asks for mining runs on its own and are \
+             read-only too: only the user defines or enables a trigger, with `memcastle trigger`. Submitting work (mine, checkpoint, audit, repair) returns a job \
              immediately; follow it with memcastle_job_get and control it with memcastle_job_pause, \
              memcastle_job_resume, memcastle_job_cancel and memcastle_job_retry.",
             tools.join(", ")
@@ -1518,7 +1572,7 @@ mod tests {
     async fn every_tool_declares_its_title_and_all_four_hints() {
         // (name, read-only, destructive, idempotent, open-world): the behaviour
         // each handler actually has, so a wrong hint fails here, not in a host.
-        let expected: [(&str, bool, bool, bool, bool); 20] = [
+        let expected: [(&str, bool, bool, bool, bool); 22] = [
             ("memcastle_set_mode", false, false, true, false),
             ("memcastle_status", true, false, true, false),
             ("memcastle_search", true, false, true, true),
@@ -1528,6 +1582,8 @@ mod tests {
             ("memcastle_mine", false, false, true, true),
             ("memcastle_miner_list", true, false, true, false),
             ("memcastle_miner_get", true, false, true, false),
+            ("memcastle_trigger_list", true, false, true, false),
+            ("memcastle_trigger_get", true, false, true, false),
             ("memcastle_checkpoint", false, true, false, false),
             ("memcastle_audit", false, false, false, false),
             ("memcastle_diary_write", false, false, false, false),

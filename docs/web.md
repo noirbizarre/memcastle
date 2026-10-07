@@ -34,12 +34,13 @@ The REST API and MCP are unaffected.
 | Diary | Read an agent's diary by identity and wing, and write an entry. |
 | Jobs | Active jobs and history, filtered by state and kind, with progress, parameters and results; pause, resume, cancel and retry. |
 | Launch | Submit a mine job (a directory or an installed source, with the options that source declares, such as `since`), an extract job or an embed job. |
+| Triggers | What asks for mining runs on its own, read only: each trigger's miner, type, status (`disabled`, `active`, `failing`, `unavailable`), settings, when it last fired and is next due, and what last went wrong, and where the [webhook listener](triggers.md#the-webhook-listener) is. Defining, enabling and firing are `memcastle trigger`, never the page. |
 | Maintenance | Run an audit or a repair (a dry run first), and see the last report of each. |
 | Settings | The configuration in effect, from `GET /api/config`: no secret, and nothing read from the files. |
 
 The dashboard does not poll, and it updates by itself.
 The daemon pushes small "something changed" notices over [`GET /api/events`](mcp-and-api.md#the-event-stream),
-and the Overview, Palace, Jobs and Maintenance pages read again, quietly, a moment after a change they show:
+and the Overview, Palace, Jobs, Triggers and Maintenance pages read again, quietly, a moment after a change they show:
 a job's progress bar moves and a new note appears without a button press.
 The sidebar says whether updates are **Live**, **Connecting** or **Manual**.
 The notices carry identifiers and never content,

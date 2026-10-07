@@ -93,6 +93,11 @@ pub struct AdapterInfo {
     /// reads as accepting none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<crate::domain::OptionSpec>,
+    /// What can trigger a run of it: the mechanisms every source has (`schedule`, `poll`) and the ones it declared
+    /// (`webhook`, `watch`). A capability only; a trigger runs when the user defines and enables one (docs/adr/043).
+    /// Absent from an older daemon's answer, which reads as none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub triggers: Vec<crate::domain::TriggerSpec>,
 }
 
 fn enabled() -> SourceState {

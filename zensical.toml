@@ -41,6 +41,7 @@ nav = [
     { "Project configuration" = "project-config.md" },
     { "Storage and data" = "storage.md" },
     { "Mining sources" = "mining-sources.md" },
+    { "Triggers" = "triggers.md" },
     { "Deduplication" = "deduplication.md" },
     { "Writing a mining source" = "writing-sources.md" },
     { "Publishing and installing sources" = "publishing-sources.md" },

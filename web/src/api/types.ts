@@ -202,7 +202,7 @@ export interface GraphView {
 }
 
 /** What `GET /api/events` can say changed. `resync` means events were missed: read everything again. */
-export type EventKind = "job" | "drawer" | "wing" | "room" | "entity" | "resync"
+export type EventKind = "job" | "drawer" | "wing" | "room" | "entity" | "trigger" | "resync"
 
 /**
  * One change notice from the daemon: identifiers and words only, never content, so a view re-reads through the
@@ -214,8 +214,41 @@ export interface DaemonEvent {
   id?: string
   /** For a job: `mine`, `audit`, ... */
   job_kind?: string
-  /** For a job: `running`, `completed`, ... */
-  status?: JobStatus
+  /** For a job: `running`, `completed`, ... For a trigger: `queued`, `coalesced`, `failed` or `changed`. */
+  status?: string
+}
+
+/** Where a trigger stands: `disabled` is how every trigger starts. */
+export type TriggerStatus = "disabled" | "active" | "failing" | "unavailable"
+
+/** One configured trigger (`GET /api/triggers`): what asks for a mining run on its own. Read-only here. */
+export interface Trigger {
+  name: string
+  miner: string
+  type: "schedule" | "poll" | "webhook" | "watch"
+  enabled: boolean
+  status: TriggerStatus
+  reason?: string
+  setup?: string[]
+  running: boolean
+  credential?: { kind: string; available: boolean }
+  settings?: Record<string, unknown>
+  endpoint?: string
+  last_fired_at?: string
+  fired: number
+  coalesced: number
+  duplicates: number
+  next_due?: string
+  last_error?: string
+  last_error_at?: string
+  consecutive_failures: number
+}
+
+export interface TriggersReport {
+  triggers: Trigger[]
+  webhook: { enabled: boolean; bind: string; port: number; allow_remote: boolean; listening?: string }
+  config_file?: string
+  error?: string
 }
 
 export interface ErrorBody {

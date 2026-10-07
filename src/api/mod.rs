@@ -18,6 +18,7 @@ mod mode;
 mod palace;
 mod source_packages;
 mod source_registry;
+mod triggers;
 mod web;
 
 use axum::Router;
@@ -127,6 +128,20 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
         .route("/api/miners/{name}/enable", post(miners::enable))
         .route("/api/miners/{name}/disable", post(miners::disable))
         .route("/api/miners/{name}/run", post(miners::run))
+        // Triggers follow the miners: reading is also offered to MCP, changing is administrative and REST-only, so an
+        // agent can see what runs unattended but not decide it (docs/adr/043). A webhook delivery is not a route here:
+        // it goes to the separate opt-in listener, so every route in this file stays behind the authentication layer.
+        .route("/api/triggers", get(triggers::list))
+        .route("/api/triggers/reload", post(triggers::reload))
+        .route(
+            "/api/triggers/{name}",
+            get(triggers::show)
+                .put(triggers::set)
+                .delete(triggers::remove),
+        )
+        .route("/api/triggers/{name}/enable", post(triggers::enable))
+        .route("/api/triggers/{name}/disable", post(triggers::disable))
+        .route("/api/triggers/{name}/fire", post(triggers::fire))
         .route("/api/shutdown", post(shutdown_now))
         // The hierarchy. REST and CLI only: no wing, room or drawer route has an MCP tool, because agents write memory
         // through `memcastle_checkpoint` and the diary, and shaping the palace is a human decision (docs/adr/018).

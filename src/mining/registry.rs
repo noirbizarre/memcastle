@@ -14,8 +14,8 @@ use std::sync::Arc;
 use crate::config::MiningConfig;
 use crate::domain::{
     AccessTokens, Cursor, OptionSpec, Options, Permissions, RawDocument, SourceCapabilities,
-    SourceOrigin, SourcePackageRecord, SourcePackageState, SourceRef, SourceState, sha256_hex,
-    unknown_option,
+    SourceOrigin, SourcePackageRecord, SourcePackageState, SourceRef, SourceState, TriggerSpec,
+    sha256_hex, unknown_option,
 };
 use crate::error::{Error, Result};
 use crate::source::manifest::check_compatible;
@@ -117,7 +117,11 @@ impl SourceAdapter for AnySource {
     }
 }
 
-fn describe(adapter: &impl SourceAdapter, options: Vec<OptionSpec>) -> AdapterInfo {
+fn describe(
+    adapter: &impl SourceAdapter,
+    options: Vec<OptionSpec>,
+    triggers: Vec<TriggerSpec>,
+) -> AdapterInfo {
     AdapterInfo {
         name: adapter.name().to_string(),
         description: adapter.description().to_string(),
@@ -131,6 +135,7 @@ fn describe(adapter: &impl SourceAdapter, options: Vec<OptionSpec>) -> AdapterIn
         signed_by: None,
         auth: None,
         options,
+        triggers,
     }
 }
 
@@ -139,7 +144,11 @@ fn describe(adapter: &impl SourceAdapter, options: Vec<OptionSpec>) -> AdapterIn
 pub fn builtin_adapters() -> Vec<AdapterInfo> {
     // Capabilities and descriptions do not depend on configuration, so default-configured adapters answer.
     let directory = DirectoryAdapter::new(0);
-    vec![describe(&directory, directory::options())]
+    vec![describe(
+        &directory,
+        directory::options(),
+        directory::triggers(),
+    )]
 }
 
 /// Why an installed source cannot run here, or `None` when it can.
@@ -188,6 +197,7 @@ pub fn describe_package(record: &SourcePackageRecord, sources_dir: &Path) -> Ada
         signed_by: record.signed_by.clone(),
         auth: None,
         options: record.manifest.option_specs(),
+        triggers: record.manifest.trigger_specs(),
     }
 }
 
@@ -476,6 +486,7 @@ mod tests {
                 permissions: Permissions::default(),
                 limits: Default::default(),
                 options: Default::default(),
+                triggers: Default::default(),
                 build: None,
                 test: None,
             },

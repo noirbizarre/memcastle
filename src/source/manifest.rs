@@ -83,6 +83,28 @@ pub fn validate(manifest: &SourceManifest, reserved: &[&str]) -> Result<()> {
             )));
         }
     }
+    for (key, trigger) in &manifest.triggers {
+        // Only the mechanisms a source has to speak for: a timetable and a poll are the host's, for every source.
+        match crate::domain::TriggerMechanism::parse(key) {
+            Some(kind) if !kind.is_host_provided() => {}
+            Some(_) => {
+                return Err(invalid(format!(
+                    "triggers.{key} is not declared: every source can be scheduled and polled, so only `webhook` and \
+                     `watch` are listed here"
+                )));
+            }
+            None => {
+                return Err(invalid(format!(
+                    "triggers.{key} is not a trigger mechanism; declare `webhook` or `watch`"
+                )));
+            }
+        }
+        if trigger.description.trim().is_empty() || trigger.description.contains('\n') {
+            return Err(invalid(format!(
+                "triggers.{key}.description must be one non-empty line"
+            )));
+        }
+    }
     for entry in &manifest.permissions.filesystem.read {
         let ok = entry == "locator"
             || entry.starts_with("~/")
@@ -367,5 +389,86 @@ read = ["locator"]
             Some("https://example.org/git")
         );
         assert!(parse(GOOD, &[]).unwrap().source.license.is_none());
+    }
+
+    #[test]
+    fn a_source_that_declares_no_trigger_is_complete_and_is_still_schedulable_and_pollable() {
+        let manifest = parse(GOOD, &[]).unwrap();
+        assert!(manifest.triggers.is_empty());
+        let kinds: Vec<_> = manifest
+            .trigger_specs()
+            .iter()
+            .map(|t| t.kind.as_str())
+            .collect();
+        assert_eq!(
+            kinds,
+            ["schedule", "poll"],
+            "the host gives every source a timetable and a poll"
+        );
+    }
+
+    #[test]
+    fn declared_triggers_are_capabilities_and_change_nothing_a_user_consents_to() {
+        let plain = parse(GOOD, &[]).unwrap();
+        let declared = parse(
+            &format!(
+                "{GOOD}\n[triggers.watch]\ndescription = \"a file changes\"\n\n[triggers.webhook]\ndescription = \"a hook\"\n"
+            ),
+            &[],
+        )
+        .unwrap();
+        let kinds: Vec<_> = declared
+            .trigger_specs()
+            .iter()
+            .map(|t| t.kind.as_str())
+            .collect();
+        assert_eq!(kinds, ["schedule", "poll", "webhook", "watch"]);
+        assert_eq!(
+            plain.permissions.consent_digest("demo"),
+            declared.permissions.consent_digest("demo"),
+            "declaring a trigger asks for no permission and so cannot change what was agreed to"
+        );
+        assert_eq!(
+            declared.format, MANIFEST_FORMAT,
+            "no new manifest format is needed"
+        );
+    }
+
+    #[test]
+    fn a_trigger_that_is_the_hosts_or_unknown_or_undescribed_is_refused() {
+        for (declaration, wants) in [
+            ("[triggers.poll]\ndescription = \"x\"\n", "every source"),
+            ("[triggers.schedule]\ndescription = \"x\"\n", "every source"),
+            (
+                "[triggers.cron]\ndescription = \"x\"\n",
+                "not a trigger mechanism",
+            ),
+            ("[triggers.watch]\ndescription = \"\"\n", "description"),
+        ] {
+            let error = parse(&format!("{GOOD}\n{declaration}"), &[])
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(wants), "{declaration}: {error}");
+        }
+    }
+
+    #[test]
+    fn the_reference_sources_declare_the_triggers_their_documentation_promises() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("sources");
+        for (name, expected) in [
+            ("directory", vec!["schedule", "poll", "webhook", "watch"]),
+            ("pi", vec!["schedule", "poll", "watch"]),
+            ("opencode", vec!["schedule", "poll", "watch"]),
+        ] {
+            let text = std::fs::read_to_string(root.join(name).join("memcastle-source.toml"))
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            let manifest = parse(&text, &[]).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let kinds: Vec<_> = manifest
+                .trigger_specs()
+                .iter()
+                .map(|t| t.kind.as_str())
+                .collect();
+            assert_eq!(kinds, expected, "{name}");
+        }
     }
 }

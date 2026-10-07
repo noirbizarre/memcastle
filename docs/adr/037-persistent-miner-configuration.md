@@ -16,6 +16,10 @@ Issue #208 asks for miner configuration to be a first-class, persistent capabili
 can be listed and changed from the CLI without editing TOML, and can be read and configured by an agent from a prompt.
 Source-specific miners (Signal, Slack) will be built on it, and the trigger architecture (#189) will act on it.
 
+> **Amended by [ADR-043](043-source-triggers.md).**
+> Triggers are their own `[[triggers]]` entries, several per miner and disabled until enabled.
+> The miner's own `[miners.trigger]` table is removed.
+
 Before this, mining was only ever a job submitted by hand: `memcastle mine` and `memcastle_mine` name a directory or a
 source and a locator, and nothing is remembered about *what the user wants mined*.
 The daemon's configuration was read once at startup and never written, and nothing in it could change while it ran.
@@ -71,7 +75,8 @@ Six decisions follow, and each has an alternative that is easier for one of the 
   not exist yet.
 - **A miner is configuration plus a manual run today.**
   `miner run` submits an ordinary mine job for the miner's source and locator, so it continues from the cursor.
-  `event` and `schedule` triggers are stored, validated and reported as not acted on: acting on them is #189.
+  `event` and `schedule` triggers are stored, validated and reported as not acted on: acting on them is #189
+  (done as `[[triggers]]`, [ADR-043](043-source-triggers.md)).
   A scope and a `config` table are stored and reported, but no adapter applies them (an adapter receives only a
   locator), so `miner run` refuses a miner that has either, and `directory` refuses to be enabled with them:
   the daemon never mines more than a filter says.

@@ -848,6 +848,7 @@ mod tests {
             signed_by: None,
             auth: None,
             options: Vec::new(),
+            triggers: Vec::new(),
         }
     }
 

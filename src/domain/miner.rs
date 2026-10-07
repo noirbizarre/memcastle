@@ -2,7 +2,7 @@
 //!
 //! Pure types and rules, no I/O. A miner is configuration, not mined data: the cursor and the documents stay on the
 //! source (`crate::domain::SourceRef`), which the adapter derives from the miner's `source` and `locator`.
-//! That is what lets a miner be renamed, disabled, re-scoped or given another trigger without losing where its
+//! That is what lets a miner be renamed, disabled or re-scoped without losing where its
 //! source stopped. See `docs/adr/037-persistent-miner-configuration.md`.
 
 use serde::{Deserialize, Serialize};
@@ -42,46 +42,10 @@ pub fn is_valid_miner_name(name: &str) -> bool {
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
-/// What starts a miner.
-///
-/// Only [`TriggerKind::Manual`] is acted on today (`memcastle miner run`); the others are stored and validated so
-/// a definition written now keeps its meaning when triggers arrive (#189), and the daemon says it does not act on
-/// them yet instead of pretending to.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TriggerKind {
-    /// Only when asked.
-    #[default]
-    Manual,
-    /// When the source announces something new.
-    Event,
-    /// On a timetable.
-    Schedule,
-}
-
-/// A miner's trigger: its kind, and whatever else the kind needs, kept verbatim.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MinerTrigger {
-    /// What starts the miner.
-    #[serde(rename = "type", default)]
-    pub kind: TriggerKind,
-    /// The kind's own settings (an interval, a webhook name), opaque here.
-    #[serde(flatten)]
-    pub settings: Map<String, Value>,
-}
-
-impl MinerTrigger {
-    /// Whether this is the default, which is not written to the file.
-    #[must_use]
-    pub fn is_default(&self) -> bool {
-        self.kind == TriggerKind::Manual && self.settings.is_empty()
-    }
-}
-
 /// One `[[miners]]` entry.
 ///
 /// Unknown top-level keys are an error (a typo in `enable` must not silently leave a miner enabled);
-/// `scope`, `config` and the trigger's settings are open, so a source can define its own keys.
+/// `scope` and `config` are open, so a source can define its own keys.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MinerDefinition {
@@ -104,9 +68,6 @@ pub struct MinerDefinition {
     /// What to include: a filter the source understands. Empty means everything the locator reaches.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub scope: Map<String, Value>,
-    /// What starts the miner.
-    #[serde(default, skip_serializing_if = "MinerTrigger::is_default")]
-    pub trigger: MinerTrigger,
     /// Source-specific settings that are not a filter.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub config: Map<String, Value>,
@@ -194,11 +155,7 @@ impl MinerDefinition {
                 ));
             }
         }
-        for (table, map) in [
-            ("scope", &self.scope),
-            ("config", &self.config),
-            ("trigger", &self.trigger.settings),
-        ] {
+        for (table, map) in [("scope", &self.scope), ("config", &self.config)] {
             check_open_table(table, map)?;
         }
         Ok(())
@@ -237,7 +194,7 @@ fn scope_value_is_valid(value: &Value) -> bool {
     }
 }
 
-/// An open table (`scope`, `config`, trigger settings) may hold anything TOML can, except a key that reads like a
+/// An open table (`scope`, `config`) may hold anything TOML can, except a key that reads like a
 /// secret, and never a null (TOML has none, so it could not be written back).
 fn check_open_table(table: &str, map: &Map<String, Value>) -> Result<(), String> {
     for (key, value) in map {
@@ -307,13 +264,12 @@ mod tests {
     fn a_minimal_miner_is_enabled_manual_and_unscoped() {
         let m = miner("name = \"docs\"\nsource = \"directory\"\n");
         assert!(m.enabled);
-        assert_eq!(m.trigger.kind, TriggerKind::Manual);
         assert!(m.scope.is_empty() && m.config.is_empty());
         assert_eq!(m.validate(), Ok(()));
     }
 
     #[test]
-    fn the_documented_example_parses_with_scope_trigger_and_credential() {
+    fn the_documented_example_parses_with_scope_and_credential() {
         let m = miner(
             r#"
 name = "signal-personal"
@@ -327,15 +283,9 @@ name = "SIGNAL_TOKEN"
 [scope]
 contacts = ["+336"]
 groups = ["MemCastle"]
-
-[trigger]
-type = "event"
-webhook = "signal"
 "#,
         );
         assert_eq!(m.scope["contacts"], json!(["+336"]));
-        assert_eq!(m.trigger.kind, TriggerKind::Event);
-        assert_eq!(m.trigger.settings["webhook"], json!("signal"));
         assert_eq!(
             m.credential,
             Some(CredentialRef::Env {
@@ -343,6 +293,16 @@ webhook = "signal"
             })
         );
         assert_eq!(m.validate(), Ok(()));
+    }
+
+    #[test]
+    fn the_removed_miner_trigger_table_is_refused_and_named() {
+        let error = toml::from_str::<MinerDefinition>(
+            "name = \"a\"\nsource = \"b\"\n[trigger]\ntype = \"schedule\"\n",
+        )
+        .expect_err("triggers are their own entries now")
+        .to_string();
+        assert!(error.contains("trigger"), "{error}");
     }
 
     #[test]
@@ -355,7 +315,7 @@ webhook = "signal"
     #[test]
     fn a_miner_round_trips_through_toml() {
         let m = miner(
-            "name = \"a\"\nsource = \"b\"\nlocator = \"/x\"\n[scope]\nk = [\"v\"]\n[trigger]\ntype = \"schedule\"\nevery = \"1d\"\n[config]\nn = 3\n",
+            "name = \"a\"\nsource = \"b\"\nlocator = \"/x\"\n[scope]\nk = [\"v\"]\n[config]\nn = 3\n",
         );
         let text = toml::to_string(&m).expect("serialises");
         assert_eq!(toml::from_str::<MinerDefinition>(&text).expect("parses"), m);
@@ -383,7 +343,7 @@ webhook = "signal"
 
     #[test]
     fn a_secret_looking_key_is_refused_in_every_open_table() {
-        for table in ["scope", "config", "trigger"] {
+        for table in ["scope", "config"] {
             let text = format!("name = \"a\"\nsource = \"b\"\n[{table}]\napi_key = \"x\"\n");
             let error = miner(&text).validate().expect_err("a secret key");
             assert!(error.contains("looks like a secret"), "{table}: {error}");
