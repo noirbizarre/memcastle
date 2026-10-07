@@ -1,7 +1,7 @@
 # Pi integration
 
 The Pi integration is an extension that loads MemCastle's wake-up context when a Pi session starts, reminds the model to
-search before it answers, and checkpoints the conversation.
+search before it answers, and checkpoints the conversation, and can audit the palace.
 It is installed with [`memcastle integration`](integrations.md); this page is what is specific to Pi.
 
 ## Requirements
@@ -41,6 +41,15 @@ The five [MemCastle skills](skills.md) come with the integration, so no separate
 The extension offers the `skills/` directory beside it to Pi when a session starts, so Pi lists them and has a
 `/skill:<name>` command for each, and it offers none in an `off` session.
 A skill of your own with the same name, in `~/.agents/skills` for example, takes precedence.
+
+## Auditing the palace
+
+`/memcastle-audit [wing]` runs MemCastle's read-only audit and shows what it found.
+When there are orphan drawers it then shows the dry-run repair plan and asks once, in a dialog, whether to apply it.
+One question covers the whole plan, because the daemon cannot repair a subset of it.
+Declining changes nothing.
+After a confirmed repair the command writes a before and after summary to the diary.
+A `read-only` session stops at the plan and is never asked, and an `off` session does nothing.
 
 ## Configuration
 

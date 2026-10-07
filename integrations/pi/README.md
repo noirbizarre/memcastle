@@ -322,7 +322,7 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | `project-context` | Implemented: `.config/memcastle.toml` and `MEMCASTLE_WING` / `MEMCASTLE_ROOM` resolved from Pi's directory, used for the wake-up wing, checkpoint defaults and the search instruction | #183, done |
 | `background-mining` | Not yet | #26 |
 | `failure-reporting` | Implemented: the five classes plus `unexpected`, each shown as a Pi notification at the severity the shared fixture promises, with `help` | #30, done |
-| `audit-repair` | Not yet | #28 |
+| `audit-repair` | Implemented: `/memcastle-audit [wing]` audits, shows the dry-run plan and applies it only after one confirmation dialog, then writes a before/after diary entry; `read-only` stops at the plan | #28, done |
 
 ### Failures
 
@@ -345,7 +345,7 @@ The session always carries on without MemCastle: a failure never stops Pi from a
 ### Gaps
 
 None are declared yet.
-Only `emergency-checkpoint`, `background-mining` and `audit-repair` may be gaps, each recorded as three lines:
+Only `emergency-checkpoint` and `background-mining` may be gaps, each recorded as three lines:
 **Missing**, **Fallback** and **Effect**.
 `emergency-checkpoint` is not one here, because Pi has a `session_before_compact` event.
 The other two are "Not yet" in the matrix: nothing is built, and no gap is declared until a decision says there will not be.

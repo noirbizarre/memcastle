@@ -7,6 +7,7 @@
 // at its severity and not shown on screen (types of `@opencode/plugin` 2.0.22).
 
 import type { Plugin } from "@opencode/plugin"
+import { AUDIT_COMMAND, AUDIT_TOOL, REPAIR_COMMAND, REPAIR_TOOL, auditWing } from "./audit.ts"
 import { CHECKPOINT_COMMAND, CHECKPOINT_TOOL, type ReviewHost, checkpointArgs } from "./checkpoint.ts"
 import { type Turn, textOf, turnOf } from "./checkpoint-core.ts"
 import { createCore, type Level } from "./core.ts"
@@ -195,6 +196,72 @@ export const setup = async (ctx: Plugin.Context): Promise<(() => Promise<void>) 
     )
   } catch (error) {
     await consoleLog("warn", `the checkpoint tool and command could not be registered: ${String(error)}`)
+  }
+
+  // The audit and repair tools and commands (#127). The user running `/memcastle-repair` is the confirmation, and the
+  // command calls the core directly, so no model decides whether to apply. The repair tool stays for a model the user
+  // told to apply the plan, and it is held to the same plan.
+  const fail = (error: unknown) => (error instanceof MemCastleFailure ? error.toUserMessage() : String(error))
+  const show = async (sessionID: string, text: string) =>
+    ctx.session.synthetic({ sessionID, text: `MemCastle: ${text}`, resume: false } as never).catch(() => consoleLog("info", text))
+  try {
+    await ctx.tool.transform((editor) => {
+      editor.add({
+        name: AUDIT_TOOL,
+        description: "Audit the MemCastle palace and plan a repair as a dry run. Read-only; show the user the report and plan.",
+        input: { type: "object", properties: { wing: { type: "string", description: "Narrow the embedding counts to one wing" } }, additionalProperties: false } as never,
+        execute: async (input: unknown, context: { sessionID: string }) => {
+          try {
+            return { content: await core.audit(context.sessionID, auditWing(input)) }
+          } catch (error) {
+            throw new Error(fail(error))
+          }
+        },
+      } as never)
+      editor.add({
+        name: REPAIR_TOOL,
+        description: "Apply the repair plan the audit just showed. Destructive: only when the user told you to apply it.",
+        input: { type: "object", properties: {}, additionalProperties: false } as never,
+        execute: async (_input: unknown, context: { sessionID: string }) => {
+          try {
+            return { content: await core.repair(context.sessionID) }
+          } catch (error) {
+            throw new Error(fail(error))
+          }
+        },
+      } as never)
+    })
+    await ctx.command.transform((editor) => {
+      editor.add({
+        name: AUDIT_COMMAND,
+        description: "Audit the MemCastle palace and plan a repair, without changing anything",
+        execute: async (invocation) => {
+          const wing = textOf((invocation.prompt as { text?: unknown } | undefined)?.text)
+          let answer: string
+          try {
+            answer = await core.audit(invocation.sessionID, wing === "" ? undefined : wing.trim())
+          } catch (error) {
+            answer = fail(error)
+          }
+          await show(invocation.sessionID, answer)
+        },
+      })
+      editor.add({
+        name: REPAIR_COMMAND,
+        description: "Apply the MemCastle repair plan that /memcastle-audit just showed",
+        execute: async (invocation) => {
+          let answer: string
+          try {
+            answer = await core.repair(invocation.sessionID)
+          } catch (error) {
+            answer = fail(error)
+          }
+          await show(invocation.sessionID, answer)
+        },
+      })
+    })
+  } catch (error) {
+    await consoleLog("warn", `the audit and repair tools and commands could not be registered: ${String(error)}`)
   }
 
   return async () => {

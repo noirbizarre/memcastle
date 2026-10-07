@@ -375,14 +375,14 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | `project-context` | Implemented: `.config/memcastle.toml` and `MEMCASTLE_WING` / `MEMCASTLE_ROOM` resolved per session directory, used for the wake-up wing, checkpoint defaults and the search instruction | #183, done |
 | `background-mining` | Not yet | no issue yet |
 | `failure-reporting` | Implemented: the five classes plus `unexpected`, shown as a toast on OpenCode 1 and logged at their severity on both; OpenCode 2 has no toast | #126, done |
-| `audit-repair` | Not yet | no issue yet |
+| `audit-repair` | Implemented: `/memcastle-audit` reports and plans a dry-run repair, `/memcastle-repair` applies exactly that plan; the second command is the confirmation, because OpenCode has no dialog a plugin can ask with | #127, done |
 
 ### Gaps
 
 None are declared.
 The interval checkpoint is partial and the V1 pre-compaction hook is experimental, as described under
 [Checkpointing](#checkpointing), but both are implemented, so neither is a gap.
-Only `emergency-checkpoint`, `background-mining` and `audit-repair` may be gaps, each recorded as three lines:
+Only `emergency-checkpoint` and `background-mining` may be gaps, each recorded as three lines:
 **Missing**, **Fallback** and **Effect**.
 The [research](docs/research.md#gaps-and-risks) lists where OpenCode is likely to need one, so that a gap is documented
 when it is found and not discovered by a user.

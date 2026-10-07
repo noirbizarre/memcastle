@@ -55,10 +55,10 @@ test("a checkpoint hook that fails never throws into OpenCode, and the failure r
 test("the plugin adds the checkpoint tool and the slash command, once", async () => {
   const { input } = fakeInput()
   const hooks = await plugin.server(input)
-  expect(Object.keys(hooks.tool ?? {})).toEqual(["memcastle_checkpoint"])
+  expect(Object.keys(hooks.tool ?? {})).toEqual(["memcastle_checkpoint", "memcastle_palace_audit", "memcastle_palace_repair"])
   const config: { command?: Record<string, unknown> } = {}
   await hooks.config?.(config as never)
-  expect(Object.keys(config.command ?? {})).toEqual(["memcastle-checkpoint"])
+  expect(Object.keys(config.command ?? {})).toEqual(["memcastle-checkpoint", "memcastle-audit", "memcastle-repair"])
   await hooks.dispose?.()
 })
 

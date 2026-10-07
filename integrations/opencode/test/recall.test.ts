@@ -108,6 +108,7 @@ test("the Pi and OpenCode copies of the shared recall, skill-reading, wake-up, p
     "recall-core.ts",
     "skill-text.ts",
     "checkpoint-core.ts",
+    "audit-core.ts",
     "wake-up-core.ts",
     "project-core.ts",
     "failures.ts",
