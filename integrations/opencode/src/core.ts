@@ -6,6 +6,7 @@
 
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { createAudits } from "./audit.ts"
 import { type CheckpointArgs, type Checkpoints, type ReviewHost, createCheckpoints } from "./checkpoint.ts"
 import type { Turn } from "./checkpoint-core.ts"
 import { MemCastleFailure, type Severity, presentFailure } from "./failures.ts"
@@ -70,6 +71,10 @@ export interface Core {
   compacting(sessionId: string | undefined, transcript?: readonly Turn[]): Promise<void>
   /** The `memcastle_checkpoint` tool: a manual checkpoint, with the model's own payload or the plugin's review (#34). */
   checkpoint(sessionId: string, args: CheckpointArgs): Promise<string>
+  /** The audit tool: report and dry-run plan, changing nothing (#127). */
+  audit(sessionId: string, wing?: string): Promise<string>
+  /** The repair tool: applies the plan the session was last shown, and nothing else (#127). */
+  repair(sessionId: string): Promise<string>
   /** Close every connection, which also tells the daemon to forget each session. */
   dispose(): Promise<void>
 }
@@ -167,6 +172,12 @@ export async function createCore(
 
   const checkpoints: Checkpoints = createCheckpoints({ settings, sessions, children, host, log, report, projectOf })
 
+  const audits = createAudits({
+    settings,
+    sessions,
+    wingOf: (sessionId) => wingFor(settings.wakeUp, directories.get(sessionId) ?? directory, projectOf(sessionId)),
+  })
+
   const startWakeUp = (sessionId: string, sessionDirectory: string) => {
     if (!settings.wakeUp.enabled || wakeUps.has(sessionId)) return
     directories.set(sessionId, sessionDirectory)
@@ -230,6 +241,7 @@ export async function createCore(
       directories.delete(sessionId)
       children.delete(sessionId)
       checkpoints.forget(sessionId)
+      audits.forget(sessionId)
       await sessions.close(sessionId)
     }),
     // OpenCode rebuilds the system prompt for every model request (the title model's included), so unlike a message
@@ -247,6 +259,9 @@ export async function createCore(
     ),
     // Not guarded: the tool's caller is the model, and what it needs is the failure itself, with its help.
     checkpoint: (sessionId, args) => checkpoints.checkpoint(sessionId, args),
+    // Not guarded, like the checkpoint: the model needs the failure itself.
+    audit: (sessionId, wing) => audits.audit(sessionId, wing),
+    repair: (sessionId) => audits.repair(sessionId),
     dispose: guarded("dispose", async () => {
       checkpoints.forgetAll()
       wakeUps.clear()

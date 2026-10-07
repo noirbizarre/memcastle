@@ -330,7 +330,13 @@ Daemon-side (tested): the audit changes nothing, the dry run is allowed in `read
 and omitting `dry_run` is a dry run.
 Real orphan data cannot be created through HTTP or MCP, so applying a repair to real orphans is covered by the unit
 tests in `src/repair`.
-Client-side (to test): nothing is applied that the user did not confirm.
+Client-side (tested in Pi and OpenCode): nothing is applied that the user did not confirm.
+Pi asks once, with a dialog, for the whole dry-run plan, because the daemon cannot repair a subset of it.
+OpenCode has no dialog a plugin can ask with, so its equivalent is two commands: the audit plans and changes nothing,
+and only the repair command applies the plan that session was shown, once.
+A tool argument is never the confirmation.
+A `read-only` session gets the audit and the plan and is never offered the repair, and the diary entry is written
+only after a repair was applied.
 
 ## Documenting a gap
 

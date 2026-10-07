@@ -3,6 +3,7 @@
 // V1 object entrypoints (`{ id, server }`) are supported from OpenCode 1.18.29.
 
 import type { Hooks, Plugin, PluginInput } from "@opencode-ai/plugin"
+import { AUDIT_TOOL, REPAIR_TOOL, addAuditCommands, auditWing } from "./audit.ts"
 import {
   CHECKPOINT_TOOL,
   type ReviewHost,
@@ -111,6 +112,32 @@ async function checkpointTool(
         }
       },
     }),
+    [AUDIT_TOOL]: helper({
+      description:
+        "Audit the MemCastle palace and plan a repair as a dry run. Read-only: it changes nothing. " +
+        "Show the user the report and plan, and let them decide.",
+      args: { wing: z.string().optional().describe("Narrow the audit's embedding counts to one wing") },
+      execute: async (args, context) => {
+        try {
+          return await core.audit(context.sessionID, auditWing(args))
+        } catch (error) {
+          throw new Error(error instanceof MemCastleFailure ? error.toUserMessage() : String(error))
+        }
+      },
+    }),
+    [REPAIR_TOOL]: helper({
+      description:
+        "Apply the repair plan the audit just showed. Destructive: call it only when the user has run /memcastle-repair " +
+        "or told you in this conversation to apply that plan. It refuses when no plan was shown.",
+      args: {},
+      execute: async (_args, context) => {
+        try {
+          return await core.repair(context.sessionID)
+        } catch (error) {
+          throw new Error(error instanceof MemCastleFailure ? error.toUserMessage() : String(error))
+        }
+      },
+    }),
   }
 }
 
@@ -133,6 +160,7 @@ export const server: Plugin = async ({ client, directory }, options) => {
     config: async (config) => {
       addSkillsPath(config, core.skillsDir)
       addCheckpointCommand(config)
+      addAuditCommands(config)
     },
     event: async ({ event }) => {
       // session.created starts the wake-up fetch, which is what gives it a head start on the first request.

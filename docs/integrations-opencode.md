@@ -1,7 +1,7 @@
 # OpenCode integration
 
 The OpenCode integration is a plugin that loads MemCastle's wake-up context when a session starts, reminds the model to
-search before it answers, and checkpoints the conversation.
+search before it answers, and checkpoints the conversation, and can audit the palace.
 One plugin serves OpenCode 1 and OpenCode 2.
 It is installed with [`memcastle integration`](integrations.md); this page is what is specific to OpenCode.
 
@@ -46,6 +46,16 @@ A skill of your own with the same name wins.
 Do not also add `mcp.memcastle` to `opencode.json`.
 The plugin opens its own MCP connection for each session, so that a session's [memory mode](memory-modes.md) is its own,
 and a second entry would show the model every tool twice.
+
+## Auditing the palace
+
+`/memcastle-audit [wing]` runs MemCastle's read-only audit, shows what it found and plans the repair as a dry run.
+It changes nothing.
+OpenCode has no dialog a plugin can ask a question with, so the confirmation is a second command:
+`/memcastle-repair` applies the plan this session was just shown, once, and then writes a before and after summary to
+the diary.
+Without a plan from the same session it refuses, and a `read-only` session is shown the plan and never able to apply it.
+The same two steps exist as the `memcastle_palace_audit` and `memcastle_palace_repair` tools.
 
 ## Configuration
 

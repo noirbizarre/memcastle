@@ -58,7 +58,7 @@ test("the plugin adds the checkpoint tool and the slash command, once", async ()
   expect(Object.keys(hooks.tool ?? {})).toEqual(["memcastle_checkpoint"])
   const config: { command?: Record<string, unknown> } = {}
   await hooks.config?.(config as never)
-  expect(Object.keys(config.command ?? {})).toEqual(["memcastle-checkpoint"])
+  expect(Object.keys(config.command ?? {})).toEqual(["memcastle-checkpoint", "memcastle-audit", "memcastle-repair"])
   await hooks.dispose?.()
 })
 
