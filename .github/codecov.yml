@@ -79,7 +79,7 @@ component_management:
       name: Sources
       paths: [src/mining/**, src/source/**, src/distribution/**, src/credential/**, src/integration/**]
     - component_id: web
-      name: Web dashboard
+      name: Web UI
       paths: [web/src/**]
       # Informational until the dashboard's views are tested: its coverage is reported, never a failing status.
       statuses:

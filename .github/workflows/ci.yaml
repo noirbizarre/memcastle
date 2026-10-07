@@ -308,7 +308,7 @@ jobs:
   # `mise install` deliberately leaves out of [tools]. This job is local to this repository; the template does not
   # have it.
   web:
-    name: 🏰 Web dashboard
+    name: 🏰 Web UI
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
