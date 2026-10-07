@@ -25,7 +25,7 @@ mise run guards     # the architecture guard hooks, described below
 mise run integrations:check # typecheck and test each package under integrations/, and install the bundles (needs bun)
 mise run integrations:build # bundle integrations/*/src into integrations/*/dist, for `--assets-dir "$PWD"`
 mise run integrations:package # lay out what a release ships in target/bundled-integrations
-mise run web:check  # typecheck, test, build and package the web dashboard, then serve it from a real daemon (needs bun and node)
+mise run web:check  # typecheck, test, build and package the web UI, then serve it from a real daemon (needs bun and node)
 mise run web:build  # build web/ into web/dist, for `--assets-dir "$PWD"` with `web.enable`
 mise run web:dev    # the dashboard's dev server, proxying /api to the running daemon
 mise run web:package # lay out what a release ships in target/bundled-web
@@ -193,7 +193,7 @@ Every path, environment variable, flag and the precedence between them is in [Co
     It needs bun and node, so it is `#[ignore]`d in the basic suite and `mise run web:check` runs it.
   - `web/test/` — the dashboard's client, login, route guard, event-stream parser and live loader
     (vitest, no daemon), and the same client, login and event stream
-    against a real `memcastle serve` (`web/test/daemon`, bun), see [Web dashboard](web.md#developing-the-dashboard).
+    against a real `memcastle serve` (`web/test/daemon`, bun), see [Web UI](web.md#developing-the-dashboard).
   - `tests/wasm_conformance.rs` — the same conformance cases run against the built-in `directory` source and against the
     reference WebAssembly source built from `sources/directory/` (in-process, WebAssembly suite).
   - `tests/wasm_pi.rs` — the Pi history source (`sources/pi/`) built and run as a component: what it files and leaves out,
@@ -234,6 +234,11 @@ mise run test -- --filter-expr 'test(job)'
 
 A filter on `mise run test` still excludes the `wasm_` binaries; use `mise run test:wasm -- <filter>` for those.
 `mise run cover` runs the basic suite with coverage.
+The TypeScript suites report coverage too: with `COVERAGE=1`, `mise run web:check` and `mise run integrations:check`
+run each package's `test:cover` script, which writes lcov under `web/coverage/` and `integrations/*/coverage/`.
+CI uploads them to Codecov under the `web` and `integrations` flags.
+`.github/codecov.yml` also groups every report into components (core, surfaces, app, memory, sources, web, integrations)
+by path, so the Codecov page shows each area whatever flag covered it.
 
 ### Where the CI time goes
 
@@ -338,9 +343,9 @@ network or an agent's settings file or a credential, and when anything under `sr
 `src/server` (or any module but the binary) calls it.
 `tests/integration_docs.rs` holds [Agent integrations](integrations.md) to the manifest parser and the error codes.
 
-The web dashboard is held to HTTP as an integration is: the `web-http-only` hook fails on `surrealdb`, `surrealkv`,
+The web UI is held to HTTP as an integration is: the `web-http-only` hook fails on `surrealdb`, `surrealkv`,
 `SurrealStore`, a `store` or `jobs` path, or `/api/db` anywhere under `web/` (Markdown, `node_modules` and `dist` are
-skipped), see [ADR-035](adr/035-web-dashboard.md).
+skipped), see [ADR-035](adr/035-web-ui.md).
 That the dashboard's static files are the only thing besides the liveness probe that needs no token is held by
 `tests/in_process/auth.rs` and `tests/in_process/web.rs`, which walk the routes with the dashboard off and on.
 

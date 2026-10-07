@@ -164,7 +164,7 @@ locator = "/home/alice/src/docs"
 [assets]
 dir = "/home/alice/src/memcastle"
 
-# The web dashboard, served under /ui. Off by default; see "Web dashboard".
+# The web UI, served under /ui. Off by default; see "Web UI".
 [web]
 enable = false
 
@@ -549,7 +549,7 @@ This is the one root for everything a package ships, in the same layout wherever
 | `sources/<name>/` | the bundled mining sources, unpacked: a `memcastle-source.toml` and a `source.wasm` each | the daemon, which lists them as installed and runs them in place (see [Publishing and installing sources](publishing-sources.md#bundled-sources)) |
 | `integrations/<id>/` | the Pi and OpenCode integrations: a `memcastle-integration.toml` and a bundled `dist/` | `memcastle integration` (see [Integrations](integrations.md)) |
 | `skills/` | the shared agent skills | `memcastle integration`, which copies the ones an integration's manifest names into its installed copy |
-| `web/dist/` | the built [web dashboard](web.md) | the daemon, under `/ui`, when `web.enable` is set |
+| `web/dist/` | the built [web UI](web.md) | the daemon, under `/ui`, when `web.enable` is set |
 
 A standalone binary has none (the dashboard is not built into it, so with `web.enable` it answers a page that says the
 files are missing), so you only need the setting to point at a package unpacked somewhere else, or at a
@@ -683,16 +683,16 @@ counts as missing, and the source asks to be signed in again under the new terms
 A credential is shared by every palace on the machine that uses the same keyring or directory, since it belongs to the
 installed source and not to a palace.
 
-## Web dashboard
+## Web UI
 
-`web.enable = true` (or `MEMCASTLE_WEB_ENABLE=true`) makes the daemon serve its web dashboard under `/ui`.
+`web.enable = true` (or `MEMCASTLE_WEB_ENABLE=true`) makes the daemon serve its web UI under `/ui`.
 It is off by default: a daemon that does not set it answers nothing at `/ui`.
 There is no command-line flag; `daemon start` and `daemon restart` pass the environment and the file to the daemon as usual.
 
 The dashboard's files are found in `web/dist/` of the [runtime assets](#runtime-assets),
 in a package and in a checkout alike.
 If they are missing, the daemon still starts, logs a warning, and answers `/ui` with a page that says how to install them.
-See [Web dashboard](web.md) for the login, the memory mode and the development workflow.
+See [Web UI](web.md) for the login, the memory mode and the development workflow.
 
 ## Not supported: other platforms' conventions
 

@@ -4,7 +4,7 @@
 //! over this (`restart` adds only daemon process management) — it never
 //! touches `store` or `jobs` directly (same rule as `api`/`mcp`; see
 //! `app`'s doc comment), which is what guarantees the CLI can only ever do
-//! what a web dashboard calling the same API could also do.
+//! what a web UI calling the same API could also do.
 
 use std::net::SocketAddr;
 use std::path::Path;

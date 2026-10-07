@@ -3,7 +3,7 @@
 ## Status
 
 Accepted.
-Amends [ADR-035](035-web-dashboard.md) (its "read on demand, neither poll nor push" decision: pages still read on demand,
+Amends [ADR-035](035-web-ui.md) (its "read on demand, neither poll nor push" decision: pages still read on demand,
 and now also when the daemon says something changed).
 Builds on [ADR-006](006-job-leases.md) (several daemons may share a remote palace),
 [ADR-007](007-memory-mode-gate-follows-data-access.md) (what a mode may read) and

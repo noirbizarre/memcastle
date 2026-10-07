@@ -1,8 +1,8 @@
-# MemCastle web dashboard
+# MemCastle web UI
 
 A Vue 3 and [OpenVue](https://openvue.dev) application that is a client of the daemon's REST API.
 The daemon serves its build under `/ui` when `web.enable` is set; see [docs/web.md](../docs/web.md) and
-[ADR-035](../docs/adr/035-web-dashboard.md).
+[ADR-035](../docs/adr/035-web-ui.md).
 
 ```sh
 mise run web:build   # build into web/dist, then `memcastle serve --assets-dir "$PWD"` with web.enable

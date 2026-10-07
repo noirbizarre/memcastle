@@ -1,4 +1,4 @@
-//! The web dashboard's static files, under `/ui` (docs/adr/035).
+//! The web UI's static files, under `/ui` (docs/adr/035).
 //!
 //! Only merged into the router when `web.enable` is set, so a daemon that did not ask for a UI answers none. The
 //! files are read through [`Assets::find`], which is the same lookup in a package (`<prefix>/share/memcastle`) and

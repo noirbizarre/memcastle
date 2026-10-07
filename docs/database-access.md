@@ -6,7 +6,7 @@ When you want to look inside it, or run a query the MemCastle commands do not of
 [SurrealDB Studio](https://surrealdb.com/surrealist) (Surrealist) connects to that.
 
 This is a developer and administrator tool.
-It is not the MemCastle web interface: Studio shows tables and records, and the [web dashboard](web.md) shows wings,
+It is not the MemCastle web interface: Studio shows tables and records, and the [web UI](web.md) shows wings,
 rooms and drawers (and signs in the same way: the user `memcastle` with the token as the password).
 The decision behind it is in [ADR-015](adr/015-database-admin-endpoint.md).
 

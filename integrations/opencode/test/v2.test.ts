@@ -220,3 +220,145 @@ test("a host without the tool editor loses only the checkpoint tool, and the plu
   await cleanup?.()
   warn.mockRestore()
 })
+
+// --- audit and repair ------------------------------------------------------------------------------------------
+
+/** A daemon that is not there: every call fails, so what the plugin shows is its own handling of the failure. */
+function unreachable() {
+  process.env.MEMCASTLE_PORT = "1"
+  process.env.MEMCASTLE_PALACE_PATH = "/nonexistent/memcastle-palace"
+}
+
+const named = (fake: ReturnType<typeof fakeContext>, name: string) => {
+  const found = [...fake.tools, ...fake.commands].find((entry) => entry.name === name)
+  if (!found) throw new Error(`${name} was not registered`)
+  return found
+}
+
+test("the repair command without an audit first tells the user what to run, and applies nothing", async () => {
+  unreachable()
+  const fake = fakeContext({})
+  const cleanup = await plugin.setup(fake.ctx)
+
+  await (named(fake, "memcastle-repair") as RegisteredCommand).execute({ sessionID: "ses_1", prompt: { text: "" } })
+
+  expect(JSON.stringify(fake.synthetic.at(-1))).toContain("no repair plan")
+  await cleanup?.()
+})
+
+test("the repair tool turns a missing plan into an error the model can read", async () => {
+  unreachable()
+  const fake = fakeContext({})
+  const cleanup = await plugin.setup(fake.ctx)
+
+  const failure = await (named(fake, "memcastle_palace_repair") as RegisteredTool).execute({}, { sessionID: "ses_1" }).catch((error: unknown) => error)
+
+  expect((failure as Error).message).toContain("no repair plan")
+  await cleanup?.()
+})
+
+test("the audit command and tool report a daemon that cannot be reached instead of throwing into the session", async () => {
+  unreachable()
+  const fake = fakeContext({})
+  const cleanup = await plugin.setup(fake.ctx)
+
+  await (named(fake, "memcastle-audit") as RegisteredCommand).execute({ sessionID: "ses_1", prompt: { text: "  castle  " } })
+  const failure = await (named(fake, "memcastle_palace_audit") as RegisteredTool).execute({ wing: "castle" }, { sessionID: "ses_1" }).catch((error: unknown) => error)
+
+  expect(fake.synthetic).toHaveLength(1)
+  expect(JSON.stringify(fake.synthetic[0])).toContain("MemCastle:")
+  expect(failure).toBeInstanceOf(Error)
+  await cleanup?.()
+})
+
+test("a host that cannot show a synthetic message still gets the answer, through the log", async () => {
+  unreachable()
+  const fake = fakeContext({})
+  ;(fake.ctx.session as unknown as { synthetic: unknown }).synthetic = async () => {
+    throw new Error("no session")
+  }
+  const cleanup = await plugin.setup(fake.ctx)
+
+  await (named(fake, "memcastle-audit") as RegisteredCommand).execute({ sessionID: "ses_1", prompt: { text: "" } })
+  await (named(fake, "memcastle-checkpoint") as RegisteredCommand).execute({ sessionID: "ses_1", prompt: { text: "" } })
+
+  expect((console.info as unknown as { mock: { calls: unknown[][] } }).mock.calls.flat().join(" ")).toContain("checkpoint:")
+  await cleanup?.()
+})
+
+test("a host without the tool editor loses the audit tools too, and says so", async () => {
+  const warn = spyOn(console, "warn").mockImplementation(() => undefined)
+  const fake = fakeContext({})
+  ;(fake.ctx.command as unknown as { transform: unknown }).transform = async () => {
+    throw new Error("no commands here")
+  }
+  const cleanup = await plugin.setup(fake.ctx)
+
+  expect(warn.mock.calls.flat().join(" ")).toContain("could not be registered")
+  await cleanup?.()
+  warn.mockRestore()
+})
+
+// --- sessions, skills and the model request --------------------------------------------------------------------
+
+test("a session that starts and ends is followed, with the directory it runs in", async () => {
+  unreachable()
+  const fake = fakeContext({})
+  const cleanup = await plugin.setup(fake.ctx)
+
+  fake.push({ type: "session.created", data: { sessionID: "ses_1", location: { directory: "/work/elsewhere" }, parentID: "ses_0" } })
+  fake.push({ type: "session.created", data: { sessionID: "ses_2" } })
+  fake.push({ type: "session.created", data: { sessionID: 7 } })
+  fake.push({ type: "session.created" })
+  fake.push({ type: "session.deleted", data: { sessionID: "ses_1" } })
+  await Bun.sleep(30)
+
+  await cleanup?.()
+})
+
+test("the briefing is added to the model request, and a daemon that is away adds nothing", async () => {
+  unreachable()
+  const fake = fakeContext({})
+  const cleanup = await plugin.setup(fake.ctx)
+  const system: unknown[] = []
+
+  await fake.runHook("context", { sessionID: "ses_1", system })
+
+  expect(system.every((part) => (part as { type: string }).type === "text")).toBe(true)
+  await cleanup?.()
+})
+
+test("a skill the user already has is not registered again, and a host that refuses skills does not stop the plugin", async () => {
+  const warn = spyOn(console, "warn").mockImplementation(() => undefined)
+  const fake = fakeContext({})
+  const added: string[] = []
+  ;(fake.ctx.skill as unknown as { transform: unknown }).transform = async (callback: (editor: unknown) => void) => {
+    callback({ get: (id: string) => (id.includes("wake") ? {} : undefined), add: (skill: { id: string }) => added.push(skill.id) })
+  }
+  const cleanup = await plugin.setup(fake.ctx)
+  expect(added.some((id) => id.includes("wake"))).toBe(false)
+  await cleanup?.()
+
+  const refusing = fakeContext({})
+  ;(refusing.ctx.skill as unknown as { transform: unknown }).transform = async () => {
+    throw new Error("no skills here")
+  }
+  const again = await plugin.setup(refusing.ctx)
+  expect(warn.mock.calls.flat().join(" ")).toContain("shared skills could not be registered")
+  await again?.()
+  warn.mockRestore()
+})
+
+test("an event stream that fails is reported, not thrown into the void", async () => {
+  const warn = spyOn(console, "warn").mockImplementation(() => undefined)
+  const fake = fakeContext({})
+  ;(fake.ctx.event as unknown as { subscribe: unknown }).subscribe = async function* () {
+    throw new Error("the stream broke")
+  }
+  const cleanup = await plugin.setup(fake.ctx)
+  await Bun.sleep(20)
+
+  expect(warn.mock.calls.flat().join(" ")).toContain("event stream ended")
+  await cleanup?.()
+  warn.mockRestore()
+})

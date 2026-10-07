@@ -95,7 +95,7 @@ jobs:
           sed -i "s/@SHA256_SOURCES@/$(checksum "memcastle_${TAG}_sources.tar.gz")/" build/PKGBUILD
           # And the agent integrations with the skills they read.
           sed -i "s/@SHA256_INTEGRATIONS@/$(checksum "memcastle_${TAG}_integrations.tar.gz")/" build/PKGBUILD
-          # And the web dashboard.
+          # And the web UI.
           sed -i "s/@SHA256_WEB@/$(checksum "memcastle_${TAG}_web.tar.gz")/" build/PKGBUILD
 
           service=$(curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${TAG}/packaging/systemd/memcastle.service" | sha256sum | cut -d' ' -f1)

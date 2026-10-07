@@ -276,14 +276,14 @@ jobs:
       - name: Package the bundled integrations
         run: packaging/integrations/build.sh stage-integrations
 
-      # The web dashboard (docs/adr/035): a Vue application built into static files under `web/dist/`, shipped as
+      # The web UI (docs/adr/035): a Vue application built into static files under `web/dist/`, shipped as
       # package content next to the sources and the integrations, and served by the daemon only when `web.enable` is
       # set. Nothing is published to npm. Vite and vue-tsc run on node. The script is the one
       # `mise run web:package` runs and tests/web_bundle.rs checks.
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
-      - name: Package the web dashboard
+      - name: Package the web UI
         run: packaging/web/build.sh stage-web
 
       # The native-package layout (docs/adr/013): the executable under `bin/`,

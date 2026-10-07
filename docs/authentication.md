@@ -13,7 +13,7 @@ With authentication enabled, every request needs `Authorization: Bearer <token>`
 `GET /api/health`, the liveness probe, stays open.
 It answers only `{"status": "ok"}`, and `daemon restart`, supervisors and health checks depend on it.
 
-If you enable the [web dashboard](web.md) (`web.enable`), its static files are a second exception:
+If you enable the [web UI](web.md) (`web.enable`), its static files are a second exception:
 `GET` and `HEAD` of `/ui` and anything under `/ui/` need no token,
 because a browser cannot send a header when it loads a page, and so could never load the page that asks for the token.
 The files are the same for everyone and hold no data; every call the page then makes to `/api` carries the token and is
@@ -224,9 +224,9 @@ Five refused sign-ins close the connection, and until a session has signed in on
 
 The endpoint listens beyond loopback only when `auth.enabled` is true, and never otherwise.
 
-## The web dashboard
+## The web UI
 
-When authentication is on, the [web dashboard](web.md) shows a login page that works like the database console's:
+When authentication is on, the [web UI](web.md) shows a login page that works like the database console's:
 the user is `memcastle` and the password is the token.
 The token is sent as `Authorization: Bearer` with each request, so the page is checked by the same layer as everything else,
 and a token you rotate or revoke stops working at the next request, which returns the page to its login.

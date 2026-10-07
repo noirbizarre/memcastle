@@ -6,7 +6,8 @@
   "license": "MIT",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test --timeout 60000"
+    "test": "bun test --timeout 60000",
+    "test:cover": "bun test --timeout 60000 --coverage --coverage-reporter=lcov --coverage-dir=coverage"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",

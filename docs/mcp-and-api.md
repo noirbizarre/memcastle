@@ -5,7 +5,7 @@ The daemon serves two interfaces on the same listener (`127.0.0.1:8420` by defau
 
 - **MCP** at `/mcp`, over streamable HTTP, for agents.
   [Connect an MCP client](mcp-clients.md) shows how to point a client at it.
-- **REST** under `/api`, which is what the CLI uses, what the [web dashboard](web.md) calls, and what a script can call.
+- **REST** under `/api`, which is what the CLI uses, what the [web UI](web.md) calls, and what a script can call.
 
 Both are thin layers over the same application services, so they accept the same arguments,
 enforce the same [memory modes](memory-modes.md) and fail with the same error body.
@@ -238,9 +238,9 @@ curl -s http://127.0.0.1:8420/api/jobs?status=running
 
 ### The dashboard's files
 
-With [`web.enable`](configuration.md#web-dashboard), the same listener also serves the dashboard's static files under
+With [`web.enable`](configuration.md#web-ui), the same listener also serves the dashboard's static files under
 `/ui` (`GET` and `HEAD` only).
-They are not part of the API and carry no data; see [Web dashboard](web.md) and [Authentication](authentication.md#what-is-protected)
+They are not part of the API and carry no data; see [Web UI](web.md) and [Authentication](authentication.md#what-is-protected)
 for why they are the one thing besides the liveness probe that needs no token.
 
 ### The event stream

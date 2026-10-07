@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the web dashboard that ships with MemCastle, and optionally lay it out as a package tree.
+# Build the web UI that ships with MemCastle, and optionally lay it out as a package tree.
 #
 # Usage: packaging/web/build.sh [out-dir]
 #

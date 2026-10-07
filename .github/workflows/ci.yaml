@@ -281,14 +281,34 @@ jobs:
 
       # `build` is a dependency of the task, so the debug binary the tests start is built first.
       - name: Typecheck and test the integrations
+        env:
+          # Makes the task run `test:cover`, which writes lcov beside each package.
+          COVERAGE: "1"
         run: mise run integrations:check
 
-  # The web dashboard (docs/adr/035): typechecked, tested, built, packaged by the release's own script, and served by a
+      # bun and vitest write paths relative to their own package (`src/audit-core.ts`), which Codecov cannot tell
+      # apart between `pi` and `opencode`, or from the daemon's own `src/`. Prefixing them makes each file unique.
+      - name: Make the integrations coverage paths relative to the repository
+        if: ${{ !cancelled() }}
+        run: |
+          for report in integrations/*/coverage/lcov.info; do
+            package="$(dirname "$(dirname "$report")")"
+            sed -i "s|^SF:|SF:$package/|" "$report"
+          done
+
+      - name: Upload integrations coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          files: integrations/*/coverage/lcov.info
+          flags: integrations
+
+  # The web UI (docs/adr/035): typechecked, tested, built, packaged by the release's own script, and served by a
   # real daemon from an installed prefix and from the checkout. Its own job because it needs bun and node, which
   # `mise install` deliberately leaves out of [tools]. This job is local to this repository; the template does not
   # have it.
   web:
-    name: 🏰 Web dashboard
+    name: 🏰 Web UI
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -303,7 +323,27 @@ jobs:
 
       # `build` is a dependency of the task, so the debug binary the tests start is built first.
       - name: Typecheck, test and package the dashboard
+        env:
+          # Makes the task run `test:cover`, which writes lcov beside each package.
+          COVERAGE: "1"
         run: mise run web:check
+
+      # bun and vitest write paths relative to their own package (`src/audit-core.ts`), which Codecov cannot tell
+      # apart between `pi` and `opencode`, or from the daemon's own `src/`. Prefixing them makes each file unique.
+      - name: Make the web coverage paths relative to the repository
+        if: ${{ !cancelled() }}
+        run: |
+          for report in web/coverage/lcov.info; do
+            package="$(dirname "$(dirname "$report")")"
+            sed -i "s|^SF:|SF:$package/|" "$report"
+          done
+
+      - name: Upload web coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          files: web/coverage/lcov.info
+          flags: web
 
   # The .deb and .rpm are otherwise first built by 📦 Publish Release, after the
   # tag exists, which is the worst moment to learn the nfpm config is broken.

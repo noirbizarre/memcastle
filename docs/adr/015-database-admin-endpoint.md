@@ -3,7 +3,7 @@
 ## Status
 
 Accepted, amended by a dated section at the end of this record (`db serve` renamed `db start`)
-by [ADR-035](035-web-dashboard.md) (the web dashboard signs in the way this endpoint does)
+by [ADR-035](035-web-ui.md) (the web UI signs in the way this endpoint does)
 and by [ADR-038](038-one-output-contract-for-every-command.md) (`db start`, `db stop` and `db status` print JSON when piped)
 
 ## Context

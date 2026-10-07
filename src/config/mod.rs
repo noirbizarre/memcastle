@@ -673,7 +673,7 @@ pub struct AssetsConfig {
     pub dir: Option<PathBuf>,
 }
 
-/// Web dashboard settings (see `docs/adr/035`).
+/// Web UI settings (see `docs/adr/035`).
 ///
 /// The dashboard is a client of the REST API served from the runtime assets, so the only decision the daemon makes
 /// is whether to serve it at all.
@@ -804,7 +804,7 @@ pub struct Config {
     /// Runtime asset settings.
     #[serde(default)]
     pub assets: AssetsConfig,
-    /// Web dashboard settings.
+    /// Web UI settings.
     #[serde(default)]
     pub web: WebConfig,
     /// Authentication settings.

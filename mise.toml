@@ -300,7 +300,7 @@ packages+=(integrations/common)
 for package in "${packages[@]}"; do
   echo "==> $package"
   # --frozen-lockfile: a lockfile that disagrees with package.json is a failure here, not a silent rewrite.
-  (cd "$package" && bun install --frozen-lockfile && bun run typecheck && bun run test)
+  (cd "$package" && bun install --frozen-lockfile && bun run typecheck && bun run "$([ -n "${COVERAGE:-}" ] && echo test:cover || echo test)")
 done
 """
 
@@ -318,7 +318,7 @@ tools = { bun = "1" }
 run = "packaging/integrations/build.sh target/bundled-integrations"
 
 [tasks."web:check"]
-description = "Typecheck, test and build the web dashboard, then check its package and serve it from a real daemon"
+description = "Typecheck, test and build the web UI, then check its package and serve it from a real daemon"
 # bun installs and runs the scripts and node is what vite and vue-tsc run on; both are declared here and not in `[tools]`
 # for the same reason as `integrations:check`.
 tools = { bun = "1", node = "24" }
@@ -339,13 +339,13 @@ cd web
 # --frozen-lockfile: a lockfile that disagrees with package.json is a failure here, not a silent rewrite.
 bun install --frozen-lockfile
 bun run typecheck
-bun run test
+bun run "$([ -n "${COVERAGE:-}" ] && echo test:cover || echo test)"
 # Against a real daemon, serving the build made above.
 bun run test:daemon
 """
 
 [tasks."web:build"]
-description = "Build the web dashboard into web/dist, which is all development mode needs"
+description = "Build the web UI into web/dist, which is all development mode needs"
 # After this, `memcastle serve --assets-dir "$PWD"` with `web.enable` serves the dashboard as built in this checkout.
 tools = { bun = "1", node = "24" }
 run = "packaging/web/build.sh"

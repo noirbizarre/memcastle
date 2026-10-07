@@ -7,7 +7,7 @@ Amends [ADR-013](013-release-packaging-and-asset-resolution.md) (the assets root
 [ADR-020](020-skills-are-versioned-with-the-repository.md) (skills are now packaged, because an installed integration
 reads them) and [ADR-022](022-integrations-are-bun-packages-tested-against-a-real-daemon.md) (an integration is also
 distributed as one bundled file, still tested from its sources).
-[ADR-035](035-web-dashboard.md) adds `web/` as a further tree under the same root.
+[ADR-035](035-web-ui.md) adds `web/` as a further tree under the same root.
 
 ## Context
 

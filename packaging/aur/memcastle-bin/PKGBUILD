@@ -44,7 +44,7 @@ sha256sums_aarch64=('@SHA256_AARCH64@')
 # The agent integrations and the shared skills (docs/adr/034) are bundled JavaScript, equally portable, and arrive the
 # same way: `$srcdir/memcastle-integrations-$pkgver/{integrations,skills}`.
 #
-# The web dashboard (docs/adr/035) is static files, portable the same way: `$srcdir/memcastle-web-$pkgver/web/dist`.
+# The web UI (docs/adr/035) is static files, portable the same way: `$srcdir/memcastle-web-$pkgver/web/dist`.
 source=("LICENSE-$pkgver::$url/raw/$pkgver/LICENSE"
         "memcastle-$pkgver.service::$url/raw/$pkgver/packaging/systemd/memcastle.service"
         "memcastle-sources-$pkgver.tar.gz::$url/releases/download/$pkgver/memcastle_${pkgver}_sources.tar.gz"
