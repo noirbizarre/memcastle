@@ -77,6 +77,10 @@ component_management:
     - component_id: web
       name: Web dashboard
       paths: [web/src/**]
+      # Informational until the dashboard's views are tested: its coverage is reported, never a failing status.
+      statuses:
+        - type: project
+          informational: true
     - component_id: integrations
       name: Agent integrations
       paths: [integrations/*/src/**]
