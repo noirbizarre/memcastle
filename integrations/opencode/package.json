@@ -7,7 +7,8 @@
   "main": "src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test --timeout 60000"
+    "test": "bun test --timeout 60000",
+    "test:cover": "bun test --timeout 60000 --coverage --coverage-reporter=lcov --coverage-dir=coverage"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.0",

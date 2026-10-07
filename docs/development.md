@@ -234,6 +234,11 @@ mise run test -- --filter-expr 'test(job)'
 
 A filter on `mise run test` still excludes the `wasm_` binaries; use `mise run test:wasm -- <filter>` for those.
 `mise run cover` runs the basic suite with coverage.
+The TypeScript suites report coverage too: with `COVERAGE=1`, `mise run web:check` and `mise run integrations:check`
+run each package's `test:cover` script, which writes lcov under `web/coverage/` and `integrations/*/coverage/`.
+CI uploads them to Codecov under the `web` and `integrations` flags.
+`.github/codecov.yml` also groups every report into components (core, surfaces, app, memory, sources, web, integrations)
+by path, so the Codecov page shows each area whatever flag covered it.
 
 ### Where the CI time goes
 

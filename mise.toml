@@ -300,7 +300,7 @@ packages+=(integrations/common)
 for package in "${packages[@]}"; do
   echo "==> $package"
   # --frozen-lockfile: a lockfile that disagrees with package.json is a failure here, not a silent rewrite.
-  (cd "$package" && bun install --frozen-lockfile && bun run typecheck && bun run test)
+  (cd "$package" && bun install --frozen-lockfile && bun run typecheck && bun run "$([ -n "${COVERAGE:-}" ] && echo test:cover || echo test)")
 done
 """
 
@@ -339,7 +339,7 @@ cd web
 # --frozen-lockfile: a lockfile that disagrees with package.json is a failure here, not a silent rewrite.
 bun install --frozen-lockfile
 bun run typecheck
-bun run test
+bun run "$([ -n "${COVERAGE:-}" ] && echo test:cover || echo test)"
 # Against a real daemon, serving the build made above.
 bun run test:daemon
 """

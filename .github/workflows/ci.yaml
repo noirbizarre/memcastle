@@ -281,7 +281,17 @@ jobs:
 
       # `build` is a dependency of the task, so the debug binary the tests start is built first.
       - name: Typecheck and test the integrations
+        env:
+          # Makes the task run `test:cover`, which writes lcov beside each package.
+          COVERAGE: "1"
         run: mise run integrations:check
+
+      - name: Upload integrations coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          files: integrations/*/coverage/lcov.info
+          flags: integrations
 
   # The web dashboard (docs/adr/035): typechecked, tested, built, packaged by the release's own script, and served by a
   # real daemon from an installed prefix and from the checkout. Its own job because it needs bun and node, which
@@ -303,7 +313,17 @@ jobs:
 
       # `build` is a dependency of the task, so the debug binary the tests start is built first.
       - name: Typecheck, test and package the dashboard
+        env:
+          # Makes the task run `test:cover`, which writes lcov beside each package.
+          COVERAGE: "1"
         run: mise run web:check
+
+      - name: Upload web coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          files: web/coverage/lcov.info
+          flags: web
 
   # The .deb and .rpm are otherwise first built by 📦 Publish Release, after the
   # tag exists, which is the worst moment to learn the nfpm config is broken.

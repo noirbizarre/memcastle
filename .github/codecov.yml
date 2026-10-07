@@ -7,7 +7,7 @@
 # (`src/mining/wasm`, much of `src/source`) is missing from the three OS reports.
 codecov:
   notify:
-    after_n_builds: 4
+    after_n_builds: 6
 
 # Every leg runs on every commit, so a missing report means a broken run,
 # not an untested platform — nothing should be carried forward to hide it.
@@ -21,6 +21,11 @@ flags:
   # The WebAssembly suite runs on every commit too, so a missing report is a
   # failed job, not a reason to reuse an old one.
   wasm:
+    carryforward: false
+  # The TypeScript suites run on every commit as well (the `web` and `integrations` jobs).
+  web:
+    carryforward: false
+  integrations:
     carryforward: false
 
 coverage:
@@ -39,8 +44,45 @@ coverage:
         # No threshold for patch (strict)
         threshold: 0%
 
+# Tests and build output are not the code under measure.
+ignore:
+  - "tests/**"
+  - "web/test/**"
+  - "web/dist/**"
+  - "integrations/*/test/**"
+  - "integrations/*/dist/**"
+
+# A view by area, whatever the flag: each component aggregates the files under its paths across every report.
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+        target: auto
+  individual_components:
+    - component_id: core
+      name: Core (domain, store, jobs, config)
+      paths: [src/domain/**, src/store/**, src/migrate/**, src/jobs/**, src/config/**, src/events/**, src/assets/**, src/error.rs, src/lib.rs, src/term.rs, src/project.rs]
+    - component_id: surfaces
+      name: Surfaces (CLI, REST, MCP, daemon)
+      paths: [src/api/**, src/mcp/**, src/client/**, src/server/**, src/dbadmin/**, src/main.rs, src/cli.rs]
+    - component_id: app
+      name: Application services
+      paths: [src/app/**]
+    - component_id: memory
+      name: Memory pipeline (search, embed, extract, dedup, checkpoint, audit, repair)
+      paths: [src/search/**, src/embed/**, src/extract/**, src/dedup/**, src/checkpoint/**, src/audit/**, src/repair/**]
+    - component_id: sources
+      name: Sources (mining, packages, distribution, credentials, integration install)
+      paths: [src/mining/**, src/source/**, src/distribution/**, src/credential/**, src/integration/**]
+    - component_id: web
+      name: Web dashboard
+      paths: [web/src/**]
+    - component_id: integrations
+      name: Agent integrations
+      paths: [integrations/*/src/**]
+
 # Require any change in coverage to post
 comment:
   require_changes: true
-  # Held back for the same reason as the status above: three OS legs plus `wasm`.
-  after_n_builds: 4
+  # Held back for the same reason as the status above: three OS legs plus `wasm`, `web` and `integrations`.
+  after_n_builds: 6
