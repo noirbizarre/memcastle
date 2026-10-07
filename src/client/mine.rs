@@ -103,41 +103,55 @@ fn absolute(path: &str) -> Result<PathBuf> {
 /// directory is, and the rest is kept as typed. A part that does not exist (a project deleted since its sessions were
 /// recorded) is cleaned up lexically instead, which is the most that can be said of it.
 fn resolve_pattern(value: &str) -> Result<String> {
+    use std::ffi::OsString;
     use std::path::Component;
 
     let path = absolute(value)?;
     let mut literal = PathBuf::new();
-    let mut rest: Vec<String> = Vec::new();
+    let mut rest: Vec<OsString> = Vec::new();
     for component in path.components() {
-        let text = component.as_os_str().to_string_lossy();
         // Once a segment holds a star, everything after it belongs to the pattern, literal or not.
-        if !rest.is_empty() || text.contains('*') {
-            rest.push(text.into_owned());
+        if !rest.is_empty() || component.as_os_str().to_string_lossy().contains('*') {
+            rest.push(component.as_os_str().to_os_string());
         } else {
             literal.push(component);
         }
     }
-    let resolved = std::fs::canonicalize(&literal).unwrap_or_else(|_| {
-        // `absolute` leaves `..` in place, so it is resolved here against what precedes it.
-        let mut clean = PathBuf::new();
-        for component in literal.components() {
-            match component {
-                Component::ParentDir => {
-                    clean.pop();
+    let resolved = std::fs::canonicalize(&literal)
+        .map(without_verbatim_prefix)
+        .unwrap_or_else(|_| {
+            // `absolute` leaves `..` in place, so it is resolved here against what precedes it.
+            let mut clean = PathBuf::new();
+            for component in literal.components() {
+                match component {
+                    Component::ParentDir => {
+                        clean.pop();
+                    }
+                    other => clean.push(other),
                 }
-                other => clean.push(other),
             }
-        }
-        clean
-    });
-    let mut out = resolved.to_string_lossy().into_owned();
-    for part in rest {
-        if !out.ends_with('/') {
-            out.push('/');
-        }
-        out.push_str(&part);
+            clean
+        });
+    // Joined as a path, so the separator is the platform's own: `\` on Windows, which is how a program there records
+    // its working directory.
+    let mut out = resolved;
+    out.extend(rest);
+    Ok(out.to_string_lossy().into_owned())
+}
+
+/// `path` without the `\\?\` prefix `canonicalize` gives a Windows path, which no program records as its working
+/// directory (`\\?\C:\work` is `C:\work`, and `\\?\UNC\host\share` is `\\host\share`). A path that has none, and
+/// every path off Windows, is returned as it is.
+fn without_verbatim_prefix(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{unc}"));
     }
-    Ok(out)
+    match text.strip_prefix(r"\\?\") {
+        // Only a drive form: any other verbatim path (a device) is not something to rewrite.
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
+        _ => path,
+    }
 }
 
 /// The request `parsed` stands for, given the sources the daemon knows (`None` when [`Parsed::needs_sources`] is
@@ -373,67 +387,113 @@ mod tests {
         );
     }
 
-    // Unix only: the paths are written with `/`, and the links need `std::os::unix`.
-    #[cfg(unix)]
-    #[test]
-    fn a_path_option_is_resolved_the_way_a_programs_working_directory_is_recorded() {
+    /// A temporary directory's canonical path, which is where a program started inside it records its working directory.
+    fn real_dir() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
-        let real = std::fs::canonicalize(dir.path()).unwrap();
-        std::fs::create_dir_all(real.join("app/src")).unwrap();
-        std::os::unix::fs::symlink(real.join("app"), real.join("link")).unwrap();
-        let app = real.join("app").display().to_string();
+        let real = without_verbatim_prefix(std::fs::canonicalize(dir.path()).unwrap());
+        (dir, real)
+    }
+
+    /// `parts` joined under `base` as a path, so every expectation uses the platform's own separator.
+    fn under(base: &Path, parts: &[&str]) -> String {
+        let mut path = base.to_path_buf();
+        path.extend(parts);
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_path_option_is_cleaned_up_the_way_a_programs_working_directory_is_recorded() {
+        let (_guard, real) = real_dir();
+        std::fs::create_dir_all(real.join("app").join("src")).unwrap();
+        let app = under(&real, &["app"]);
 
         for spelling in [
-            format!("{}/", app),
-            format!("{}/./src/..", app),
-            format!("{}/link/../app", real.display()),
-            format!("{}//app", real.display()),
-            format!("{}/link", real.display()),
+            format!("{app}{}", std::path::MAIN_SEPARATOR),
+            under(&real, &["app", ".", "src", ".."]),
+            under(&real, &["app", "src", "..", "..", "app"]),
         ] {
             assert_eq!(resolve_pattern(&spelling).unwrap(), app, "{spelling}");
         }
     }
 
-    // Unix only: the paths are written with `/`, and the links need `std::os::unix`.
+    #[test]
+    fn the_result_never_carries_the_verbatim_prefix_windows_canonicalization_adds() {
+        let (_guard, real) = real_dir();
+        let resolved = resolve_pattern(&real.to_string_lossy()).unwrap();
+        assert!(!resolved.starts_with(r"\\?\"), "{resolved}");
+        assert_eq!(resolved, real.to_string_lossy());
+    }
+
+    #[test]
+    fn a_verbatim_prefix_is_removed_from_a_drive_path_and_a_share_and_nothing_else_is_touched() {
+        let strip = |text: &str| {
+            without_verbatim_prefix(PathBuf::from(text))
+                .to_string_lossy()
+                .into_owned()
+        };
+        assert_eq!(strip(r"\\?\C:\work\app"), r"C:\work\app");
+        assert_eq!(strip(r"\\?\UNC\host\share\app"), r"\\host\share\app");
+        assert_eq!(strip(r"\\?\GLOBALROOT\device"), r"\\?\GLOBALROOT\device");
+        assert_eq!(strip("/work/app"), "/work/app");
+        assert_eq!(strip(r"C:\work"), r"C:\work");
+    }
+
+    // Links need a privilege on Windows, so only the creation of one is Unix-only: everything else here runs there too.
     #[cfg(unix)]
     #[test]
+    fn a_link_in_the_part_that_exists_is_resolved() {
+        let (_guard, real) = real_dir();
+        std::fs::create_dir_all(real.join("app")).unwrap();
+        std::os::unix::fs::symlink(real.join("app"), real.join("link")).unwrap();
+        let app = under(&real, &["app"]);
+
+        assert_eq!(resolve_pattern(&under(&real, &["link"])).unwrap(), app);
+        assert_eq!(
+            resolve_pattern(&under(&real, &["link", "..", "app"])).unwrap(),
+            app
+        );
+    }
+
+    #[test]
     fn a_pattern_keeps_what_follows_its_first_star_and_resolves_what_precedes_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let real = std::fs::canonicalize(dir.path()).unwrap();
+        let (_guard, real) = real_dir();
         std::fs::create_dir_all(real.join("work")).unwrap();
-        std::os::unix::fs::symlink(real.join("work"), real.join("ws")).unwrap();
-        let work = real.join("work").display().to_string();
 
         assert_eq!(
-            resolve_pattern(&format!("{}/ws/*", real.display())).unwrap(),
-            format!("{work}/*")
+            resolve_pattern(&under(&real, &["work", ".", "*"])).unwrap(),
+            under(&real, &["work", "*"]),
+            "what precedes the star is cleaned up"
         );
         assert_eq!(
-            resolve_pattern(&format!("{}/ws/*/src/../x*", real.display())).unwrap(),
-            format!("{work}/*/src/../x*"),
+            resolve_pattern(&under(&real, &["work", "*", "src", "..", "x*"])).unwrap(),
+            under(&real, &["work", "*", "src", "..", "x*"]),
             "after a star nothing is known, so nothing is resolved"
         );
     }
 
-    // Unix only: the paths are written with `/`, and the links need `std::os::unix`.
-    #[cfg(unix)]
     #[test]
     fn a_path_that_does_not_exist_is_only_cleaned_up_lexically() {
+        let (_guard, real) = real_dir();
         assert_eq!(
-            resolve_pattern("/no/such/./place/../dir/").unwrap(),
-            "/no/such/dir"
+            resolve_pattern(&under(&real, &["no", "such", ".", "place", "..", "dir"])).unwrap(),
+            under(&real, &["no", "such", "dir"])
         );
-        assert_eq!(resolve_pattern("/no/such/p*").unwrap(), "/no/such/p*");
+        assert_eq!(
+            resolve_pattern(&under(&real, &["no", "such", "p*"])).unwrap(),
+            under(&real, &["no", "such", "p*"])
+        );
     }
 
-    // Unix only: the paths are written with `/`, and the links need `std::os::unix`.
-    #[cfg(unix)]
     #[test]
     fn a_relative_pattern_is_made_absolute_against_the_shells_directory() {
-        let resolved = resolve_pattern("workspaces/*").unwrap();
-        assert!(
-            Path::new(&resolved).is_absolute() && resolved.ends_with("/workspaces/*"),
-            "{resolved}"
+        let resolved = PathBuf::from(
+            resolve_pattern(&format!("workspaces{}*", std::path::MAIN_SEPARATOR)).unwrap(),
+        );
+        assert!(resolved.is_absolute(), "{resolved:?}");
+        assert_eq!(resolved.file_name().unwrap(), "*");
+        assert_eq!(
+            resolved.parent().unwrap().file_name().unwrap(),
+            "workspaces"
         );
     }
 
