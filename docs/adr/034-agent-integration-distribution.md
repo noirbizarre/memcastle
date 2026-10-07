@@ -70,9 +70,19 @@ That directory is the natural place for integrations too, and the same rule make
 - **Compatibility is checked before anything is written**, against `CARGO_PKG_VERSION` and the agent's `--version`.
   An agent whose version cannot be read is refused when the manifest requires a range, because guessing installs
   something that may not load.
-- **The skills are installed beside the integration.**
+- **The skills are installed beside the integration, and the manifest names them.**
   `skill-text.ts` looks for `skills/` next to the bundle first and for the checkout's second, so one source file serves
   both layouts.
+  A `[[skills]]` entry per skill replaces the first form's all-or-nothing `[skills] install = true`:
+  a `name` alone references the shared `skills/<name>/` of the assets root, so nothing is duplicated, and `local = true`
+  takes it from the integration's own `skills/<name>/` for a skill only that integration needs.
+  Only the named skills are installed, a named skill without a `SKILL.md` refuses the installation before anything is
+  written, and the receipt records the names.
+  Both layouts resolve a skill through the same assets root as everything else, and `build.sh` ships an integration's own
+  `skills/` inside its package directory.
+  The agent is told about the skills where they sit in the installed copy (Pi through `resources_discover`, which an `off`
+  session never answers, and OpenCode through `skills.paths`), and the installer never writes into the directories a user
+  keeps skills in, so skills stay independently installable and the integration never overwrites one of the user's.
 
 ## Alternatives rejected
 

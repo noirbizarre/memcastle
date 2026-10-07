@@ -525,8 +525,9 @@ and a state: `not installed`, `installed`, `outdated` (the package ships a diffe
 `modified` (a file changed, or the agent no longer knows the copy), `incompatible` (your MemCastle or agent is outside the
 supported range) or `unavailable` (the shipped files are incomplete).
 It ends with the assets root it used and how it was chosen.
-`install` copies the integration and the shared skills to `~/.local/share/memcastle/agents/<AGENT>/`, registers them with
-the agent, checks the result and reports every change.
+`install` copies the integration and the skills its manifest names to `~/.local/share/memcastle/agents/<AGENT>/`,
+registers it with the agent, checks the result and reports every change.
+`list --json` carries the skills each integration exposes, by name, in `skills`.
 It changes nothing, and says so, when the integration is already installed and current.
 `update` is `install` for an integration that is already installed, and refuses one that is not.
 `remove` unregisters the integration and deletes the copy; it needs no assets, so it works after the package is gone.

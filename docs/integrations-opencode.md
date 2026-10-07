@@ -38,6 +38,11 @@ The shim carries a comment saying MemCastle wrote it.
 `remove` deletes the file only if that comment is there, and `install` refuses to overwrite a `memcastle.ts` without it
 (`conflict`), so a plugin of your own with that name is safe.
 
+The five [MemCastle skills](skills.md) come with the integration, so no separate skill installation follows.
+The plugin adds the `skills/` directory beside it to OpenCode's skill paths, so they show in OpenCode's `skill` tool, and
+it adds none in an `off` session.
+A skill of your own with the same name wins.
+
 Do not also add `mcp.memcastle` to `opencode.json`.
 The plugin opens its own MCP connection for each session, so that a session's [memory mode](memory-modes.md) is its own,
 and a second entry would show the model every tool twice.

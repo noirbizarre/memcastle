@@ -83,6 +83,10 @@ pub struct Receipt {
     pub assets_root: String,
     /// Every file copied, relative to the installed copy with `/` separators, and its SHA-256.
     pub files: BTreeMap<String, String>,
+    /// The skills exposed, by name: the directories under `skills/` in the installed copy. A receipt written before
+    /// skills were declared has none listed, and its `files` still say what was copied.
+    #[serde(default)]
+    pub skills: Vec<String>,
     /// What the agent was told.
     pub registration: Registration,
 }
@@ -139,6 +143,8 @@ pub struct Status {
     pub memcastle_requirement: String,
     /// The agent versions it supports.
     pub agent_requirement: Option<String>,
+    /// The skills the shipped integration exposes to its agent, by name.
+    pub skills: Vec<String>,
     /// What is wrong, when something is.
     pub problems: Vec<String>,
 }
@@ -332,26 +338,33 @@ fn plan_files(shipped: &Shipped, catalog: &Catalog) -> Result<Plan> {
             place(&mut plan, id, destination, from)?;
         }
     }
-    if shipped.manifest.skills.install {
-        let skills = catalog.skills_dir();
-        if !skills.is_dir() {
+    // Only the skills the manifest names are installed: a shared skill is read from the assets root where it is, a
+    // local one from the integration's own directory, and `skills/README.md` (a working document) is never a skill.
+    for skill in &shipped.manifest.skills {
+        let (from, whose) = if skill.local {
+            (shipped.dir.join("skills").join(&skill.name), "its own")
+        } else {
+            (catalog.skills_dir().join(&skill.name), "the shared")
+        };
+        // A directory without a `SKILL.md` is not a skill a client would list, so installing it would claim an exposure
+        // that does not happen.
+        if !from.join("SKILL.md").is_file() {
             return Err(Error::IntegrationAssetsMissing {
                 message: format!(
-                    "integration `{id}` reads the shared skills, and {} does not exist",
-                    skills.display()
+                    "integration `{id}` exposes the skill `{}` from {whose} `skills/`, and {} holds no SKILL.md; \
+                     a package that lacks it is incomplete",
+                    skill.name,
+                    from.display()
                 ),
             });
         }
-        for (relative, source) in walk(&skills)? {
-            // Only a skill's own directory is installed; `skills/README.md` is a working document for the repository.
-            if relative.components().count() > 1 {
-                place(
-                    &mut plan,
-                    id,
-                    format!("skills/{}", relative_slashes(&relative)),
-                    source,
-                )?;
-            }
+        for (relative, source) in walk(&from)? {
+            place(
+                &mut plan,
+                id,
+                format!("skills/{}/{}", skill.name, relative_slashes(&relative)),
+                source,
+            )?;
         }
     }
     if let Some(entry) = &shipped.manifest.agent.entry
@@ -364,6 +377,13 @@ fn plan_files(shipped: &Shipped, catalog: &Catalog) -> Result<Plan> {
         });
     }
     Ok(plan)
+}
+
+/// The names of the skills `manifest` exposes, in a stable order.
+fn skill_names(manifest: &IntegrationManifest) -> Vec<String> {
+    let mut names: Vec<String> = manifest.skills.iter().map(|s| s.name.clone()).collect();
+    names.sort();
+    names
 }
 
 fn digests(plan: &Plan) -> Result<BTreeMap<String, String>> {
@@ -430,6 +450,7 @@ pub fn inspect(shipped: &Shipped, catalog: &Catalog, ctx: &Context<'_>) -> Resul
         agent_version: detected.as_ref().map(|d| d.raw.clone()),
         memcastle_requirement: manifest.compatibility.memcastle.clone(),
         agent_requirement: manifest.compatibility.agent.clone(),
+        skills: skill_names(manifest),
         problems: Vec::new(),
     };
     let receipt = match read_receipt(&directory) {
@@ -561,6 +582,7 @@ pub fn install(shipped: &Shipped, catalog: &Catalog, ctx: &Context<'_>) -> Resul
         agent_version: Some(info.raw.clone()),
         assets_root: catalog.root().display().to_string(),
         files,
+        skills: skill_names(manifest),
         registration: registration.clone(),
     };
 
@@ -790,8 +812,8 @@ entry = "dist/index.js"
 [[assets]]
 from = "dist"
 to = "dist"
-[skills]
-install = true
+[[skills]]
+name = "wake-up"
 "#
         )
     }
@@ -814,6 +836,9 @@ install = true
             std::fs::create_dir_all(assets.join("skills/wake-up")).unwrap();
             std::fs::write(assets.join("skills/wake-up/SKILL.md"), "# wake\n").unwrap();
             std::fs::write(assets.join("skills/README.md"), "working notes\n").unwrap();
+            // Shared but declared by no manifest: an integration installs the skills it names and no others.
+            std::fs::create_dir_all(assets.join("skills/diary")).unwrap();
+            std::fs::write(assets.join("skills/diary/SKILL.md"), "# diary\n").unwrap();
             let locations = Locations {
                 agents_dir: root.path().join("data/agents"),
                 opencode_config_dir: root.path().join("config/opencode"),
@@ -995,7 +1020,7 @@ install = true
     }
 
     #[test]
-    fn an_integration_that_reads_skills_needs_the_skills_directory_to_exist() {
+    fn a_shared_skill_the_manifest_names_must_exist_in_the_shared_skills_directory() {
         let machine = Machine::new();
         std::fs::remove_dir_all(machine.assets().join("skills")).unwrap();
 
@@ -1005,7 +1030,147 @@ install = true
             matches!(error, Error::IntegrationAssetsMissing { .. }),
             "{error}"
         );
-        assert!(error.to_string().contains("shared skills"), "{error}");
+        assert!(error.to_string().contains("`wake-up`"), "{error}");
+        assert!(error.to_string().contains("the shared"), "{error}");
+    }
+
+    #[test]
+    fn a_skill_directory_without_a_skill_file_is_refused_before_anything_is_written() {
+        let machine = Machine::new();
+        std::fs::remove_file(machine.assets().join("skills/wake-up/SKILL.md")).unwrap();
+        std::fs::write(machine.assets().join("skills/wake-up/notes.md"), "x").unwrap();
+
+        let error = plan_error(&machine, "pi");
+
+        assert!(error.to_string().contains("no SKILL.md"), "{error}");
+        assert!(!machine.locations.agents_dir.join("pi").exists());
+    }
+
+    #[test]
+    fn only_the_skills_a_manifest_names_are_installed() {
+        let machine = Machine::new();
+
+        machine.install("pi").unwrap();
+
+        let skills = machine.locations.agents_dir.join("pi/skills");
+        assert!(skills.join("wake-up/SKILL.md").is_file());
+        // `diary` is shared and present in the assets root, but this integration does not expose it.
+        assert!(!skills.join("diary").exists());
+    }
+
+    #[test]
+    fn an_integration_with_no_skills_declared_installs_none_and_needs_no_skills_directory() {
+        let machine = Machine::new();
+        std::fs::remove_dir_all(machine.assets().join("skills")).unwrap();
+        let text = manifest("pi", "pi", "0.1.0", ">=0.1", ">=1.0")
+            .replace("[[skills]]\nname = \"wake-up\"\n", "");
+        machine.rewrite_manifest("pi", text);
+
+        machine.install("pi").unwrap();
+
+        assert!(!machine.locations.agents_dir.join("pi/skills").exists());
+        assert!(machine.status("pi").skills.is_empty());
+    }
+
+    #[test]
+    fn a_local_skill_ships_from_the_integrations_own_directory() {
+        let machine = Machine::new();
+        let local = machine.assets().join("integrations/pi/skills/pi-notes");
+        std::fs::create_dir_all(local.join("references")).unwrap();
+        std::fs::write(local.join("SKILL.md"), "# notes\n").unwrap();
+        std::fs::write(local.join("references/more.md"), "more\n").unwrap();
+        let text = manifest("pi", "pi", "0.1.0", ">=0.1", ">=1.0")
+            + "[[skills]]\nname = \"pi-notes\"\nlocal = true\n";
+        machine.rewrite_manifest("pi", text);
+
+        machine.install("pi").unwrap();
+
+        let skills = machine.locations.agents_dir.join("pi/skills");
+        assert!(skills.join("pi-notes/SKILL.md").is_file());
+        assert!(skills.join("pi-notes/references/more.md").is_file());
+        // It belongs to `pi` alone: the other integration did not name it.
+        machine.install("opencode").unwrap();
+        assert!(
+            !machine
+                .locations
+                .agents_dir
+                .join("opencode/skills/pi-notes")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn a_local_skill_is_not_looked_for_among_the_shared_ones_and_the_reverse() {
+        let machine = Machine::new();
+        let text = manifest("pi", "pi", "0.1.0", ">=0.1", ">=1.0")
+            .replace("name = \"wake-up\"", "name = \"wake-up\"\nlocal = true");
+        machine.rewrite_manifest("pi", text);
+
+        let error = plan_error(&machine, "pi");
+
+        assert!(error.to_string().contains("its own"), "{error}");
+    }
+
+    #[test]
+    fn a_local_and_a_shared_skill_of_one_name_cannot_both_be_installed() {
+        // The manifest parser refuses a repeated name, so the clash is only reachable from a skill file that an asset
+        // also lands on: `[[assets]]` writing into `skills/wake-up/` must not silently override the shared skill.
+        let machine = Machine::new();
+        let text = manifest("pi", "pi", "0.1.0", ">=0.1", ">=1.0")
+            + "[[assets]]\nfrom = \"dist/package.json\"\nto = \"skills/wake-up/SKILL.md\"\n";
+        machine.rewrite_manifest("pi", text);
+
+        let error = plan_error(&machine, "pi");
+
+        assert!(error.to_string().contains("two different files"), "{error}");
+    }
+
+    #[test]
+    fn dropping_a_skill_from_the_manifest_removes_it_on_update_and_leaves_the_users_own_skills() {
+        let machine = Machine::new();
+        machine.install("pi").unwrap();
+        // A skill the user keeps in a client location is never inside the installed copy, so it cannot be touched.
+        let own = machine.root.path().join("home/.agents/skills/mine");
+        std::fs::create_dir_all(&own).unwrap();
+        std::fs::write(own.join("SKILL.md"), "# mine\n").unwrap();
+        let text = manifest("pi", "pi", "0.1.0", ">=0.1", ">=1.0")
+            .replace("[[skills]]\nname = \"wake-up\"\n", "");
+        machine.rewrite_manifest("pi", text);
+
+        let outcome = machine.update("pi").unwrap();
+
+        assert_eq!(outcome.action, Action::Updated);
+        assert!(
+            !machine
+                .locations
+                .agents_dir
+                .join("pi/skills/wake-up")
+                .exists()
+        );
+        assert!(own.join("SKILL.md").is_file());
+    }
+
+    #[test]
+    fn a_change_to_a_shipped_skill_makes_the_installation_outdated_until_updated() {
+        let machine = Machine::new();
+        machine.install("pi").unwrap();
+        std::fs::write(
+            machine.assets().join("skills/wake-up/SKILL.md"),
+            "# newer\n",
+        )
+        .unwrap();
+
+        assert_eq!(machine.status("pi").state, State::Outdated);
+        machine.update("pi").unwrap();
+
+        assert_eq!(machine.status("pi").state, State::Installed);
+    }
+
+    #[test]
+    fn a_listing_names_the_skills_each_integration_exposes() {
+        let machine = Machine::new();
+
+        assert_eq!(machine.status("pi").skills, ["wake-up"]);
     }
 
     #[test]
@@ -1645,10 +1810,29 @@ install = true
         assert_eq!(receipt.agent_version.as_deref(), Some("1.18.34"));
         assert!(receipt.files.contains_key("dist/index.js"));
         assert!(receipt.files.contains_key("skills/wake-up/SKILL.md"));
+        assert_eq!(receipt.skills, ["wake-up"]);
         assert_eq!(
             receipt.registration.target,
             machine.plugin_file().display().to_string()
         );
+    }
+
+    #[test]
+    fn a_receipt_written_before_skills_were_declared_still_reads() {
+        let machine = Machine::new();
+        machine.install("pi").unwrap();
+        let dir = machine.locations.agents_dir.join("pi");
+        let mut value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join(RECEIPT_FILE)).unwrap())
+                .unwrap();
+        value.as_object_mut().unwrap().remove("skills");
+        std::fs::write(dir.join(RECEIPT_FILE), value.to_string()).unwrap();
+
+        let receipt = read_receipt(&dir).unwrap().unwrap();
+
+        assert!(receipt.skills.is_empty());
+        // Its files still say what was copied, so removal and drift detection work as before.
+        assert!(receipt.files.contains_key("skills/wake-up/SKILL.md"));
     }
 
     #[test]

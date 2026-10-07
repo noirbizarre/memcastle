@@ -89,6 +89,13 @@ const pi: Record<string, Driver> = {
         return answer?.systemPrompt ? [answer.systemPrompt] : []
       }),
     ),
+  "native-skills": (mode, actor) =>
+    as(actor, () =>
+      withPi(mode, {}, async (session) => {
+        const offered = (await session.fire("resources_discover", { reason: "startup" })) as { skillPaths?: string[] } | undefined
+        return offered?.skillPaths ?? []
+      }),
+    ),
   "interval-checkpoint": (mode, actor) =>
     as(actor, () =>
       withPi(mode, { eagerCheckpoint: true }, async (session) => {

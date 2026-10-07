@@ -6,7 +6,8 @@ Accepted, builds on [ADR-019](019-shared-integration-contract.md) (the contract'
 operation) and [ADR-013](013-release-packaging-and-asset-resolution.md) (a package asset needs a consumer, and there is
 none for skills).
 Amended by [ADR-034](034-agent-integration-distribution.md): an installed integration now reads the skills, so releases
-package them under `share/memcastle/skills/` and the integration installer copies them beside the integration.
+package them under `share/memcastle/skills/` and the integration installer copies the ones each integration's manifest
+names into the integration's installed copy.
 
 ## Context
 

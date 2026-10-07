@@ -108,7 +108,8 @@ Other Pi sessions, in this process or another, are other MCP sessions and keep t
   no request is made and no marker reaches the user or the model, through every path listed in
   `tests/fixtures/integration/off-isolation.json`.
 - **A skill copied by hand is out of reach.**
-  The extension loads skills from `skills/` itself and loads none in `off`.
+  The extension offers the skills from `skills/` to Pi itself (`src/skills.ts`, through `resources_discover`) and offers
+  none in `off`.
   A copy a user installed under `.agents/skills`, or a separate MCP entry for MemCastle in Pi's own configuration,
   is Pi's to load, and an integration that registered nothing cannot stop it.
   Remove those copies when a project must be free of MemCastle.
@@ -157,6 +158,8 @@ Every turn, the extension adds the shared [`search-before-answer`](../../skills/
 the system prompt, so the model searches MemCastle before it answers a question about past work, decisions, people or
 preferences, and quotes what it finds verbatim.
 The text is read from `skills/` in the repository, byte for byte, and is never copied into this package.
+The same directory is offered to Pi's own skill discovery, so all five skills are listed with a `/skill:<name>` command;
+`memcastle-integration.toml` names them, and `memcastle integration install pi` puts them beside the extension.
 
 The level is named after `pi-palace`'s `forceMemoryRecall.level`.
 It is a client policy: MemCastle itself never forces a search, and no daemon setting changes that.
@@ -276,6 +279,7 @@ src/wake-up-cli.ts            `/memcastle-wake-up`: show what a session start wo
 src/recall-core.ts            search-before-answer without a host: the level and the text to inject (the same file as OpenCode's)
 src/project-core.ts           the project context: `.config/memcastle.toml`, `MEMCASTLE_WING` and `MEMCASTLE_ROOM` (the same file as OpenCode's)
 src/skill-text.ts             reads a shared skill from `skills/` and strips its frontmatter (the same file as OpenCode's)
+src/skills.ts                 offers the bundled `skills/` to Pi's own skill listing at `resources_discover`, and none in `off`
 src/search-before-answer.ts   injects that skill into the system prompt at every `before_agent_start`
 src/checkpoint-core.ts        checkpointing without a host: settings, the review, the payload, submission (the same file as OpenCode's)
 src/checkpoint-agent.ts       the interval review (counts `agent_end`) and the emergency one (`session_before_compact`): reads Pi's transcript, asks Pi's model
@@ -314,7 +318,7 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | `checkpoint` | Implemented: an interval review by Pi's own model and `/memcastle-checkpoint`, both submitting a classified payload and reporting a failed job with how to retry it | #23, done |
 | `emergency-checkpoint` | Implemented: the same review submitted with `emergency: true` at `session_before_compact`, whatever the interval setting says, bounded by a 30 second deadline, never cancelling the compaction; a `read-only` or `off` session does nothing | #24, done |
 | `persistent-session` | Implemented: one connection per Pi session, kept alive, replaced with its mode re-selected when the daemon forgets it | #29, done |
-| `skills` | Implemented: `search-before-answer` is injected and `checkpoint-instructions` instructs the reviewing model, both read from `skills/` and never copied; `off` sessions get nothing | #25, #23, done |
+| `skills` | Implemented: the skills the manifest names are offered to Pi's own skill listing, `search-before-answer` is injected and `checkpoint-instructions` instructs the reviewing model, all read from `skills/` and never copied; `off` sessions get nothing | #25, #23, #213, done |
 | `project-context` | Implemented: `.config/memcastle.toml` and `MEMCASTLE_WING` / `MEMCASTLE_ROOM` resolved from Pi's directory, used for the wake-up wing, checkpoint defaults and the search instruction | #183, done |
 | `background-mining` | Not yet | #26 |
 | `failure-reporting` | Implemented: the five classes plus `unexpected`, each shown as a Pi notification at the severity the shared fixture promises, with `help` | #30, done |

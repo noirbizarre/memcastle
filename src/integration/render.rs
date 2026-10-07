@@ -170,6 +170,7 @@ mod tests {
             agent_version: Some("1.0.1".to_string()),
             memcastle_requirement: ">=0.2".to_string(),
             agent_requirement: None,
+            skills: Vec::new(),
             problems: Vec::new(),
         }
     }

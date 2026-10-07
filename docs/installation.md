@@ -38,7 +38,7 @@ One package asset is the set of sources that ship with MemCastle, under `share/m
 (see [Publishing and installing sources](publishing-sources.md#bundled-sources)): the release tarballs, the `.deb` and
 `.rpm`, the AUR package and the Homebrew formula carry them, unpacked and installed from the start, and a standalone binary
 does not, so it installs a source from a file or from the official registry instead.
-The other package assets are the agent integrations and the skills they read, under `share/memcastle/integrations/` and
+The other package assets are the agent integrations and the skills they expose, under `share/memcastle/integrations/` and
 `share/memcastle/skills/`; `memcastle integration install pi` copies one to your home and registers it with the agent
 (see [Agent integrations](integrations.md)).
 The same release packages carry them, and a standalone binary does not.

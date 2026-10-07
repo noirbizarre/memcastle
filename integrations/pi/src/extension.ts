@@ -17,6 +17,7 @@ import { McpManager } from "./mcp-manager.ts"
 import { ProjectScopes } from "./project-core.ts"
 import { registerSearchBeforeAnswer } from "./search-before-answer.ts"
 import { resolveSettings } from "./settings.ts"
+import { registerSkills } from "./skills.ts"
 import { registerWakeUp } from "./wake-up.ts"
 import { registerWakeUpCommand } from "./wake-up-cli.ts"
 
@@ -57,6 +58,8 @@ export default function memcastle(pi: ExtensionAPI): void {
   registerWakeUp(pi, current)
   registerWakeUpCommand(pi, current)
   registerSearchBeforeAnswer(pi, current)
+  // Offers the bundled skills to Pi's own skill listing; it reads the mode itself, so an `off` session gets none.
+  registerSkills(pi)
   // The interval review and the manual command share one counter and one review at a time per Pi session.
   const checkpoints = new CheckpointSessions()
   registerCheckpointAgent(pi, current, checkpoints)

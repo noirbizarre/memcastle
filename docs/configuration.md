@@ -548,7 +548,7 @@ This is the one root for everything a package ships, in the same layout wherever
 |---|---|---|
 | `sources/<name>/` | the bundled mining sources, unpacked: a `memcastle-source.toml` and a `source.wasm` each | the daemon, which lists them as installed and runs them in place (see [Publishing and installing sources](publishing-sources.md#bundled-sources)) |
 | `integrations/<id>/` | the Pi and OpenCode integrations: a `memcastle-integration.toml` and a bundled `dist/` | `memcastle integration` (see [Integrations](integrations.md)) |
-| `skills/` | the shared agent skills | `memcastle integration`, which copies them beside an integration |
+| `skills/` | the shared agent skills | `memcastle integration`, which copies the ones an integration's manifest names into its installed copy |
 | `web/dist/` | the built [web dashboard](web.md) | the daemon, under `/ui`, when `web.enable` is set |
 
 A standalone binary has none (the dashboard is not built into it, so with `web.enable` it answers a page that says the

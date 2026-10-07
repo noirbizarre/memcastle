@@ -217,7 +217,11 @@ a restarted daemon is reconnected to in the same mode, and an idle session keeps
 ### Skills reuse
 
 There is no MemCastle operation here, because a skill is plain agent text.
-`skills/` is the one source of those instructions, and an integration loads them rather than keeping its own copy.
+`skills/` is the one source of those instructions, and an integration loads them rather than keeping its own copy:
+its manifest names the shared skills it exposes, `memcastle integration install` puts those inside the installed copy,
+and the agent lists them from there (see [Agent integrations](integrations.md#what-an-integration-packages)).
+A skill that only one integration needs may ship in that integration's own `skills/` directory instead.
+Skills stay usable without an integration, as a copy made by hand.
 The five [agent skills](skills.md) are `memcastle-setup`, `search-before-answer`, `checkpoint-instructions`, `wake-up`
 and `diary`.
 A skill never overrides a mode: in `off` it must not be loaded if it would carry MemCastle-derived content.
@@ -226,8 +230,8 @@ the mode refuses it.
 
 Client-side (tested in Pi and OpenCode): the integration reads its instructions from `skills/` and does not duplicate
 them.
-Pi appends `search-before-answer` to the system prompt, and OpenCode also lists the skills through its own skill
-mechanism.
+Pi and OpenCode both list the skills through the agent's own skill mechanism, offering none in an `off` session
+(the `native-skills` path of `off-isolation.json`), and Pi also appends `search-before-answer` to the system prompt.
 Nothing is tested against a daemon, and the matrix records that with a `null` daemon test.
 What is tested is the skills themselves:
 `tests/in_process/skills.rs` checks every tool, command and route a skill names against this release (see [ADR-020](adr/020-skills-are-versioned-with-the-repository.md)).

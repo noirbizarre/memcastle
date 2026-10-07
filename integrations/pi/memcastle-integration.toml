@@ -23,6 +23,20 @@ entry = "extension.js"
 from = "dist"
 to = "."
 
-# The wake-up, search-before-answer and checkpoint instructions the extension injects (docs/skills.md).
-[skills]
-install = true
+# The shared skills (docs/skills.md) the extension exposes to Pi, referenced from the assets root's `skills/` and not
+# copied into this directory. The extension injects `search-before-answer` and `checkpoint-instructions` itself and
+# lists all of them through Pi's own skill discovery.
+[[skills]]
+name = "memcastle-setup"
+
+[[skills]]
+name = "search-before-answer"
+
+[[skills]]
+name = "checkpoint-instructions"
+
+[[skills]]
+name = "wake-up"
+
+[[skills]]
+name = "diary"
