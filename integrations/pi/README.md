@@ -32,7 +32,11 @@ pi -e /path/to/memcastle/integrations/pi/src/extension.ts          # try it for 
 mise run integrations:build && memcastle integration install pi --assets-dir "$PWD"   # install this checkout's build
 ```
 
+Pi 1.0 is the minimum version (`agent = ">=1.0"` in the manifest, and the peer dependency range).
 Pi supplies `@earendil-works/pi-coding-agent` to extensions, so it is a peer dependency here and is never bundled.
+The MCP connection is built on `@earendil-works/pi-mcp`, the client library Pi itself uses for its MCP servers.
+Pi does not supply that package to extensions, so it is a regular dependency and is bundled
+(see [ADR-044](../../docs/adr/044-pi-integration-uses-pis-mcp-client-library.md)).
 
 ### Configuration
 
@@ -249,6 +253,9 @@ Pi runs one agent session at a time, so the extension holds one MCP connection.
 It is opened in the background on `session_start`, closed in `session_shutdown`, and replaced if the session is started
 again (a reload).
 Between the two it is one MCP session, so the memory mode chosen at the start holds for every call.
+The extension owns this connection instead of registering MemCastle with `pi.registerMcpServer()`:
+Pi would connect that server itself and offer its tools to the model a second time,
+and the extension needs to hold the session id that carries the memory mode.
 
 - **A forgotten session is replaced.**
   The daemon drops a session after five idle minutes or a restart and answers HTTP 404.

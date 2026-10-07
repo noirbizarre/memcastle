@@ -1,5 +1,8 @@
 // One MCP session with the daemon, held open for as long as the agent session lives.
 //
+// The connection is built on Pi's own MCP client library (`@earendil-works/pi-mcp`, the one Pi uses for its MCP servers),
+// not on a second implementation of the protocol; it is bundled into the extension because Pi does not supply it.
+//
 // The daemon scopes a memory mode to one MCP connection: the mode lives and dies with the `mcp-session-id` issued at
 // `initialize`. Two consequences shape this class.
 //   1. Never reconnect per call. A fresh connection starts as `full`, so a read-only or disabled session would
@@ -10,9 +13,15 @@
 //      the next request with HTTP 404. That is a lost session, not a failed call: it is replaced (mode re-selected)
 //      and the call is retried once. A periodic ping keeps a quiet session from reaching the idle limit at all.
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js"
-import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js"
+import {
+  McpClient,
+  McpConnectionClosedError,
+  McpError,
+  McpHttpError,
+  McpSessionExpiredError,
+  McpTimeoutError,
+  StreamableHttpTransport,
+} from "@earendil-works/pi-mcp"
 import type { Endpoint } from "./daemon-client.ts"
 import {
   MemCastleFailure,
@@ -69,15 +78,15 @@ function firstText(result: unknown): string {
 }
 
 export class McpSession {
-  private client: Client | null = null
-  private transport: StreamableHTTPClientTransport | null = null
+  private client: McpClient | null = null
+  private transport: StreamableHttpTransport | null = null
   private connecting: Promise<void> | null = null
   private lastEndpoint = "the MemCastle daemon"
   private connectCount = 0
   private pingCount = 0
   private keepAlive: ReturnType<typeof setInterval> | null = null
   /** Connections closed because the daemon forgot their session, as opposed to closed on purpose by `close()`. */
-  private readonly lostClients = new WeakSet<Client>()
+  private readonly lostClients = new WeakSet<McpClient>()
 
   constructor(private readonly options: SessionOptions) {}
 
@@ -116,13 +125,13 @@ export class McpSession {
   }
 
   async close(): Promise<void> {
-    const { client, transport } = this
+    const { client } = this
     this.client = null
     this.transport = null
     // Before the awaits below: a ping must not fire at a connection that is being torn down.
     this.stopKeepAlive()
-    // Ask the daemon to forget the session (best effort), then close; neither may throw during shutdown.
-    await transport?.terminateSession().catch(() => undefined)
+    // Closing the client closes the transport, which asks the daemon to forget the session (best effort, bounded to
+    // a second); it must not throw during shutdown.
     await client?.close().catch(() => undefined)
   }
 
@@ -151,7 +160,7 @@ export class McpSession {
   }
 
   /** The connected client, connecting first if needed. */
-  private async ready(): Promise<Client> {
+  private async ready(): Promise<McpClient> {
     await this.connect()
     // `connect` has set `client`; the check narrows the type and covers a close() racing this call.
     if (!this.client) throw failureFromTransport(this.lastEndpoint, new Error("the session was closed"))
@@ -162,7 +171,7 @@ export class McpSession {
    * Drop `stale` if it is still the current connection. Several callers can lose the same session together, and
    * only the first may close it: a later one would otherwise close the replacement the first already opened.
    */
-  private async discard(stale: Client): Promise<void> {
+  private async discard(stale: McpClient): Promise<void> {
     if (this.client !== stale) return
     // Marked first: calls still in flight on `stale` fail with "connection closed" once it is torn down, and
     // that is the same loss as their own 404, not a failure of the call.
@@ -170,11 +179,11 @@ export class McpSession {
     await this.close()
   }
 
-  private startKeepAlive(client: Client): void {
+  private startKeepAlive(client: McpClient): void {
     const every = this.options.keepAliveMs ?? DEFAULT_KEEP_ALIVE_MS
     if (every <= 0) return
     this.keepAlive = setInterval(() => {
-      client.ping({ timeout: this.options.timeoutMs }).then(
+      client.ping({ timeoutMs: this.options.timeoutMs }).then(
         () => {
           this.pingCount += 1
         },
@@ -197,8 +206,9 @@ export class McpSession {
 
   /** Whether `error` means the connection is gone (session forgotten, or nothing answering). */
   private classifyLoss(error: unknown): boolean {
-    if (error instanceof StreamableHTTPError && error.code === 404) return true
-    if (error instanceof StreamableHTTPError || error instanceof McpError) return false
+    if (error instanceof McpSessionExpiredError) return true
+    // The daemon answered, so it is there and the session is not known to be lost.
+    if (error instanceof McpHttpError || error instanceof McpError || error instanceof McpTimeoutError) return false
     return this.classify(error).failureClass === "daemon_unavailable"
   }
 
@@ -207,8 +217,10 @@ export class McpSession {
     this.lastEndpoint = endpoint.baseUrl
     const headers: Record<string, string> = {}
     if (this.options.token !== null) headers.Authorization = `Bearer ${this.options.token}`
-    const transport = new StreamableHTTPClientTransport(new URL(endpoint.mcpUrl), { requestInit: { headers } })
-    const client = new Client({ name: this.options.clientName, version: "0.0.0" })
+    // The daemon never pushes anything to a client, so no idle server-to-client stream is held open; the ping below is
+    // what keeps the session alive.
+    const transport = new StreamableHttpTransport({ url: endpoint.mcpUrl, headers, openGetStream: false })
+    const client = new McpClient({ name: this.options.clientName, version: "0.0.0", requestTimeoutMs: this.options.timeoutMs })
     try {
       await client.connect(transport)
     } catch (error) {
@@ -228,16 +240,14 @@ export class McpSession {
     }
   }
 
-  private async invoke<T>(client: Client, tool: string, args: Record<string, unknown>): Promise<T> {
+  private async invoke<T>(client: McpClient, tool: string, args: Record<string, unknown>): Promise<T> {
     let result: unknown
     try {
-      result = await client.callTool({ name: tool, arguments: args }, undefined, { timeout: this.options.timeoutMs })
+      result = await client.callTool(tool, args, { timeoutMs: this.options.timeoutMs })
     } catch (error) {
       // The daemon has dropped the session; `call` replaces it, and a ping or a closed connection leaves it to them.
-      if (error instanceof StreamableHTTPError && error.code === 404) throw new SessionLost(this.lastEndpoint)
-      if (error instanceof McpError && error.code === ErrorCode.ConnectionClosed && this.lostClients.has(client)) {
-        throw new SessionLost(this.lastEndpoint)
-      }
+      if (error instanceof McpSessionExpiredError) throw new SessionLost(this.lastEndpoint)
+      if (error instanceof McpConnectionClosedError && this.lostClients.has(client)) throw new SessionLost(this.lastEndpoint)
       const failure = this.classify(error)
       // A transport failure means the connection is gone; the next call must reconnect (and re-select the mode).
       if (failure.failureClass === "daemon_unavailable") await this.close()
@@ -256,13 +266,11 @@ export class McpSession {
 
   private classify(error: unknown): MemCastleFailure {
     if (error instanceof MemCastleFailure) return error
-    if (error instanceof StreamableHTTPError && typeof error.code === "number") {
-      // The SDK embeds the response body in its message; recover it so `help` reaches the user.
-      const body = error.message.slice(error.message.indexOf("{") >= 0 ? error.message.indexOf("{") : 0)
-      return failureFromStatus(error.code, body)
-    }
-    // A JSON-RPC error means the daemon answered, so it is reachable and it is not a transport failure.
-    if (error instanceof McpError) return new MemCastleFailure("unexpected", error.message)
+    // The response body travels with the status, so the daemon's `help` reaches the user.
+    if (error instanceof McpHttpError) return failureFromStatus(error.status, error.body)
+    // A JSON-RPC error or a call that ran out of time means the daemon answered or is slow, not that it is gone:
+    // it is not a transport failure, and the session stays open.
+    if (error instanceof McpError || error instanceof McpTimeoutError) return new MemCastleFailure("unexpected", error.message)
     return failureFromTransport(this.lastEndpoint, error)
   }
 }

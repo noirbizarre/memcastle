@@ -49,7 +49,7 @@ flowchart TB
 
 | Integration | Agent | Agent versions | MemCastle versions | Guide |
 |---|---|---|---|---|
-| `pi` | Pi (`@earendil-works/pi-coding-agent`) | 0.99 and later | 0.2 and later | [Pi](integrations-pi.md) |
+| `pi` | Pi (`@earendil-works/pi-coding-agent`) | 1.0 and later | 0.2 and later | [Pi](integrations-pi.md) |
 | `opencode` | [OpenCode](https://opencode.ai) | 1.18.29 and later, including 2.x | 0.2 and later | [OpenCode](integrations-opencode.md) |
 
 `memcastle integration list` shows the same ranges for the MemCastle you run, since they come from the integrations it ships.
@@ -244,7 +244,7 @@ description = "Wake-up, recall, checkpoint and mining lifecycle for the Pi codin
 
 [compatibility]
 memcastle = ">=0.2"
-agent = ">=0.99"
+agent = ">=1.0"
 
 [agent]
 kind = "pi"

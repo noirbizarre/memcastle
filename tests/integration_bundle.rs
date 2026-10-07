@@ -156,7 +156,11 @@ fn the_bundles_import_nothing_the_installed_copy_would_not_have() {
     for (id, file) in [("pi", "dist/extension.js"), ("opencode", "dist/index.js")] {
         let text =
             std::fs::read_to_string(package.join("integrations").join(id).join(file)).unwrap();
-        for dependency in ["@modelcontextprotocol/sdk", "smol-toml"] {
+        for dependency in [
+            "@modelcontextprotocol/sdk",
+            "@earendil-works/pi-mcp",
+            "smol-toml",
+        ] {
             assert!(
                 !text.contains(&format!("from \"{dependency}")),
                 "{id} still imports {dependency} instead of carrying it"

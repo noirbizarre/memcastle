@@ -6,7 +6,7 @@ It is installed with [`memcastle integration`](integrations.md); this page is wh
 
 ## Requirements
 
-- Pi 0.99 or later, with the `pi` command on your `PATH`.
+- Pi 1.0 or later, with the `pi` command on your `PATH`.
   The installer runs `pi --version` and refuses an older Pi, naming the version it found.
 - MemCastle 0.2 or later.
 - A running daemon when you use Pi, not when you install:
