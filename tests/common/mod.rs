@@ -16,7 +16,7 @@ use std::time::Duration;
 // can use them, but only `integration_contract.rs` does today.
 pub mod mcp;
 
-// A throwaway machine with fake `pi` and `opencode` programs, for the `memcastle integration` tests.
+// A throwaway machine with fake Pi, OpenCode and Claude programs, for the `memcastle integration` tests.
 #[cfg(unix)]
 pub mod agents;
 
