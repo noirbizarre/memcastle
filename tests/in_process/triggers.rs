@@ -14,7 +14,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use assert_cmd::cargo::cargo_bin;
-use common::{TestDaemon, wait_for_registry};
+use common::{TestDaemon, mcp, wait_for_registry};
 use hmac::{Hmac, KeyInit, Mac};
 use memcastle::config::{Config, StoreConfig};
 use memcastle::store::StoreSync;
@@ -1086,6 +1086,212 @@ async fn a_hand_edit_that_enables_a_trigger_is_noticed_and_one_that_breaks_the_f
     assert!(
         report["error"].as_str().unwrap().contains("every"),
         "{report}"
+    );
+    daemon.shutdown().await;
+}
+
+// ---- the CLI's client -----------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn the_clients_trigger_methods_speak_the_same_routes_the_cli_prints() {
+    use memcastle::app::TriggerPatch;
+    use memcastle::domain::{FireOutcome, TriggerMechanism, TriggerStatus};
+
+    let daemon = TestDaemon::start().await;
+    let notes = notes_dir();
+    put_miner(&daemon, "docs", notes.path()).await;
+    let bind = daemon
+        .base_url
+        .trim_start_matches("http://")
+        .parse()
+        .unwrap();
+    let client = memcastle::client::DaemonClient::discover(&daemon.palace_path, bind);
+
+    assert!(client.list_triggers().await.unwrap().triggers.is_empty());
+
+    let created = client
+        .set_trigger(
+            "t",
+            &TriggerPatch {
+                miner: Some("docs".to_string()),
+                kind: Some(TriggerMechanism::Poll),
+                settings: json!({ "every": "1h" }).as_object().cloned().unwrap(),
+                ..TriggerPatch::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(created.created && !created.trigger.enabled);
+    assert_eq!(
+        client.show_trigger("t").await.unwrap().status,
+        TriggerStatus::Disabled
+    );
+
+    let refused = client.fire_trigger("t").await.unwrap_err();
+    assert!(refused.to_string().contains("disabled"), "{refused}");
+
+    let enabled = client.set_trigger_enabled("t", true).await.unwrap();
+    assert_eq!(enabled.trigger.status, TriggerStatus::Active);
+    assert!(matches!(
+        client.fire_trigger("t").await.unwrap(),
+        FireOutcome::Queued { .. }
+    ));
+    assert!(matches!(
+        client.fire_trigger("t").await.unwrap(),
+        FireOutcome::Coalesced { .. }
+    ));
+    let off = client.set_trigger_enabled("t", false).await.unwrap();
+    assert!(!off.trigger.enabled);
+
+    assert!(client.reload_triggers().await.unwrap().diff.is_empty());
+    client.remove_trigger("t").await.unwrap();
+    assert!(
+        client
+            .show_trigger("t")
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("no trigger")
+    );
+    daemon.shutdown().await;
+}
+
+// ---- the read-only agent surface --------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn the_event_stream_tells_the_dashboard_when_a_trigger_fires() {
+    let daemon = TestDaemon::start().await;
+    let notes = notes_dir();
+    put_miner(&daemon, "docs", notes.path()).await;
+    put_trigger(
+        &daemon,
+        "t",
+        json!({ "miner": "docs", "type": "poll", "settings": { "every": "1h" } }),
+    )
+    .await;
+
+    let mut events = reqwest::Client::new()
+        .get(format!("{}/api/events", daemon.base_url))
+        .send()
+        .await
+        .expect("the event stream");
+    // The `open` frame first, so what follows is what happened after the stream was live.
+    let mut seen = String::new();
+    while !seen.contains("event: open") {
+        seen.push_str(&String::from_utf8_lossy(
+            &events.chunk().await.unwrap().expect("a frame"),
+        ));
+    }
+
+    post(&daemon, "/api/triggers/t/enable").await;
+    post(&daemon, "/api/triggers/t/fire").await;
+    while !(seen.contains("event: trigger") && seen.contains("\"status\":\"queued\"")) {
+        seen.push_str(&String::from_utf8_lossy(
+            &events.chunk().await.unwrap().expect("a frame"),
+        ));
+    }
+    assert!(
+        seen.contains("\"kind\":\"trigger\"") && seen.contains("\"id\":\"t\""),
+        "{seen}"
+    );
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn mcp_and_rest_show_the_same_triggers_with_the_same_errors_and_the_same_memory_mode_gates() {
+    let (daemon, _port, secrets) = webhook_daemon().await;
+    let notes = notes_dir();
+    put_miner(&daemon, "docs", notes.path()).await;
+    put_trigger(&daemon, "hook", webhook_body(secrets.path(), "docs")).await;
+    put_trigger(
+        &daemon,
+        "poll",
+        json!({ "miner": "docs", "type": "poll", "settings": { "every": "1h" } }),
+    )
+    .await;
+
+    let session = mcp::connect(&daemon.base_url).await;
+    let (_, rest_list) = get(&daemon, "/api/triggers").await;
+    let listed = mcp::call(&session, "memcastle_trigger_list", json!({}))
+        .await
+        .ok();
+    assert_eq!(listed, rest_list);
+    assert!(
+        !listed.to_string().contains(SECRET),
+        "a secret is never in an answer"
+    );
+    assert!(
+        !listed.to_string().contains("hook-secret"),
+        "nor the path it is kept at"
+    );
+    let (_, rest_one) = get(&daemon, "/api/triggers/poll").await;
+    assert_eq!(
+        mcp::call(&session, "memcastle_trigger_get", json!({ "name": "poll" }))
+            .await
+            .ok(),
+        rest_one
+    );
+
+    let missing = mcp::call(
+        &session,
+        "memcastle_trigger_get",
+        json!({ "name": "nobody" }),
+    )
+    .await;
+    assert_eq!(missing.error_code(), "memcastle::trigger::not_found");
+
+    mcp::set_mode(&session, "disabled").await;
+    for (tool, args) in [
+        ("memcastle_trigger_list", json!({})),
+        ("memcastle_trigger_get", json!({ "name": "poll" })),
+    ] {
+        assert_eq!(
+            mcp::call(&session, tool, args).await.error_code(),
+            "memcastle::mode::forbidden",
+            "{tool}"
+        );
+    }
+    session.cancel().await.expect("close session");
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn firing_is_a_write_and_reading_follows_the_memory_mode() {
+    let daemon = TestDaemon::start().await;
+    let notes = notes_dir();
+    put_miner(&daemon, "docs", notes.path()).await;
+    put_trigger(
+        &daemon,
+        "t",
+        json!({ "miner": "docs", "type": "poll", "enabled": true, "settings": { "every": "1h" } }),
+    )
+    .await;
+    let with_mode = |method: Method, path: &str, mode: &str| {
+        reqwest::Client::new()
+            .request(method, format!("{}{path}", daemon.base_url))
+            .header("X-MemCastle-Mode", mode)
+            .send()
+    };
+
+    let read_only_read = with_mode(Method::GET, "/api/triggers", "read_only")
+        .await
+        .unwrap();
+    assert_eq!(read_only_read.status(), StatusCode::OK);
+    let read_only_fire = with_mode(Method::POST, "/api/triggers/t/fire", "read_only")
+        .await
+        .unwrap();
+    assert_eq!(
+        read_only_fire.status(),
+        StatusCode::FORBIDDEN,
+        "firing files drawers, so it is a write"
+    );
+    let disabled_read = with_mode(Method::GET, "/api/triggers/t", "disabled")
+        .await
+        .unwrap();
+    assert_eq!(disabled_read.status(), StatusCode::FORBIDDEN);
+    assert!(
+        jobs(&daemon).await.is_empty(),
+        "a refused firing asked for nothing"
     );
     daemon.shutdown().await;
 }

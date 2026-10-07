@@ -126,4 +126,114 @@ mod tests {
             Duration::from_secs(86_400)
         );
     }
+
+    use chrono::Duration as Span;
+
+    use super::super::fake::{FakeHost, eventually};
+    use crate::domain::TriggerState;
+
+    fn timetable(every: Duration, max_backoff: Option<Duration>) -> Timetable {
+        Timetable {
+            every,
+            at: None,
+            max_backoff,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_timer_that_never_fired_waits_a_whole_interval_and_says_when_it_is_due() {
+        let host = FakeHost::default();
+        let cancel = CancellationToken::new();
+        let task = tokio::spawn(run(
+            host.clone(),
+            "t".to_string(),
+            TriggerMechanism::Schedule,
+            timetable(Duration::from_secs(3600), None),
+            cancel.clone(),
+        ));
+
+        eventually("its wait to be noted", || {
+            host.noted("t", |n| matches!(n, Note::NextDue(Some(_))))
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        assert!(host.fires().is_empty(), "enabling never fires on the spot");
+        cancel.cancel();
+        task.await.expect("stops when cancelled");
+    }
+
+    #[tokio::test]
+    async fn a_slot_missed_while_the_daemon_was_down_fires_once_and_moves_on() {
+        let host = FakeHost::default();
+        let mut state = TriggerState::new("t");
+        state.next_due = Some(Utc::now() - Span::days(3));
+        host.set_state(state);
+        let cancel = CancellationToken::new();
+        let task = tokio::spawn(run(
+            host.clone(),
+            "t".to_string(),
+            TriggerMechanism::Schedule,
+            timetable(Duration::from_secs(3600), None),
+            cancel.clone(),
+        ));
+
+        eventually("the overdue slot to fire", || host.fires().len() == 1).await;
+        eventually("the next slot to be noted", || {
+            host.noted(
+                "t",
+                |n| matches!(n, Note::NextDue(Some(due)) if *due > Utc::now()),
+            )
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        assert_eq!(
+            host.fires().len(),
+            1,
+            "three missed days are one request, not seventy-two"
+        );
+        assert_eq!(host.fires()[0].via, Some(TriggerMechanism::Schedule));
+        cancel.cancel();
+        task.await.expect("stops when cancelled");
+    }
+
+    #[tokio::test]
+    async fn a_poll_that_fails_waits_longer_and_a_schedule_that_fails_keeps_its_timetable() {
+        for (via, ceiling) in [
+            (TriggerMechanism::Poll, Some(Duration::from_millis(400))),
+            (TriggerMechanism::Schedule, None),
+        ] {
+            let host = FakeHost::default();
+            host.refuse_with(Some("the source is down"));
+            let mut state = TriggerState::new("t");
+            state.next_due = Some(Utc::now());
+            host.set_state(state);
+            let cancel = CancellationToken::new();
+            let task = tokio::spawn(run(
+                host.clone(),
+                "t".to_string(),
+                via,
+                timetable(Duration::from_millis(100), ceiling),
+                cancel.clone(),
+            ));
+
+            eventually("two failed requests", || host.fires().len() >= 2).await;
+
+            let dues: Vec<_> = host
+                .notes()
+                .into_iter()
+                .filter_map(|(_, note)| match note {
+                    Note::NextDue(Some(due)) => Some(due),
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                dues.len() >= 2,
+                "{via}: every request is followed by the next time"
+            );
+            cancel.cancel();
+            task.await.expect("stops when cancelled");
+        }
+    }
 }

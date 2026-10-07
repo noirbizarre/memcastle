@@ -1070,6 +1070,8 @@ impl trigger::Host for TriggerHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+
     use crate::app::{MinerPatch, MinerRegistry};
     use crate::domain::MemoryMode;
     use crate::jobs::Scheduler;
@@ -1565,5 +1567,520 @@ mod tests {
             app.show_trigger("t", MemoryMode::Full).await,
             Err(Error::TriggerNotFound { .. })
         ));
+    }
+
+    // ---- refusals, hand edits and the branches a daemon with a healthy file never takes ----------------------------
+
+    /// Like `app_with_a_miner`, with the listener settings a test chooses, so a webhook can be asked for.
+    async fn app_with_webhook(webhook: WebhookConfig) -> (AppServices, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let notes = dir.path().join("notes");
+        std::fs::create_dir(&notes).expect("notes dir");
+        let config = dir.path().join("config.toml");
+        let app = AppServices::for_tests()
+            .await
+            .with_miners(MinerRegistry::new(Some(config.clone()), Vec::new()))
+            .with_triggers(TriggerRegistry::new(
+                Some(config),
+                Vec::new(),
+                webhook,
+                Arc::new(Runtime::default()),
+            ));
+        app.set_miner(
+            "docs",
+            MinerPatch {
+                source: Some("directory".to_string()),
+                locator: Some(notes.display().to_string()),
+                ..MinerPatch::default()
+            },
+        )
+        .await
+        .expect("a miner");
+        (app, dir)
+    }
+
+    fn webhook_patch(secret: &Path) -> TriggerPatch {
+        TriggerPatch {
+            miner: Some("docs".to_string()),
+            kind: Some(TriggerMechanism::Webhook),
+            enabled: Some(true),
+            credential: Some(CredentialRef::File {
+                path: secret.display().to_string(),
+            }),
+            ..TriggerPatch::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_daemon_with_no_configuration_file_refuses_to_change_triggers_and_says_why() {
+        let app = AppServices::for_tests().await;
+        for error in [
+            app.set_trigger("t", poll_patch(false))
+                .await
+                .map(|_| ())
+                .expect_err("no file"),
+            app.remove_trigger("t").await.expect_err("no file"),
+            app.reload_triggers()
+                .await
+                .map(|_| ())
+                .expect_err("no file"),
+        ] {
+            assert!(
+                matches!(&error, Error::MinerConfigFile { reason, .. } if reason.contains("nowhere to keep triggers")),
+                "{error}"
+            );
+        }
+        assert!(
+            app.list_triggers(MemoryMode::Full)
+                .await
+                .unwrap()
+                .triggers
+                .is_empty()
+        );
+        assert_eq!(app.trigger_runtime().webhook_addr(), None);
+    }
+
+    #[test]
+    fn a_failure_that_is_not_about_the_file_is_reported_as_it_is() {
+        assert_eq!(
+            reason_of(&Error::DaemonNotRunning),
+            Error::DaemonNotRunning.to_string()
+        );
+        let file = Error::MinerConfigFile {
+            path: "x".to_string(),
+            reason: "no good".to_string(),
+        };
+        assert_eq!(reason_of(&file), "no good");
+    }
+
+    #[tokio::test]
+    async fn only_the_credential_can_be_cleared_and_a_setting_can_be_removed() {
+        let (app, _dir) = app_with_a_miner().await;
+        let mut patch = poll_patch(false);
+        patch
+            .settings
+            .insert("max_backoff".to_string(), serde_json::json!("2h"));
+        app.set_trigger("t", patch).await.expect("saved");
+
+        let error = app
+            .set_trigger(
+                "t",
+                TriggerPatch {
+                    unset: vec!["miner".to_string()],
+                    ..TriggerPatch::default()
+                },
+            )
+            .await
+            .expect_err("a field that cannot be cleared");
+        assert!(
+            error
+                .to_string()
+                .contains("only field that can be cleared is credential"),
+            "{error}"
+        );
+
+        let changed = app
+            .set_trigger(
+                "t",
+                TriggerPatch {
+                    unset_settings: vec!["max_backoff".to_string()],
+                    ..TriggerPatch::default()
+                },
+            )
+            .await
+            .expect("a setting removed");
+        assert!(changed.changed);
+        assert!(!changed.trigger.settings.contains_key("max_backoff"));
+        let cleared = app
+            .set_trigger(
+                "t",
+                TriggerPatch {
+                    unset: vec!["credential".to_string()],
+                    ..TriggerPatch::default()
+                },
+            )
+            .await
+            .expect("nothing to clear is not an error");
+        assert!(!cleared.changed);
+    }
+
+    #[tokio::test]
+    async fn enabling_or_removing_an_unknown_trigger_is_not_found() {
+        let (app, _dir) = app_with_a_miner().await;
+        let error = app
+            .set_trigger_enabled("ghost", true)
+            .await
+            .expect_err("unknown");
+        assert!(matches!(error, Error::TriggerNotFound { .. }), "{error}");
+        let error = app.remove_trigger("ghost").await.expect_err("unknown");
+        assert!(matches!(error, Error::TriggerNotFound { .. }), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_reload_reads_a_hand_edit_now_and_says_what_changed() {
+        let (app, dir) = app_with_a_miner().await;
+        let path = dir.path().join("config.toml");
+        let mut text = std::fs::read_to_string(&path).expect("the file");
+        text.push_str(
+            "\n[[triggers]]\nname = \"by-hand\"\nminer = \"docs\"\ntype = \"poll\"\nevery = \"1h\"\n",
+        );
+        std::fs::write(&path, text).expect("an edit");
+
+        let reload = app.reload_triggers().await.expect("reloaded");
+
+        assert_eq!(reload.triggers, 1);
+        assert_eq!(reload.diff.added, ["by-hand"]);
+        let again = app.reload_triggers().await.expect("reloaded again");
+        assert!(again.diff.is_empty(), "nothing changed since");
+    }
+
+    #[tokio::test]
+    async fn a_file_that_stopped_parsing_is_never_written_over_and_the_last_triggers_are_still_listed()
+     {
+        let (app, dir) = app_with_a_miner().await;
+        app.set_trigger("t", poll_patch(false))
+            .await
+            .expect("saved");
+        let path = dir.path().join("config.toml");
+        let mut text = std::fs::read_to_string(&path).expect("the file");
+        text.push_str("\n[[triggers]]\nname = \"broken\"\nminer = \"docs\"\ntype = \"poll\"\n");
+        std::fs::write(&path, &text).expect("a bad edit");
+
+        let report = app
+            .list_triggers(MemoryMode::Full)
+            .await
+            .expect("a read never fails because the file does");
+        assert_eq!(report.triggers.len(), 1, "the last good copy");
+        assert!(
+            report.error.as_deref().is_some_and(|e| e.contains("every")),
+            "{report:?}"
+        );
+
+        let error = app
+            .set_trigger("other", poll_patch(false))
+            .await
+            .expect_err("refused");
+        assert!(matches!(error, Error::MinerConfigFile { .. }), "{error}");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("the file"),
+            text,
+            "left as the user wrote it"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_webhook_cannot_be_enabled_on_a_network_listener_while_the_daemon_has_no_authentication()
+     {
+        let (app, dir) = app_with_webhook(WebhookConfig {
+            enable: true,
+            bind: "0.0.0.0".parse().unwrap(),
+            allow_remote: true,
+            ..WebhookConfig::default()
+        })
+        .await;
+        let secret = dir.path().join("secret");
+        std::fs::write(&secret, "s3cret").expect("a secret");
+
+        let error = app
+            .set_trigger("hook", webhook_patch(&secret))
+            .await
+            .expect_err("refused");
+
+        match error {
+            Error::TriggerNotActivatable { reason, .. } => {
+                assert!(reason.contains("authentication disabled"), "{reason}");
+            }
+            other => panic!("{other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_webhook_needs_its_secret_to_exist_whether_it_is_a_variable_or_a_file() {
+        let (app, dir) = app_with_webhook(WebhookConfig {
+            enable: true,
+            ..WebhookConfig::default()
+        })
+        .await;
+
+        let missing_file = webhook_patch(&dir.path().join("absent"));
+        let error = app
+            .set_trigger("hook", missing_file)
+            .await
+            .expect_err("no such file");
+        assert!(
+            error.to_string().contains("secret file does not exist"),
+            "{error}"
+        );
+
+        let mut missing_variable = webhook_patch(&dir.path().join("absent"));
+        missing_variable.credential = Some(CredentialRef::Env {
+            name: "MEMCASTLE_TEST_SECRET_THAT_IS_NEVER_SET".to_string(),
+        });
+        let error = app
+            .set_trigger("hook", missing_variable)
+            .await
+            .expect_err("no such variable");
+        assert!(
+            error.to_string().contains("environment variable"),
+            "{error}"
+        );
+
+        let secret = dir.path().join("secret");
+        std::fs::write(&secret, "s3cret\n").expect("a secret");
+        let enabled = app
+            .set_trigger("hook", webhook_patch(&secret))
+            .await
+            .expect("everything holds now");
+        assert_eq!(
+            enabled.trigger.credential.map(|c| (c.kind, c.available)),
+            Some(("file".to_string(), true))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_miner_that_cannot_run_keeps_its_triggers_from_being_enabled_and_says_why() {
+        let (app, dir) = app_with_a_miner().await;
+        let path = dir.path().join("config.toml");
+        let mut text = std::fs::read_to_string(&path).expect("the file");
+        // Edited in by hand: an enabled miner for a source that is not installed, which `miner set` would have refused.
+        text.push_str("\n[[miners]]\nname = \"ghost\"\nsource = \"not-installed\"\n");
+        std::fs::write(&path, text).expect("an edit");
+
+        let mut patch = poll_patch(true);
+        patch.miner = Some("ghost".to_string());
+        let error = app.set_trigger("t", patch).await.expect_err("refused");
+
+        match error {
+            Error::TriggerNotActivatable { reason, .. } => {
+                assert!(reason.contains("`ghost` cannot run"), "{reason}");
+            }
+            other => panic!("{other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_miner_that_is_switched_off_keeps_its_triggers_from_being_enabled() {
+        let (app, _dir) = app_with_a_miner().await;
+        app.set_miner_enabled("docs", false).await.expect("off");
+        let error = app
+            .set_trigger("t", poll_patch(true))
+            .await
+            .expect_err("refused");
+        assert!(
+            error
+                .to_string()
+                .contains("is disabled, so a run could not start"),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_source_that_does_not_declare_a_kind_cannot_be_triggered_that_way() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sources = dir.path().join("sources");
+        std::fs::create_dir_all(sources.join("plain")).expect("the source's directory");
+        std::fs::write(
+            sources.join("plain").join(crate::source::COMPONENT_FILE),
+            b"component",
+        )
+        .expect("a component");
+        let config = dir.path().join("config.toml");
+        let app = AppServices::for_tests()
+            .await
+            .with_mining(crate::config::MiningConfig {
+                sources_dir: Some(sources),
+                ..crate::config::MiningConfig::default()
+            })
+            .with_miners(MinerRegistry::new(Some(config.clone()), Vec::new()))
+            .with_triggers(TriggerRegistry::new(
+                Some(config),
+                Vec::new(),
+                WebhookConfig {
+                    enable: true,
+                    ..WebhookConfig::default()
+                },
+                Arc::new(Runtime::default()),
+            ));
+        let now = Utc::now();
+        let manifest: crate::domain::SourceManifest = toml::from_str(
+            "[source]\nname = \"plain\"\nversion = \"1.0.0\"\ndescription = \"demo\"\n\
+             [compatibility]\ncontract = \"0.4\"\nmemcastle = \">=0.1\"\n",
+        )
+        .expect("a manifest");
+        app.store
+            .save_source_package(&crate::domain::SourcePackageRecord {
+                name: "plain".to_string(),
+                state: crate::domain::SourcePackageState::Enabled,
+                digest: crate::domain::sha256_hex(b"component"),
+                manifest,
+                installed_at: now,
+                updated_at: now,
+                origin: crate::domain::SourceOrigin::Package,
+                registry: None,
+                archive_digest: None,
+                signed_by: None,
+            })
+            .await
+            .expect("installed");
+        app.set_miner(
+            "chat",
+            MinerPatch {
+                source: Some("plain".to_string()),
+                ..MinerPatch::default()
+            },
+        )
+        .await
+        .expect("a miner for it");
+
+        // A timetable needs nothing from the source.
+        let mut schedule = poll_patch(true);
+        schedule.miner = Some("chat".to_string());
+        app.set_trigger("timed", schedule)
+            .await
+            .expect("every source can be polled");
+
+        let watch = TriggerPatch {
+            miner: Some("chat".to_string()),
+            kind: Some(TriggerMechanism::Watch),
+            enabled: Some(true),
+            settings: serde_json::json!({"path": dir.path()})
+                .as_object()
+                .cloned()
+                .unwrap(),
+            ..TriggerPatch::default()
+        };
+        let error = app
+            .set_trigger("watched", watch)
+            .await
+            .expect_err("not declared");
+
+        match error {
+            Error::TriggerNotActivatable { reason, .. } => {
+                assert!(
+                    reason.contains("does not declare support for `watch`"),
+                    "{reason}"
+                );
+            }
+            other => panic!("{other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_delivery_owed_to_a_miner_that_can_no_longer_run_stays_owed_and_is_not_lost() {
+        let (app, _dir) = app_with_a_miner().await;
+        app.set_trigger("t", poll_patch(true))
+            .await
+            .expect("enabled");
+        let delivery = TriggerDelivery {
+            trigger: "t".to_string(),
+            key: "d".to_string(),
+            received_at: Utc::now() - chrono::Duration::minutes(5),
+            job: None,
+        };
+        assert!(
+            app.store
+                .create_trigger_delivery_once(&delivery)
+                .await
+                .unwrap()
+        );
+        app.set_miner_enabled("docs", false).await.expect("off");
+
+        app.recover_triggers().await;
+
+        assert_eq!(queued_mines(&app).await, 0);
+        let kept = app
+            .store
+            .get_trigger_delivery("t", "d")
+            .await
+            .unwrap()
+            .expect("still recorded");
+        assert!(kept.job.is_none(), "the next start tries again");
+    }
+
+    #[tokio::test]
+    async fn the_host_reports_only_what_is_enabled_and_runnable_and_says_nothing_when_nothing_is() {
+        let (app, _dir) = app_with_a_miner().await;
+        let host = app.trigger_host();
+        assert!(
+            host.desired().await.triggers.is_empty(),
+            "no trigger is defined"
+        );
+
+        app.set_trigger("off", poll_patch(false))
+            .await
+            .expect("saved");
+        app.set_trigger("on", poll_patch(true))
+            .await
+            .expect("enabled");
+        let desired = host.desired().await;
+        assert_eq!(
+            desired
+                .triggers
+                .iter()
+                .map(|(t, _)| t.name.as_str())
+                .collect::<Vec<_>>(),
+            ["on"]
+        );
+        assert!(
+            desired.listener.is_none(),
+            "webhooks are off, so there is nowhere to listen"
+        );
+
+        // The miner is switched off by hand: the trigger is enabled and no longer runnable, so it is not started.
+        app.set_miner_enabled("docs", false).await.expect("off");
+        assert!(host.desired().await.triggers.is_empty());
+        assert_eq!(
+            app.show_trigger("on", MemoryMode::Full)
+                .await
+                .expect("view")
+                .status,
+            TriggerStatus::Unavailable
+        );
+    }
+
+    #[tokio::test]
+    async fn the_hosts_secret_is_what_the_trigger_points_at_without_the_trailing_newline() {
+        let (app, dir) = app_with_a_miner().await;
+        let host = app.trigger_host();
+        let file = dir.path().join("secret");
+        let definition = |credential: Option<CredentialRef>| TriggerDefinition {
+            name: "hook".to_string(),
+            miner: "docs".to_string(),
+            kind: TriggerMechanism::Webhook,
+            enabled: true,
+            credential,
+            settings: Map::new(),
+        };
+        let by_file = definition(Some(CredentialRef::File {
+            path: file.display().to_string(),
+        }));
+
+        assert_eq!(host.secret(&by_file).await, None, "no such file");
+        std::fs::write(&file, "  s3cret\r\n").expect("a secret");
+        assert_eq!(host.secret(&by_file).await, Some(b"s3cret".to_vec()));
+        std::fs::write(&file, "\n").expect("an empty secret");
+        assert_eq!(host.secret(&by_file).await, None, "nothing is not a secret");
+        assert_eq!(host.secret(&definition(None)).await, None);
+        assert_eq!(
+            host.secret(&definition(Some(CredentialRef::Oauth))).await,
+            None
+        );
+        let unset = definition(Some(CredentialRef::Env {
+            name: "MEMCASTLE_TEST_SECRET_THAT_IS_NEVER_SET".to_string(),
+        }));
+        assert_eq!(host.secret(&unset).await, None);
+    }
+
+    #[tokio::test]
+    async fn housekeeping_and_state_reads_work_on_a_fresh_palace() {
+        let (app, _dir) = app_with_a_miner().await;
+        let host = app.trigger_host();
+        host.maintain().await;
+        assert!(host.state("never").await.is_none());
+        host.note("never", Note::Healthy).await;
+        assert!(
+            host.state("never").await.is_none(),
+            "a healthy note changes nothing worth storing"
+        );
     }
 }

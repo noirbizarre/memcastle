@@ -268,6 +268,27 @@ describe("the triggers page", () => {
     expect(wrapper.text()).toContain("1 joined")
   })
 
+  it("says when the configuration file cannot be read and still shows the last triggers it held", async () => {
+    const { wrapper } = await show(TriggersView, () => ({
+      body: { triggers: [TRIGGER], webhook: { enabled: false, bind: "127.0.0.1", port: 8787, allow_remote: false }, error: "not valid TOML" },
+    }))
+
+    expect(wrapper.text()).toContain("cannot be read")
+    expect(wrapper.text()).toContain("not valid TOML")
+    expect(wrapper.text()).toContain("nightly")
+  })
+
+  it("shows a trigger that has never fired or failed without inventing a time or an error", async () => {
+    const { wrapper } = await show(TriggersView, () =>
+      report([{ name: "quiet", miner: "docs", type: "watch", enabled: false, status: "disabled", running: false, fired: 1, coalesced: 0, duplicates: 0, consecutive_failures: 0 }]),
+    )
+
+    expect(wrapper.text()).toContain("quiet")
+    expect(wrapper.text()).toContain("disabled")
+    expect(wrapper.text()).toContain("1 run")
+    expect(wrapper.text()).not.toContain("1 runs")
+  })
+
   it("names where the webhook listener is, and offers no way to change a trigger", async () => {
     const { wrapper, requests } = await show(TriggersView, () =>
       report([], { enabled: true, bind: "127.0.0.1", port: 8787, allow_remote: false, listening: "127.0.0.1:8787" } as never),

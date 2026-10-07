@@ -646,4 +646,70 @@ every = \"1h\"
         let error = write_triggers(&path, loaded.stamp, &[trigger("x")]).expect_err("stale");
         assert!(error.to_string().contains("changed while"), "{error}");
     }
+
+    #[test]
+    fn an_inline_triggers_array_is_rewritten_as_tables_and_a_scalar_is_refused() {
+        let (_dir, path) = setup(
+            "triggers = [{ name = \"a\", miner = \"docs\", type = \"poll\", every = \"1m\" }]\n",
+        );
+        let loaded = read_triggers(&path).expect("read");
+        let mut triggers = loaded.triggers;
+        triggers.push(trigger("b"));
+        write_triggers(&path, loaded.stamp, &triggers).expect("write");
+        let text = std::fs::read_to_string(&path).expect("read back");
+        assert!(text.contains("[[triggers]]"), "{text}");
+        assert_eq!(read_triggers(&path).expect("reread").triggers.len(), 2);
+
+        let (_dir, path) = setup("triggers = 5\n");
+        let error = read_triggers(&path).expect_err("not a list").to_string();
+        assert!(error.contains("[[triggers]]"), "{error}");
+    }
+
+    #[test]
+    fn a_missing_file_has_no_triggers_and_is_created_with_the_first_one() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("nested").join("config.toml");
+        let loaded = read_triggers(&path).expect("read");
+        assert!(loaded.triggers.is_empty() && loaded.stamp.is_none());
+        write_triggers(&path, None, &[trigger("a")]).expect("write");
+        assert_eq!(
+            read_triggers(&path).expect("reread").triggers,
+            vec![trigger("a")]
+        );
+    }
+
+    #[test]
+    fn a_file_that_is_not_toml_is_named_and_nothing_is_written_over_it() {
+        let (_dir, path) = setup("[[triggers\nname = ");
+        let error = read_triggers(&path).expect_err("not TOML").to_string();
+        assert!(error.contains("does not parse as TOML"), "{error}");
+        let stamp = stamp(&path).expect("stamp");
+        assert!(write_triggers(&path, stamp, &[trigger("a")]).is_err());
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            "[[triggers\nname = "
+        );
+    }
+
+    #[test]
+    fn a_changed_trigger_keeps_the_comment_above_it_and_an_invalid_one_is_never_written() {
+        let (_dir, path) = setup(WITH_BOTH);
+        let loaded = read_triggers(&path).expect("read");
+        let mut triggers = loaded.triggers;
+        triggers[0].enabled = true;
+        let stamp = write_triggers(&path, loaded.stamp, &triggers).expect("write");
+        let text = std::fs::read_to_string(&path).expect("read back");
+        assert!(
+            text.contains("# polls the docs") && text.contains("enabled = true"),
+            "{text}"
+        );
+
+        let mut invalid = triggers.clone();
+        invalid[0].settings.remove("every");
+        let error = write_triggers(&path, stamp, &invalid)
+            .expect_err("no `every`")
+            .to_string();
+        assert!(error.contains("needs `every`"), "{error}");
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), text);
+    }
 }

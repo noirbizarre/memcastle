@@ -14,6 +14,8 @@
 //! triggers the user enabled and whose prerequisites hold, so a defined trigger, an installed source or an enabled
 //! miner starts no task, opens no port and watches no file.
 
+#[cfg(test)]
+mod fake;
 mod timer;
 mod watch;
 mod webhook;
@@ -400,5 +402,208 @@ async fn stop_listener(listener: Listener) {
         .is_err()
     {
         handle.abort();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use hmac::{Hmac, KeyInit, Mac};
+    use sha2::Sha256;
+
+    use super::fake::{FakeHost, eventually};
+    use super::*;
+
+    fn definition(text: &str) -> (TriggerDefinition, TriggerPlan) {
+        let definition: TriggerDefinition = toml::from_str(text).expect("a trigger");
+        let plan = definition.plan().expect("a valid plan");
+        (definition, plan)
+    }
+
+    fn poll(every: &str) -> (TriggerDefinition, TriggerPlan) {
+        definition(&format!(
+            "name = \"p\"\nminer = \"m\"\ntype = \"poll\"\nenabled = true\nevery = \"{every}\"\n"
+        ))
+    }
+
+    fn webhook() -> (TriggerDefinition, TriggerPlan) {
+        definition(
+            "name = \"hook\"\nminer = \"m\"\ntype = \"webhook\"\nenabled = true\n\
+             delivery_header = \"x-delivery-id\"\ncredential = { type = \"env\", name = \"HOOK\" }\n",
+        )
+    }
+
+    fn listener(port: u16) -> Option<ListenerSettings> {
+        Some(ListenerSettings {
+            addr: SocketAddr::from(([127, 0, 0, 1], port)),
+            max_body_bytes: 1024,
+            max_concurrent: 4,
+        })
+    }
+
+    /// A supervisor running on `host`, and what stops it.
+    fn supervise(host: &FakeHost) -> (Arc<Runtime>, CancellationToken, JoinHandle<()>) {
+        let runtime = Arc::new(Runtime::default());
+        let cancel = CancellationToken::new();
+        let handle =
+            tokio::spawn(Supervisor::new(host.clone(), Arc::clone(&runtime)).run(cancel.clone()));
+        (runtime, cancel, handle)
+    }
+
+    async fn stop(cancel: CancellationToken, handle: JoinHandle<()>) {
+        cancel.cancel();
+        handle.await.expect("the supervisor stops cleanly");
+    }
+
+    fn sign(secret: &[u8], body: &[u8]) -> String {
+        let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(secret).unwrap();
+        mac.update(body);
+        let hex: String = mac
+            .finalize()
+            .into_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        format!("sha256={hex}")
+    }
+
+    async fn deliver(addr: SocketAddr, secret: &[u8], id: &str) -> reqwest::StatusCode {
+        let body = b"{}";
+        reqwest::Client::new()
+            .post(format!("http://{addr}/hooks/hook"))
+            .header("x-hub-signature-256", sign(secret, body))
+            .header("x-delivery-id", id)
+            .body(body.to_vec())
+            .send()
+            .await
+            .expect("a delivery")
+            .status()
+    }
+
+    #[tokio::test]
+    async fn nothing_runs_until_something_is_desired_and_housekeeping_still_happens() {
+        let host = FakeHost::default();
+        let (runtime, cancel, handle) = supervise(&host);
+
+        eventually("housekeeping", || host.maintained() >= 1).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        assert!(!runtime.is_running("p"));
+        assert_eq!(runtime.webhook_addr(), None);
+        assert!(host.fires().is_empty() && host.notes().is_empty());
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test]
+    async fn a_trigger_runs_while_it_is_desired_and_what_it_waited_for_is_forgotten_when_it_stops()
+    {
+        let host = FakeHost::default();
+        host.set_desired(Desired {
+            triggers: vec![poll("1h")],
+            listener: None,
+        });
+        let (runtime, cancel, handle) = supervise(&host);
+
+        runtime.wake();
+        eventually("the poll to start", || runtime.is_running("p")).await;
+        eventually("its first wait to be noted", || {
+            host.noted("p", |n| matches!(n, Note::NextDue(Some(_))))
+        })
+        .await;
+
+        // Changed settings replace the task; it keeps running.
+        host.set_desired(Desired {
+            triggers: vec![poll("2h")],
+            listener: None,
+        });
+        runtime.wake();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(runtime.is_running("p"));
+
+        // Switched off: it stops, and enabling it again must not fire at once on an old due time.
+        host.set_desired(Desired::default());
+        runtime.wake();
+        eventually("the poll to stop", || !runtime.is_running("p")).await;
+        eventually("its wait to be forgotten", || {
+            host.noted("p", |n| matches!(n, Note::NextDue(None)))
+        })
+        .await;
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test]
+    async fn a_listener_that_cannot_bind_reports_why_on_every_webhook_and_recovers_when_the_port_frees()
+     {
+        let blocker = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+        let taken = blocker.local_addr().expect("addr").port();
+        let host = FakeHost::default();
+        host.set_desired(Desired {
+            triggers: vec![webhook()],
+            listener: listener(taken),
+        });
+        let (runtime, cancel, handle) = supervise(&host);
+
+        runtime.wake();
+        eventually("the bind failure to be reported", || {
+            host.noted(
+                "hook",
+                |n| matches!(n, Note::Failed(why) if why.contains("cannot listen")),
+            )
+        })
+        .await;
+        assert_eq!(runtime.webhook_addr(), None);
+        assert!(
+            !runtime.is_running("hook"),
+            "a webhook is running only while its listener is"
+        );
+
+        drop(blocker);
+        runtime.wake();
+        eventually("the listener to come up", || {
+            runtime.webhook_addr().is_some()
+        })
+        .await;
+        assert!(runtime.is_running("hook"));
+        assert!(host.noted("hook", |n| matches!(n, Note::Healthy)));
+
+        host.set_desired(Desired::default());
+        runtime.wake();
+        eventually("the listener to close", || runtime.webhook_addr().is_none()).await;
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test]
+    async fn an_authentic_delivery_asks_for_a_run_and_one_that_cannot_be_queued_is_told_to_retry() {
+        let host = FakeHost::default();
+        host.set_secret("hook", b"s3cret");
+        host.set_desired(Desired {
+            triggers: vec![webhook()],
+            listener: listener(0),
+        });
+        let (runtime, cancel, handle) = supervise(&host);
+        runtime.wake();
+        eventually("the listener", || runtime.webhook_addr().is_some()).await;
+        let addr = runtime.webhook_addr().expect("listening");
+
+        assert_eq!(
+            deliver(addr, b"s3cret", "d-1").await,
+            reqwest::StatusCode::ACCEPTED
+        );
+        let fires = host.fires();
+        assert_eq!(fires.len(), 1);
+        assert_eq!(fires[0].trigger, "hook");
+        assert_eq!(fires[0].via, Some(TriggerMechanism::Webhook));
+        assert_eq!(fires[0].delivery.as_deref(), Some("d-1"));
+
+        host.refuse_with(Some("the miner is disabled"));
+        assert_eq!(
+            deliver(addr, b"s3cret", "d-2").await,
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+            "authentic, but nothing could be queued: the sender is told to come back"
+        );
+        assert_eq!(
+            deliver(addr, b"wrong", "d-3").await,
+            reqwest::StatusCode::UNAUTHORIZED
+        );
+        stop(cancel, handle).await;
     }
 }

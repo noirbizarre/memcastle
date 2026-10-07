@@ -198,4 +198,130 @@ mod tests {
             "/n/.gitignore"
         )));
     }
+
+    use super::super::fake::{FakeHost, eventually};
+
+    fn spawn(
+        host: &FakeHost,
+        path: &Path,
+        cancel: &CancellationToken,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(run(
+            host.clone(),
+            "w".to_string(),
+            path.to_path_buf(),
+            Duration::from_millis(100),
+            true,
+            cancel.clone(),
+        ))
+    }
+
+    #[tokio::test]
+    async fn a_missing_path_is_reported_and_the_watch_starts_when_it_appears() {
+        let parent = tempfile::tempdir().expect("tempdir");
+        let path = parent.path().join("notes");
+        let host = FakeHost::default();
+        let cancel = CancellationToken::new();
+        let task = spawn(&host, &path, &cancel);
+
+        eventually("the missing path to be reported", || {
+            host.noted(
+                "w",
+                |n| matches!(n, Note::Failed(why) if why.contains("does not exist")),
+            )
+        })
+        .await;
+        assert!(!host.noted("w", |n| matches!(n, Note::Healthy)));
+
+        std::fs::create_dir(&path).expect("the path appears");
+        eventually("the watch to start", || {
+            host.noted("w", |n| matches!(n, Note::Healthy))
+        })
+        .await;
+
+        cancel.cancel();
+        task.await.expect("stops when cancelled");
+    }
+
+    #[tokio::test]
+    async fn a_burst_of_changes_asks_for_one_run_and_a_read_asks_for_none() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let host = FakeHost::default();
+        let cancel = CancellationToken::new();
+        let task = spawn(&host, dir.path(), &cancel);
+        eventually("the watch to start", || {
+            host.noted("w", |n| matches!(n, Note::Healthy))
+        })
+        .await;
+
+        for i in 0..20 {
+            std::fs::write(dir.path().join(format!("{i}.txt")), "x").expect("a change");
+        }
+
+        eventually("the burst to ask for a run", || !host.fires().is_empty()).await;
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        let fires = host.fires();
+        assert!(
+            fires.len() <= 2,
+            "twenty writes asked for {} runs",
+            fires.len()
+        );
+        assert_eq!(fires[0].via, Some(TriggerMechanism::Watch));
+        assert_eq!(fires[0].trigger, "w");
+        cancel.cancel();
+        task.await.expect("stops when cancelled");
+    }
+
+    #[tokio::test]
+    async fn a_run_that_is_refused_does_not_break_the_watch() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let host = FakeHost::default();
+        host.refuse_with(Some("the miner is disabled"));
+        let cancel = CancellationToken::new();
+        let task = spawn(&host, dir.path(), &cancel);
+        eventually("the watch to start", || {
+            host.noted("w", |n| matches!(n, Note::Healthy))
+        })
+        .await;
+
+        std::fs::write(dir.path().join("a.txt"), "x").expect("a change");
+        eventually("the first request", || !host.fires().is_empty()).await;
+        std::fs::write(dir.path().join("b.txt"), "y").expect("another change");
+        let before = host.fires().len();
+        eventually("a second request after the refusal", || {
+            host.fires().len() > before
+        })
+        .await;
+
+        assert!(
+            !host.noted("w", |n| matches!(n, Note::Failed(_))),
+            "a refusal is the host's to record"
+        );
+        cancel.cancel();
+        task.await.expect("stops when cancelled");
+    }
+
+    #[tokio::test]
+    async fn a_watched_directory_that_is_removed_is_reported_as_gone() {
+        let parent = tempfile::tempdir().expect("tempdir");
+        let path = parent.path().join("notes");
+        std::fs::create_dir(&path).expect("the path");
+        let host = FakeHost::default();
+        let cancel = CancellationToken::new();
+        let task = spawn(&host, &path, &cancel);
+        eventually("the watch to start", || {
+            host.noted("w", |n| matches!(n, Note::Healthy))
+        })
+        .await;
+
+        std::fs::write(path.join("a.txt"), "x").expect("a change");
+        std::fs::remove_dir_all(&path).expect("the path goes");
+
+        eventually("the removal to be reported", || {
+            host.noted("w", |n| matches!(n, Note::Failed(_)))
+        })
+        .await;
+        cancel.cancel();
+        task.await.expect("stops when cancelled");
+    }
 }

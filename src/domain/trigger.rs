@@ -906,4 +906,157 @@ mod tests {
         assert_eq!(watch.len(), 3);
         assert_eq!(watch[2].description, "the notes");
     }
+
+    #[test]
+    fn a_poll_ceiling_must_parse_and_may_not_be_shorter_than_the_interval() {
+        let ok = trigger(
+            "name = \"t\"\nminer = \"m\"\ntype = \"poll\"\nevery = \"1m\"\nmax_backoff = \"1h\"\n",
+        );
+        assert!(matches!(
+            ok.plan(),
+            Ok(TriggerPlan::Poll { max_backoff, .. }) if max_backoff == Duration::from_secs(3600)
+        ));
+        let short = trigger(
+            "name = \"t\"\nminer = \"m\"\ntype = \"poll\"\nevery = \"1h\"\nmax_backoff = \"1m\"\n",
+        );
+        assert!(
+            short
+                .validate()
+                .expect_err("shorter")
+                .contains("shorter than `every`")
+        );
+        let junk = trigger(
+            "name = \"t\"\nminer = \"m\"\ntype = \"poll\"\nevery = \"1h\"\nmax_backoff = \"soon\"\n",
+        );
+        assert!(junk.validate().expect_err("junk").contains("max_backoff"));
+        let default = trigger("name = \"t\"\nminer = \"m\"\ntype = \"poll\"\nevery = \"1m\"\n");
+        assert!(matches!(
+            default.plan(),
+            Ok(TriggerPlan::Poll { max_backoff, .. }) if max_backoff == Duration::from_secs(480)
+        ));
+    }
+
+    #[test]
+    fn a_setting_of_the_wrong_type_is_named() {
+        let number = trigger("name = \"t\"\nminer = \"m\"\ntype = \"poll\"\nevery = 5\n");
+        assert!(
+            number
+                .validate()
+                .expect_err("a number")
+                .contains("non-empty string")
+        );
+        let blank = trigger("name = \"t\"\nminer = \"m\"\ntype = \"poll\"\nevery = \" \"\n");
+        assert!(
+            blank
+                .validate()
+                .expect_err("blank")
+                .contains("non-empty string")
+        );
+        let tiny = trigger("name = \"t\"\nminer = \"m\"\ntype = \"poll\"\nevery = \"500ms\"\n");
+        assert!(
+            tiny.validate()
+                .expect_err("under a second")
+                .contains("at least 1s")
+        );
+        let junk = trigger("name = \"t\"\nminer = \"m\"\ntype = \"poll\"\nevery = \"often\"\n");
+        assert!(
+            junk.validate()
+                .expect_err("not a duration")
+                .contains("`every`")
+        );
+    }
+
+    #[test]
+    fn a_webhook_names_what_is_wrong_with_each_of_its_settings() {
+        let secret = "credential = { type = \"env\", name = \"HOOK\" }\n";
+        for (extra, wants) in [
+            ("auth = \"md5\"\n", "`auth`"),
+            ("encoding = \"rot13\"\n", "`encoding`"),
+            ("prefix = 5\n", "`prefix` must be a string"),
+            ("header = \"bad header\"\n", "not a valid HTTP header name"),
+            (
+                "delivery_header = \"a:b\"\n",
+                "not a valid HTTP header name",
+            ),
+        ] {
+            let t = trigger(&format!(
+                "name = \"t\"\nminer = \"m\"\ntype = \"webhook\"\n{extra}{secret}"
+            ));
+            let error = t.validate().expect_err(extra);
+            assert!(error.contains(wants), "{extra}: {error}");
+        }
+        for credential in [
+            "credential = { type = \"env\", name = \" \" }",
+            "credential = { type = \"file\", path = \"\" }",
+        ] {
+            let t = trigger(&format!(
+                "name = \"t\"\nminer = \"m\"\ntype = \"webhook\"\n{credential}\n"
+            ));
+            assert!(
+                t.validate()
+                    .expect_err(credential)
+                    .contains("needs a `credential`")
+            );
+        }
+        let base64 = trigger(&format!(
+            "name = \"t\"\nminer = \"m\"\ntype = \"webhook\"\nencoding = \"base64\"\nprefix = \"\"\n{secret}"
+        ));
+        assert!(matches!(
+            base64.plan(),
+            Ok(TriggerPlan::Webhook(p)) if p.encoding == SignatureEncoding::Base64 && p.prefix.is_empty()
+        ));
+    }
+
+    #[test]
+    fn the_miner_a_trigger_names_must_be_a_miner_name_and_a_watch_flag_a_boolean() {
+        let bad_miner =
+            trigger("name = \"t\"\nminer = \"Not A Miner\"\ntype = \"poll\"\nevery = \"1m\"\n");
+        assert!(
+            bad_miner
+                .validate()
+                .expect_err("bad miner")
+                .contains("is not a miner name")
+        );
+        let bad_name = trigger("name = \"T\"\nminer = \"m\"\ntype = \"poll\"\nevery = \"1m\"\n");
+        assert!(
+            bad_name
+                .validate()
+                .expect_err("bad name")
+                .contains("not a valid trigger name")
+        );
+        let absolute = std::env::temp_dir().display().to_string();
+        let flag = |value: &str| {
+            trigger(&format!(
+                "name = \"t\"\nminer = \"m\"\ntype = \"watch\"\npath = '{absolute}'\nrecursive = {value}\n"
+            ))
+        };
+        assert!(matches!(
+            flag("false").plan(),
+            Ok(TriggerPlan::Watch {
+                recursive: false,
+                ..
+            })
+        ));
+        assert!(
+            flag("\"yes\"")
+                .validate()
+                .expect_err("not a bool")
+                .contains("true or false")
+        );
+        let slow = trigger(&format!(
+            "name = \"t\"\nminer = \"m\"\ntype = \"watch\"\npath = '{absolute}'\ndebounce = \"2d\"\n"
+        ));
+        assert!(slow.validate().expect_err("too slow").contains("debounce"));
+    }
+
+    #[test]
+    fn a_mechanism_is_found_by_the_name_a_manifest_writes_and_prints_the_same_name() {
+        for kind in TriggerMechanism::ALL {
+            assert_eq!(TriggerMechanism::parse(kind.as_str()), Some(kind));
+            assert_eq!(kind.to_string(), kind.as_str());
+        }
+        assert_eq!(TriggerMechanism::parse("cron"), None);
+        assert!(TriggerMechanism::Schedule.is_host_provided());
+        assert!(!TriggerMechanism::Webhook.is_host_provided());
+    }
 }
