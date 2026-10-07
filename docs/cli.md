@@ -507,9 +507,8 @@ memcastle miner get <NAME>
 memcastle miner set <NAME> [--source <SOURCE>] [--locator <WHERE>] [--wing <WING>]
                            [--credential-env <VAR> | --credential-file <PATH> | --credential-oauth]
                            [--scope <KEY=VALUES>]... [--unset-scope <KEY>]...
-                           [--trigger manual|event|schedule [--trigger-setting <KEY=VALUE>]...]
                            [--setting <KEY=VALUE>]... [--unset-setting <KEY>]...
-                           [--unset locator|wing|credential|trigger]... [--disabled] [--allow-broaden]
+                           [--unset locator|wing|credential]... [--disabled] [--allow-broaden]
 memcastle miner enable <NAME>
 memcastle miner disable <NAME>
 memcastle miner remove <NAME> [--yes]
@@ -525,7 +524,7 @@ Every command is a call to the daemon's `/api/miners` routes, which are the rule
 `set` creates the miner when there is none (it needs `--source`), and otherwise changes only what it is given:
 everything not named stays as it is, and a repeated command changes nothing.
 `--scope groups=MemCastle,Ops` sets the scope key `groups` to a list of strings, always a list, even for one value;
-`--setting window=30` and `--trigger-setting every=1d` take JSON when the value parses as JSON, and a string otherwise.
+`--setting window=30` takes JSON when the value parses as JSON, and a string otherwise.
 `--setting` and not `--config`, which names the configuration file.
 A field is cleared by name with `--unset`, and a scope or settings key with `--unset-scope` and `--unset-setting`.
 `--disabled` creates the miner switched off, or switches it off.
@@ -553,6 +552,50 @@ a key the source does not declare makes the miner not runnable, and a key in bot
 the others are administrative: `--mode` is accepted (it is a global flag) but ignored by them,
 and no MCP tool exists for any of them.
 `miner set` and the rest print the miner as it is now when standard output is a terminal, and JSON when it is not.
+
+### `trigger`
+
+```sh
+memcastle trigger list
+memcastle trigger get <NAME>
+memcastle trigger set <NAME> [--miner <MINER>] [--type schedule|poll|webhook|watch]
+                             [--credential-env <VAR> | --credential-file <PATH>]
+                             [--setting <KEY=VALUE>]... [--unset-setting <KEY>]...
+                             [--unset credential] [--enable]
+memcastle trigger enable <NAME>
+memcastle trigger disable <NAME>
+memcastle trigger remove <NAME> [--yes]
+memcastle trigger reload
+memcastle trigger fire <NAME>
+```
+
+Manages the `[[triggers]]` of the configuration file: what asks for a mining run on its own, described on the
+[Triggers](triggers.md) page ([ADR-043](adr/043-source-triggers.md)).
+A trigger only decides *when*; it asks for the same run `miner run` does.
+Every command is a call to the daemon's `/api/triggers` routes, the same rules MCP's read-only `memcastle_trigger_list`
+and `memcastle_trigger_get` follow.
+
+`set` creates a trigger when there is none (it needs `--miner` and `--type`), and otherwise changes only what it is
+given.
+**A trigger is created disabled**, and `set` never enables one unless `--enable` is given, so writing a definition starts
+nothing.
+`--setting every=1d`, `--setting at=03:30`, `--setting path=/notes` and `--setting debounce=2s` take JSON when the value
+parses as JSON and a string otherwise.
+A webhook's shared secret is a reference, `--credential-env` or `--credential-file`, never an argument.
+Changing `--type` drops the settings of the old type.
+`enable` checks every prerequisite first (the miner exists and can run, the source supports the type, the webhook
+listener is on and its secret resolves, the watched path exists), and when one is missing it is refused with
+`memcastle::trigger::not_activatable`, says what to set up, and writes nothing.
+`get` shows the same list under `to enable:` for a disabled trigger.
+`disable` stops it and keeps what it did; `remove` deletes the definition and what the daemon remembered about it,
+and asks first in a terminal (`--yes` skips it).
+`reload` reads the file again now; the daemon also notices an edited file within a few seconds.
+`fire` asks for a run through the trigger now, the way it would on its own (joining a run already waiting); it is
+refused while the trigger is disabled, and is a write, so `--mode read_only` is refused.
+
+`list` and `get` are reads and `fire` is a write; the others are administrative like `miner`'s, and no MCP tool exists
+for any of them.
+Output is the trigger as it is now in a terminal, and JSON when standard output is not one.
 
 ### `integration`
 

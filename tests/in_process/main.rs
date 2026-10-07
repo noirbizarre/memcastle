@@ -34,4 +34,5 @@ mod retrieval_eval;
 mod server;
 mod skills;
 mod sources;
+mod triggers;
 mod web;

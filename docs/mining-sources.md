@@ -132,13 +132,18 @@ Mining is a write, so a [read-only or disabled session](memory-modes.md) cannot 
 
 `memcastle mine` names a source and where to read every time.
 A **miner** is a named definition of one, kept as `[[miners]]` in the configuration file:
-a source, a locator, a scope, a trigger and a reference to a credential
+a source, a locator, a scope and a reference to a credential
 ([Configuration](configuration.md#miners), [`memcastle miner`](cli.md#miner)).
 `memcastle miner run <name>` submits the same job `mine` would, with the miner's scope and settings as the options,
 so a miner continues from the cursor its source already has.
 The cursor belongs to the source, which is the `source` and `locator`, and not to the miner:
 renaming, disabling, re-scoping or removing a miner never loses it or what it mined.
 An agent can read the miners (`memcastle_miner_list`, `memcastle_miner_get`) but only the user changes them.
+
+A miner runs when asked.
+To have it run on its own (daily, when files change, when a service calls a webhook) the user defines a
+[trigger](triggers.md) for it, which starts disabled and which no source, install or miner ever enables.
+The trigger only decides when; the source still decides how to read.
 
 The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unchanged`, `skipped`, `similar` and `truncated`.
 

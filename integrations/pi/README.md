@@ -284,7 +284,6 @@ src/search-before-answer.ts   injects that skill into the system prompt at every
 src/checkpoint-core.ts        checkpointing without a host: settings, the review, the payload, submission (the same file as OpenCode's)
 src/checkpoint-agent.ts       the interval review (counts `agent_end`) and the emergency one (`session_before_compact`): reads Pi's transcript, asks Pi's model
 src/checkpoint-tool.ts        `/memcastle-checkpoint`: the manual save
-src/daily-mine.ts             background mining on the extension's own schedule (#26, scheduling only), empty
 test/                         bun tests against a real `memcastle serve`; they read tests/fixtures/integration/
 ```
 
@@ -320,7 +319,7 @@ The contract is [`docs/integration-contract.md`](../../docs/integration-contract
 | `persistent-session` | Implemented: one connection per Pi session, kept alive, replaced with its mode re-selected when the daemon forgets it | #29, done |
 | `skills` | Implemented: the skills the manifest names are offered to Pi's own skill listing, `search-before-answer` is injected and `checkpoint-instructions` instructs the reviewing model, all read from `skills/` and never copied; `off` sessions get nothing | #25, #23, #213, done |
 | `project-context` | Implemented: `.config/memcastle.toml` and `MEMCASTLE_WING` / `MEMCASTLE_ROOM` resolved from Pi's directory, used for the wake-up wing, checkpoint defaults and the search instruction | #183, done |
-| `background-mining` | Not yet | #26 |
+| `background-mining` | By the daemon: a `schedule` trigger (`memcastle trigger set`) the user enables asks for the `pi` source on a timetable, so the extension keeps no timer of its own | #26, superseded by #189 |
 | `failure-reporting` | Implemented: the five classes plus `unexpected`, each shown as a Pi notification at the severity the shared fixture promises, with `help` | #30, done |
 | `audit-repair` | Implemented: `/memcastle-audit [wing]` audits, shows the dry-run plan and applies it only after one confirmation dialog, then writes a before/after diary entry; `read-only` stops at the plan | #28, done |
 
@@ -344,8 +343,21 @@ The session always carries on without MemCastle: a failure never stops Pi from a
 
 ### Gaps
 
-None are declared yet.
+None are declared.
 Only `emergency-checkpoint` and `background-mining` may be gaps, each recorded as three lines:
 **Missing**, **Fallback** and **Effect**.
 `emergency-checkpoint` is not one here, because Pi has a `session_before_compact` event.
-The other two are "Not yet" in the matrix: nothing is built, and no gap is declared until a decision says there will not be.
+`background-mining` is not one either, because the extension does not need a timer of its own:
+the daemon keeps the schedule when the user asks it to (below).
+
+### Background mining
+
+Mining Pi's session history on a timetable is a daemon-side [trigger](../../docs/triggers.md), not extension code:
+the trigger decides *when* and the `pi` source decides *how* to read.
+It is the user's to set up, and installing this extension or the `pi` source starts nothing:
+
+```sh
+memcastle miner set pi --source pi
+memcastle trigger set pi-nightly --miner pi --type schedule --setting every=1d --setting at=03:30
+memcastle trigger enable pi-nightly
+```

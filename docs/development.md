@@ -154,6 +154,12 @@ Every path, environment variable, flag and the precedence between them is in [Co
     and changes validated before anything is written, a scope never widening silently, hand edits noticed and an invalid
     one keeping the last good miners, a cursor surviving every change that keeps the source, a credential never shown, and
     REST, the CLI and MCP agreeing (in-process, with the CLI as a subprocess client).
+  - `tests/in_process/triggers.rs` — source triggers end to end: disabled by default and nothing started by defining a
+    trigger, a miner or a webhook; enabling refused with what is missing; poll, watch and webhook firing; a webhook's
+    listener opening only while one is enabled and refusing every unauthentic delivery alike; repeated deliveries running
+    once; a burst of firings and deliveries becoming one waiting run; a restart keeping the user's choice and the
+    remembered timetable; a vanished watch path reported and recovered; hand edits; and REST and the CLI agreeing
+    (in-process, with the CLI as a subprocess client).
   - `tests/in_process/cli_daemon.rs` — CLI flags that change what the daemon is asked: `--mode`, and relative `mine` paths
     against an in-process daemon (subprocess client).
   - `tests/in_process/integration_contract.rs` — the daemon half of the [integration contract](integration-contract.md):
@@ -336,6 +342,15 @@ hook either.
 `tests/in_process/auth.rs` guards every `/api/miners` route and fails when any MCP tool other than `memcastle_miner_list`
 and `memcastle_miner_get` mentions miners; `tests/in_process/miners.rs` holds the rest, and `config::miners_file`'s unit
 tests hold that an edit keeps the file's comments and other tables ([ADR-037](adr/037-persistent-miner-configuration.md)).
+
+Invariant 13 (triggers are opt-in, administrative, and only ask for a run) has no hook either.
+`tests/trigger_isolation.rs` reads the source text so that `src/trigger` reaches neither the palace, the jobs nor any
+source, only `app` and the daemon's root can name it, MCP calls nothing that defines, enables or fires a trigger, the
+main router serves no `/hooks` route, the webhook listener never logs or passes on a body or a secret, and a trigger
+queues work only through the request `miner run` makes.
+`tests/in_process/auth.rs` guards every `/api/triggers` route and fails when any MCP tool other than
+`memcastle_trigger_list` and `memcastle_trigger_get` mentions triggers
+([ADR-043](adr/043-source-triggers.md)).
 
 The integration installer is local tooling like the source tooling, and is held to the same rule in the same way.
 `tests/integration_isolation.rs` fails when `src/integration/` mentions the store, the jobs, the daemon client, the

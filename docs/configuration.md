@@ -101,6 +101,16 @@ port = 8000
 allow_remote = false
 allowed_origins = []
 
+# The listener that `webhook` triggers are delivered to; see "Triggers". Off by default: nothing listens until it is
+# enabled here *and* a webhook trigger is enabled.
+[webhook]
+enable = false
+bind = "127.0.0.1"
+port = 8787
+allow_remote = false
+max_body_bytes = 1048576
+max_concurrent = 16
+
 # Where embeddings come from. Without a provider search stays lexical; see "Embeddings".
 [embeddings]
 provider = "none"          # "none", "command" or "http"
@@ -216,6 +226,10 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `db.port` (0 to 65535) | `MEMCASTLE_DB_PORT` | `8000` |
 | `db.allow_remote` (`true` or `false`) | `MEMCASTLE_DB_ALLOW_REMOTE` | `false` |
 | `db.allowed_origins` (a list) | `MEMCASTLE_DB_ALLOWED_ORIGINS` (comma-separated) | none |
+| `webhook.enable` (`true` or `false`) | `MEMCASTLE_WEBHOOK_ENABLE` | `false` |
+| `webhook.bind` (an IP address) | `MEMCASTLE_WEBHOOK_BIND` | `127.0.0.1` |
+| `webhook.port` (0 to 65535) | `MEMCASTLE_WEBHOOK_PORT` | `8787` |
+| `webhook.allow_remote` (`true` or `false`) | `MEMCASTLE_WEBHOOK_ALLOW_REMOTE` | `false` |
 | `embeddings.provider` (`none`, `command` or `http`) | `MEMCASTLE_EMBEDDINGS_PROVIDER` | `none` |
 | `embeddings.url` (an `http://` or `https://` URL) | `MEMCASTLE_EMBEDDINGS_URL` | none |
 | `embeddings.model` | `MEMCASTLE_EMBEDDINGS_MODEL` | none |
@@ -522,6 +536,35 @@ The values are compared whole, never as patterns.
 
 See [Database access](database-access.md) for the workflow and the security model.
 
+## Triggers
+
+A trigger asks for a miner's run on its own: on a timetable, on a poll, when a file changes, or when a webhook is
+called.
+Triggers are the `[[triggers]]` entries of the configuration file, managed from the file or from
+[`memcastle trigger`](cli.md#trigger) ([ADR-043](adr/043-source-triggers.md)).
+**Every trigger is disabled until `enabled = true`**, and nothing the daemon does ever sets it.
+
+```toml
+[[triggers]]
+name = "notes-watch"       # unique: lowercase letters, digits, `-` and `_`; `reload` is reserved
+miner = "notes"            # the miner it asks to run
+type = "watch"             # "schedule", "poll", "webhook" or "watch"
+enabled = false            # the default
+path = "/home/alice/notes" # the other keys depend on the type
+debounce = "2s"
+
+[[triggers]]
+name = "notes-hook"
+miner = "notes"
+type = "webhook"
+credential = { type = "env", name = "NOTES_HOOK_SECRET" }   # or { type = "file", path = "/run/secrets/hook" }
+delivery_header = "x-delivery-id"
+```
+
+The settings of each type, what enabling needs, the webhook listener (`[webhook]` above), its security and
+networking prerequisites, bursts, repeats, restarts and failures are on the [Triggers](triggers.md) page.
+`[webhook]` is read when the daemon starts, and a `[[triggers]]` entry is read again whenever the file changes.
+
 ## Runtime assets
 
 Some files a release carries are not your configuration or your data.
@@ -563,7 +606,7 @@ leaves the sources to the installed assets.
 
 ## Miners
 
-A miner is a named, persistent definition of what to mine and how: a source, where in it to read, a scope, a trigger.
+A miner is a named, persistent definition of what to mine and how: a source, where in it to read, a scope, a credential.
 They are the `[[miners]]` entries of the configuration file, so they are declarative and survive a restart,
 and they are managed from the file, from [`memcastle miner`](cli.md#miner) and, read-only, from MCP
 ([ADR-037](adr/037-persistent-miner-configuration.md)).
@@ -581,19 +624,16 @@ credential = { type = "env", name = "SIGNAL_TOKEN" }   # or { type = "file", pat
 contacts = ["+336..."]
 groups = ["MemCastle"]
 
-[miners.trigger]                  # what starts the miner
-type = "event"                    # "manual" (the default), "event" or "schedule"; other keys are kept as written
-
 [miners.config]                   # source-specific settings that are not a filter, kept as written
 window_days = 30
 ```
 
 A key that is not listed is an error, not an ignored typo: `enable = false` must not leave a miner enabled.
-`scope`, `trigger` and `config` are open tables, so a source can define keys of its own.
+`scope` and `config` are open tables, so a source can define keys of its own.
 
 - **Identity.** A miner's cursor and documents belong to the *source* it points at, which is its `source` and `locator`,
   and not to its name.
-  Renaming, enabling, disabling, re-scoping or changing the wing, the trigger or the credential of a miner keeps its
+  Renaming, enabling, disabling, re-scoping or changing the wing or the credential of a miner keeps its
   cursor.
   Pointing it at another `source` or `locator` is a different source with its own cursor, and `miner set` says so.
   Removing a miner, or disabling it, never deletes what it mined.
@@ -601,7 +641,7 @@ A key that is not listed is an error, not an ignored typo: `enable = false` must
   `credential` names where it comes from: an environment variable of the daemon, a file,
   or `{ type = "oauth" }` for a source that signs in with OAuth (see [Credentials](#credentials)), which names nothing
   because the daemon keeps the tokens itself.
-  A key in `scope`, `config` or `trigger` that reads like a secret (`password`, `token`, `secret`, `api_key`, ...)
+  A key in `scope` or `config` that reads like a secret (`password`, `token`, `secret`, `api_key`, ...)
   is refused, and the daemon reports a credential only as `env`, `file` or `oauth` and whether it resolves
   (for `oauth`, whether the source is signed in), never its name or path.
   Handing an `env` or `file` credential to a source is the source's side of the contract, which does not take one yet;
@@ -614,9 +654,8 @@ A key that is not listed is an error, not an ignored typo: `enable = false` must
   installed and enabled, the credential resolves, every `scope` and `config` key is one the source declares as an option,
   and for `directory` the `locator` is an absolute path.
   A disabled miner may name a source that is not installed yet, so a configuration can be written ahead of the install.
-- **Trigger.** Only `manual` is acted on, by `memcastle miner run <name>`.
-  `event` and `schedule` are stored and validated, and reported as not acted on, so a definition written now keeps its
-  meaning when triggers arrive.
+- **Trigger.** A miner runs when asked: `memcastle miner run <name>`.
+  What asks on its own is a [trigger](#triggers), which is a separate `[[triggers]]` entry and starts disabled.
 - **Scope.** A scope and the `config` table are the options of a run: `miner run` passes them to the source
   exactly as `memcastle mine <source> key=value` would ([ADR-042](adr/042-mine-takes-a-source-and-its-options.md)).
   A scalar is its text and a list of strings is comma-joined; a key the source does not declare, a key in both tables

@@ -27,6 +27,7 @@ import type {
   SimilarDrawer,
   SourcesReport,
   StatusReport,
+  TriggersReport,
   WingDetail,
   Wing,
 } from "./types.ts"
@@ -188,6 +189,11 @@ export class MemCastleClient {
   }
   controlJob(id: string, action: JobControl): Promise<{ status: string }> {
     return this.request("POST", `/api/jobs/${encodeURIComponent(id)}/${action}`)
+  }
+
+  /** What asks for mining runs on its own. Read-only: defining or enabling a trigger is `memcastle trigger`. */
+  triggers(): Promise<TriggersReport> {
+    return this.request("GET", "/api/triggers")
   }
 
   sources(): Promise<SourcesReport> {

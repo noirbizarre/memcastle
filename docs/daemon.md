@@ -248,5 +248,9 @@ Enable [authentication](authentication.md) when you do, and put a TLS-terminatin
 because the token travels in cleartext over plain HTTP.
 `/mcp` also refuses a non-loopback `Host` header, so reach it through a loopback name or a proxy that rewrites `Host`.
 
+A [webhook trigger](triggers.md#the-webhook-listener) adds a second listener, which does not exist until you enable
+`[webhook]` and a webhook trigger, binds loopback by default, and is exposed to the internet only by what you put in
+front of it.
+
 With a supervisor, inject the secret as `MEMCASTLE_AUTH_TOKEN` from an `EnvironmentFile=` or your secret manager,
 not as an argument; [Authentication](authentication.md#with-a-shared-secret-from-a-secret-manager) shows how.

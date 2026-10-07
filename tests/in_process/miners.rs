@@ -101,33 +101,23 @@ async fn several_miners_coexist_with_their_own_settings_and_survive_in_the_file(
         "docs",
         json!({
             "source": "directory", "locator": docs.path(), "wing": "documentation",
-            "trigger": { "type": "schedule", "every": "1d" },
         }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{created}");
     assert_eq!(created["created"], true);
     assert_eq!(created["miner"]["state"], "ready");
-    // A scheduled trigger is stored and reported as not acted on: the daemon does not pretend.
-    assert!(
-        created["miner"]["warnings"][0]
-            .as_str()
-            .unwrap()
-            .contains("not acted on yet")
-    );
 
     put(&daemon, "notes", directory(notes.path())).await;
 
     let (_, list) = get(&daemon, "/api/miners").await;
     assert_eq!(names(&list), ["docs", "notes"]);
     assert_eq!(list["miners"][0]["wing"], "documentation");
-    assert_eq!(list["miners"][0]["trigger"]["type"], "schedule");
     assert_eq!(
         list["miners"][1]["wing"],
         Value::Null,
         "one miner's settings never leak into another"
     );
-    assert_eq!(list["miners"][1]["trigger"]["type"], "manual");
 
     // A daemon that restarted would read exactly this: the file is the miners' only home.
     let reloaded = Config::load(
@@ -292,7 +282,7 @@ async fn a_disabled_miner_may_name_a_source_that_is_not_installed_yet() {
     let (status, created) = put(
         &daemon,
         "signal-personal",
-        json!({ "source": "signal", "enabled": false, "scope": { "contacts": ["+336"] }, "trigger": { "type": "event" } }),
+        json!({ "source": "signal", "enabled": false, "scope": { "contacts": ["+336"] } }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{created}");
@@ -510,12 +500,7 @@ async fn a_miners_cursor_survives_every_change_that_keeps_its_source_and_locator
     assert!(!cursor.is_null());
 
     // Everything about the miner except what it points at.
-    put(
-        &daemon,
-        "docs",
-        json!({ "wing": "other", "trigger": { "type": "manual" } }),
-    )
-    .await;
+    put(&daemon, "docs", json!({ "wing": "other" })).await;
     post(&daemon, "/api/miners/docs/disable").await;
     post(&daemon, "/api/miners/docs/enable").await;
     request(&daemon, Method::DELETE, "/api/miners/docs", None).await;
@@ -838,10 +823,8 @@ async fn the_cli_creates_changes_and_reads_miners_through_the_same_routes() {
             locator,
             "--wing",
             "w",
-            "--trigger",
-            "schedule",
-            "--trigger-setting",
-            "every=1d",
+            "--scope",
+            "since=2020-01",
         ],
     )
     .await;
@@ -850,10 +833,7 @@ async fn the_cli_creates_changes_and_reads_miners_through_the_same_routes() {
 
     // What the CLI wrote is what REST reads, and what `miner list` prints is what REST answers.
     let (_, rest) = get(&daemon, "/api/miners/docs").await;
-    assert_eq!(
-        rest["trigger"],
-        json!({ "type": "schedule", "every": "1d" })
-    );
+    assert_eq!(rest["scope"], json!({ "since": ["2020-01"] }));
     let (ok, listed, stderr) = cli(&daemon, &["miner", "list"]).await;
     assert!(ok, "{stderr}");
     let (_, rest_list) = get(&daemon, "/api/miners").await;

@@ -18,6 +18,7 @@ use tracing::{info, warn};
 
 use crate::app::{
     AppServices, AuthPolicy, ConfigReport, DbEndpoint, MinerRegistry, RuntimeContext,
+    TriggerRegistry,
 };
 use crate::config::{Config, Secret};
 use crate::credential::Credentials;
@@ -141,6 +142,7 @@ pub async fn run(config: Config) -> Result<()> {
         tokio::spawn(async move { scheduler.run(shutdown).await })
     };
 
+    let trigger_runtime = Arc::new(crate::trigger::Runtime::default());
     let backend_info = backend.describe();
     let backend_info_kind = backend_info.kind.to_string();
     let app = AppServices::new(store, Arc::clone(&scheduler))
@@ -155,6 +157,14 @@ pub async fn run(config: Config) -> Result<()> {
         .with_miners(MinerRegistry::new(
             config.config_file.clone(),
             config.miners.clone(),
+        ))
+        // Every trigger is off until the user enables it, so a daemon with none enabled runs no task, opens no port and
+        // watches no file here (`docs/adr/043`); the supervisor below only starts what is.
+        .with_triggers(TriggerRegistry::new(
+            config.config_file.clone(),
+            config.triggers.clone(),
+            config.webhook.clone(),
+            Arc::clone(&trigger_runtime),
         ))
         .with_runtime(RuntimeContext {
             // The real bound address, not the requested one: `status` must agree
@@ -185,6 +195,13 @@ pub async fn run(config: Config) -> Result<()> {
              address can read and write the palace; set auth.enabled (see docs/authentication.md)"
         );
     }
+    // Deliveries accepted before a crash but never queued are queued now, for the triggers that are still enabled.
+    app.recover_triggers().await;
+    // Stopped first on the way down (below), so nothing new is asked for while the jobs drain.
+    let trigger_handle = tokio::spawn(
+        crate::trigger::Supervisor::new(app.trigger_host(), trigger_runtime)
+            .run(shutdown.child_token()),
+    );
     // Kept for the shutdown below: the layer takes `app` by value.
     let services = app.clone();
     let mcp_service = crate::mcp::service(app.clone(), &shutdown);
@@ -277,6 +294,8 @@ pub async fn run(config: Config) -> Result<()> {
     // a Studio connection left open must not outlive the daemon's storage.
     // Idempotent, and a no-op when the endpoint was never started.
     services.stop_db_endpoint().await;
+    // Before the jobs drain: a trigger that is still asking for runs would only queue work the daemon is about to leave.
+    let _ = trigger_handle.await;
 
     // The dispatch loop exits on the same `shutdown` token and then drains
     // in-flight jobs (`Scheduler::drain`); wait for it rather than aborting,

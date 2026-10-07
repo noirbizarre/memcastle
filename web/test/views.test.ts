@@ -14,6 +14,7 @@ import OverviewView from "../src/views/OverviewView.vue"
 import PalaceView from "../src/views/PalaceView.vue"
 import DiaryView from "../src/views/DiaryView.vue"
 import MaintenanceView from "../src/views/MaintenanceView.vue"
+import TriggersView from "../src/views/TriggersView.vue"
 import SearchView from "../src/views/SearchView.vue"
 import SettingsView from "../src/views/SettingsView.vue"
 import { fakeFetch, memoryStorage, STATUS, type Recorded } from "./support/fetch.ts"
@@ -225,6 +226,77 @@ describe("the settings page", () => {
     await flushPromises()
 
     expect(requests.filter((request) => path(request) === "/api/config")).toHaveLength(2)
+  })
+})
+
+describe("the triggers page", () => {
+  const TRIGGER = {
+    name: "nightly",
+    miner: "docs",
+    type: "schedule",
+    enabled: true,
+    status: "failing",
+    reason: "no route to the source",
+    running: true,
+    settings: { every: "1d", at: "03:30" },
+    last_fired_at: "2026-10-05T03:30:00Z",
+    fired: 4,
+    coalesced: 1,
+    duplicates: 0,
+    next_due: "2026-10-06T03:30:00Z",
+    last_error: "no route to the source",
+    consecutive_failures: 2,
+  }
+  const report = (triggers: unknown[], webhook = { enabled: false, bind: "127.0.0.1", port: 8787, allow_remote: false }) => ({ body: { triggers, webhook } })
+
+  it("says plainly that nothing runs unattended when no trigger is configured", async () => {
+    const { wrapper } = await show(TriggersView, () => report([]))
+
+    expect(wrapper.text()).toContain("nothing runs unattended")
+    expect(wrapper.text()).toContain("Off")
+  })
+
+  it("shows each trigger with where it stands, when it fires next and what last went wrong", async () => {
+    const { wrapper, requests } = await show(TriggersView, () => report([TRIGGER]))
+
+    expect(requests.map(path)).toEqual(["/api/triggers"])
+    expect(wrapper.text()).toContain("nightly")
+    expect(wrapper.text()).toContain("failing")
+    expect(wrapper.text()).toContain("every=1d at=03:30")
+    expect(wrapper.text()).toContain("no route to the source")
+    expect(wrapper.text()).toContain("4 runs")
+    expect(wrapper.text()).toContain("1 joined")
+  })
+
+  it("says when the configuration file cannot be read and still shows the last triggers it held", async () => {
+    const { wrapper } = await show(TriggersView, () => ({
+      body: { triggers: [TRIGGER], webhook: { enabled: false, bind: "127.0.0.1", port: 8787, allow_remote: false }, error: "not valid TOML" },
+    }))
+
+    expect(wrapper.text()).toContain("cannot be read")
+    expect(wrapper.text()).toContain("not valid TOML")
+    expect(wrapper.text()).toContain("nightly")
+  })
+
+  it("shows a trigger that has never fired or failed without inventing a time or an error", async () => {
+    const { wrapper } = await show(TriggersView, () =>
+      report([{ name: "quiet", miner: "docs", type: "watch", enabled: false, status: "disabled", running: false, fired: 1, coalesced: 0, duplicates: 0, consecutive_failures: 0 }]),
+    )
+
+    expect(wrapper.text()).toContain("quiet")
+    expect(wrapper.text()).toContain("disabled")
+    expect(wrapper.text()).toContain("1 run")
+    expect(wrapper.text()).not.toContain("1 runs")
+  })
+
+  it("names where the webhook listener is, and offers no way to change a trigger", async () => {
+    const { wrapper, requests } = await show(TriggersView, () =>
+      report([], { enabled: true, bind: "127.0.0.1", port: 8787, allow_remote: false, listening: "127.0.0.1:8787" } as never),
+    )
+
+    expect(wrapper.text()).toContain("127.0.0.1:8787")
+    expect(wrapper.findAll("button").filter((button) => /enable|disable|fire|remove/i.test(button.text()))).toHaveLength(0)
+    expect(requests.every((request) => request.method === "GET")).toBe(true)
   })
 })
 

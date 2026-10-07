@@ -168,6 +168,17 @@ async fn every_other_route_is_guarded_including_ones_that_do_not_exist() {
         (Method::POST, "/api/miners/x/enable"),
         (Method::POST, "/api/miners/x/disable"),
         (Method::POST, "/api/miners/x/run"),
+        // Triggers decide what the daemon does unattended (docs/adr/043): reading, every change and firing are guarded.
+        // A webhook delivery is not among them: it goes to the separate opt-in listener, never to this router.
+        (Method::GET, "/api/triggers"),
+        (Method::POST, "/api/triggers/reload"),
+        (Method::GET, "/api/triggers/x"),
+        (Method::PUT, "/api/triggers/x"),
+        (Method::DELETE, "/api/triggers/x"),
+        (Method::POST, "/api/triggers/x/enable"),
+        (Method::POST, "/api/triggers/x/disable"),
+        (Method::POST, "/api/triggers/x/fire"),
+        (Method::POST, "/hooks/x"),
         (Method::POST, "/api/shutdown"),
         (Method::POST, "/api/auth/token"),
         (Method::DELETE, "/api/auth/token"),
@@ -449,6 +460,32 @@ async fn mcp_can_read_miners_but_offers_no_way_to_change_one() {
             .iter()
             .any(|word| name.contains(word)),
             "`{name}` looks like miner management, which must never be an MCP tool"
+        );
+    }
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn mcp_can_read_triggers_but_offers_no_way_to_change_or_fire_one() {
+    let daemon = TestDaemon::start().await;
+
+    let names = tool_names(&daemon, None).await;
+
+    // What the daemon does unattended is the user's decision (`docs/adr/043`): an agent may read the triggers, so it
+    // can say what is configured, but nothing it can call defines, enables, disables, removes or fires one.
+    let mut trigger_tools: Vec<&String> = names.iter().filter(|n| n.contains("trigger")).collect();
+    trigger_tools.sort();
+    assert_eq!(
+        trigger_tools,
+        ["memcastle_trigger_get", "memcastle_trigger_list"],
+        "only the two read-only trigger tools may exist"
+    );
+    for name in &names {
+        assert!(
+            !["webhook", "fire", "watch", "schedule", "poll"]
+                .iter()
+                .any(|word| name.contains(word)),
+            "`{name}` looks like a way to make the daemon act on its own, which must never be an MCP tool"
         );
     }
     daemon.shutdown().await;

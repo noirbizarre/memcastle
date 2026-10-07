@@ -26,6 +26,7 @@ mod secret;
 mod source;
 mod source_index;
 mod source_package;
+mod trigger;
 
 pub use checkpoint::{CheckpointDestination, CheckpointItem, CheckpointPayload, FactMutation};
 pub use credential::{AccessTokens, SourceAuth};
@@ -49,8 +50,7 @@ pub use job::{
 };
 pub use memory_mode::MemoryMode;
 pub use miner::{
-    MAX_MINER_NAME_LEN, MinerDefinition, MinerTrigger, TriggerKind, is_valid_miner_name,
-    scope_broadening, validate_miners,
+    MAX_MINER_NAME_LEN, MinerDefinition, is_valid_miner_name, scope_broadening, validate_miners,
 };
 pub use resolution::{
     EntityCandidate, MIN_TYPO_KEY_CHARS, PossibleMatch, Resolution, ResolutionRule, entity_key,
@@ -72,6 +72,12 @@ pub use source_package::{
     Permissions, ResourceLimits, SourceManifest, SourceOrigin, SourcePackageEvent,
     SourcePackageRecord, SourcePackageState, SourceState, TestSection, contract_compatibility,
     contract_version, is_secure_endpoint, is_valid_source_name, version_compatibility,
+};
+pub use trigger::{
+    FireOutcome, MAX_TRIGGER_NAME_LEN, ManifestTrigger, SignatureEncoding, TriggerDefinition,
+    TriggerDelivery, TriggerMechanism, TriggerPlan, TriggerSpec, TriggerState, TriggerStatus,
+    WebhookAuth, WebhookPlan, is_valid_trigger_name, next_due, parse_duration, supported_triggers,
+    validate_triggers,
 };
 
 /// The channels a write can come through, recorded as `Job::requested_by` and

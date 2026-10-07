@@ -11,7 +11,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { registerAuditCommand } from "./audit-command.ts"
 import { CheckpointSessions, registerCheckpointAgent } from "./checkpoint-agent.ts"
 import { registerCheckpointTool } from "./checkpoint-tool.ts"
-import { registerDailyMine } from "./daily-mine.ts"
 import { MemCastleFailure } from "./failures.ts"
 import { InvalidModeError } from "./modes.ts"
 import { McpManager } from "./mcp-manager.ts"
@@ -67,5 +66,5 @@ export default function memcastle(pi: ExtensionAPI): void {
   registerCheckpointTool(pi, current, checkpoints)
   // The manual audit and its confirmed repair (#28).
   registerAuditCommand(pi, current)
-  registerDailyMine(pi, current)
+  // No background mining here: when to mine on a schedule is a daemon-side trigger the user enables (docs/triggers.md).
 }

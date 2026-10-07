@@ -11,7 +11,8 @@ use serde_json::json;
 
 use crate::domain::{
     Candidate, CanonicalDocument, Cursor, NameKind, OptionKind, OptionSpec, Options, RawDocument,
-    Segment, SourceCapabilities, SourceKind, SourceRef, parse_since, validate_name,
+    Segment, SourceCapabilities, SourceKind, SourceRef, TriggerMechanism, TriggerSpec, parse_since,
+    supported_triggers, validate_name,
 };
 use crate::error::{Error, Result};
 
@@ -30,6 +31,22 @@ pub fn options() -> Vec<OptionSpec> {
         "only files modified at or after this date (`2026-09`, `2026-09-14` or an RFC 3339 time)",
         OptionKind::Date,
     )]
+}
+
+/// What can trigger a run of the `directory` source: a change under the directory, and a call from whatever tells you
+/// the directory changed (a sync tool's hook). Neither runs unless the user defines and enables a trigger for it.
+#[must_use]
+pub fn triggers() -> Vec<TriggerSpec> {
+    supported_triggers(&[
+        (
+            TriggerMechanism::Watch,
+            "a file under the directory is created, changed or removed".to_string(),
+        ),
+        (
+            TriggerMechanism::Webhook,
+            "an external tool reports that the directory changed".to_string(),
+        ),
+    ])
 }
 
 /// Directories never worth mining — build output, VCS metadata, dependency trees. Skipped by name at any depth,

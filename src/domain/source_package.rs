@@ -48,6 +48,11 @@ pub struct SourceManifest {
     /// part of what a user consents to, and a source that declares none accepts none.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub options: BTreeMap<String, ManifestOption>,
+    /// The trigger mechanisms it supports beyond the ones every source has (`webhook`, `watch`), by name. A
+    /// capability, not an activation and not a permission: it is no part of what a user consents to, nothing starts
+    /// because it is declared, and a source that declares none is a complete source (docs/adr/043).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub triggers: BTreeMap<String, super::ManifestTrigger>,
     /// How `memcastle source build` produces the component. Development-time only: the daemon never runs it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build: Option<BuildSection>,
@@ -68,6 +73,20 @@ pub struct ManifestOption {
 }
 
 impl SourceManifest {
+    /// What this source can be triggered by: the mechanisms the host gives every source, and the ones declared.
+    /// Unknown names are skipped, since `source::manifest::validate` refuses them before a manifest is kept.
+    #[must_use]
+    pub fn trigger_specs(&self) -> Vec<super::TriggerSpec> {
+        let declared: Vec<_> = self
+            .triggers
+            .iter()
+            .filter_map(|(name, trigger)| {
+                super::TriggerMechanism::parse(name).map(|kind| (kind, trigger.description.clone()))
+            })
+            .collect();
+        super::supported_triggers(&declared)
+    }
+
     /// The options this source declares, in key order, as the daemon checks a run against them and a person reads them.
     #[must_use]
     pub fn option_specs(&self) -> Vec<OptionSpec> {

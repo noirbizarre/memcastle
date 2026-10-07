@@ -64,6 +64,7 @@ mod sources;
 #[cfg(test)]
 mod temporal_tests;
 mod timestamps;
+mod triggers;
 mod wings;
 
 use std::path::PathBuf;

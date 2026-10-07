@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::MinerDefinition;
+use crate::domain::{MinerDefinition, TriggerDefinition};
 use crate::error::{Error, Result};
 use crate::store::{Backend, StoreSync};
 
@@ -238,6 +238,52 @@ impl Default for DbConfig {
             port: DEFAULT_DB_PORT,
             allow_remote: false,
             allowed_origins: Vec::new(),
+        }
+    }
+}
+
+/// The default webhook listener address: loopback only, never a wildcard.
+const DEFAULT_WEBHOOK_BIND: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+/// The default webhook listener port.
+const DEFAULT_WEBHOOK_PORT: u16 = 8787;
+/// The largest delivery the listener reads, in bytes: a delivery only says "something changed", and a signature is
+/// computed over the whole body, so it is read whole and bounded.
+const DEFAULT_WEBHOOK_MAX_BODY: usize = 1024 * 1024;
+/// How many deliveries the listener works on at once; more are answered `429` and the sender retries.
+const DEFAULT_WEBHOOK_MAX_CONCURRENT: usize = 16;
+
+/// The webhook listener that `webhook` triggers are delivered to (`docs/adr/043`).
+///
+/// Off unless `enable` is set, and even then nothing listens until a `webhook` trigger is enabled: installing a
+/// source, defining a miner or writing a trigger never opens a port. The listener is a separate socket from the API,
+/// loopback by default, and a delivery is authenticated by its trigger's own shared secret, not by the daemon's token.
+/// Exposing it to the internet (a reverse proxy, a tunnel, a firewall rule) is the operator's to arrange.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WebhookConfig {
+    /// Whether `webhook` triggers may be enabled at all.
+    pub enable: bool,
+    /// Interface the listener binds. Loopback by default, and anything else is refused unless `allow_remote` is set.
+    pub bind: IpAddr,
+    /// TCP port. `0` asks the OS for a free port. Must differ from `server.port` and `db.port`.
+    pub port: u16,
+    /// Permit a non-loopback bind. Also requires `auth.enabled`, so the daemon is not open on the same network.
+    pub allow_remote: bool,
+    /// The largest delivery body accepted, in bytes.
+    pub max_body_bytes: usize,
+    /// How many deliveries are worked on at once.
+    pub max_concurrent: usize,
+}
+
+impl Default for WebhookConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            bind: DEFAULT_WEBHOOK_BIND,
+            port: DEFAULT_WEBHOOK_PORT,
+            allow_remote: false,
+            max_body_bytes: DEFAULT_WEBHOOK_MAX_BODY,
+            max_concurrent: DEFAULT_WEBHOOK_MAX_CONCURRENT,
         }
     }
 }
@@ -813,6 +859,9 @@ pub struct Config {
     /// Database admin endpoint defaults.
     #[serde(default)]
     pub db: DbConfig,
+    /// The webhook listener `webhook` triggers are delivered to.
+    #[serde(default)]
+    pub webhook: WebhookConfig,
     /// Embedding provider settings.
     #[serde(default)]
     pub embeddings: EmbeddingsConfig,
@@ -834,6 +883,10 @@ pub struct Config {
     /// the daemon itself rewrites that section when a miner is added or changed.
     #[serde(default)]
     pub miners: Vec<MinerDefinition>,
+    /// The `[[triggers]]` definitions as they were when the file was loaded: a startup snapshot like `miners`, read
+    /// from the file again while the daemon runs. Every trigger is off until the user enables it.
+    #[serde(default)]
+    pub triggers: Vec<TriggerDefinition>,
     /// The file this configuration was read from, or would be written to: `--config`, `MEMCASTLE_CONFIG`, or the
     /// default location (which may not exist yet).
     ///
@@ -1002,6 +1055,19 @@ impl Config {
                 .filter(|origin| !origin.is_empty())
                 .map(str::to_string)
                 .collect();
+        }
+        if let Some(raw) = lookup("MEMCASTLE_WEBHOOK_ENABLE") {
+            self.webhook.enable = parse_override("MEMCASTLE_WEBHOOK_ENABLE", &raw)?;
+        }
+        if let Some(bind) = lookup("MEMCASTLE_WEBHOOK_BIND") {
+            self.webhook.bind = parse_bind_host(&bind)
+                .map_err(|e| Error::config(format!("MEMCASTLE_WEBHOOK_BIND: {e}")))?;
+        }
+        if let Some(port) = lookup("MEMCASTLE_WEBHOOK_PORT") {
+            self.webhook.port = parse_override("MEMCASTLE_WEBHOOK_PORT", &port)?;
+        }
+        if let Some(raw) = lookup("MEMCASTLE_WEBHOOK_ALLOW_REMOTE") {
+            self.webhook.allow_remote = parse_override("MEMCASTLE_WEBHOOK_ALLOW_REMOTE", &raw)?;
         }
         if let Some(raw) = lookup("MEMCASTLE_EMBEDDINGS_PROVIDER") {
             self.embeddings.provider = raw
@@ -1258,6 +1324,39 @@ impl Config {
         self.validate_credentials()?;
         self.validate_dedup()?;
         validate_miners(&self.miners)?;
+        validate_triggers(&self.triggers)?;
+        self.validate_webhook()?;
+        Ok(())
+    }
+
+    /// The `[webhook]` invariants, caught at load like `[db]`'s so a bad section is reported when the daemon starts, not
+    /// the first time a webhook trigger is enabled. That a non-loopback listener also needs daemon authentication is
+    /// checked when the listener opens, where the daemon's real policy is known.
+    fn validate_webhook(&self) -> Result<()> {
+        let webhook = &self.webhook;
+        if !webhook.bind.is_loopback() && !webhook.allow_remote {
+            return Err(Error::config(format!(
+                "webhook.bind {} is not a loopback address; a webhook listener reachable from the network accepts \
+                 calls from anyone who can guess a trigger's name and secret, so listening elsewhere needs \
+                 `webhook.allow_remote = true` (or MEMCASTLE_WEBHOOK_ALLOW_REMOTE=true) together with `auth.enabled`",
+                webhook.bind
+            )));
+        }
+        for (name, other) in [("server.port", self.server.port), ("db.port", self.db.port)] {
+            // Port 0 is exempt: the OS picks a distinct one each time.
+            if webhook.port != 0 && webhook.port == other {
+                return Err(Error::config(format!(
+                    "webhook.port {} is the same as {name}; the webhook listener is a separate listener, so give it \
+                     its own port",
+                    webhook.port
+                )));
+            }
+        }
+        if webhook.max_body_bytes == 0 || webhook.max_concurrent == 0 {
+            return Err(Error::config(
+                "webhook.max_body_bytes and webhook.max_concurrent must be at least 1",
+            ));
+        }
         Ok(())
     }
 
@@ -1496,6 +1595,17 @@ fn validate_miners(miners: &[MinerDefinition]) -> Result<()> {
     crate::domain::validate_miners(miners).map_err(|reason| {
         Error::config(format!(
             "[[miners]]: {reason}; fix the entry in the configuration file"
+        ))
+    })
+}
+
+/// The `[[triggers]]` invariants that need no knowledge of the miners or sources: shapes, unique names, no secret in the
+/// file. Whether a trigger's miner exists, and its source supports the kind, is checked when the trigger is enabled,
+/// because the miners are edited at runtime.
+fn validate_triggers(triggers: &[TriggerDefinition]) -> Result<()> {
+    crate::domain::validate_triggers(triggers).map_err(|reason| {
+        Error::config(format!(
+            "[[triggers]]: {reason}; fix the entry in the configuration file"
         ))
     })
 }
@@ -2273,6 +2383,76 @@ mod tests {
         config.db.port = 0;
         config.server.port = 0;
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn the_webhook_listener_is_off_on_loopback_and_never_the_apis_or_the_consoles_port_by_default()
+    {
+        let config = Config::default();
+        assert!(
+            !config.webhook.enable,
+            "nothing listens unless the user turns it on"
+        );
+        assert!(config.webhook.bind.is_loopback());
+        assert!(!config.webhook.allow_remote);
+        assert_ne!(config.webhook.port, config.server.port);
+        assert_ne!(config.webhook.port, config.db.port);
+        assert!(config.triggers.is_empty());
+    }
+
+    #[test]
+    fn a_non_loopback_webhook_bind_is_rejected_unless_remote_access_was_allowed() {
+        let mut config = Config::default();
+        config.palace.path = std::env::temp_dir();
+        config.webhook.bind = "0.0.0.0".parse().unwrap();
+
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("webhook.allow_remote"), "{err}");
+
+        config.webhook.allow_remote = true;
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn the_webhook_port_may_not_collide_with_another_listener() {
+        let mut config = Config::default();
+        config.palace.path = std::env::temp_dir();
+        config.webhook.port = config.server.port;
+        assert!(config.validate().is_err());
+        config.webhook.port = config.db.port;
+        assert!(config.validate().is_err());
+        config.webhook.port = 0;
+        assert!(
+            config.validate().is_ok(),
+            "port 0 is the OS's choice and never collides"
+        );
+    }
+
+    #[test]
+    fn the_webhook_settings_come_from_the_file_then_the_environment() {
+        let mut config: Config = toml::from_str("[webhook]\nenable = true\nport = 9100\n").unwrap();
+        assert!(config.webhook.enable);
+        assert_eq!(config.webhook.port, 9100);
+        config
+            .apply_overrides_from(|name| match name {
+                "MEMCASTLE_WEBHOOK_PORT" => Some("9200".to_string()),
+                "MEMCASTLE_WEBHOOK_ENABLE" => Some("false".to_string()),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(config.webhook.port, 9200);
+        assert!(!config.webhook.enable);
+    }
+
+    #[test]
+    fn a_triggers_section_with_a_typo_fails_the_load_naming_the_entry() {
+        let mut config: Config = toml::from_str(
+            "[[triggers]]\nname = \"t\"\nminer = \"m\"\ntype = \"poll\"\nevr = \"1h\"\n",
+        )
+        .unwrap();
+        config.palace.path = std::env::temp_dir();
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("evr"), "{err}");
     }
 
     #[test]

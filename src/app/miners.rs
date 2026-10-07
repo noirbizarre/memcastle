@@ -20,8 +20,8 @@ use tracing::{info, warn};
 use super::AppServices;
 use crate::config::miners_file::{self, FileStamp};
 use crate::domain::{
-    CredentialRef, Job, MemoryMode, MinerDefinition, MinerTrigger, MiningSource, NameKind,
-    SourceId, SourceRecord, TriggerKind, scope_broadening, validate_name,
+    CredentialRef, Job, JobKind, JobStatus, MemoryMode, MinerDefinition, MiningSource, NameKind,
+    SourceId, SourceRecord, scope_broadening, validate_name,
 };
 use crate::error::{Error, Result};
 
@@ -57,6 +57,15 @@ impl MinerRegistry {
                 error: None,
             }),
         }
+    }
+
+    /// The miners as they are now: a hand edit made since the last look is picked up first, and an invalid file leaves
+    /// the last good copy. What another service (the triggers) reads, so it never reaches into the registry's state.
+    pub(super) async fn snapshot(&self) -> Vec<MinerDefinition> {
+        let mut state = self.state.lock().await;
+        // The error is in `state.error`; a failed refresh must not turn a read into a failure.
+        let _ = self.refresh(&mut state, false);
+        state.miners.clone()
     }
 
     /// The path, or the error that says changing miners needs one.
@@ -226,8 +235,6 @@ pub struct MinerView {
     /// Its scope filter.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub scope: Map<String, Value>,
-    /// What starts it.
-    pub trigger: MinerTrigger,
     /// Its source-specific settings.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub config: Map<String, Value>,
@@ -240,9 +247,6 @@ pub struct MinerView {
     /// How many documents that source holds.
     #[serde(default)]
     pub documents: u64,
-    /// Things that are stored but not acted on yet.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub warnings: Vec<String>,
 }
 
 /// Every miner, and whether the file they come from is currently readable.
@@ -279,13 +283,11 @@ pub struct MinerPatch {
     pub scope: Map<String, Value>,
     /// Scope keys to remove.
     pub unset_scope: Vec<String>,
-    /// The trigger, replaced as a whole.
-    pub trigger: Option<MinerTrigger>,
     /// Source-specific settings to set.
     pub config: Map<String, Value>,
     /// Source-specific settings to remove.
     pub unset_config: Vec<String>,
-    /// Fields to clear: any of `locator`, `wing`, `credential`, `trigger`.
+    /// Fields to clear: any of `locator`, `wing`, `credential`.
     pub unset: Vec<String>,
     /// Allow the change to make the scope wider.
     pub allow_broaden: bool,
@@ -456,6 +458,29 @@ impl AppServices {
         mode: MemoryMode,
     ) -> Result<Job> {
         Self::require_write(mode, "miner_run")?;
+        self.request_miner_run(name, full, requested_by, mode, false)
+            .await
+            .map(|(job, _)| job)
+    }
+
+    /// Ask for a run of a miner: the one path every request for a run takes, whether a person made it
+    /// (`memcastle miner run`) or a trigger did (docs/adr/043), so a trigger can cause nothing a person could not.
+    ///
+    /// With `join_waiting`, a run of the same source with the same settings that is still queued is returned instead
+    /// of queueing another, and the second value says so: that run will read whatever has changed by the time it
+    /// starts, so a burst of requests need not become a burst of jobs. A run that is already *running* does not
+    /// count, because it may have passed the part that changed.
+    ///
+    /// Does not check the memory mode's write gate itself: the caller has, or is a trigger the user set up, which is
+    /// not a client session.
+    pub(super) async fn request_miner_run(
+        &self,
+        name: &str,
+        full: bool,
+        requested_by: &str,
+        mode: MemoryMode,
+        join_waiting: bool,
+    ) -> Result<(Job, bool)> {
         let miner = {
             let mut state = self.miners.state.lock().await;
             let _ = self.miners.refresh(&mut state, false);
@@ -474,19 +499,48 @@ impl AppServices {
         // The scope and the settings are the run's options; `check_activation` has already checked their keys against
         // what the source declares, so what reaches the source is what the miner says.
         let options = miner.options().map_err(not_runnable)?;
-        self.submit_mine(
-            MiningSource::Named {
-                source: miner.source.clone(),
-                // A source may need none (`opencode` reads its own history); the ones that do refuse it at activation.
-                locator: miner.locator.clone(),
-            },
-            miner.wing.clone(),
-            full,
-            options,
-            requested_by,
-            mode,
-        )
-        .await
+        if join_waiting && !full {
+            let queued = self.store.list_jobs(Some(JobStatus::Queued)).await?;
+            let waiting = queued.into_iter().find(|job| match &job.kind {
+                JobKind::Mine {
+                    source,
+                    wing,
+                    options: waiting_options,
+                    ..
+                } => {
+                    let same_source = match source {
+                        MiningSource::Named { source, locator } => {
+                            *source == miner.source && *locator == miner.locator
+                        }
+                        // The older wire form of a `directory` job.
+                        MiningSource::Directory { path } => {
+                            miner.source == "directory"
+                                && miner.locator.as_deref() == Some(&*path.to_string_lossy())
+                        }
+                    };
+                    same_source && *wing == miner.wing && *waiting_options == options
+                }
+                _ => false,
+            });
+            if let Some(job) = waiting {
+                return Ok((job, true));
+            }
+        }
+        let job = self
+            .submit_mine(
+                MiningSource::Named {
+                    source: miner.source.clone(),
+                    // A source may need none (`opencode` reads its own history); the ones that do refuse it at activation.
+                    locator: miner.locator.clone(),
+                },
+                miner.wing.clone(),
+                full,
+                options,
+                requested_by,
+                mode,
+            )
+            .await?;
+        Ok((job, false))
     }
 
     /// Re-read the file for a write, and refuse when it cannot be trusted.
@@ -570,7 +624,10 @@ impl AppServices {
 
     /// What an enabled miner needs in order to run: a usable source, a locator the source can use, a credential that
     /// resolves. The reason is a sentence that says what to do.
-    async fn check_activation(&self, miner: &MinerDefinition) -> std::result::Result<(), String> {
+    pub(super) async fn check_activation(
+        &self,
+        miner: &MinerDefinition,
+    ) -> std::result::Result<(), String> {
         // The scope and the settings are what a run passes as options, so their keys are the source's to accept.
         let options = miner.options()?;
         crate::mining::registry::ensure_minable(&self.store, &self.mining, &miner.source, &options)
@@ -687,17 +744,6 @@ impl AppServices {
             Some(record) => self.store.count_source_documents(record.id).await?,
             None => 0,
         };
-        let mut warnings = Vec::new();
-        if miner.trigger.kind != TriggerKind::Manual {
-            warnings.push(format!(
-                "the {} trigger is stored but not acted on yet; `memcastle miner run {}` mines it now",
-                serde_json::to_value(miner.trigger.kind)
-                    .ok()
-                    .and_then(|v| v.as_str().map(str::to_string))
-                    .unwrap_or_default(),
-                miner.name
-            ));
-        }
         let credential = match &miner.credential {
             Some(c) => Some(CredentialView {
                 kind: match c {
@@ -727,12 +773,10 @@ impl AppServices {
             wing: miner.wing.clone(),
             credential,
             scope: miner.scope.clone(),
-            trigger: miner.trigger.clone(),
             config: miner.config.clone(),
             source_id: record.map(|r| r.id),
             last_run_at: record.and_then(|r| r.last_run_at),
             documents,
-            warnings,
         })
     }
 }
@@ -744,7 +788,7 @@ fn invalid(name: &str, reason: impl Into<String>) -> Error {
     }
 }
 
-fn find<'a>(miners: &'a [MinerDefinition], name: &str) -> Result<&'a MinerDefinition> {
+pub(super) fn find<'a>(miners: &'a [MinerDefinition], name: &str) -> Result<&'a MinerDefinition> {
     miners
         .iter()
         .find(|m| m.name == name)
@@ -754,7 +798,7 @@ fn find<'a>(miners: &'a [MinerDefinition], name: &str) -> Result<&'a MinerDefini
 }
 
 /// Whether a credential reference points at something that exists. The value itself is never read here.
-fn credential_available(credential: &CredentialRef) -> bool {
+pub(super) fn credential_available(credential: &CredentialRef) -> bool {
     match credential {
         CredentialRef::Env { name } => std::env::var_os(name).is_some_and(|v| !v.is_empty()),
         CredentialRef::File { path } => Path::new(path).is_file(),
@@ -789,7 +833,6 @@ fn apply(
                 wing: None,
                 credential: None,
                 scope: Map::new(),
-                trigger: MinerTrigger::default(),
                 config: Map::new(),
             }
         }
@@ -799,12 +842,11 @@ fn apply(
             "locator" => miner.locator = None,
             "wing" => miner.wing = None,
             "credential" => miner.credential = None,
-            "trigger" => miner.trigger = MinerTrigger::default(),
             other => {
                 return Err(invalid(
                     name,
                     format!(
-                        "cannot unset `{other}`; the fields that can be cleared are locator, wing, credential and trigger"
+                        "cannot unset `{other}`; the fields that can be cleared are locator, wing, credential"
                     ),
                 ));
             }
@@ -824,9 +866,6 @@ fn apply(
     }
     if patch.credential.is_some() {
         miner.credential = patch.credential;
-    }
-    if let Some(trigger) = patch.trigger {
-        miner.trigger = trigger;
     }
     for key in &patch.unset_scope {
         miner.scope.remove(key);

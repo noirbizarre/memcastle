@@ -24,9 +24,12 @@ pub mod palace_view;
 pub mod report_view;
 pub mod status;
 pub mod table;
+pub mod trigger_view;
+mod triggers;
 
 pub use miners::SetFlags;
 pub use status::StatusView;
+pub use triggers::TriggerSetFlags;
 
 use crate::app::{
     DbEndpointRequest, DbEndpointStatus, GeneratedToken, JobControlResult, RevokeResult,

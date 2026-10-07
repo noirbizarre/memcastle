@@ -42,8 +42,9 @@ mining, and acquiring history is not its job.
   on an unparsable time.
 - **The live integration is unchanged.**
   `integrations/pi/` keeps talking to the daemon over MCP.
-  What it will submit for background mining ([#26](https://github.com/noirbizarre/memcastle/issues/26), which is now only
-  about *when*) is `memcastle_mine` with `source: "pi"`; it never reads a session file.
+  What asks for background mining ([#26](https://github.com/noirbizarre/memcastle/issues/26), which was only about
+  *when*) is now a daemon-side schedule trigger ([ADR-043](043-source-triggers.md)), which asks for a run of the `pi`
+  source; the extension never reads a session file and keeps no timer.
 
 ## Consequences
 

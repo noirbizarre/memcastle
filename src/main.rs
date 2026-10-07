@@ -24,10 +24,10 @@ use cli::{
     AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, CompletionsArgs, DaemonCommand,
     DbCommand, DiaryCommand, DrawerCommand, EmbedArgs, ExtractArgs, IntegrationCommand, JobCommand,
     MigrateArgs, MineArgs, MinerCommand, NoteArgs, RecallArgs, RepairArgs, RoomCommand, SearchArgs,
-    ServeArgs, SourceCommand, WakeUpArgs, WingCommand,
+    ServeArgs, SourceCommand, TriggerCommand, WakeUpArgs, WingCommand,
 };
 use memcastle::app::{DbEndpointRequest, DbEndpointStatus, WakeUpBudget};
-use memcastle::client::{DaemonClient, SetFlags, StatusView};
+use memcastle::client::{DaemonClient, SetFlags, StatusView, TriggerSetFlags};
 use memcastle::config::{Config, Overrides};
 use memcastle::domain::{MemoryMode, NameKind, PalacePath, validate_name};
 use memcastle::store::SurrealStore;
@@ -237,6 +237,7 @@ async fn run_command(
         Command::Sources => cmd_sources(&config, mode).await,
         Command::Source(command) => cmd_source(&config, mode, command).await,
         Command::Miner(command) => cmd_miner(&config, command).await,
+        Command::Trigger(command) => cmd_trigger(&config, command).await,
         Command::Integration(command) => cmd_integration(&config, &command),
         Command::Note(args) => cmd_note(&config, mode, args).await,
         Command::Checkpoint(args) => cmd_checkpoint(&config, mode, args).await,
@@ -949,8 +950,6 @@ async fn cmd_miner(config: &Config, command: MinerCommand) -> Result<()> {
                 credential_oauth: args.credential_oauth,
                 scope: &args.scope,
                 unset_scope: &args.unset_scope,
-                trigger: args.trigger.as_deref(),
-                trigger_setting: &args.trigger_setting,
                 config: &args.setting,
                 unset_config: &args.unset_setting,
                 unset: &args.unset,
@@ -991,6 +990,78 @@ async fn cmd_miner(config: &Config, command: MinerCommand) -> Result<()> {
         MinerCommand::Run(args) => {
             let job = daemon.run_miner(&args.name, args.full).await?;
             print_submitted(&job)
+        }
+    }
+}
+
+/// `memcastle trigger ...`: configure what asks for a mining run on its own.
+///
+/// Every subcommand is an HTTP call to the daemon's trigger routes, the same ones MCP's read-only tools sit beside.
+/// Administrative like `miner`: no memory mode is sent, because the mode governs memory and not what the daemon is
+/// configured to do unattended.
+async fn cmd_trigger(config: &Config, command: TriggerCommand) -> Result<()> {
+    use memcastle::client::trigger_view as view;
+    let daemon = client(config, None);
+    match command {
+        TriggerCommand::List => {
+            let report = daemon.list_triggers().await?;
+            print_for_terminal_or_json(
+                |painter, width| view::render_triggers(&report, painter, width),
+                &report,
+            )
+        }
+        TriggerCommand::Get(args) => {
+            let trigger = daemon.show_trigger(&args.name).await?;
+            print_for_terminal_or_json(
+                |painter, _| view::render_trigger(&trigger, painter),
+                &trigger,
+            )
+        }
+        TriggerCommand::Set(args) => {
+            let patch = TriggerSetFlags {
+                miner: args.miner.as_deref(),
+                kind: args.kind.as_deref(),
+                credential_env: args.credential_env.as_deref(),
+                credential_file: args.credential_file.as_deref(),
+                settings: &args.setting,
+                unset_settings: &args.unset_setting,
+                unset: &args.unset,
+                enable: args.enable,
+            }
+            .into_patch()?;
+            let change = daemon.set_trigger(&args.name, &patch).await?;
+            print_for_terminal_or_json(|painter, _| view::render_change(&change, painter), &change)
+        }
+        TriggerCommand::Enable(args) => {
+            let change = daemon.set_trigger_enabled(&args.name, true).await?;
+            print_for_terminal_or_json(|painter, _| view::render_change(&change, painter), &change)
+        }
+        TriggerCommand::Disable(args) => {
+            let change = daemon.set_trigger_enabled(&args.name, false).await?;
+            print_for_terminal_or_json(|painter, _| view::render_change(&change, painter), &change)
+        }
+        TriggerCommand::Remove(args) => {
+            term::confirm(
+                &format!(
+                    "Remove the trigger `{}` from the configuration file?",
+                    args.name
+                ),
+                "removing the trigger",
+                args.confirm.yes,
+            )?;
+            daemon.remove_trigger(&args.name).await?;
+            print_for_terminal_or_json(
+                |painter, _| format!("{} trigger {}", painter.ok("Removed"), args.name),
+                &serde_json::json!({ "removed": args.name }),
+            )
+        }
+        TriggerCommand::Reload => {
+            let reload = daemon.reload_triggers().await?;
+            print_for_terminal_or_json(|_, _| view::render_reload(&reload), &reload)
+        }
+        TriggerCommand::Fire(args) => {
+            let outcome = daemon.fire_trigger(&args.name).await?;
+            print_for_terminal_or_json(|painter, _| view::render_fire(&outcome, painter), &outcome)
         }
     }
 }

@@ -36,6 +36,11 @@ description = "only sessions modified at or after this date (`2026-09`, `2026-09
 type = "path"
 description = "only sessions started in this working directory, or in directories matching a pattern such as `/work/*`"
 
+# What can trigger a run of this source. A capability, never an activation: nothing starts until the user defines and
+# enables a trigger (`memcastle trigger set`, docs/triggers.md). A timetable and a poll are the host's, for every source.
+[triggers.watch]
+description = "a session file is created or changed under the session directory"
+
 [build]
 # `--target-dir` pins the output where `output` says it is, whatever CARGO_TARGET_DIR the builder has set.
 command = ["cargo", "build", "--release", "--target", "wasm32-wasip2", "--target-dir", "target"]

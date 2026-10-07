@@ -102,6 +102,9 @@ env = []                     # environment variables the source may read
 type = "date"                # "string" (the default), "path" or "date"
 description = "only files modified at or after this date"
 
+[triggers.watch]             # optional: what can trigger a run beyond a timetable and a poll; see "Triggers"
+description = "a file under the directory is created or changed"
+
 [limits]
 memory_mib = 64              # at most mining.source_memory_mib
 timeout_secs = 30            # per call; at most mining.source_timeout_secs
@@ -122,6 +125,7 @@ fixtures = "fixtures"
 | `compatibility.memcastle` | A semver requirement. A pre-release of a release is held to the release's requirement. |
 | `permissions.filesystem.read` | `locator`, an absolute path, or a path starting with `~/`. A directory that does not exist is dropped, not an error. |
 | `options.<name>` | A key of lowercase letters, digits, `-` or `_` starting with a letter, with a one-line `description` and a `type` of `string`, `path` or `date`. Options are not permissions: they ask for nothing and are no part of what a user consents to. |
+| `triggers.<kind>` | `webhook` or `watch` (a timetable and a poll are every source's, so they are not declared), with a one-line `description`. A capability, not a permission: nothing starts because it is declared, and it is no part of what a user consents to. |
 | `permissions.process` | Bare program names (`git`), never a path or a command line. |
 | `permissions.oauth` | `client_id` and `token_url`, and `device_authorization_url`, `authorize_url` or both; every URL `https` (plain `http` only to `localhost`); each scope one word; and `capabilities.needs_credentials = true`. No client secret: a public client cannot keep one. |
 | `build.output` | Relative to the project; it must be a component, not a core module. |
@@ -149,6 +153,26 @@ An option either narrows or selects, and the two are not the same to the cursor,
   otherwise a run for one slice would move the cursor past documents another slice has not read yet.
 
 A case in the conformance fixtures can carry the options of a run in `options`, and runs through the same checks.
+
+## Triggers
+
+A source can say what can trigger a run of it, and that is all.
+Every source can be scheduled and polled, because those only mean "mine again", so a source that declares nothing is a
+complete source.
+`[triggers.watch]` says that a change to local files is a meaningful signal for the source (the user chooses which path
+to watch), and `[triggers.webhook]` that a delivery from an external service is (the user sets up the listener and the
+secret).
+`memcastle sources` and `GET /api/sources` list what each source supports, and a trigger of a kind the source does not
+declare is refused when the user tries to enable it.
+
+Declaring a trigger changes nothing else: it adds no WIT function, it is not a permission, it is not part of the consent
+digest and it does not change the manifest `format`.
+There is also no trigger code in a source.
+When a trigger fires, the daemon asks for an ordinary run and the source acquires what is new from its cursor with
+`discover` and `read`, so a source for a service with webhooks is one that reads the service on request, and the
+user's webhook only says *when*.
+Nothing a trigger carries (a delivery's body, the path that changed) reaches the source.
+See [Triggers](triggers.md).
 
 ## Permissions and consent
 

@@ -20,6 +20,10 @@ The files are the same for everyone and hold no data; every call the page then m
 checked like any other.
 With the dashboard off, `/ui` is guarded like every other path.
 
+A webhook delivery is not a request to this API and is not one of these exceptions: it goes to the separate
+[webhook listener](triggers.md#the-webhook-listener), which is off by default, loopback by default, and checks a
+delivery against its trigger's own shared secret, so no route of the main router is opened for it.
+
 Everything else is protected, including `/api/status`, `/api/shutdown`, every other REST route, and `/mcp`.
 A path that does not exist is refused with `401` too, rather than `404`.
 
