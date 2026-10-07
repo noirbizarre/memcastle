@@ -106,7 +106,7 @@ fn resolve_pattern(value: &str) -> Result<String> {
     use std::ffi::OsString;
     use std::path::Component;
 
-    let path = absolute(value)?;
+    let path = absolute_keeping_dots(value)?;
     let mut literal = PathBuf::new();
     let mut rest: Vec<OsString> = Vec::new();
     for component in path.components() {
@@ -137,6 +137,29 @@ fn resolve_pattern(value: &str) -> Result<String> {
     let mut out = resolved;
     out.extend(collapse_dots(rest));
     Ok(out.to_string_lossy().into_owned())
+}
+
+/// [`absolute`], except that a `..` is left where it is.
+///
+/// `std::path::absolute` asks the operating system on Windows, which resolves every `..` itself, even one after a `*`
+/// that it cannot know the extent of; elsewhere it leaves them. A relative or already absolute path is made absolute
+/// here, by joining the shell's directory, so [`collapse_dots`] is the one place `..` is decided. What is neither
+/// (`\work` or `C:work` on Windows) needs the system's own rules and keeps them.
+fn absolute_keeping_dots(value: &str) -> Result<PathBuf> {
+    let path = Path::new(value);
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    if !path.has_root()
+        && path
+            .components()
+            .next()
+            .is_none_or(|c| !matches!(c, std::path::Component::Prefix(_)))
+    {
+        let here = std::env::current_dir().map_err(|source| Error::io(".".to_string(), source))?;
+        return Ok(here.join(path));
+    }
+    absolute(value)
 }
 
 /// The segments of a pattern with each `..` applied to the literal segment before it, as the sources do to the value
