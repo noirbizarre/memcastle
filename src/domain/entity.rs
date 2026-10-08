@@ -36,7 +36,7 @@ pub struct Entity {
 
 /// A directed, bi-temporal edge between two entities.
 ///
-/// `valid_to: None` means "still true." Superseding a fact means closing the
+/// `valid_to: None` means "still asserted as valid", not undisputed truth. Superseding a fact means closing the
 /// old edge (`valid_to = now`) and opening a new one — never mutating a
 /// still-open edge in place — so an `as_of` query before the boundary keeps
 /// seeing the original claim.
@@ -66,6 +66,124 @@ pub struct Relationship {
     /// directly (a checkpoint), `Some` for one the extraction job derived.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<FactProvenance>,
+    /// Checkpoint drawer recording a directly asserted fact, distinct from extracted evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assertion: Option<DrawerId>,
+    /// Reconstructible links and the reason this assertion is current or disputed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle: Option<FactLifecycle>,
+}
+
+/// The meaning of a link between two assertions (not between their entities).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FactLinkKind {
+    /// The newer assertion explicitly replaces the older one.
+    Supersedes,
+    /// Two independent assertions disagree about a single-valued property.
+    Contradicts,
+    /// Independent evidence supports the same assertion.
+    Confirms,
+    /// A caller explicitly declared that one assertion adds precision to another.
+    Refines,
+    /// A caller retracted an assertion without replacing it.
+    Invalidates,
+}
+
+impl FactLinkKind {
+    /// Stable storage spelling, also used to derive replay-safe IDs.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Supersedes => "supersedes",
+            Self::Contradicts => "contradicts",
+            Self::Confirms => "confirms",
+            Self::Refines => "refines",
+            Self::Invalidates => "invalidates",
+        }
+    }
+}
+
+/// Why a lifecycle link was created.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FactLinkOrigin {
+    /// The conservative, versioned comparison policy made the link.
+    Inferred,
+    /// A checkpoint explicitly identified the fact to change.
+    Explicit,
+}
+
+/// A durable decision; `at` is when it was recorded, distinct from validity time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FactLink {
+    /// The assertion making the claim or correction.
+    pub from: RelationshipId,
+    /// The assertion it is compared with (itself for retractions).
+    pub to: RelationshipId,
+    /// What their relationship means.
+    pub kind: FactLinkKind,
+    /// Whether this decision was inferred or asserted.
+    pub origin: FactLinkOrigin,
+    /// Human-readable policy rule or explicit reason.
+    pub reason: String,
+    /// The recorded decision time.
+    pub at: DateTime<Utc>,
+    /// The drawer recording an explicit decision, when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<DrawerId>,
+}
+
+/// Belief state computed from validity and durable links, never stored on a fact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FactState {
+    /// Valid at the requested instant, without a known disagreement.
+    Current,
+    /// Valid, with another open assertion explicitly disagreeing.
+    Conflicting,
+    /// Closed by an explicit replacement.
+    Superseded,
+    /// Retracted without replacement.
+    Invalidated,
+    /// Not valid at the requested instant, without a known explicit reason.
+    Historical,
+}
+
+/// Explanation returned alongside a graph assertion.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FactLifecycle {
+    /// Status at the requested point in time.
+    pub state: FactState,
+    /// Decisions supporting this status.
+    pub links: Vec<FactLink>,
+    /// Leading candidate in an unresolved conflict, for ranking only; both assertions remain visible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preferred: Option<RelationshipId>,
+    /// The deterministic tie-break policy, exposed alongside the preference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub basis: Option<String>,
+}
+
+/// Compare resolved claims without asking an extraction provider to judge truth.
+/// Only `located_in` denotes one primary place in this version of the policy.
+/// Other predicates can have multiple objects, so difference is not disagreement.
+#[must_use]
+pub fn infer_fact_link(new: &Relationship, old: &Relationship) -> Option<FactLinkKind> {
+    if new.id == old.id
+        || new.from != old.from
+        || new.predicate != old.predicate
+        || new.valid_from >= old.valid_to.unwrap_or(DateTime::<Utc>::MAX_UTC)
+        || old.valid_from >= new.valid_to.unwrap_or(DateTime::<Utc>::MAX_UTC)
+    {
+        return None;
+    }
+    if new.to == old.to {
+        Some(FactLinkKind::Confirms)
+    } else if new.predicate == Predicate::LocatedIn.as_str() {
+        Some(FactLinkKind::Contradicts)
+    } else {
+        None
+    }
 }
 
 /// Where an extracted fact (or an entity mention) came from: the evidence,
@@ -297,7 +415,65 @@ pub fn require_label(field: &'static str, raw: &str) -> crate::error::Result<Str
 
 #[cfg(test)]
 mod tests {
-    use super::{EntityKind, Predicate, normalize_label, require_label};
+    use super::{
+        EntityKind, FactLinkKind, Predicate, Relationship, infer_fact_link, normalize_label,
+        require_label,
+    };
+    use crate::domain::{EntityId, RelationshipId};
+    use chrono::{Duration, Utc};
+
+    fn claim(
+        from: EntityId,
+        to: EntityId,
+        predicate: &str,
+        start: chrono::DateTime<Utc>,
+    ) -> Relationship {
+        Relationship {
+            id: RelationshipId::new(),
+            from,
+            to,
+            predicate: predicate.into(),
+            confidence: 0.6,
+            valid_from: start,
+            valid_to: None,
+            provenance: None,
+            assertion: None,
+            lifecycle: None,
+        }
+    }
+
+    #[test]
+    fn only_overlapping_single_valued_differences_are_inferred_as_conflicts() {
+        let subject = EntityId::new();
+        let (a, b) = (EntityId::new(), EntityId::new());
+        let now = Utc::now();
+        let old = claim(subject, a, "located_in", now - Duration::days(2));
+        let same = claim(subject, a, "located_in", now);
+        let different = claim(subject, b, "located_in", now);
+        assert_eq!(infer_fact_link(&same, &old), Some(FactLinkKind::Confirms));
+        assert_eq!(
+            infer_fact_link(&different, &old),
+            Some(FactLinkKind::Contradicts)
+        );
+        assert_eq!(
+            infer_fact_link(
+                &claim(subject, b, "works_on", now),
+                &claim(subject, a, "works_on", now)
+            ),
+            None
+        );
+        let mut retired = old.clone();
+        retired.valid_to = Some(now);
+        assert_eq!(
+            infer_fact_link(&different, &retired),
+            None,
+            "the validity end is exclusive"
+        );
+        assert_eq!(
+            infer_fact_link(&claim(EntityId::new(), b, "located_in", now), &old),
+            None
+        );
+    }
 
     #[test]
     fn an_empty_label_is_reported_against_the_field_that_held_it() {

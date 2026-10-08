@@ -21,7 +21,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::domain::{
-    Entity, EntityId, FactProvenance, NewRelationship, Relationship, RelationshipId, require_label,
+    DrawerId, Entity, EntityId, FactLink, FactLinkKind, FactLinkOrigin, FactProvenance,
+    NewRelationship, Relationship, RelationshipId, require_label,
 };
 use crate::error::{Error, Result};
 
@@ -38,9 +39,9 @@ pub(super) const ENTITY_COLUMNS: &str =
 /// The column list every relationship read projects. `in`/`out` are
 /// `relates_to`'s built-in graph-edge fields (every `RELATE`d table has
 /// them) — aliased to `from`/`to` to match [`Relationship`]'s field names.
-const RELATIONSHIP_COLUMNS: &str = "record::id(id) AS id, record::id(in) AS from, \
+pub(super) const RELATIONSHIP_COLUMNS: &str = "record::id(id) AS id, record::id(in) AS from, \
      record::id(out) AS to, predicate, confidence, \
-     <string>valid_from AS valid_from, valid_to, provenance";
+     <string>valid_from AS valid_from, valid_to, provenance, assertion";
 
 impl SurrealStore {
     /// Find the entity named `name` of kind `kind`, or create it.
@@ -124,6 +125,19 @@ impl SurrealStore {
         valid_from: DateTime<Utc>,
         provenance: Option<FactProvenance>,
     ) -> Result<Relationship> {
+        self.create_relationship_evidenced(id, new, valid_from, provenance, None)
+            .await
+    }
+
+    /// Create an assertion with its checkpoint drawer, or an extraction with its provenance.
+    pub async fn create_relationship_evidenced(
+        &self,
+        id: RelationshipId,
+        new: NewRelationship,
+        valid_from: DateTime<Utc>,
+        provenance: Option<FactProvenance>,
+        assertion: Option<DrawerId>,
+    ) -> Result<Relationship> {
         let predicate = require_label("predicate", &new.predicate)?;
         let relationship = Relationship {
             id,
@@ -134,9 +148,14 @@ impl SurrealStore {
             valid_from,
             valid_to: None,
             provenance,
+            assertion,
+            lifecycle: None,
         };
         if self.relationship_exists(id).await? {
-            return Ok(relationship);
+            return self
+                .get_relationship(id)
+                .await?
+                .ok_or_else(|| Error::RelationshipNotFound { id: id.to_string() });
         }
         self.relate(&relationship).await?;
         Ok(relationship)
@@ -150,6 +169,16 @@ impl SurrealStore {
         } else {
             Err(Error::RelationshipNotFound { id: id.to_string() })
         }
+    }
+
+    /// Read a single assertion, including its recorded validity, rather than reconstructing it on replay.
+    pub async fn get_relationship(&self, id: RelationshipId) -> Result<Option<Relationship>> {
+        let mut response = self.db.query(format!(
+            "SELECT {RELATIONSHIP_COLUMNS} FROM relates_to WHERE id = type::record('relates_to', $id)"
+        )).bind(("id", id.to_string())).await?;
+        let mut facts: Vec<Relationship> = super::take_rows(&mut response, 0)?;
+        self.attach_lifecycle(&mut facts, Utc::now()).await?;
+        Ok(facts.pop())
     }
 
     /// Whether a `relates_to` edge with this id exists.
@@ -189,6 +218,20 @@ impl SurrealStore {
         new: NewRelationship,
         at: DateTime<Utc>,
     ) -> Result<Relationship> {
+        self.supersede_relationship_with(old_id, new_id, new, at, None, "explicit correction")
+            .await
+    }
+
+    /// Supersede an assertion and record why in the same transaction as the validity change.
+    pub async fn supersede_relationship_with(
+        &self,
+        old_id: RelationshipId,
+        new_id: RelationshipId,
+        new: NewRelationship,
+        at: DateTime<Utc>,
+        evidence: Option<DrawerId>,
+        reason: &str,
+    ) -> Result<Relationship> {
         let predicate = require_label("predicate", &new.predicate)?;
         let replacement = Relationship {
             id: new_id,
@@ -200,23 +243,58 @@ impl SurrealStore {
             valid_to: None,
             // A supersession is somebody's assertion, not an extraction.
             provenance: None,
+            assertion: evidence,
+            lifecycle: None,
         };
         if self.relationship_exists(new_id).await? {
-            return Ok(replacement);
+            return self.get_relationship(new_id).await?.ok_or_else(|| {
+                Error::RelationshipNotFound {
+                    id: new_id.to_string(),
+                }
+            });
         }
         // Checked, not assumed: `UPDATE` on an id that is not there reports
         // success having changed nothing, which would leave the replacement
         // opened with no old edge closed — two current edges for one fact.
         self.require_relationship(old_id).await?;
+        if self
+            .get_relationship(old_id)
+            .await?
+            .is_some_and(|old| old.valid_to.is_some() || old.valid_from > at)
+        {
+            return Err(Error::invalid_input(
+                "relationship_id",
+                "the assertion is already closed or starts after the correction; inspect its history before correcting it",
+            ));
+        }
 
-        self.db
+        let link = FactLink {
+            from: new_id,
+            to: old_id,
+            kind: FactLinkKind::Supersedes,
+            origin: FactLinkOrigin::Explicit,
+            reason: reason.to_string(),
+            at,
+            evidence,
+        };
+
+        // The conditional close is inside the transaction: another daemon must not open a second replacement after
+        // the first writer closed this assertion between our preliminary read and this write.
+        super::retrying_on_conflict(|| async {
+            let mut response = self.db
             .query(
                 "BEGIN TRANSACTION; \
-                 UPDATE type::record('relates_to', $old_id) SET valid_to = $now; \
-                 RELATE (type::record('entity', $from))->relates_to->(type::record('entity', $to)) \
-                     SET id = type::record('relates_to', $new_id), predicate = $predicate, \
-                         confidence = $confidence, valid_from = <datetime>$now, valid_to = NONE; \
-                 COMMIT TRANSACTION;",
+                  LET $closed = (UPDATE relates_to SET valid_to = $now \
+                      WHERE id = type::record('relates_to', $old_id) AND !valid_to \
+                        AND valid_from <= <datetime>$now RETURN record::id(id) AS id); \
+                  IF array::len($closed) = 0 { THROW 'fact not open'; }; \
+                   RELATE (type::record('entity', $from))->relates_to->(type::record('entity', $to)) \
+                      SET id = type::record('relates_to', $new_id), predicate = $predicate, \
+                           confidence = $confidence, valid_from = <datetime>$now, valid_to = NONE, assertion = $evidence; \
+                  CREATE type::record('fact_link', $link_id) SET from_id = $new_id, to_id = $old_id, \
+                      kind = 'supersedes', origin = 'explicit', reason = $reason, \
+                      at = <datetime>$now, evidence = $evidence; \
+                  COMMIT TRANSACTION;",
             )
             .bind(("old_id", old_id.to_string()))
             .bind(("now", super::stored(replacement.valid_from)))
@@ -225,8 +303,17 @@ impl SurrealStore {
             .bind(("to", replacement.to.to_string()))
             .bind(("predicate", replacement.predicate.clone()))
             .bind(("confidence", replacement.confidence))
-            .await?
-            .check()?;
+            .bind(("link_id", super::lifecycle::link_id(&link)))
+            .bind(("reason", reason.to_string()))
+            .bind(("evidence", evidence.map(|id| id.to_string())))
+            .await?;
+            let errors: Vec<_> = response.take_errors().into_iter().collect();
+            if errors.is_empty() { return Ok(()); }
+            if errors.iter().any(|(_, error)| error.to_string().contains("fact not open")) {
+                return Err(Error::invalid_input("relationship_id", "the assertion was already corrected; inspect its history before correcting it"));
+            }
+            Err(super::root_cause(errors).expect("a failed transaction has a cause").into())
+        }).await?;
         Ok(replacement)
     }
 
@@ -242,23 +329,83 @@ impl SurrealStore {
         id: RelationshipId,
         at: DateTime<Utc>,
     ) -> Result<()> {
+        self.invalidate_relationship_with(id, at, None, "explicit retraction")
+            .await
+    }
+
+    /// Retraction and its reason are committed together; an already closed edge is a no-op.
+    pub async fn invalidate_relationship_with(
+        &self,
+        id: RelationshipId,
+        at: DateTime<Utc>,
+        evidence: Option<DrawerId>,
+        reason: &str,
+    ) -> Result<()> {
         // Checked first: the `UPDATE` below matches nothing for a missing id
         // and still succeeds, so a mistyped id would read as a retraction
         // that happened. An edge that exists but is already closed is fine —
         // that is a replayed invalidate, and `WHERE !valid_to` keeps its
         // original close time.
         self.require_relationship(id).await?;
-        self.db
-            // `WHERE !valid_to`: only close an edge that is still open, so
-            // repeating an invalidate (a replayed job item) keeps the
-            // original close time instead of silently moving it forward.
-            .query(
-                "UPDATE type::record('relates_to', $id) SET valid_to = $valid_to WHERE !valid_to",
-            )
-            .bind(("id", id.to_string()))
-            .bind(("valid_to", super::stored(at)))
-            .await?
-            .check()?;
+        if let Some(old) = self.get_relationship(id).await? {
+            if old.valid_to.is_some() {
+                return Ok(());
+            }
+            if old.valid_from > at {
+                return Err(Error::invalid_input(
+                    "relationship_id",
+                    "the assertion starts after the requested retraction; choose a later time",
+                ));
+            }
+        }
+        let link = FactLink {
+            from: id,
+            to: id,
+            kind: FactLinkKind::Invalidates,
+            origin: FactLinkOrigin::Explicit,
+            reason: reason.to_string(),
+            at,
+            evidence,
+        };
+        super::retrying_on_conflict(|| async {
+            let mut response = self
+                .db
+                .query(
+                    "BEGIN TRANSACTION; \
+                  IF !record::exists(type::record('fact_link', $link_id)) { \
+                    LET $closed = (UPDATE relates_to SET valid_to = $valid_to \
+                        WHERE id = type::record('relates_to', $id) AND !valid_to \
+                          AND valid_from <= <datetime>$valid_to RETURN record::id(id) AS id); \
+                    IF array::len($closed) = 0 { THROW 'fact not open'; }; \
+                    CREATE type::record('fact_link', $link_id) SET from_id = $id, to_id = $id, \
+                      kind = 'invalidates', origin = 'explicit', reason = $reason, \
+                     at = <datetime>$valid_to, evidence = $evidence; \
+                 }; COMMIT TRANSACTION;",
+                )
+                .bind(("id", id.to_string()))
+                .bind(("valid_to", super::stored(at)))
+                .bind(("link_id", super::lifecycle::link_id(&link)))
+                .bind(("reason", reason.to_string()))
+                .bind(("evidence", evidence.map(|id| id.to_string())))
+                .await?;
+            let errors: Vec<_> = response.take_errors().into_iter().collect();
+            if errors.is_empty() {
+                return Ok(());
+            }
+            if errors
+                .iter()
+                .any(|(_, error)| error.to_string().contains("fact not open"))
+            {
+                return Err(Error::invalid_input(
+                    "relationship_id",
+                    "the assertion was already corrected; inspect its history before retracting it",
+                ));
+            }
+            Err(super::root_cause(errors)
+                .expect("a failed transaction has a cause")
+                .into())
+        })
+        .await?;
         Ok(())
     }
 
@@ -273,6 +420,17 @@ impl SurrealStore {
     /// `include_expired: false` (the common case) returns only currently
     /// valid facts; `true` also returns superseded/invalidated history.
     pub async fn list_relationships(
+        &self,
+        entity: EntityId,
+        include_expired: bool,
+    ) -> Result<Vec<Relationship>> {
+        let mut edges = self.list_relationships_raw(entity, include_expired).await?;
+        self.attach_lifecycle(&mut edges, Utc::now()).await?;
+        Ok(edges)
+    }
+
+    /// Unadorned edges for a graph traversal; decorate the whole view in one batch afterwards.
+    pub async fn list_relationships_raw(
         &self,
         entity: EntityId,
         include_expired: bool,
@@ -294,7 +452,12 @@ impl SurrealStore {
             .bind(("include_expired", include_expired))
             .await?;
         let mut rows: Vec<EntityEdges> = super::take_rows(&mut response, 0)?;
-        Ok(rows.pop().map(|r| r.edges).unwrap_or_default())
+        let mut edges = rows.pop().map(|r| r.edges).unwrap_or_default();
+        if !include_expired {
+            // An open assertion that starts in the future is not currently valid.
+            edges.retain(|edge| edge.valid_from <= Utc::now());
+        }
+        Ok(edges)
     }
 
     /// The entity with this id, or `None`.
@@ -364,7 +527,7 @@ impl SurrealStore {
                 "RELATE (type::record('entity', $from))->relates_to->(type::record('entity', $to)) \
                  SET id = type::record('relates_to', $id), predicate = $predicate, \
                      confidence = $confidence, valid_from = <datetime>$valid_from, valid_to = $valid_to, \
-                     provenance = $provenance",
+                      provenance = $provenance, assertion = $assertion",
             )
             .bind(("id", relationship.id.to_string()))
             .bind(("from", relationship.from.to_string()))
@@ -385,6 +548,7 @@ impl SurrealStore {
                     .map(super::bindable)
                     .transpose()?,
             ))
+            .bind(("assertion", relationship.assertion.map(|id| id.to_string())))
             .await?
             .check()?;
         Ok(())
@@ -676,5 +840,84 @@ mod tests {
             store.list_relationships(alice, false).await.unwrap().len(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn correcting_an_already_replaced_assertion_cannot_open_another_successor() {
+        let store = memory_store().await;
+        let (subject, object) = two_entities(&store).await;
+        let original = open_relationship(&store, subject, object, "located_in", 0.8)
+            .await
+            .unwrap();
+        let first = RelationshipId::new();
+        store
+            .supersede_relationship(original.id, first, a_fact(subject, object), Utc::now())
+            .await
+            .unwrap();
+        let boundary = store
+            .get_relationship(original.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .valid_to;
+        let competing = RelationshipId::new();
+        let error = store
+            .supersede_relationship(original.id, competing, a_fact(subject, object), Utc::now())
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::InvalidInput { .. }), "{error:?}");
+        assert!(!store.relationship_exists(competing).await.unwrap());
+        assert_eq!(
+            store
+                .get_relationship(original.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .valid_to,
+            boundary
+        );
+        assert_eq!(
+            store
+                .list_relationships(subject, false)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn a_future_assertion_cannot_be_closed_before_its_validity_starts() {
+        let store = memory_store().await;
+        let (subject, object) = two_entities(&store).await;
+        let future = store
+            .create_relationship(
+                RelationshipId::new(),
+                a_fact(subject, object),
+                Utc::now() + chrono::Duration::days(1),
+            )
+            .await
+            .unwrap();
+        let retract = store
+            .invalidate_relationship(future.id, Utc::now())
+            .await
+            .unwrap_err();
+        assert!(matches!(retract, Error::InvalidInput { .. }), "{retract:?}");
+        let successor = RelationshipId::new();
+        let replace = store
+            .supersede_relationship(future.id, successor, a_fact(subject, object), Utc::now())
+            .await
+            .unwrap_err();
+        assert!(matches!(replace, Error::InvalidInput { .. }), "{replace:?}");
+        assert!(
+            store
+                .get_relationship(future.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .valid_to
+                .is_none()
+        );
+        assert!(!store.relationship_exists(successor).await.unwrap());
     }
 }

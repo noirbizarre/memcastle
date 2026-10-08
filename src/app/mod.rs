@@ -867,12 +867,53 @@ impl AppServices {
         // out-of-range (or NaN) confidence would be stored as given and
         // skew whatever later ranks facts by it. `contains` is false for NaN.
         for (index, item) in payload.items.iter().enumerate() {
+            if let Some(
+                FactMutation::Supersede {
+                    reason: Some(reason),
+                    ..
+                }
+                | FactMutation::Invalidate {
+                    reason: Some(reason),
+                    ..
+                },
+            ) = &item.fact
+                && reason.trim().is_empty()
+            {
+                return Err(Error::invalid_input(
+                    "payload",
+                    format!(
+                        "`items[{index}].fact.reason` must not be blank; omit it for the default explanation"
+                    ),
+                ));
+            }
+            if let Some(FactMutation::Link {
+                relationship_id,
+                other_id,
+                kind,
+                reason,
+            }) = &item.fact
+                && (relationship_id == other_id
+                    || reason.trim().is_empty()
+                    || !matches!(
+                        kind,
+                        crate::domain::FactLinkKind::Confirms
+                            | crate::domain::FactLinkKind::Contradicts
+                            | crate::domain::FactLinkKind::Refines
+                    ))
+            {
+                return Err(Error::invalid_input(
+                    "payload",
+                    format!(
+                        "`items[{index}].fact` needs two distinct relationship IDs, a reason and confirms, contradicts or refines"
+                    ),
+                ));
+            }
             let confidence = match &item.fact {
                 Some(
                     FactMutation::Add { confidence, .. }
                     | FactMutation::Supersede { confidence, .. },
                 ) => Some(*confidence),
-                Some(FactMutation::Invalidate { .. }) | None => None,
+                Some(FactMutation::Invalidate { .. } | FactMutation::Link { .. }) | None => None,
             };
             if confidence.is_some_and(|value| !(0.0..=1.0).contains(&value)) {
                 return Err(Error::invalid_input(

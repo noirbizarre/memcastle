@@ -22,9 +22,10 @@ mod cli;
 
 use cli::{
     AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, CompletionsArgs, DaemonCommand,
-    DbCommand, DiaryCommand, DrawerCommand, EmbedArgs, ExtractArgs, IntegrationCommand, JobCommand,
-    MigrateArgs, MineArgs, MinerCommand, NoteArgs, RecallArgs, RepairArgs, RoomCommand, SearchArgs,
-    ServeArgs, SourceCommand, TriggerCommand, WakeUpArgs, WingCommand,
+    DbCommand, DiaryCommand, DrawerCommand, EmbedArgs, ExtractArgs, FactCommand,
+    IntegrationCommand, JobCommand, MigrateArgs, MineArgs, MinerCommand, NoteArgs, RecallArgs,
+    RepairArgs, RoomCommand, SearchArgs, ServeArgs, SourceCommand, TriggerCommand, WakeUpArgs,
+    WingCommand,
 };
 use memcastle::app::{DbEndpointRequest, DbEndpointStatus, WakeUpBudget};
 use memcastle::client::{DaemonClient, SetFlags, StatusView, TriggerSetFlags};
@@ -250,6 +251,24 @@ async fn run_command(
         Command::Wing(cmd) => cmd_wing(&config, mode, cmd).await,
         Command::Room(cmd) => cmd_room(&config, mode, cmd).await,
         Command::Drawer(cmd) => cmd_drawer(&config, mode, cmd).await,
+        Command::Fact(FactCommand::History {
+            relationship_id,
+            as_of,
+        }) => {
+            relationship_id
+                .parse::<memcastle::domain::RelationshipId>()
+                .map_err(|_| {
+                    Error::invalid_input("relationship_id", "expected a relationship UUID")
+                })?;
+            let facts = client(&config, mode)
+                .fact_history(&relationship_id, as_of.as_deref())
+                .await?;
+            print_for_terminal_or_json(
+                |painter, _| memcastle::client::fact_view::render_history(&facts, painter),
+                &facts,
+            )?;
+            Ok(())
+        }
         Command::Auth(auth) => cmd_auth(&config, auth).await,
         Command::Db(db) => cmd_db(&config, db).await,
         // Handled before the configuration is loaded (see `async_main`); the

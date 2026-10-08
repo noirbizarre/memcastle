@@ -78,6 +78,11 @@ A `mentions` edge links a drawer to an entity it talks about, and both it and `r
 that names the drawer, job and extractor an extracted fact came from.
 A `drawer_extraction` row marks a drawer the job has read, beside the drawer rather than on it, so extraction never writes
 a drawer.
+`fact_link` records confirmation, contradiction, refinement, supersession and invalidation between graph assertion IDs;
+it also records why and when each decision was made.
+Direct checkpoint assertions reference their checkpoint drawer through `assertion` rather than extraction provenance.
+Neither a fact link nor its computed lifecycle state changes the canonical content of a drawer.
+See [fact lifecycle](adr/046-fact-lifecycle-and-contradictions.md).
 See [Extraction](configuration.md#extraction).
 
 Two more edge tables record what [deduplication](deduplication.md) decided and never act on it.

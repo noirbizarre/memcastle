@@ -105,6 +105,9 @@ pub enum FactMutation {
         predicate: String,
         /// Confidence in `[0, 1]`.
         confidence: f32,
+        /// Why this explicit replacement takes precedence over an inferred conflict.
+        #[serde(default)]
+        reason: Option<String>,
     },
     /// Close an existing edge without opening a replacement — the fact is
     /// retracted. Maps onto
@@ -112,6 +115,20 @@ pub enum FactMutation {
     Invalidate {
         /// The edge being closed.
         relationship_id: RelationshipId,
+        /// Why the assertion was retracted.
+        #[serde(default)]
+        reason: Option<String>,
+    },
+    /// Add an auditable explicit comparison without closing either assertion.
+    Link {
+        /// Assertion making the comparison.
+        relationship_id: RelationshipId,
+        /// Assertion it is compared with.
+        other_id: RelationshipId,
+        /// Either confirms, contradicts, or refines (never supersedes: use the atomic operation).
+        kind: super::FactLinkKind,
+        /// The caller's explanation.
+        reason: String,
     },
 }
 

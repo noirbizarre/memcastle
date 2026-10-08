@@ -8,7 +8,7 @@ use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Json};
 use serde::Deserialize;
 
-use crate::domain::EntityId;
+use crate::domain::{EntityId, RelationshipId};
 
 use super::extract::{ApiJson, ApiQuery};
 use super::{ApiError, ApiState, ModeHeader};
@@ -74,6 +74,8 @@ pub(super) struct RelationshipsParams {
     /// Also return superseded and retracted facts.
     #[serde(default)]
     include_expired: bool,
+    /// Validity at an RFC3339 instant or date, instead of now.
+    as_of: Option<String>,
 }
 
 /// `GET /api/entities/{id}/relationships`
@@ -84,12 +86,47 @@ pub(super) async fn entity_relationships(
     ApiQuery(params): ApiQuery<RelationshipsParams>,
 ) -> Result<impl IntoResponse, ApiError> {
     let id = parse_entity_id(&id)?;
-    Ok(Json(
+    if params.include_expired && params.as_of.is_some() {
+        return Err(crate::Error::invalid_input(
+            "as_of",
+            "choose as_of or include_expired, not both",
+        )
+        .into());
+    }
+    let facts = if let Some(raw) = params.as_of {
+        state
+            .app
+            .entity_relationships_at(id, crate::search::parse_instant("as_of", &raw)?, mode)
+            .await?
+    } else {
         state
             .app
             .entity_relationships(id, params.include_expired, mode)
-            .await?,
-    ))
+            .await?
+    };
+    Ok(Json(facts))
+}
+
+/// `GET /api/relationships/{id}/history`: exact assertion and its supporting decisions.
+pub(super) async fn fact_history(
+    State(state): State<ApiState>,
+    ModeHeader(mode): ModeHeader,
+    Path(id): Path<String>,
+    ApiQuery(params): ApiQuery<FactHistoryParams>,
+) -> Result<impl IntoResponse, ApiError> {
+    let id = id
+        .parse::<RelationshipId>()
+        .map_err(|_| crate::Error::invalid_input("id", "expected a relationship UUID"))?;
+    let at = params
+        .as_of
+        .map(|raw| crate::search::parse_instant("as_of", &raw))
+        .transpose()?;
+    Ok(Json(state.app.fact_history(id, at, mode).await?))
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct FactHistoryParams {
+    as_of: Option<String>,
 }
 
 /// `GET /api/entities/{id}/mentions`

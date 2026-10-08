@@ -22,6 +22,7 @@ A failure comes back as an MCP error result carrying the [error body](#errors) b
 | `memcastle_search` | `query`, `limit?`, `wing?`, `room?`, `ranking?`, `tags?`, `source_kind?`, `as_of?`, `from?`, `until?`, `include_historical?`, `expand?` | Search drawer content: lexical, semantic or hybrid, see [Searching](#searching). |
 | `memcastle_recall` | the same, without `room` | Verbatim recall of matching content. |
 | `memcastle_history` | `drawer_id` | How one piece of knowledge evolved: every version of a drawer's supersession chain, oldest first, see [History](#history). |
+| `memcastle_fact_history` | `relationship_id`, `as_of?` | An assertion and its linked confirmations, conflicts or corrections, with provenance and reasons. Read-only. |
 | `memcastle_wake_up` | `agent_identity`, `wing?`, `max_items?`, `max_bytes?` | Session-start context for an agent. |
 | `memcastle_diary_write` | `agent_identity`, `wing`, `content` | Write a diary entry. |
 | `memcastle_diary_read` | `agent_identity`, `wing`, `limit?` | Read an agent's newest diary entries. |
@@ -62,7 +63,7 @@ and some directories reject a tool whose hint is missing.
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
 |---|---|---|---|---|
-| `memcastle_status`, `memcastle_history`, `memcastle_wake_up`, `memcastle_diary_read`, `memcastle_job_list`, `memcastle_job_get`, `memcastle_miner_list`, `memcastle_miner_get` | true | false | true | false |
+| `memcastle_status`, `memcastle_history`, `memcastle_fact_history`, `memcastle_wake_up`, `memcastle_diary_read`, `memcastle_job_list`, `memcastle_job_get`, `memcastle_miner_list`, `memcastle_miner_get` | true | false | true | false |
 | `memcastle_search`, `memcastle_recall` | true | false | true | true |
 | `memcastle_set_mode` | false | false | true | false |
 | `memcastle_mine` | false | false | true | true |
@@ -117,7 +118,11 @@ MemCastle does not decide what is worth remembering; the calling integration doe
 | `tags` | Free-form labels stored with the drawer. Required, may be empty. |
 | `source` | Where the memory came from: `kind` is `file` or `manual` (the MCP schema allows only these; REST and the CLI also accept `transcript` and `note`, and store any other value as `other`), `uri` and `agent` are optional. |
 | `name` | Optional name for the drawer, unique within its room, so it can be addressed as `wing/room/name`. A name held by another drawer fails the item with `memcastle::palace::drawer_name_taken`; an unusable one is refused at submission. |
-| `fact` | Optional knowledge-graph change made alongside the drawer: `{"op": "add" \| "supersede" \| "invalidate", ...}`; a `confidence` outside 0 to 1 is refused at submission. |
+| `fact` | Optional knowledge-graph change made alongside the drawer: `{"op": "add" \| "supersede" \| "invalidate" \| "link", ...}`; a `confidence` outside 0 to 1 is refused at submission. |
+
+`supersede` and `invalidate` accept an optional `reason` and record the checkpoint drawer as the correction's evidence.
+`link` takes `relationship_id`, `other_id`, `kind` (`confirms`, `contradicts` or `refines`) and a required nonblank `reason`.
+It relates two existing assertions without closing either; use `supersede` to replace one atomically.
 
 Over MCP, `payload` is a JSON object, and the tool's input schema describes its shape.
 A JSON-encoded string of that object is accepted too, because some clients serialise it before sending.
@@ -129,6 +134,7 @@ blamed on `payload`, so a job never completes having stored nothing.
 A job that is interrupted resumes where it stopped and never stores an item twice.
 An unnamed item whose content is identical to a drawer already valid in its room is not stored again;
 it still counts as done, and the job's result reports `{"items": n, "duplicates": d}`.
+A fact-bearing item always keeps its own drawer, even if the content matches, so its assertion or correction has evidence.
 A named item is always stored, and a likely copy (a typo, a case variant) is stored and linked, never merged:
 see [Deduplication](deduplication.md).
 
@@ -213,7 +219,8 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `GET /api/drawers/{id}/history` | How the knowledge a drawer belongs to evolved: `{drawer, versions}`, every version of its supersession chain oldest first, from any version of it. See [History](#history). | none |
 | `POST /api/drawers/{id}/mentions` | Record that a drawer mentions an entity, for graph expansion: `201` when linked, `200` when it already was. The name converges on an entity it is a variant of. | JSON body: `name`, `kind` |
 | `GET /api/entities` | List entities of the [knowledge graph](#the-knowledge-graph), by name. | query string: `name` (contains, any case), `kind`, `limit` (default 50, at most 200) |
-| `GET /api/entities/{id}/relationships` | The relationships touching an entity, with provenance and validity. | query string: `include_expired` |
+| `GET /api/entities/{id}/relationships` | The relationships touching an entity, with provenance, validity and lifecycle explanation. | query string: `include_expired` or `as_of` (mutually exclusive) |
+| `GET /api/relationships/{id}/history` | A fact and the facts linked to it, including historical assertions, decisions and evidence. | query string: `as_of?` (RFC 3339 or date) |
 | `GET /api/entities/{id}/mentions` | The drawers that mention an entity, with the provenance of each link and the name as that drawer spelled it. | none |
 | `GET /api/entities/{id}/candidates` | The entities this one resembles without having been equated with, or that resemble it. | none |
 | `POST /api/entities/{id}/aliases` | Record another spelling of an entity, so later sightings converge on it. | JSON body: `alias` |
@@ -618,8 +625,19 @@ A relationship says what it relates and when it holds, and where an extractor de
 ```
 
 `provenance` is absent on a fact somebody asserted directly.
+For a directly asserted checkpoint fact, `assertion` names its checkpoint drawer instead.
 A fact stops being current (`valid_to` is set) when the drawer it was read from is superseded, and `include_expired`
 returns that history too.
+Each graph assertion also has `lifecycle: {state, links, preferred?, basis?}`.
+States are `current`, `conflicting`, `superseded`, `invalidated` and `historical`.
+Each link has `from`, `to`, `kind`, `origin`, `reason`, `at` and optional `evidence` (a drawer ID).
+`preferred` is a deterministic ranking hint among conflicting assertions, never a declaration that the others are false.
+The policy ranks direct assertions first, then confidence, validity start and fact ID; both sides remain visible.
+The same metadata appears in `/api/graph`, the entity relationships route and `memcastle fact history`.
+An `as_of` request computes the state at that instant and cannot be combined with `include_expired` on an entity listing.
+The exact fact-history route accepts the ID of any related assertion, even one no longer current.
+Drawer search/recall still returns canonical evidence and uses the existing validity filters.
+A conflict does not delete or hide its source drawer.
 Extracted facts use a closed vocabulary: kinds `person`, `organization`, `project`, `tool`, `place`, `concept` and `other`;
 predicates `works_on`, `member_of`, `depends_on`, `uses`, `owns`, `part_of`, `located_in` and `related_to`.
 An unknown entity is a `404` with `memcastle::graph::entity_not_found`.
@@ -631,7 +649,8 @@ confidence, so resolving two spellings to one entity loses neither.
 Names that could not be settled stay separate entities, listed by `GET /api/entities/{id}/candidates`.
 There is no MCP tool for any of it.
 [Deduplication](deduplication.md) has the rules.
-The reasoning is in [ADR-024](adr/024-entity-extraction-as-an-enrich-job.md).
+The reasoning is in [ADR-024](adr/024-entity-extraction-as-an-enrich-job.md) and
+[the lifecycle decision](adr/046-fact-lifecycle-and-contradictions.md).
 
 ### Submitting jobs
 

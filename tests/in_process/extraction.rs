@@ -7,8 +7,10 @@
 use crate::common;
 
 use std::path::Path;
+use std::process::Stdio;
 use std::time::{Duration, SystemTime};
 
+use assert_cmd::cargo::cargo_bin;
 use axum::routing::post;
 use axum::{Json, Router};
 use common::{TestDaemon, wait_for_job_status};
@@ -144,6 +146,17 @@ async fn mined_fixtures_populate_the_graph_with_provenance_and_temporal_validity
     assert_eq!(provenance["origin"]["document"], "team.md");
     assert!(provenance["job_id"].is_string());
     assert!(provenance["drawer"].is_string());
+    assert_eq!(works_on["lifecycle"]["state"], "current");
+    let history = get(
+        base,
+        &format!(
+            "/api/relationships/{}/history",
+            works_on["id"].as_str().unwrap()
+        ),
+    )
+    .await;
+    assert_eq!(history.as_array().unwrap().len(), 1);
+    assert_eq!(history[0]["provenance"]["drawer"], provenance["drawer"]);
     assert!(ada.iter().any(|edge| edge["predicate"] == "member_of"));
 
     // The drawer it names is the one mined, verbatim.
@@ -281,6 +294,194 @@ async fn a_changed_document_retires_the_facts_it_no_longer_supports_and_keeps_th
         .find(|edge| edge["valid_to"].is_string())
         .expect("the old fact is closed");
     assert_ne!(closed["id"], current[0]["id"]);
+    assert_eq!(closed["lifecycle"]["state"], "superseded");
+    let history = get(
+        base,
+        &format!(
+            "/api/relationships/{}/history",
+            closed["id"].as_str().unwrap()
+        ),
+    )
+    .await;
+    assert_eq!(history.as_array().unwrap().len(), 2);
+    assert!(history.as_array().unwrap().iter().any(|fact| {
+        fact["lifecycle"]["links"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|link| link["kind"] == "supersedes")
+    }));
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_checkpoint_correction_is_explained_through_fact_history_and_as_of_reads() {
+    let daemon = daemon().await;
+    let base = &daemon.base_url;
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "a.md", "Ada works on MemCastle.", 1_000);
+    mine(base, dir.path()).await;
+    settle(base).await;
+    let old = relationships(base, "Ada", false).await.remove(0);
+    let id = old["id"].as_str().unwrap();
+    let subject = old["from"].as_str().unwrap();
+    let object = old["to"].as_str().unwrap();
+    for invalid in [
+        json!({"op": "link", "relationship_id": id, "other_id": id, "kind": "confirms", "reason": "same assertion"}),
+        json!({"op": "link", "relationship_id": id, "other_id": "00000000-0000-4000-8000-000000000001", "kind": "refines", "reason": "   "}),
+        json!({"op": "link", "relationship_id": id, "other_id": "00000000-0000-4000-8000-000000000001", "kind": "supersedes", "reason": "use the atomic operation"}),
+        json!({"op": "supersede", "relationship_id": id, "from": subject, "to": object,
+            "predicate": "works_on", "confidence": 1.0, "reason": " "}),
+        json!({"op": "invalidate", "relationship_id": id, "reason": " "}),
+    ] {
+        let response = client()
+            .post(format!("{base}/api/jobs"))
+            .json(&json!({"type": "checkpoint", "payload": {"items": [{
+                "destination": "general", "content": "invalid correction", "tags": [],
+                "source": {"kind": "manual"}, "fact": invalid
+            }]}}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+        let error: Value = response.json().await.unwrap();
+        assert_eq!(error["code"], "memcastle::input::invalid");
+    }
+    let submitted: Job = client().post(format!("{base}/api/jobs"))
+        .json(&json!({"type": "checkpoint", "requested_by": "test", "payload": {"items": [{
+            "destination": "general", "content": "Correction: Ada still works on MemCastle.", "tags": [],
+            "source": {"kind": "manual", "agent": "test"},
+            "fact": {"op": "supersede", "relationship_id": id, "from": subject, "to": object,
+                "predicate": "works_on", "confidence": 1.0, "reason": "confirmed by Ada"}
+        }]}})).send().await.unwrap().json().await.unwrap();
+    wait_for_job_status(&client(), base, submitted.id, JobStatus::Completed).await;
+
+    let history = get(base, &format!("/api/relationships/{id}/history")).await;
+    let assertions = history.as_array().unwrap();
+    assert_eq!(assertions.len(), 2, "{history}");
+    let previous = assertions.iter().find(|fact| fact["id"] == id).unwrap();
+    assert_eq!(previous["lifecycle"]["state"], "superseded");
+    assert_eq!(
+        previous["lifecycle"]["links"][0]["reason"],
+        "confirmed by Ada"
+    );
+    let replacement = assertions.iter().find(|fact| fact["id"] != id).unwrap();
+    assert_eq!(replacement["lifecycle"]["state"], "current");
+    assert!(replacement["assertion"].is_string());
+
+    let boundary = replacement["valid_from"].as_str().unwrap();
+    let at: Value = client()
+        .get(format!("{base}/api/entities/{subject}/relationships"))
+        .query(&[("as_of", boundary)])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(at.as_array().unwrap().len(), 1, "{at}");
+    assert_eq!(at[0]["id"], replacement["id"]);
+    for path in [
+        format!("/api/entities/{subject}/relationships?include_expired=true&as_of=2026-01-01"),
+        "/api/relationships/not-a-uuid/history".to_string(),
+        format!("/api/relationships/{id}/history?as_of=not-a-date"),
+    ] {
+        let response = client().get(format!("{base}{path}")).send().await.unwrap();
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::BAD_REQUEST,
+            "{path}"
+        );
+        let error: Value = response.json().await.unwrap();
+        assert_eq!(
+            error["code"], "memcastle::input::invalid",
+            "{path}: {error}"
+        );
+    }
+
+    // The CLI must use the same authenticated REST read and pass as_of through without changing its meaning.
+    let output = tokio::process::Command::new(cargo_bin("memcastle"))
+        .env("MEMCASTLE_PALACE_PATH", &daemon.palace_path)
+        .env_remove("MEMCASTLE_MODE")
+        .env_remove("MEMCASTLE_AUTH_ENABLED")
+        .env_remove("MEMCASTLE_AUTH_TOKEN")
+        .stdin(Stdio::null())
+        .args(["--json", "fact", "history", id, "--as-of", boundary])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cli: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(cli[0]["id"], previous["id"]);
+    assert_eq!(cli[1]["id"], replacement["id"]);
+    assert_eq!(cli[1]["lifecycle"]["state"], "current");
+
+    let pretty = tokio::process::Command::new(cargo_bin("memcastle"))
+        .env("MEMCASTLE_PALACE_PATH", &daemon.palace_path)
+        .env("CLICOLOR_FORCE", "1")
+        .stdin(Stdio::null())
+        .args(["fact", "history", id])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        pretty.status.success(),
+        "{}",
+        String::from_utf8_lossy(&pretty.stderr)
+    );
+    // Piped output is JSON regardless of terminal-colour settings.
+    let piped: Value = serde_json::from_slice(&pretty.stdout).unwrap();
+    assert_eq!(piped.as_array().unwrap().len(), 2);
+
+    let malformed = tokio::process::Command::new(cargo_bin("memcastle"))
+        .env("MEMCASTLE_PALACE_PATH", &daemon.palace_path)
+        .stdin(Stdio::null())
+        .args(["fact", "history", "not-a-uuid"])
+        .output()
+        .await
+        .unwrap();
+    assert!(!malformed.status.success());
+    assert!(String::from_utf8_lossy(&malformed.stderr).contains("relationship_id"));
+
+    let refined: Job = client().post(format!("{base}/api/jobs"))
+        .json(&json!({"type": "checkpoint", "requested_by": "test", "payload": {"items": [{
+            "destination": "general", "content": "The correction refines the earlier claim.", "tags": [],
+            "source": {"kind": "manual", "agent": "test"},
+            "fact": {"op": "link", "relationship_id": replacement["id"], "other_id": id,
+                "kind": "refines", "reason": "explicitly reviewed"}
+        }]}})).send().await.unwrap().json().await.unwrap();
+    wait_for_job_status(&client(), base, refined.id, JobStatus::Completed).await;
+    let linked = get(base, &format!("/api/relationships/{id}/history")).await;
+    assert!(
+        linked
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|fact| fact["lifecycle"]["links"].as_array().unwrap())
+            .any(|link| link["kind"] == "refines" && link["reason"] == "explicitly reviewed")
+    );
+    let session = common::mcp::connect(base).await;
+    common::mcp::set_mode(&session, "read_only").await;
+    let via_mcp = common::mcp::call(
+        &session,
+        "memcastle_fact_history",
+        json!({"relationship_id": id, "as_of": boundary}),
+    )
+    .await
+    .ok();
+    assert_eq!(via_mcp.as_array().unwrap().len(), 2);
+    assert!(
+        via_mcp
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|fact| fact["id"] == replacement["id"])
+    );
+    session.cancel().await.unwrap();
     daemon.shutdown().await;
 }
 

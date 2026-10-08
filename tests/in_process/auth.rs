@@ -219,6 +219,7 @@ async fn every_other_route_is_guarded_including_ones_that_do_not_exist() {
         (Method::GET, "/ui/"),
         (Method::GET, "/ui/index.html"),
         (Method::GET, "/api/entities/x/relationships"),
+        (Method::GET, "/api/relationships/x/history"),
         (Method::GET, "/api/entities/x/mentions"),
         (Method::GET, "/api/entities/x/candidates"),
         (Method::POST, "/api/entities/x/aliases"),

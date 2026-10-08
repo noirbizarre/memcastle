@@ -190,7 +190,7 @@ async fn write_graph(
             drawer.id.0,
             &format!("extract-edge:{from}:{}:{to}", relation.predicate.as_str()),
         );
-        store
+        let fact = store
             .create_relationship_with(
                 id,
                 NewRelationship {
@@ -203,6 +203,11 @@ async fn write_graph(
                 Some(provenance.clone()),
             )
             .await?;
+        // Link after the edge exists but before the marker: a crash here replays stable link IDs.
+        store.reconcile_extracted_fact(&fact).await?;
+        if let Some(predecessor) = drawer.supersedes {
+            store.link_revised_extraction(&fact, predecessor).await?;
+        }
         written += 1;
     }
 
@@ -453,6 +458,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn independent_extractions_conflict_without_overwriting_either_drawer() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let dir = tempfile::tempdir().unwrap();
+        let graph = |place: &str| {
+            let wire: crate::extract::WireGraph = serde_json::from_value(json!({
+                "entities": [
+                    {"name": "Ada", "kind": "person"},
+                    {"name": place, "kind": "place"}
+                ],
+                "relations": [{"subject": "Ada", "predicate": "located_in", "object": place, "confidence": 0.9}]
+            })).unwrap();
+            Extraction::new(
+                fake::Canned(wire.into_graph()),
+                &ExtractionConfig::default(),
+            )
+        };
+        write(dir.path(), "a.md", "Ada is in Paris.");
+        mine(&store, dir.path()).await;
+        let (_, result) = extract_with(&store, graph("Paris"), JobControl::default()).await;
+        assert_eq!(result.unwrap(), JobOutcome::Completed);
+
+        write(dir.path(), "b.md", "Ada is in London.");
+        mine(&store, dir.path()).await;
+        let (_, result) = extract_with(&store, graph("London"), JobControl::default()).await;
+        assert_eq!(result.unwrap(), JobOutcome::Completed);
+
+        let ada = store.find_entity_by_name("Ada").await.unwrap().unwrap();
+        let current = store.list_relationships(ada.id, false).await.unwrap();
+        assert_eq!(current.len(), 2);
+        assert!(
+            current
+                .iter()
+                .all(|f| f.lifecycle.as_ref().unwrap().state
+                    == crate::domain::FactState::Conflicting)
+        );
+        assert_eq!(
+            store.list_drawers(None).await.unwrap().len(),
+            2,
+            "both pieces of evidence remain canonical"
+        );
+        let again = extract(&store).await;
+        assert_eq!(again.result.as_ref().unwrap()["drawers"], 0);
+        assert_eq!(
+            store.fact_history(current[0].id, None).await.unwrap().len(),
+            2
+        );
+    }
+
+    #[tokio::test]
     async fn a_second_sweep_finds_nothing_to_read() {
         let store = SurrealStore::connect_memory_for_tests().await;
         let dir = tempfile::tempdir().unwrap();
@@ -518,6 +572,19 @@ mod tests {
         let parser = store.find_entity_by_name("Parser").await.unwrap().unwrap();
         assert_eq!(new.to, parser.id);
         assert_ne!(old.to, parser.id);
+        assert_eq!(
+            old.lifecycle.as_ref().unwrap().state,
+            crate::domain::FactState::Superseded
+        );
+        assert!(
+            old.lifecycle
+                .as_ref()
+                .unwrap()
+                .links
+                .iter()
+                .any(|link| link.kind == crate::domain::FactLinkKind::Supersedes
+                    && link.from == new.id)
+        );
         // A search of the present sees only the new fact.
         let ada = store.find_entity_by_name("Ada").await.unwrap().unwrap();
         let current = store.list_relationships(ada.id, false).await.unwrap();

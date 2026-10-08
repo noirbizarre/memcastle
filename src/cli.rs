@@ -201,6 +201,9 @@ pub enum Command {
     /// is an alias.
     #[command(subcommand, alias = "drawers")]
     Drawer(DrawerCommand),
+    /// Inspect graph assertions and their linked evidence by fact UUID.
+    #[command(subcommand)]
+    Fact(FactCommand),
     /// Manage the daemon's authentication token. Administrative, and never
     /// available to MCP clients.
     #[command(subcommand)]
@@ -217,6 +220,19 @@ pub enum Command {
     Completions(CompletionsArgs),
     /// Maintenance operations (stale-data sweep, ...). Not yet implemented.
     Maintenance,
+}
+
+/// Read-only inspection of fact lifecycle decisions.
+#[derive(Debug, Subcommand)]
+pub enum FactCommand {
+    /// Show the assertion and linked confirmations, conflicts and corrections.
+    History {
+        /// UUID of the assertion to inspect.
+        relationship_id: String,
+        /// Evaluate lifecycle at this date or RFC 3339 instant.
+        #[arg(long)]
+        as_of: Option<String>,
+    },
 }
 
 /// `memcastle daemon` subcommands: the daemon as a background process.

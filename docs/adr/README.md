@@ -177,3 +177,6 @@ The history is the value.
 - [ADR-045](045-codex-history-is-an-installed-webassembly-source.md) — Codex rollout history is an installed WebAssembly
   source built from `sources/codex/`, with read-only access only to the dated rollout directory and no Codex-specific
   code in the daemon core
+- [ADR-046](046-fact-lifecycle-and-contradictions.md) — graph assertions keep auditable confirmation, contradiction and
+  supersession links; unresolved conflicts remain visible and explicit corrections retain their evidence
+  (builds on ADR-024, ADR-025 and ADR-032)

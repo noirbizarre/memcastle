@@ -34,8 +34,9 @@ pub use drawer::{
     Drawer, DrawerHistory, Origin, Provenance, Source, SourceKind, content_hash, sha256_hex,
 };
 pub use entity::{
-    Entity, EntityKind, FactProvenance, Mention, NewRelationship, Observation, Predicate,
-    Relationship, normalize_label, require_label,
+    Entity, EntityKind, FactLifecycle, FactLink, FactLinkKind, FactLinkOrigin, FactProvenance,
+    FactState, Mention, NewRelationship, Observation, Predicate, Relationship, infer_fact_link,
+    normalize_label, require_label,
 };
 pub use extraction::{ExtractedEntity, ExtractedGraph, ExtractedRelation, Limits, MAX_NAME_CHARS};
 pub use fingerprint::{

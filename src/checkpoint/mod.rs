@@ -111,7 +111,9 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: CheckpointParams) -> R
         // item is an identity of its own, and a diary entry is only compared
         // with its own agent's.
         let rules = crate::dedup::Rules {
-            skip_exact: item.name.is_none(),
+            // A fact or correction needs its own durable evidence: pointing at a skipped drawer would lose the
+            // assertion's origin, and reusing another item's drawer would misattribute the correction.
+            skip_exact: item.name.is_none() && item.fact.is_none(),
             per_agent: item.destination == CheckpointDestination::Diary,
         };
         match crate::dedup::write(store, &drawer, ctx.dedup(), rules).await? {
@@ -126,7 +128,9 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: CheckpointParams) -> R
         }
 
         if let Some(fact) = &item.fact {
-            apply_fact_mutation(store, job, index, fact).await?;
+            apply_fact_mutation(store, job, index, drawer.id, fact).await?;
+            // A graph reader must refresh when a correction changes which assertion is current.
+            ctx.events().publish(Event::entity_graph_changed());
         }
 
         checkpoint_progress(ctx, job, index + 1, payload.items.len(), duplicates).await?;
@@ -201,6 +205,7 @@ async fn apply_fact_mutation(
     store: &SurrealStore,
     job: &Job,
     index: usize,
+    evidence: DrawerId,
     fact: &FactMutation,
 ) -> Result<()> {
     let edge_id = RelationshipId::derive(job.id.0, &format!("checkpoint-edge:{index}"));
@@ -212,7 +217,7 @@ async fn apply_fact_mutation(
             confidence,
         } => {
             store
-                .create_relationship(
+                .create_relationship_evidenced(
                     edge_id,
                     NewRelationship {
                         from: *subject,
@@ -221,6 +226,8 @@ async fn apply_fact_mutation(
                         confidence: *confidence,
                     },
                     Utc::now(),
+                    None,
+                    Some(evidence),
                 )
                 .await?;
         }
@@ -230,9 +237,10 @@ async fn apply_fact_mutation(
             to,
             predicate,
             confidence,
+            reason,
         } => {
             store
-                .supersede_relationship(
+                .supersede_relationship_with(
                     *relationship_id,
                     edge_id,
                     NewRelationship {
@@ -242,12 +250,61 @@ async fn apply_fact_mutation(
                         confidence: *confidence,
                     },
                     Utc::now(),
+                    Some(evidence),
+                    reason.as_deref().unwrap_or("checkpoint correction"),
                 )
                 .await?;
         }
-        FactMutation::Invalidate { relationship_id } => {
+        FactMutation::Invalidate {
+            relationship_id,
+            reason,
+        } => {
             store
-                .invalidate_relationship(*relationship_id, Utc::now())
+                .invalidate_relationship_with(
+                    *relationship_id,
+                    Utc::now(),
+                    Some(evidence),
+                    reason.as_deref().unwrap_or("checkpoint retraction"),
+                )
+                .await?;
+        }
+        FactMutation::Link {
+            relationship_id,
+            other_id,
+            kind,
+            reason,
+        } => {
+            if !matches!(
+                kind,
+                crate::domain::FactLinkKind::Confirms
+                    | crate::domain::FactLinkKind::Contradicts
+                    | crate::domain::FactLinkKind::Refines
+            ) || relationship_id == other_id
+                || reason.trim().is_empty()
+            {
+                return Err(Error::invalid_input(
+                    "fact",
+                    "link needs two distinct facts, a reason and confirms, contradicts or refines",
+                ));
+            }
+            if !store.relationship_exists(*relationship_id).await?
+                || !store.relationship_exists(*other_id).await?
+            {
+                return Err(Error::invalid_input(
+                    "fact",
+                    "both linked relationship IDs must exist",
+                ));
+            }
+            store
+                .record_fact_link(&crate::domain::FactLink {
+                    from: *relationship_id,
+                    to: *other_id,
+                    kind: *kind,
+                    origin: crate::domain::FactLinkOrigin::Explicit,
+                    reason: reason.clone(),
+                    at: Utc::now(),
+                    evidence: Some(evidence),
+                })
                 .await?;
         }
     }
@@ -494,6 +551,179 @@ mod tests {
         assert_eq!(relationships.len(), 1);
         assert_eq!(relationships[0].predicate, "employee_of");
         assert_eq!(relationships[0].to, acme.id);
+        assert_eq!(
+            relationships[0].assertion,
+            Some(DrawerId::derive(job.id.0, "checkpoint-drawer:0"))
+        );
+    }
+
+    #[tokio::test]
+    async fn an_exact_duplicate_with_a_fact_keeps_its_own_evidence_drawer() {
+        let store = memory_store().await;
+        let subject = store
+            .get_or_create_entity("Ada", "person", json!({}))
+            .await
+            .unwrap()
+            .id;
+        let object = store
+            .get_or_create_entity("Acme", "organization", json!({}))
+            .await
+            .unwrap()
+            .id;
+        let first = item(CheckpointDestination::General, "Ada joined Acme");
+        let mut second = first.clone();
+        second.fact = Some(FactMutation::Add {
+            subject,
+            predicate: "member_of".into(),
+            object,
+            confidence: 1.0,
+        });
+        run_items(&store, vec![first, second]).await.unwrap();
+        assert_eq!(store.list_drawers(None).await.unwrap().len(), 2);
+        let fact = store
+            .list_relationships(subject, false)
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert!(
+            store
+                .get_drawer(fact.assertion.unwrap())
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn an_explicit_refinement_keeps_both_assertions_and_is_replay_safe() {
+        let store = memory_store().await;
+        let subject = store
+            .get_or_create_entity("Ada", "person", json!({}))
+            .await
+            .unwrap()
+            .id;
+        let first = store
+            .get_or_create_entity("Paris", "place", json!({}))
+            .await
+            .unwrap()
+            .id;
+        let second = store
+            .get_or_create_entity("France", "place", json!({}))
+            .await
+            .unwrap()
+            .id;
+        let create = |to| NewRelationship {
+            from: subject,
+            to,
+            predicate: "located_in".into(),
+            confidence: 1.0,
+        };
+        let a = store
+            .create_relationship(RelationshipId::new(), create(first), Utc::now())
+            .await
+            .unwrap();
+        let b = store
+            .create_relationship(RelationshipId::new(), create(second), Utc::now())
+            .await
+            .unwrap();
+        let mut linked = item(CheckpointDestination::General, "Paris refines France");
+        linked.fact = Some(FactMutation::Link {
+            relationship_id: a.id,
+            other_id: b.id,
+            kind: crate::domain::FactLinkKind::Refines,
+            reason: "Paris is in France".into(),
+        });
+        let payload = CheckpointPayload {
+            items: vec![linked],
+        };
+        let mut job = Job::new(
+            JobKind::Checkpoint {
+                payload: payload.clone(),
+            },
+            Priority::High,
+            "test",
+        );
+        for _ in 0..2 {
+            job.checkpoint = json!({});
+            let ctx = ctx_for(&store, &job, JobControl::default());
+            run(
+                &ctx,
+                &mut job,
+                CheckpointParams {
+                    payload: payload.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        }
+        assert_eq!(
+            store
+                .list_relationships(subject, false)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+        let history = store.fact_history(a.id, None).await.unwrap();
+        assert_eq!(history.len(), 2);
+        let links = &history[0].lifecycle.as_ref().unwrap().links;
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].origin, crate::domain::FactLinkOrigin::Explicit);
+        assert_eq!(links[0].reason, "Paris is in France");
+        assert!(
+            store
+                .get_drawer(links[0].evidence.unwrap())
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_link_to_an_unknown_assertion_fails_without_inventing_a_relationship() {
+        let store = memory_store().await;
+        let subject = store
+            .get_or_create_entity("Ada", "person", json!({}))
+            .await
+            .unwrap()
+            .id;
+        let object = store
+            .get_or_create_entity("Paris", "place", json!({}))
+            .await
+            .unwrap()
+            .id;
+        let known = store
+            .create_relationship(
+                RelationshipId::new(),
+                NewRelationship {
+                    from: subject,
+                    to: object,
+                    predicate: "located_in".into(),
+                    confidence: 1.0,
+                },
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+        for (from, to) in [
+            (RelationshipId::new(), known.id),
+            (known.id, RelationshipId::new()),
+        ] {
+            let mut linked = item(
+                CheckpointDestination::General,
+                "cannot link an unknown assertion",
+            );
+            linked.fact = Some(FactMutation::Link {
+                relationship_id: from,
+                other_id: to,
+                kind: crate::domain::FactLinkKind::Confirms,
+                reason: "reviewed".into(),
+            });
+            let error = run_items(&store, vec![linked]).await.unwrap_err();
+            assert!(matches!(error, Error::InvalidInput { .. }), "{error:?}");
+        }
+        assert!(store.fact_links(&[known.id]).await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -524,6 +754,7 @@ mod tests {
         let mut with_fact = item(CheckpointDestination::General, "Alice left Acme");
         with_fact.fact = Some(FactMutation::Invalidate {
             relationship_id: relationship.id,
+            reason: None,
         });
         let payload = CheckpointPayload {
             items: vec![with_fact],
@@ -781,6 +1012,7 @@ mod tests {
             to: b.id,
             predicate: "friends".to_string(),
             confidence: 1.0,
+            reason: None,
         });
         let payload = CheckpointPayload {
             items: vec![superseding],

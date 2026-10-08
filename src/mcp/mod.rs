@@ -192,6 +192,15 @@ struct HistoryArgs {
     drawer_id: String,
 }
 
+/// Read the lifecycle of a knowledge-graph assertion by its exact id.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct FactHistoryArgs {
+    /// UUID of any assertion, including one that is no longer valid.
+    relationship_id: String,
+    /// Explain the state at this validity-time instant (RFC 3339 or YYYY-MM-DD).
+    as_of: Option<String>,
+}
+
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct WakeUpArgs {
     /// The identity to build session-start context for.
@@ -283,16 +292,19 @@ fn checkpoint_payload_schema(_: &mut schemars::SchemaGenerator) -> schemars::Sch
                         },
                         "fact": {
                             "type": ["object", "null"],
-                            "description": "Optional knowledge-graph change, with the ids of entities and relationships that already exist. \"add\" needs subject, predicate, object and confidence; \"supersede\" needs relationship_id, from, to, predicate and confidence; \"invalidate\" needs relationship_id.",
+                            "description": "Optional knowledge-graph change. Add asserts a fact; supersede and invalidate explicitly correct one; link relates two existing facts without retiring either.",
                             "properties": {
-                                "op": { "type": "string", "enum": ["add", "supersede", "invalidate"] },
+                                "op": { "type": "string", "enum": ["add", "supersede", "invalidate", "link"] },
                                 "subject": { "type": "string", "description": "Entity id (add)." },
                                 "object": { "type": "string", "description": "Entity id (add)." },
                                 "relationship_id": { "type": "string", "description": "The edge to close (supersede, invalidate)." },
                                 "from": { "type": "string", "description": "Entity id of the replacement's subject (supersede)." },
                                 "to": { "type": "string", "description": "Entity id of the replacement's object (supersede)." },
                                 "predicate": { "type": "string", "description": "The relationship's label (add, supersede)." },
-                                "confidence": { "type": "number", "minimum": 0, "maximum": 1, "description": "Confidence in [0, 1] (add, supersede)." }
+                                "confidence": { "type": "number", "minimum": 0, "maximum": 1, "description": "Confidence in [0, 1] (add, supersede)." },
+                                "other_id": { "type": "string", "description": "Other relationship ID (link)." },
+                                "kind": { "type": "string", "enum": ["confirms", "contradicts", "refines"], "description": "Explicit link kind." },
+                                "reason": { "type": ["string", "null"], "description": "Explanation (required for link)." }
                             },
                             "required": ["op"]
                         }
@@ -685,6 +697,38 @@ impl McpTools {
             Err(error) => Err(error),
         };
         tool_result("memcastle_history", history)
+    }
+
+    #[tool(
+        title = "Fact history",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
+        description = "Read a graph assertion and its related corrections, confirmations and conflicts, with provenance and the reason for their lifecycle states. Optionally inspect their validity as_of a date or instant."
+    )]
+    async fn memcastle_fact_history(
+        &self,
+        Parameters(args): Parameters<FactHistoryArgs>,
+        Extension(parts): Extension<http::request::Parts>,
+    ) -> Result<CallToolResult, McpError> {
+        let result = (|| {
+            let id = args.relationship_id.parse().map_err(|_| {
+                Error::invalid_input("relationship_id", "expected a relationship UUID")
+            })?;
+            let at = args
+                .as_of
+                .map(|raw| crate::search::parse_instant("as_of", &raw))
+                .transpose()?;
+            Ok((id, at))
+        })();
+        let history = match result {
+            Ok((id, at)) => self.app.fact_history(id, at, self.mode_for(&parts)).await,
+            Err(error) => Err(error),
+        };
+        tool_result("memcastle_fact_history", history)
     }
 
     #[tool(
@@ -1519,9 +1563,17 @@ mod tests {
                 to: entity,
                 predicate: "p".into(),
                 confidence: 1.0,
+                reason: None,
             },
             FactMutation::Invalidate {
                 relationship_id: relationship,
+                reason: None,
+            },
+            FactMutation::Link {
+                relationship_id: relationship,
+                other_id: RelationshipId::new(),
+                kind: crate::domain::FactLinkKind::Refines,
+                reason: "more specific".into(),
             },
         ] {
             fact_keys.extend(keys_of(serde_json::to_value(&fact).unwrap()));
@@ -1572,12 +1624,13 @@ mod tests {
     async fn every_tool_declares_its_title_and_all_four_hints() {
         // (name, read-only, destructive, idempotent, open-world): the behaviour
         // each handler actually has, so a wrong hint fails here, not in a host.
-        let expected: [(&str, bool, bool, bool, bool); 22] = [
+        let expected: [(&str, bool, bool, bool, bool); 23] = [
             ("memcastle_set_mode", false, false, true, false),
             ("memcastle_status", true, false, true, false),
             ("memcastle_search", true, false, true, true),
             ("memcastle_recall", true, false, true, true),
             ("memcastle_history", true, false, true, false),
+            ("memcastle_fact_history", true, false, true, false),
             ("memcastle_wake_up", true, false, true, false),
             ("memcastle_mine", false, false, true, true),
             ("memcastle_miner_list", true, false, true, false),
