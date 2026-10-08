@@ -99,6 +99,7 @@ See [Configuration](configuration.md) for how these flags combine with the confi
 | `memcastle daemon stop` | Ask the running daemon to shut down gracefully. |
 | `memcastle daemon restart [--bind <IP>] [--port <PORT>] [--assets-dir <DIR>]` | Stop the running daemon, start a detached new one and wait until it serves. |
 | `memcastle status` | Report whether the daemon is running, where, which palace, and whether the datastore is healthy. |
+| `memcastle tui` | Open the interactive operations console for mining jobs and maintenance; see [Terminal operations console](tui.md). |
 | `memcastle migrate [--check \| --status]` | Apply, or just inspect, the palace's migrations without a daemon. |
 | `memcastle completions <SHELL>` | Print a shell completion script, see [Shell completion](#shell-completion). |
 
@@ -106,6 +107,8 @@ See [Configuration](configuration.md) for how these flags combine with the confi
 client commands find the daemon through its registry file instead.
 `--assets-dir` names a directory of runtime assets that outranks the installed and built-in ones,
 see [Runtime assets](configuration.md#runtime-assets).
+`tui` requires interactive standard input and output and refuses `--json`;
+the ordinary CLI commands continue to provide JSON for scripts.
 See [Running the daemon](daemon.md) for the details of each, and [Migrations and upgrades](migrations.md) for `migrate`.
 
 ### Shell completion

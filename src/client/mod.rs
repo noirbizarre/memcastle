@@ -14,6 +14,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::json;
 
+pub mod events;
 pub mod fact_view;
 pub mod hit_view;
 pub mod job_view;
@@ -67,10 +68,15 @@ const REGISTRY_TIMEOUT: Duration = Duration::from_secs(180);
 /// Both headers are built here, together, from the client's stored settings:
 /// `with_mode` and `with_token` each rebuild the client, and if either built
 /// only its own header the other would be silently dropped.
-fn http_client(mode: Option<MemoryMode>, token: Option<&Secret>) -> reqwest::Client {
-    let mut builder = reqwest::Client::builder()
-        .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT);
+fn http_client(
+    mode: Option<MemoryMode>,
+    token: Option<&Secret>,
+    timeout: Option<Duration>,
+) -> reqwest::Client {
+    let mut builder = reqwest::Client::builder().connect_timeout(CONNECT_TIMEOUT);
+    if let Some(timeout) = timeout {
+        builder = builder.timeout(timeout);
+    }
     let mut headers = reqwest::header::HeaderMap::new();
     if let Some(mode) = mode {
         headers.insert(
@@ -195,7 +201,7 @@ impl DaemonClient {
         Self {
             base_url: format!("http://{}", connectable(&bind_addr)),
             source,
-            http: http_client(None, None),
+            http: http_client(None, None, Some(REQUEST_TIMEOUT)),
             mode: None,
             token: None,
         }
@@ -219,7 +225,7 @@ impl DaemonClient {
     #[must_use]
     pub fn with_mode(mut self, mode: MemoryMode) -> Self {
         self.mode = Some(mode);
-        self.http = http_client(self.mode, self.token.as_ref());
+        self.http = http_client(self.mode, self.token.as_ref(), Some(REQUEST_TIMEOUT));
         self
     }
 
@@ -229,7 +235,7 @@ impl DaemonClient {
     #[must_use]
     pub fn with_token(mut self, token: Option<Secret>) -> Self {
         self.token = token;
-        self.http = http_client(self.mode, self.token.as_ref());
+        self.http = http_client(self.mode, self.token.as_ref(), Some(REQUEST_TIMEOUT));
         self
     }
 
@@ -338,6 +344,12 @@ impl DaemonClient {
     /// Returns [`Error::DaemonNotRunning`] if no daemon is reachable.
     pub async fn status(&self) -> Result<StatusReport> {
         self.send(self.http.get(format!("{}/api/status", self.base_url)))
+            .await
+    }
+
+    /// The daemon's effective, token-free configuration, including provider names.
+    pub async fn config_report(&self) -> Result<crate::app::ConfigReport> {
+        self.send(self.http.get(self.api_url(&["config"], None)?))
             .await
     }
 
@@ -798,6 +810,16 @@ impl DaemonClient {
         self.send(request).await
     }
 
+    /// Fetch a bounded, newest-first page of jobs of one kind.
+    pub async fn list_jobs_page(&self, kind: &str, limit: u32) -> Result<Vec<Job>> {
+        self.send(
+            self.http
+                .get(self.api_url(&["jobs"], None)?)
+                .query(&[("kind", kind), ("limit", &limit.to_string())]),
+        )
+        .await
+    }
+
     /// Fetch one job by id.
     ///
     /// # Errors
@@ -846,6 +868,15 @@ impl DaemonClient {
         self.send(
             self.http
                 .post(format!("{}/api/jobs/{id}/cancel", self.base_url)),
+        )
+        .await
+    }
+
+    /// Abort a locally owned running mining job; the daemon confirms its terminal state.
+    pub async fn force_cancel_job(&self, id: JobId) -> Result<JobControlResult> {
+        self.send(
+            self.http
+                .post(self.api_url(&["jobs", &id.to_string(), "force-cancel"], None)?),
         )
         .await
     }

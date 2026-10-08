@@ -122,6 +122,8 @@ pub enum Command {
     /// Exit codes: 0 running and healthy, 1 running but degraded (or an
     /// error), 3 not running.
     Status,
+    /// Open the interactive operations console for this daemon.
+    Tui,
     /// Search palace drawer content.
     Search(SearchArgs),
     /// Retrieve palace content matching a query, returned verbatim — the

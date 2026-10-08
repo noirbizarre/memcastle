@@ -522,6 +522,79 @@ impl Scheduler {
         Err(Self::contended(id))
     }
 
+    /// Abort a mining worker owned by this daemon after durably requesting cancellation.
+    /// Blocking work already handed to another thread may continue briefly; removing
+    /// the lease before returning fences any later checkpoint from that work.
+    pub async fn force_cancel(&self, id: JobId) -> Result<()> {
+        let job = self.load_job(id).await?;
+        if !matches!(job.kind, JobKind::Mine { .. }) {
+            return Err(crate::Error::invalid_input(
+                "job",
+                "force-cancel is only available for mining jobs",
+            ));
+        }
+        if job.status != JobStatus::Running {
+            return Err(crate::Error::invalid_input(
+                "job",
+                "force-cancel requires a running mining job",
+            ));
+        }
+        if job.lease_owner.as_deref() != Some(&self.worker) {
+            return Err(crate::Error::invalid_input(
+                "job",
+                "this mining job runs on another daemon; connect to its owner or request a graceful cancel",
+            ));
+        }
+        let control = self
+            .controls
+            .get(&id)
+            .map(|item| item.clone())
+            .ok_or_else(|| crate::Error::JobOrphaned { id: id.to_string() })?;
+        // This write survives a daemon crash between receiving the request and aborting the task.
+        if !self
+            .store
+            .mark_cancel_requested_by(id, &self.worker)
+            .await?
+        {
+            return Err(crate::Error::job_contended(id.to_string()));
+        }
+        control.request_cancel();
+        let handle = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(handle) = control.worker.lock().await.take() {
+                    break Ok(handle);
+                }
+                // The claim registers its control before spawning; do not mistake that
+                // short gap for a worker on another daemon.
+                if !self.controls.contains_key(&id) {
+                    break Err(crate::Error::job_contended(id.to_string()));
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .map_err(|_| crate::Error::JobOrphaned { id: id.to_string() })??;
+        handle.abort();
+        let _ = handle.await;
+        self.controls.remove(&id);
+        let mut current = self.load_job(id).await?;
+        if current.status != JobStatus::Running
+            || current.lease_owner.as_deref() != Some(&self.worker)
+        {
+            return Err(crate::Error::job_contended(id.to_string()));
+        }
+        current.apply(JobEvent::Cancel)?;
+        if !self
+            .store
+            .save_job_if_running_owner(&current, &self.worker)
+            .await?
+        {
+            return Err(crate::Error::job_contended(id.to_string()));
+        }
+        self.announce(Action::Updated, &current);
+        Ok(())
+    }
+
     /// Move a `Paused` job back to `Queued` so the dispatch loop picks it
     /// up again.
     ///
@@ -716,12 +789,16 @@ impl Scheduler {
                 // cancel arriving in the gap would otherwise find no control
                 // and act on a record the worker is about to overwrite.
                 let control = JobControl::default();
+                let worker_slot = control.worker.clone();
                 self.controls.insert(job.id, control.clone());
                 let scheduler = Arc::clone(&self);
-                tokio::spawn(async move {
+                let handle = tokio::spawn(async move {
                     let _permit = permit; // held for the job's whole execution
                     scheduler.execute(job, control).await;
                 });
+                // The abort handle is installed on the same control registered
+                // before spawn, so a force request cannot miss the worker.
+                *worker_slot.lock().await = Some(handle);
             }
             Ok(None) => {} // nothing queued; permit is dropped, released
             Err(error) => {
@@ -816,13 +893,12 @@ impl Scheduler {
             }
         };
 
-        self.controls.remove(&job.id);
-
         if let Err(crate::Error::LeaseLost { .. }) = &outcome {
             // Another daemon owns this job now. Marking it `Failed` here
             // would overwrite the new owner's record with a stale verdict,
             // so drop everything and let it run its course there.
             warn!(job_id = %job.id, "lease lost while running; abandoning this run");
+            self.controls.remove(&job.id);
             return;
         }
 
@@ -870,6 +946,9 @@ impl Scheduler {
             ),
             Err(error) => warn!(job_id = %job.id, %error, "failed to persist final job state"),
         }
+        // Keep the abort handle registered through the final write: a force
+        // request in that window must not mistake a still-running task for an orphan.
+        self.controls.remove(&job.id);
         // After the final state is saved, so the sweep sees the finished
         // job's drawers and never races its last write.
         if event == JobEvent::Complete && kind_wrote_drawers {
@@ -907,6 +986,93 @@ fn kind_name(kind: &JobKind) -> &'static str {
 mod tests {
     use super::*;
     use crate::domain::JobStatus;
+
+    fn mining_kind() -> JobKind {
+        JobKind::Mine {
+            source: crate::domain::MiningSource::Directory {
+                path: "/tmp/memcastle-force-test".into(),
+            },
+            wing: None,
+            full: false,
+            options: Default::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn forcing_a_local_mine_aborts_its_worker_and_fences_future_writes() {
+        let scheduler = scheduler().await;
+        let submitted = scheduler
+            .submit(mining_kind(), Priority::Background, "test")
+            .await
+            .unwrap();
+        let running = scheduler
+            .store
+            .claim_next_job(&scheduler.worker, chrono::Duration::seconds(30))
+            .await
+            .unwrap()
+            .unwrap();
+        let permit = Arc::clone(&scheduler.semaphore)
+            .try_acquire_owned()
+            .unwrap();
+        let control = JobControl::default();
+        let handle = tokio::spawn(async move {
+            let _permit = permit;
+            std::future::pending::<()>().await;
+        });
+        *control.worker.lock().await = Some(handle);
+        scheduler.controls.insert(running.id, control);
+
+        scheduler.force_cancel(submitted.id).await.unwrap();
+
+        let cancelled = reload(&scheduler, &submitted).await;
+        assert_eq!(cancelled.status, JobStatus::Cancelled);
+        assert!(!cancelled.cancel_requested);
+        assert!(cancelled.lease_owner.is_none());
+        assert!(
+            !scheduler
+                .store
+                .save_job_fenced(&running, &scheduler.worker)
+                .await
+                .unwrap()
+        );
+        assert!(scheduler.semaphore.try_acquire().is_ok());
+    }
+
+    #[tokio::test]
+    async fn force_cancel_refuses_a_remote_lease_without_changing_the_job() {
+        let scheduler = scheduler().await;
+        let submitted = scheduler
+            .submit(mining_kind(), Priority::Background, "test")
+            .await
+            .unwrap();
+        scheduler
+            .store
+            .claim_next_job("another-daemon", chrono::Duration::seconds(30))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert!(scheduler.force_cancel(submitted.id).await.is_err());
+        let unchanged = reload(&scheduler, &submitted).await;
+        assert_eq!(unchanged.status, JobStatus::Running);
+        assert!(!unchanged.cancel_requested);
+    }
+
+    #[tokio::test]
+    async fn force_cancel_refuses_non_mining_and_finished_jobs() {
+        let scheduler = scheduler().await;
+        let mine = scheduler
+            .submit(mining_kind(), Priority::Background, "test")
+            .await
+            .unwrap();
+        let demo = scheduler
+            .submit(JobKind::Demo { steps: 1 }, Priority::Normal, "test")
+            .await
+            .unwrap();
+        assert!(scheduler.force_cancel(mine.id).await.is_err());
+        assert!(scheduler.force_cancel(demo.id).await.is_err());
+        assert_eq!(reload(&scheduler, &mine).await.status, JobStatus::Queued);
+    }
 
     #[tokio::test]
     async fn no_embedding_sweep_is_queued_without_a_provider() {

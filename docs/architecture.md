@@ -444,6 +444,12 @@ Resuming re-reads the checkpoint and continues from there, not from zero.
 an applied repair checks before each delete).
 Neither keeps a checkpoint, so a paused or shutdown-interrupted one restarts from scratch when resumed.
 That is safe: an audit only reads, and a repair recomputes the live orphan set.
+The terminal console also offers a distinct, confirmed **force-cancel** for a locally owned running mining job.
+The daemon durably records the cancel request, aborts and joins its task, and then applies `JobEvent::Cancel`
+with a write guarded by the job's running status and lease owner.
+This fences later job checkpoints and lets crash recovery honour a request interrupted before completion.
+It cannot undo work already filed or immediately interrupt blocking work running outside the aborted task;
+a worker owned by another daemon must be stopped on that daemon or cancelled cooperatively.
 
 **Resuming is replay-safe.**
 A handler writes an item's records first and saves the checkpoint after,

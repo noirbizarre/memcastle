@@ -24,6 +24,36 @@ fn help_lists_the_top_level_commands() {
 }
 
 #[test]
+fn tui_help_is_available_without_a_daemon() {
+    Command::cargo_bin("memcastle")
+        .unwrap()
+        .args(["tui", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("interactive operations console"));
+}
+
+#[test]
+fn tui_refuses_piped_input_instead_of_entering_raw_mode() {
+    Command::cargo_bin("memcastle")
+        .unwrap()
+        .arg("tui")
+        .assert()
+        .failure()
+        .stderr(contains("interactive stdin and stdout are required"));
+}
+
+#[test]
+fn tui_refuses_json_mode() {
+    Command::cargo_bin("memcastle")
+        .unwrap()
+        .args(["tui", "--json"])
+        .assert()
+        .failure()
+        .stderr(contains("--json cannot be used"));
+}
+
+#[test]
 fn mine_help_shows_the_source_first_grammar_and_no_longer_offers_the_old_flags() {
     Command::cargo_bin("memcastle")
         .unwrap()

@@ -30,7 +30,8 @@ The rule follows what an operation touches, not what it is called.
   Mining and applied repairs count because their purpose is to file or delete drawers,
   and the derived-data writes count because they change the palace even though they never touch a drawer's content.
   Every search option (`ranking`, `as_of`, `expand` and the rest) is still a read.
-- **Never gated:** `status`, job control (pause, resume, cancel, retry), demo jobs, `audit` and a dry-run `repair`.
+- **Never gated:** `status`, job control (pause, resume, cancel, force-cancel, retry), demo jobs, `audit`
+  and a dry-run `repair`.
   They report on the palace or steer work that was already allowed, and never expose drawer content.
 
 A rejected operation fails with `memcastle::mode::forbidden`, on reads as well as writes.

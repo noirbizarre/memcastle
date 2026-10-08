@@ -10,7 +10,10 @@ use crate::common;
 use std::time::Duration;
 
 use common::TestDaemon;
+use memcastle::client::DaemonClient;
+use memcastle::client::events::Notice;
 use memcastle::config::Secret;
+use memcastle::domain::MemoryMode;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 
@@ -18,6 +21,95 @@ const SECRET: &str = "mc_a_shared_secret_for_the_tests_0123456789";
 
 /// How long a test waits for a frame it expects, generous for a busy machine.
 const PATIENCE: Duration = Duration::from_secs(20);
+
+#[tokio::test]
+async fn force_cancel_route_rejects_a_non_mining_job() {
+    let daemon = TestDaemon::start().await;
+    let http = reqwest::Client::new();
+    let job: Value = http
+        .post(format!("{}/api/jobs", daemon.base_url))
+        .json(&json!({ "type": "demo", "steps": 100 }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = job["id"].as_str().unwrap();
+    let response = http
+        .post(format!("{}/api/jobs/{id}/force-cancel", daemon.base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let after: Value = http
+        .get(format!("{}/api/jobs/{id}", daemon.base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_ne!(after["status"], "cancelled");
+}
+
+#[tokio::test]
+async fn rust_client_reads_the_same_event_stream_as_the_web_dashboard() {
+    let daemon = TestDaemon::start().await;
+    let addr = daemon
+        .base_url
+        .trim_start_matches("http://")
+        .parse()
+        .unwrap();
+    let client = DaemonClient::discover(&daemon.palace_path, addr);
+    let mut events = client.events().await.unwrap();
+    assert_eq!(events.next().await.unwrap(), Some(Notice::Open));
+
+    let job = client.submit_demo(1).await.unwrap();
+    let notice = tokio::time::timeout(PATIENCE, async {
+        loop {
+            if let Some(Notice::Job { id, kind }) = events.next().await.unwrap() {
+                if id == job.id.to_string() {
+                    break kind;
+                }
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(notice, "demo");
+}
+
+#[tokio::test]
+async fn rust_event_reader_uses_the_same_token_and_memory_mode_as_other_calls() {
+    let daemon = TestDaemon::start_configured(|config| {
+        config.auth.enabled = true;
+        config.auth.token = Some(Secret::new(SECRET));
+    })
+    .await;
+    let addr = daemon
+        .base_url
+        .trim_start_matches("http://")
+        .parse()
+        .unwrap();
+    let anonymous = DaemonClient::discover(&daemon.palace_path, addr);
+    assert!(matches!(
+        anonymous.events().await,
+        Err(memcastle::Error::Remote { status: 401, .. })
+    ));
+    let authorised =
+        DaemonClient::discover(&daemon.palace_path, addr).with_token(Some(Secret::new(SECRET)));
+    assert!(matches!(
+        authorised.events().await.unwrap().next().await.unwrap(),
+        Some(Notice::Open)
+    ));
+    let disabled = authorised.with_mode(MemoryMode::Disabled);
+    assert!(matches!(
+        disabled.events().await,
+        Err(memcastle::Error::Remote { status: 403, .. })
+    ));
+    daemon.shutdown_as(Some(SECRET)).await;
+}
 
 /// One SSE frame: its event name and the JSON it carried.
 #[derive(Debug)]

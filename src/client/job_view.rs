@@ -132,6 +132,7 @@ pub fn render_control(id: JobId, result: &JobControlResult, painter: Painter) ->
         JobControlStatus::PauseRequested => ("Pause requested", "it stops at its next check"),
         JobControlStatus::Resumed => ("Resumed", "it is queued again"),
         JobControlStatus::CancelRequested => ("Cancel requested", "it stops at its next check"),
+        JobControlStatus::ForceCancelled => ("Force-cancelled", "the local worker stopped"),
         JobControlStatus::Retried => ("Retried", "it is queued again"),
     };
     format!("{} job {id}, {}", painter.ok(verb), painter.dim(rest))

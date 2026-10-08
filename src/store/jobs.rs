@@ -55,6 +55,8 @@ enum Guard {
     Status(JobStatus),
     /// The job must still be leased to this worker (a fenced write).
     Owner(String),
+    /// A force-cancel may only displace the exact running owner it observed.
+    RunningOwner(String),
     /// The job must still carry exactly the lease that was read: the same
     /// owner and expiry, so a lease renewed since is not reaped from under
     /// its owner.
@@ -97,6 +99,12 @@ impl SurrealStore {
         super::retrying_on_conflict(|| self.write_job(job, Some(&guard))).await
     }
 
+    /// Commit a forced terminal state only while this worker still owns a running job.
+    pub async fn save_job_if_running_owner(&self, job: &Job, owner: &str) -> Result<bool> {
+        let guard = Guard::RunningOwner(owner.to_string());
+        super::retrying_on_conflict(|| self.write_job(job, Some(&guard))).await
+    }
+
     /// Save `job` (typically a reaped, re-queued copy of `seen`) only if the
     /// stored record still carries the lease `seen` had. Returns `false`,
     /// writing nothing, if it changed: the owner renewed, or someone else
@@ -116,6 +124,10 @@ impl SurrealStore {
             None => ("UPSERT", ""),
             Some(Guard::Status(_)) => ("UPDATE", " WHERE status = $guard_status"),
             Some(Guard::Owner(_)) => ("UPDATE", " WHERE lease_owner = $guard_owner"),
+            Some(Guard::RunningOwner(_)) => (
+                "UPDATE",
+                " WHERE status = 'running' AND lease_owner = $guard_owner",
+            ),
             // `= NONE`/`= NULL` differ (see `list_jobs`), and a legacy job
             // has no lease at all: `??` folds both into one comparable value.
             Some(Guard::Lease { .. }) => (
@@ -151,7 +163,9 @@ impl SurrealStore {
         let query = match guard {
             None => query,
             Some(Guard::Status(status)) => query.bind(("guard_status", super::bindable(status)?)),
-            Some(Guard::Owner(owner)) => query.bind(("guard_owner", owner.clone())),
+            Some(Guard::Owner(owner) | Guard::RunningOwner(owner)) => {
+                query.bind(("guard_owner", owner.clone()))
+            }
             Some(Guard::Lease { owner, expires_at }) => query
                 .bind(("guard_owner", owner.clone().unwrap_or_default()))
                 .bind(("guard_expires_at", expires_at.clone().unwrap_or_default())),
@@ -206,6 +220,25 @@ impl SurrealStore {
     /// The cancel counterpart of [`Self::mark_pause_requested`].
     pub async fn mark_cancel_requested(&self, id: JobId) -> Result<bool> {
         self.mark_stop_requested(id, "cancel_requested").await
+    }
+
+    /// Record a force request only for the run owned by this daemon.
+    pub async fn mark_cancel_requested_by(&self, id: JobId, owner: &str) -> Result<bool> {
+        super::retrying_on_conflict(|| async {
+            let mut response = self
+                .db
+                .query(
+                    "UPDATE type::record('job', $id) SET cancel_requested = true \
+                 WHERE status = 'running' AND lease_owner = $owner RETURN record::id(id) AS id",
+                )
+                .bind(("id", id.to_string()))
+                .bind(("owner", owner.to_string()))
+                .await?
+                .check()?;
+            let rows: Vec<serde_json::Value> = response.take(0)?;
+            Ok(!rows.is_empty())
+        })
+        .await
     }
 
     async fn mark_stop_requested(&self, id: JobId, field: &'static str) -> Result<bool> {
