@@ -68,10 +68,10 @@ async fn rust_client_reads_the_same_event_stream_as_the_web_dashboard() {
     let job = client.submit_demo(1).await.unwrap();
     let notice = tokio::time::timeout(PATIENCE, async {
         loop {
-            if let Some(Notice::Job { id, kind }) = events.next().await.unwrap() {
-                if id == job.id.to_string() {
-                    break kind;
-                }
+            if let Some(Notice::Job { id, kind }) = events.next().await.unwrap()
+                && id == job.id.to_string()
+            {
+                break kind;
             }
         }
     })

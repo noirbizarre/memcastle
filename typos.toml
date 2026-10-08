@@ -24,3 +24,5 @@ modlue = "modlue"
 decidde = "decidde"
 Sureal = "Sureal"
 SurealDB = "SurealDB"
+# The TUI framework's name is intentional, not the recipe's spelling.
+ratatui = "ratatui"
