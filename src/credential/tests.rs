@@ -244,6 +244,36 @@ async fn a_browser_sign_in_exchanges_the_code_with_the_pkce_verifier_that_matche
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_source_declared_callback_path_is_used_by_authorization_and_the_listener() {
+    let fixture = fixture().await;
+    let mut requirement = fixture.provider.browser_requirement();
+    requirement.callback_path = Some("/auth/callback".into());
+    let challenge = fixture
+        .credentials
+        .begin(SOURCE, &requirement)
+        .await
+        .unwrap();
+    let asked = authorization(challenge.url.as_deref().unwrap());
+    let redirect = &asked["redirect_uri"];
+    assert!(redirect.ends_with("/auth/callback"));
+
+    let wrong = redirect.replace("/auth/callback", "/callback");
+    assert_eq!(
+        call_back(&wrong, &[("code", "good-code"), ("state", &asked["state"])]).await,
+        404
+    );
+    assert_eq!(
+        call_back(
+            redirect,
+            &[("code", "good-code"), ("state", &asked["state"])]
+        )
+        .await,
+        200
+    );
+    assert!(fixture.finish(&challenge.flow).await.signed_in);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_callback_with_the_wrong_state_is_refused_and_the_real_one_still_signs_in() {
     let fixture = fixture().await;
     let requirement = fixture.provider.browser_requirement();

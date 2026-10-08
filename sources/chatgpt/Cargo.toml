@@ -1,0 +1,23 @@
+[package]
+name = "memcastle-source-chatgpt"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wit-bindgen = "0.57"
+serde = "1"
+serde_json = { version = "1", features = ["raw_value"] }
+sha2 = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+time = { version = "0.3", features = ["formatting"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+
+[workspace]

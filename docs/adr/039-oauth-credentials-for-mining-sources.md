@@ -69,6 +69,9 @@ The forces:
   right `state` and then closes.
   The authentication layer's rule that only the liveness probe is public therefore stands, and the redirect is not a route.
   The browser flow needs a browser on the daemon's machine, and says so.
+  A manifest may set `callback_path` for a provider that requires a specific loopback path: the listener still binds an
+  ephemeral port on `127.0.0.1`, and the requested path must match the callback exactly.
+  This path is part of permission consent and the credential fingerprint.
 - **Tokens are kept in the platform credential store, and in an owner-only file where there is none.**
   `credentials.backend = "auto"` probes the platform store on first use (macOS Keychain, Windows Credential Manager, the
   Secret Service on Linux, through the `keyring` crate and its pure-Rust Linux backend) and falls back to
@@ -88,6 +91,10 @@ The forces:
   `memcastle::credential::required`, whose message names `memcastle source auth <source>`;
   an unreachable provider fails it with `memcastle::credential::refresh_failed` and keeps the credential for the next try.
   A run of a source that signs in checks that it is signed in before it touches a cursor or a drawer.
+  For a package that also imports offline data, `on_demand = true` defers the check to the source's granted `identify`
+  call: it asks `host.access-token` before any source record is created for its online mode, and its offline mode never
+  asks for one.
+  Existing sources keep mandatory preflight by default.
 - **A miner's `credential = { type = "oauth" }` is a reference like the others.**
   It names nothing, is shown as `oauth` with whether the source is signed in,
   and is refused for a source that declares no sign-in.

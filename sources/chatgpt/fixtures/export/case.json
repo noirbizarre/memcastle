@@ -1,0 +1,26 @@
+{
+  "name": "synthetic ChatGPT export with a branch",
+  "description": "A conversation graph and a second conversation survive paging without a real account.",
+  "locator": "conversations.json",
+  "limit": 1,
+  "documents": [
+    {
+      "external_id": "conversation-a",
+      "title": "Example conversation",
+      "kind": "transcript",
+      "tags": ["chatgpt", "transcript"],
+      "segments": [
+        "[user id=question parent=root at 2026-01-01T00:00:01Z]\nWhat is a castle?\n\n",
+        "[assistant id=answer-a parent=question name=Example Assistant model=model-example at 2026-01-01T00:00:02Z]\nA building.\n\n",
+        "[assistant id=answer-b parent=question at 2026-01-01T00:00:03Z]\nA fortress.\n\n"
+      ]
+    },
+    {
+      "external_id": "conversation-b",
+      "title": "Another conversation",
+      "kind": "transcript",
+      "tags": ["chatgpt", "transcript"],
+      "segments": ["[user id=hello parent=start]\nHello\n\n"]
+    }
+  ]
+}

@@ -127,8 +127,17 @@ pub(super) fn readable_directories(
         let Ok(path) = std::fs::canonicalize(&path) else {
             continue;
         };
-        if path.is_dir() && !directories.contains(&path) {
-            directories.push(path);
+        // A file locator is opened through its containing directory: WASI preopens directories, not individual files.
+        // Granting the parent is visible at consent as `locator`, and the guest still chooses the exact file to read.
+        let directory = if path.is_file() {
+            path.parent().map(PathBuf::from)
+        } else {
+            Some(path)
+        };
+        if let Some(directory) =
+            directory.filter(|path| path.is_dir() && !directories.contains(path))
+        {
+            directories.push(directory);
         }
     }
     directories
@@ -225,6 +234,15 @@ mod tests {
     fn nothing_is_opened_without_a_filesystem_grant() {
         let mined = tempfile::tempdir().unwrap();
         assert!(readable_directories(&Permissions::default(), mined.path().to_str()).is_empty());
+    }
+
+    #[test]
+    fn a_file_locator_opens_its_parent_so_a_source_can_import_an_archive() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("conversations.json");
+        std::fs::write(&file, "[]").unwrap();
+        let directories = readable_directories(&reading(&["locator"]), file.to_str());
+        assert_eq!(directories, vec![root.path().canonicalize().unwrap()]);
     }
 
     #[test]

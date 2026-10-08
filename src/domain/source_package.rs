@@ -224,6 +224,16 @@ pub struct OAuthRequirement {
     /// The device flow's endpoint (RFC 8628), for a machine with no browser of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device_authorization_url: Option<String>,
+    /// Override the browser listener's path when a provider registers one fixed loopback path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callback_path: Option<String>,
+    /// A source with both offline and signed-in acquisition can ask for a token only on its online calls.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub on_demand: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl OAuthRequirement {
@@ -280,6 +290,16 @@ impl OAuthRequirement {
                 ));
             }
         }
+        if let Some(path) = &self.callback_path
+            && (path.len() > 80
+                || !path.starts_with('/')
+                || path.contains("//")
+                || !path
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"/-_".contains(&byte)))
+        {
+            return Err("permissions.oauth.callback_path must be an absolute path of letters, digits, '/', '-' or '_'".into());
+        }
         Ok(())
     }
 
@@ -292,13 +312,20 @@ impl OAuthRequirement {
         let mut scopes = self.scopes.clone();
         scopes.sort();
         scopes.dedup();
-        let canonical = serde_json::json!({
+        let mut canonical = serde_json::json!({
             "client_id": self.client_id,
             "scopes": scopes,
             "token_url": self.token_url,
             "authorize_url": self.authorize_url,
             "device_authorization_url": self.device_authorization_url,
         });
+        // Existing OAuth credentials keep their fingerprints: these opt-in terms change it only when declared.
+        if let Some(path) = &self.callback_path {
+            canonical["callback_path"] = serde_json::json!(path);
+        }
+        if self.on_demand {
+            canonical["on_demand"] = serde_json::json!(true);
+        }
         sha256_hex(canonical.to_string().as_bytes())
     }
 
@@ -758,6 +785,8 @@ mod tests {
             token_url: "https://auth.example.com/token".into(),
             authorize_url: Some("https://auth.example.com/authorize".into()),
             device_authorization_url: None,
+            callback_path: None,
+            on_demand: false,
         }
     }
 
@@ -816,6 +845,33 @@ mod tests {
             change(&mut changed);
             assert_ne!(base.fingerprint(), changed.fingerprint());
         }
+    }
+
+    #[test]
+    fn an_optional_sign_in_and_a_custom_callback_need_new_consent_without_changing_old_terms() {
+        let old = oauth();
+        let original = serde_json::to_value(&old).unwrap();
+        assert!(original.get("callback_path").is_none());
+        assert!(original.get("on_demand").is_none());
+        let mut changed = old.clone();
+        changed.callback_path = Some("/auth/callback".into());
+        changed.on_demand = true;
+        assert!(changed.validate().is_ok());
+        assert_ne!(old.fingerprint(), changed.fingerprint());
+        assert_ne!(
+            Permissions {
+                oauth: Some(old),
+                ..Permissions::default()
+            }
+            .consent_digest("x"),
+            Permissions {
+                oauth: Some(changed.clone()),
+                ..Permissions::default()
+            }
+            .consent_digest("x")
+        );
+        changed.callback_path = Some("/../../unsafe".into());
+        assert!(changed.validate().is_err());
     }
 
     #[test]

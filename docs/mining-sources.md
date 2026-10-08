@@ -77,7 +77,8 @@ and for each document of a source, the **revision** last filed and the **chunks*
 
 ### What "incremental" and "idempotent" mean here
 
-- A re-mine of an unchanged source reads nothing: the cursor is past everything.
+- A re-mine of an unchanged incremental source reads nothing: the cursor is past everything.
+  A non-incremental source such as `chatgpt` rescans and skips documents whose content hash has not changed.
 - If the cursor is lost or you pass `--full`, everything is read again, and an unchanged document is recognised by its
   revision and skipped.
   Nothing is duplicated either way, so the cursor is a speed-up, not something correctness depends on.
@@ -114,6 +115,7 @@ memcastle mine pi dir=/work/app --full
 memcastle mine opencode since=2026-09 dir=/path/to/workspace   # OpenCode session history (once installed)
 memcastle mine claude since=2026-09 dir=/path/to/workspace     # Claude Code session history (once installed)
 memcastle mine codex                                           # Codex rollout history (once installed)
+memcastle mine chatgpt /path/to/chatgpt-export.zip            # ChatGPT data export (once installed)
 ```
 
 The first word is a source, and what follows is that source's own: at most one place to read, then `key=value` options
@@ -158,14 +160,16 @@ The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unc
 | `opencode` | bundled package, `sources/opencode/` | OpenCode coding-agent session history | `time_updated` of the session | yes | no |
 | `claude` | bundled package, `sources/claude/` | Claude Code session history | modification time | yes | no |
 | `codex` | bundled package, `sources/codex/` | Codex rollout history | modification time | yes | no |
+| `chatgpt` | bundled package, `sources/chatgpt/` | ChatGPT export or experimental web history | repeated sweep | yes | OAuth for web, optional manual fallback |
 
 Only `directory` is compiled into MemCastle.
-`pi`, `opencode`, `claude` and `codex` are [WebAssembly sources](writing-sources.md), built from their directories in
-the repository and shipped alongside each release (release archives and the `.deb` and `.rpm` carry them, unpacked, under
-`share/memcastle/sources/`), so they are installed from the start and `memcastle source enable pi` is all one needs, with
-no registry and no network:
-no Pi, OpenCode, Claude Code or Codex code is part of the core, and they run under the same sandbox and pipeline as
-any source a user writes.
+`pi`, `opencode`, `claude`, `codex` and `chatgpt` are [WebAssembly sources](writing-sources.md).
+They are built from their directories in the repository and shipped alongside each release
+(release archives and the `.deb` and `.rpm` carry them, unpacked, under
+`share/memcastle/sources/`), so they are installed from the start.
+`memcastle source enable <name>` is all one needs, with no registry and no network.
+No Pi, OpenCode, Claude Code, Codex or ChatGPT code is part of the core.
+They run under the same sandbox and pipeline as any source a user writes.
 Other sources are found in [registries](publishing-sources.md).
 `directory` and `pi` have a modification-time watermark as their cursor:
 files are ordered by modification time, then by path, and the cursor is the last one done.
@@ -422,6 +426,59 @@ is not read twice and an appended rollout preserves the chunks made from its unc
 It files user and assistant text and concise tool-call markers.
 It deliberately excludes model reasoning, tool output, command and file contents, injected context, and record types it
 does not understand.
+
+### `chatgpt`
+
+ChatGPT conversation history is imported from an official export ZIP with a top-level `conversations.json`.
+A standalone `conversations.json` extracted from it is accepted too.
+The source ships disabled like the other bundled packages; enable it, then provide the path on the **daemon's** machine:
+
+```sh
+memcastle source enable chatgpt
+memcastle mine chatgpt /path/to/chatgpt-export.zip
+```
+
+The export path is the source's identity.
+Replacing the file at that path with a newer export and mining again revisits each conversation without duplicating
+unchanged drawers; a different file path starts a separate source.
+One conversation is one transcript document in `chatgpt/conversations`, identified by the conversation ID, with source
+metadata, parent/child branches, assistant model information, attachment/reference descriptors and timestamps retained
+in the raw document when present.
+User and assistant text is searchable, including alternate branches; non-text attachments are not downloaded.
+An absent conversation ID or message collection fails with an actionable error; unsupported non-text content stays in
+the raw document and is not searchable.
+The source permits up to 128 MiB of JSON and 16 MiB per conversation; split larger exports before importing.
+Exports and raw retained documents contain private conversations.
+
+An **experimental** alternative uses the undocumented ChatGPT web API:
+
+```sh
+memcastle mine chatgpt mode=web account=personal
+```
+
+`account` is a non-secret label that keeps different accounts' cursors separate.
+Without a project filter, the web backend combines ordinary conversations and the full paginated history of each
+project, including archived projects; the sidebar's preview alone is never treated as complete history.
+`projects=id:PROJECT_ID` or `projects=name:Exact Name` selects one project; comma-separated selectors choose several.
+Names must be unique and exact, and an ID is the stable choice for a scheduled miner because renames or reused names
+change what the name selects.
+A project selection has its own cursor, separate from the account's unfiltered history.
+Export files cannot be project-filtered until their project membership is verified.
+Configure the filter persistently with `memcastle miner set` and a `--scope 'projects=name:Exact Name'` flag
+([Configuration](configuration.md#chatgpt-project-miner)).
+The daemon needs `curl`; run `memcastle source auth chatgpt` on its machine before web mining.
+The daemon keeps and renews the OAuth credential, and the source asks for a current bearer through the host function.
+Fresh desktop-compatible OAuth access and renewed tokens read conversation and project history **without cookies** when
+the request uses a browser-style User-Agent; plain curl received a 403 edge challenge with the same token.
+OpenAI's documented third-party sign-in does not grant history access, so this private desktop-compatible integration
+can change independently of the generic MemCastle OAuth mechanism.
+The previous fallback still accepts `MEMCASTLE_CHATGPT_BEARER` (and an optional `MEMCASTLE_CHATGPT_COOKIE`) from the daemon
+environment; no session value belongs in a mine option or config setting.
+It revisits conversations on every run and fails on incomplete message pages rather than filing a partial transcript.
+This backend is tested against synthetic replies, not yet against a fresh live session; endpoints, login requirements and
+pagination may change.
+See [the source README](https://github.com/noirbizarre/memcastle/tree/main/sources/chatgpt) for its session setup and
+limits.
 
 ## Writing a source
 

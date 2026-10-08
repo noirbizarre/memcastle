@@ -3,6 +3,13 @@
   "name": "MemCastle official sources",
   "sources": [
     {
+      "name": "chatgpt",
+      "description": "ChatGPT conversation history from an official export or an experimental web session",
+      "homepage": "https://noirbizarre.github.io/memcastle/mining-sources/#chatgpt",
+      "license": "MIT",
+      "repository": "noirbizarre/memcastle"
+    },
+    {
       "name": "claude",
       "description": "Claude Code session history (JSONL transcripts under ~/.claude/projects), one document per session",
       "homepage": "https://noirbizarre.github.io/memcastle/mining-sources/#claude",
