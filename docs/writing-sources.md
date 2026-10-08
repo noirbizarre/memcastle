@@ -97,6 +97,8 @@ env = []                     # environment variables the source may read
 # token_url = "https://auth.example.com/oauth/token"
 # device_authorization_url = "https://auth.example.com/oauth/device/code"   # the device flow
 # authorize_url = "https://auth.example.com/oauth/authorize"                # the browser flow, with PKCE
+# callback_path = "/auth/callback"   # optional registered loopback path, defaults to /callback
+# on_demand = true                  # optional: only online calls need a sign-in; offline calls can still run
 
 [options.since]              # optional: what `memcastle mine my-notes key=value` accepts; see "Options"
 type = "date"                # "string" (the default), "path" or "date"
@@ -127,7 +129,7 @@ fixtures = "fixtures"
 | `options.<name>` | A key of lowercase letters, digits, `-` or `_` starting with a letter, with a one-line `description` and a `type` of `string`, `path` or `date`. Options are not permissions: they ask for nothing and are no part of what a user consents to. |
 | `triggers.<kind>` | `webhook` or `watch` (a timetable and a poll are every source's, so they are not declared), with a one-line `description`. A capability, not a permission: nothing starts because it is declared, and it is no part of what a user consents to. |
 | `permissions.process` | Bare program names (`git`), never a path or a command line. |
-| `permissions.oauth` | `client_id` and `token_url`, and `device_authorization_url`, `authorize_url` or both; every URL `https` (plain `http` only to `localhost`); each scope one word; and `capabilities.needs_credentials = true`. No client secret: a public client cannot keep one. |
+| `permissions.oauth` | `client_id` and `token_url`, and `device_authorization_url`, `authorize_url` or both; every URL `https` (plain `http` only to `localhost`); each scope one word; and `capabilities.needs_credentials = true`. A declared `callback_path` replaces `/callback` on the same loopback listener; `on_demand = true` lets an offline mode proceed without a sign-in while the online mode must ask for its token at `identify`. No client secret: a public client cannot keep one. |
 | `build.output` | Relative to the project; it must be a component, not a core module. |
 
 ## Options

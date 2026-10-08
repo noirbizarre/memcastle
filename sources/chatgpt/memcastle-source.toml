@@ -11,12 +11,21 @@ memcastle = ">=0.2"
 # A sweep restarts after its final candidate, so edits to old conversations are found on the next run.
 incremental = false
 retains_raw = true
-needs_credentials = false
+# Export imports are offline; web identify alone requires the source's OAuth sign-in.
+needs_credentials = true
 
 [permissions]
-# The private web interface has no demonstrated compatible public OAuth grant. curl receives session headers on stdin.
+# The tested desktop-compatible OAuth grant is declared below; curl receives bearer headers on stdin.
 process = ["curl"]
 env = ["MEMCASTLE_CHATGPT_BEARER", "MEMCASTLE_CHATGPT_COOKIE"]
+
+[permissions.oauth]
+client_id = "app_EMoamEEZ73f0CkXaXp7hrann"
+scopes = ["openid", "profile", "email", "offline_access", "api.connectors.read", "api.connectors.invoke"]
+authorize_url = "https://auth.openai.com/oauth/authorize"
+token_url = "https://auth.openai.com/oauth/token"
+callback_path = "/auth/callback"
+on_demand = true
 
 [permissions.filesystem]
 read = ["locator"]
@@ -29,8 +38,13 @@ description = "non-secret account label required for web mining; keeps each acco
 type = "string"
 description = "web selects experimental authenticated acquisition instead of an export file"
 
+[options.projects]
+type = "string"
+description = "web-only projects to mine, comma-separated id:PROJECT_ID or name:EXACT_NAME; omit for all conversations"
+
 [limits]
-timeout_secs = 30
+# A web sweep may page through several projects in one discover call; the daemon still caps this at its own setting.
+timeout_secs = 600
 
 [build]
 command = ["cargo", "build", "--release", "--target", "wasm32-wasip2", "--target-dir", "target"]

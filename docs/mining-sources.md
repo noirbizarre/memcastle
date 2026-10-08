@@ -160,7 +160,7 @@ The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unc
 | `opencode` | bundled package, `sources/opencode/` | OpenCode coding-agent session history | `time_updated` of the session | yes | no |
 | `claude` | bundled package, `sources/claude/` | Claude Code session history | modification time | yes | no |
 | `codex` | bundled package, `sources/codex/` | Codex rollout history | modification time | yes | no |
-| `chatgpt` | bundled package, `sources/chatgpt/` | ChatGPT export or experimental web history | repeated sweep | yes | optional manual web session |
+| `chatgpt` | bundled package, `sources/chatgpt/` | ChatGPT export or experimental web history | repeated sweep | yes | OAuth for web, optional manual fallback |
 
 Only `directory` is compiled into MemCastle.
 `pi`, `opencode`, `claude`, `codex` and `chatgpt` are [WebAssembly sources](writing-sources.md).
@@ -457,11 +457,23 @@ memcastle mine chatgpt mode=web account=personal
 ```
 
 `account` is a non-secret label that keeps different accounts' cursors separate.
-The daemon must have `curl` and a fresh ChatGPT web session in its `MEMCASTLE_CHATGPT_BEARER` environment variable;
-`MEMCASTLE_CHATGPT_COOKIE` may also be needed.
-Session values are never mine options or config settings.
-The observed web traffic carries both a Bearer credential and cookies, and no compatible public OAuth grant has been
-demonstrated, so this source cannot use `memcastle source auth` to obtain or renew a web session.
+Without a project filter, the web backend combines ordinary conversations and the full paginated history of each
+project, including archived projects; the sidebar's preview alone is never treated as complete history.
+`projects=id:PROJECT_ID` or `projects=name:Exact Name` selects one project; comma-separated selectors choose several.
+Names must be unique and exact, and an ID is the stable choice for a scheduled miner because renames or reused names
+change what the name selects.
+A project selection has its own cursor, separate from the account's unfiltered history.
+Export files cannot be project-filtered until their project membership is verified.
+Configure the filter persistently with `memcastle miner set` and a `--scope 'projects=name:Exact Name'` flag
+([Configuration](configuration.md#chatgpt-project-miner)).
+The daemon needs `curl`; run `memcastle source auth chatgpt` on its machine before web mining.
+The daemon keeps and renews the OAuth credential, and the source asks for a current bearer through the host function.
+Fresh desktop-compatible OAuth access and renewed tokens read conversation and project history **without cookies** when
+the request uses a browser-style User-Agent; plain curl received a 403 edge challenge with the same token.
+OpenAI's documented third-party sign-in does not grant history access, so this private desktop-compatible integration
+can change independently of the generic MemCastle OAuth mechanism.
+The previous fallback still accepts `MEMCASTLE_CHATGPT_BEARER` (and an optional `MEMCASTLE_CHATGPT_COOKIE`) from the daemon
+environment; no session value belongs in a mine option or config setting.
 It revisits conversations on every run and fails on incomplete message pages rather than filing a partial transcript.
 This backend is tested against synthetic replies, not yet against a fresh live session; endpoints, login requirements and
 pagination may change.

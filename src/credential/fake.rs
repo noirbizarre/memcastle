@@ -89,6 +89,8 @@ impl Provider {
             token_url: format!("{}/token", self.base),
             authorize_url: Some(format!("{}/authorize", self.base)),
             device_authorization_url: Some(format!("{}/device", self.base)),
+            callback_path: None,
+            on_demand: false,
         }
     }
 

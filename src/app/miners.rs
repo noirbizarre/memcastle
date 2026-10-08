@@ -683,6 +683,9 @@ impl AppServices {
             _ => {}
         }
         if let Some(requirement) = requirement
+            // An on-demand OAuth source may mine offline exports or use its explicitly granted manual-session
+            // fallback; an explicit `oauth` miner reference still promises that this particular miner is signed in.
+            && (!requirement.on_demand || matches!(miner.credential.as_ref(), Some(CredentialRef::Oauth)))
             && !self.signed_in(&miner.source, requirement).await
         {
             return Err(format!(

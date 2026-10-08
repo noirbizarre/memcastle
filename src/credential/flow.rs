@@ -153,7 +153,8 @@ impl Credentials {
                 .local_addr()
                 .map_err(|e| failed(source, e.to_string()))?
                 .port();
-            let redirect = format!("http://127.0.0.1:{port}/callback");
+            let callback_path = requirement.callback_path.as_deref().unwrap_or("/callback");
+            let redirect = format!("http://127.0.0.1:{port}{callback_path}");
             let state = oauth::random_token(16).map_err(|m| failed(source, m))?;
             let pkce = Pkce::generate().map_err(|m| failed(source, m))?;
             let url = oauth::authorize_url(requirement, &redirect, &state, &pkce.challenge)
@@ -173,6 +174,7 @@ impl Credentials {
                 listener,
                 Redirect {
                     uri: redirect,
+                    path: callback_path.to_string(),
                     state,
                     verifier: pkce.verifier,
                 },
@@ -308,10 +310,12 @@ impl Credentials {
         outcome: watch::Sender<Outcome>,
     ) {
         let result = async {
-            let code =
-                tokio::time::timeout(BROWSER_WINDOW, await_callback(&listener, &redirect.state))
-                    .await
-                    .map_err(|_| "the sign-in was not finished in time".to_string())??;
+            let code = tokio::time::timeout(
+                BROWSER_WINDOW,
+                await_callback(&listener, &redirect.state, &redirect.path),
+            )
+            .await
+            .map_err(|_| "the sign-in was not finished in time".to_string())??;
             // The listener has done its one job; the provider is talked to without a port held open.
             drop(listener);
             let tokens = oauth::exchange_code(
@@ -335,6 +339,7 @@ impl Credentials {
 /// What the browser flow's callback must match.
 struct Redirect {
     uri: String,
+    path: String,
     state: String,
     verifier: String,
 }
@@ -343,6 +348,7 @@ struct Redirect {
 async fn await_callback(
     listener: &TcpListener,
     state: &str,
+    path: &str,
 ) -> std::result::Result<String, String> {
     loop {
         let Ok((stream, _)) = listener.accept().await else {
@@ -350,7 +356,7 @@ async fn await_callback(
         };
         // Anything else (not ours, not valid, too slow) has been answered or dropped, and the real one may still come.
         if let Ok(Some(result)) =
-            tokio::time::timeout(CALLBACK_READ, answer_callback(stream, state)).await
+            tokio::time::timeout(CALLBACK_READ, answer_callback(stream, state, path)).await
         {
             return result;
         }
@@ -361,6 +367,7 @@ async fn await_callback(
 async fn answer_callback(
     mut stream: TcpStream,
     state: &str,
+    path: &str,
 ) -> Option<std::result::Result<String, String>> {
     let mut buffer = Vec::with_capacity(1024);
     let mut chunk = [0_u8; 1024];
@@ -378,7 +385,7 @@ async fn answer_callback(
         .then_some(target)
         .flatten()
         .and_then(|target| reqwest::Url::parse(&format!("http://localhost{target}")).ok())
-        .filter(|url| url.path() == "/callback");
+        .filter(|url| url.path() == path);
     let Some(url) = parsed else {
         respond(&mut stream, "404 Not Found", "Not found.").await;
         return None;

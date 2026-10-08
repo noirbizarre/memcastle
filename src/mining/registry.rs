@@ -435,6 +435,10 @@ pub async fn ensure_signed_in(
     let Some(requirement) = permissions.oauth.clone() else {
         return Ok(());
     };
+    // Mixed offline/online packages defer this check to the source's identify call, before a source record is filed.
+    if requirement.on_demand {
+        return Ok(());
+    }
     let required = |reason: &str| Error::CredentialRequired {
         source_name: name.to_string(),
         reason: reason.to_string(),
@@ -461,6 +465,31 @@ mod tests {
 
     use super::*;
     use crate::domain::{Compatibility, ManifestSource, SourceManifest};
+
+    #[tokio::test]
+    async fn an_on_demand_oauth_permission_does_not_block_offline_acquisition() {
+        let mut permissions = Permissions::default();
+        permissions.oauth = Some(crate::domain::OAuthRequirement {
+            client_id: "public-client".into(),
+            scopes: vec!["read".into()],
+            token_url: "https://auth.example.com/token".into(),
+            authorize_url: Some("https://auth.example.com/authorize".into()),
+            device_authorization_url: None,
+            callback_path: None,
+            on_demand: false,
+        });
+        assert!(
+            ensure_signed_in("example", &permissions, None)
+                .await
+                .is_err()
+        );
+        permissions.oauth.as_mut().unwrap().on_demand = true;
+        assert!(
+            ensure_signed_in("example", &permissions, None)
+                .await
+                .is_ok()
+        );
+    }
 
     fn record(contract: &str) -> SourcePackageRecord {
         let now = Utc::now();

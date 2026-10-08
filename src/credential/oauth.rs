@@ -417,6 +417,8 @@ mod tests {
             token_url: "https://auth.example.com/token".into(),
             authorize_url: Some("https://auth.example.com/authorize?audience=api".into()),
             device_authorization_url: None,
+            callback_path: None,
+            on_demand: false,
         }
     }
 

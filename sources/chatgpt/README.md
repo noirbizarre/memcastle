@@ -23,10 +23,23 @@ No export can restore conversations already deleted at the origin.
 
 ## Experimental live acquisition
 
-The captured ChatGPT web application used a Bearer authorization header **and** cookies; it did not show how a session is issued or renewed.
-There is no demonstrated public-client OAuth grant authorizing these endpoints.
-The source therefore does not declare OAuth and does not accept an OpenAI API key.
-If you choose the experimental backend, arrange for a **fresh** session in the daemon's environment:
+The captured desktop app sent both a Bearer token and cookies, but a fresh desktop-compatible PKCE sign-in proved a
+renewed bearer alone can read history and projects when curl sends a browser-style User-Agent.
+Plain curl and Python's default User-Agent received an HTML 403 edge challenge even with the same bearer; storing a
+cookie from `auth.openai.com` does not fix that.
+The source declares the tested desktop OAuth client and keeps its refresh token through MemCastle's credential store;
+the daemon hands the source a renewed access token for each web call, and no browser cookie is stored.
+OpenAI's *documented third-party* Sign in with ChatGPT flow does not grant history access, so this desktop-compatible
+private interface may change without notice.
+Sign in on the daemon's machine (browser OAuth needs its loopback callback), then mine:
+
+```sh
+memcastle source auth chatgpt
+memcastle mine chatgpt mode=web account=personal
+```
+
+Export ZIP/JSON imports remain usable while signed out.
+The old manual-session environment fallback also remains available when a fresh OAuth sign-in is not possible:
 
 ```text
 MEMCASTLE_CHATGPT_BEARER=<fresh ChatGPT web access token>
@@ -34,6 +47,7 @@ MEMCASTLE_CHATGPT_COOKIE=<fresh ChatGPT web cookie header, if required>
 ```
 
 Set these outside MemCastle's config and restart the daemon so it inherits them.
+An environment bearer takes precedence over OAuth, so remove it to use `source auth chatgpt`.
 Do not put them in `memcastle mine` options, project files, a shell history entry or a saved HAR.
 The source's process grant runs `curl` with a fixed `https://chatgpt.com` origin, sends headers through standard input, refuses redirects and caps each command's response at 16 MiB.
 Installing the source shows the `locator` read grant (for a file, its parent directory), `curl` process grant and the two environment-variable grants for consent.
@@ -43,9 +57,31 @@ Use an account label that is **not** a token and that differs across accounts:
 memcastle mine chatgpt mode=web account=personal
 ```
 
+An unfiltered web run reads ordinary and project conversations, including archived projects.
+To mine only named projects, use `projects=name:Exact Name`, or `projects=id:PROJECT_ID` for an unambiguous selection.
+Separate multiple selectors with commas: `projects=id:ID_A,name:Other Project`.
+Names must be exact and unique; a renamed project stops matching, and a newly created project with the old name may
+be selected on a later run, so use IDs for unattended miners.
+A name containing a comma must use its ID instead.
+Each selected set of projects has its own source identity and cursor; omitting the option keeps the original unfiltered
+identity.
+An export file does not support `projects` because its project membership has not been verified.
+The project sidebar only discovers names and IDs; this source follows the per-project conversation pages for history.
+Project membership in raw document metadata comes from those listings, even when conversation details omit it.
+Large accounts may need a higher `mining.source_timeout_secs` for discovery; each call remains bounded by both the daemon
+setting and this source's 600-second maximum.
+
+Define a persistent, scoped miner using the existing miner settings:
+
+```sh
+memcastle miner set chatgpt-project --source chatgpt \
+  --scope 'projects=name:Exact Name' --setting mode=web --setting account=personal
+memcastle miner run chatgpt-project
+```
+
 The daemon must have `curl` installed.
-Sessions expire and cannot currently be renewed by this source.
-HTTP 401/403 means replace the session; HTTP 429 means retry later.
+OAuth tokens are renewed by MemCastle; manually supplied sessions still expire without automatic renewal.
+HTTP 401/403 means check the sign-in and session or retry when the private interface changes; HTTP 429 means retry later.
 Conversation lists can change during offset paging: the source rejects detected drift and rescans on a later run.
 The source revisits the list on each run so edited old conversations are not hidden behind a timestamp watermark.
 Message pagination is bounded and fails instead of storing a partial transcript.

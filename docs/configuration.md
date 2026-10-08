@@ -631,11 +631,10 @@ window_days = 30
 A key that is not listed is an error, not an ignored typo: `enable = false` must not leave a miner enabled.
 `scope` and `config` are open tables, so a source can define keys of its own.
 
-- **Identity.** A miner's cursor and documents belong to the *source* it points at, which is its `source` and `locator`,
-  and not to its name.
-  Renaming, enabling, disabling, re-scoping or changing the wing or the credential of a miner keeps its
-  cursor.
-  Pointing it at another `source` or `locator` is a different source with its own cursor, and `miner set` says so.
+- **Identity.** A miner's cursor and documents belong to the *source* it points at, and not to its name.
+  Renaming, enabling, disabling or changing the wing or credential keeps its cursor.
+  Pointing it at another source or locator creates a different source with its own cursor.
+  A source such as `chatgpt` can also give different selected project scopes separate identities and cursors.
   Removing a miner, or disabling it, never deletes what it mined.
 - **Secrets.** A secret is never written in the file.
   `credential` names where it comes from: an environment variable of the daemon, a file,
@@ -646,8 +645,9 @@ A key that is not listed is an error, not an ignored typo: `enable = false` must
   (for `oauth`, whether the source is signed in), never its name or path.
   Handing an `env` or `file` credential to a source is the source's side of the contract, which does not take one yet;
   today the daemon checks that it resolves, so an enabled miner whose variable is unset is `unavailable`, with the fix.
-  An OAuth sign-in is handed over: a source that declares one is given a fresh access token on each call that asks,
-  and a miner for it is `unavailable` until `memcastle source auth <source>` has been run, whatever its `credential` says.
+  An OAuth sign-in is handed over: a source that declares one is given a fresh access token on each call that asks.
+  Sources requiring it for every mode make a miner unavailable until `memcastle source auth <source>` has been run;
+  a source with on-demand OAuth may also offer an offline mode or an explicit manual-session fallback.
 - **Validation.** The shape of every entry is checked when the file is loaded, so a bad entry stops the daemon starting
   like a bad `[embeddings]` section.
   An *enabled* miner is also held to what running needs, when it is created or changed: the source is built in or
@@ -660,7 +660,8 @@ A key that is not listed is an error, not an ignored typo: `enable = false` must
   exactly as `memcastle mine <source> key=value` would ([ADR-042](adr/042-mine-takes-a-source-and-its-options.md)).
   A scalar is its text and a list of strings is comma-joined; a key the source does not declare, a key in both tables
   and a nested table make the miner not runnable, so the daemon never mines more than a filter says.
-   `directory` declares `since`; `pi`, `opencode` and `claude` declare `since` and `dir`.
+  `directory` declares `since`; `pi`, `opencode` and `claude` declare `since` and `dir`.
+  `chatgpt` declares a web-only `projects` scope in addition to `mode` and `account` settings.
 
 ### Claude Code history miner
 
@@ -681,6 +682,33 @@ dir = "/home/alice/src/*"
 
 `since` narrows by transcript modification time and `dir` matches the working directory recorded in each transcript.
 Use a separate miner or run `memcastle mine claude --full` when a restored transcript predates its cursor.
+
+### ChatGPT project miner
+
+The bundled `chatgpt` source can select projects on its experimental web backend using existing miner scope options.
+Sign the source in with `memcastle source auth chatgpt` on the daemon's machine before running web miners.
+This source's desktop-compatible OAuth bearer was verified to read history without cookies using a browser-style
+User-Agent; the old manually supplied web session remains a fallback ([ChatGPT](mining-sources.md#chatgpt)).
+
+```toml
+[[miners]]
+name = "chatgpt-work"
+source = "chatgpt"
+
+[miners.scope]
+projects = ["name:Work", "id:g-p-example"]
+
+[miners.config]
+mode = "web"
+account = "personal"
+```
+
+The miner joins the `projects` list with commas and the source resolves names to unique project IDs.
+If a name no longer exists or names collide, the run fails rather than broadening its scope.
+Use project IDs for scheduled miners: names can be reused by another project after a rename.
+Without `projects`, a web miner includes ordinary conversations and every project's history; exports do not support
+project selection.
+Changing or removing a scope still follows the existing `--allow-broaden` rule.
 
 ### Changing miners while the daemon runs
 

@@ -1,12 +1,208 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use serde_json::{Value, json};
 
-use crate::memcastle::source::host::run_process;
+use crate::memcastle::source::host::{access_token, run_process};
 
 const PAGE: usize = 20;
 const MAX_LIST_PAGES: usize = 500;
 const MAX_MESSAGE_PAGES: usize = 500;
+const MAX_PROJECT_PAGES: usize = 100;
+// A plain curl user agent received an HTML edge challenge even with a freshly issued OAuth token.
+// This browser-style value received a JSON 200 without any cookie, including after token refresh.
+const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+pub(super) fn check_auth() -> Result<(), String> {
+    bearer().map(|_| ())
+}
+
+fn bearer() -> Result<String, String> {
+    if let Ok(token) = std::env::var("MEMCASTLE_CHATGPT_BEARER")
+        && !token.is_empty()
+    {
+        return Ok(token);
+    }
+    access_token().map_err(|_| {
+        "sign in with `memcastle source auth chatgpt` before mining the web source".into()
+    })
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Project {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug)]
+pub(super) struct Listing {
+    pub id: String,
+    pub project: Option<Project>,
+}
+
+fn valid_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
+fn next_cursor(response: &Value) -> Result<Option<&str>, String> {
+    match response.get("cursor") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(cursor)) if !cursor.is_empty() && cursor.len() <= 2048 => {
+            Ok(Some(cursor))
+        }
+        _ => Err("ChatGPT returned an invalid project-page cursor".into()),
+    }
+}
+
+pub(super) fn projects() -> Result<Vec<Project>, String> {
+    let mut result = Vec::new();
+    let mut ids = HashSet::new();
+    let mut cursors = HashSet::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..MAX_PROJECT_PAGES {
+        let mut path = format!("/backend-api/gizmos/snorlax/sidebar?limit={PAGE}");
+        if let Some(cursor) = &cursor {
+            path.push_str(&format!("&cursor={}", encode(cursor)));
+        }
+        let response = request(&path)?;
+        let items = response
+            .get("items")
+            .and_then(Value::as_array)
+            .ok_or("ChatGPT project sidebar has no items")?;
+        if items.len() > PAGE {
+            return Err("ChatGPT returned an oversized project sidebar page".into());
+        }
+        for item in items {
+            let project = &item["gizmo"]["gizmo"];
+            let id = project
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| valid_id(id))
+                .ok_or("a ChatGPT project has no valid ID")?;
+            let name = project["display"]["name"]
+                .as_str()
+                .filter(|name| !name.is_empty())
+                .ok_or("a ChatGPT project has no display name")?;
+            if !ids.insert(id.to_string()) {
+                return Err("ChatGPT project sidebar repeated a project; retry the mine".into());
+            }
+            result.push(Project {
+                id: id.to_string(),
+                name: name.to_string(),
+            });
+        }
+        let Some(next) = next_cursor(&response)? else {
+            return Ok(result);
+        };
+        if items.is_empty() || !cursors.insert(next.to_string()) {
+            return Err("ChatGPT project sidebar repeated a cursor or ended prematurely".into());
+        }
+        cursor = Some(next.to_string());
+    }
+    Err("ChatGPT project sidebar exceeds its paging limit; refusing a partial listing".into())
+}
+
+pub(super) fn select_projects(
+    selection: &str,
+    available: &[Project],
+) -> Result<Vec<Project>, String> {
+    let mut selected = BTreeMap::new();
+    if selection.is_empty() {
+        return Err("projects is empty; omit it to mine everything".into());
+    }
+    for selector in selection.split(',') {
+        let project = if let Some(id) = selector.strip_prefix("id:") {
+            if !valid_id(id) {
+                return Err("projects=id:… needs a valid ChatGPT project ID".into());
+            }
+            available
+                .iter()
+                .find(|project| project.id == id)
+                .ok_or("the selected ChatGPT project ID is unavailable; check its ID and account")?
+        } else if let Some(name) = selector.strip_prefix("name:") {
+            if name.is_empty() {
+                return Err("projects=name:… needs a nonempty display name".into());
+            }
+            let mut matches = available.iter().filter(|project| project.name == name);
+            let first = matches.next().ok_or("the named ChatGPT project was not found; a renamed project needs its new name or ID")?;
+            if matches.next().is_some() {
+                return Err(
+                    "more than one ChatGPT project has that name; use projects=id:…".into(),
+                );
+            }
+            first
+        } else {
+            return Err(
+                "projects accepts comma-separated id:PROJECT_ID or name:EXACT_NAME values".into(),
+            );
+        };
+        if selected
+            .insert(project.id.clone(), project.clone())
+            .is_some()
+        {
+            return Err("the same ChatGPT project is selected twice".into());
+        }
+    }
+    Ok(selected.into_values().collect())
+}
+
+fn project_conversations(project: &Project) -> Result<Vec<Listing>, String> {
+    let mut listings = Vec::new();
+    let mut ids = HashSet::new();
+    let mut cursors = HashSet::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..MAX_LIST_PAGES {
+        let mut path = format!(
+            "/backend-api/gizmos/{}/conversations?limit={PAGE}",
+            encode(&project.id)
+        );
+        if let Some(cursor) = &cursor {
+            path.push_str(&format!("&cursor={}", encode(cursor)));
+        }
+        let response = request(&path)?;
+        let items = response
+            .get("items")
+            .and_then(Value::as_array)
+            .ok_or("ChatGPT project conversations have no items")?;
+        if items.len() > PAGE {
+            return Err("ChatGPT returned an oversized project conversation page".into());
+        }
+        for item in items {
+            let id = item
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| valid_id(id))
+                .ok_or("a ChatGPT project conversation has no valid ID")?;
+            if item.get("gizmo_id").and_then(Value::as_str) != Some(project.id.as_str()) {
+                return Err(
+                    "a ChatGPT conversation belongs to another project; retry the mine".into(),
+                );
+            }
+            if !ids.insert(id.to_string()) {
+                return Err(
+                    "ChatGPT project conversation pages repeated an ID; retry the mine".into(),
+                );
+            }
+            listings.push(Listing {
+                id: id.to_string(),
+                project: Some(project.clone()),
+            });
+        }
+        let Some(next) = next_cursor(&response)? else {
+            return Ok(listings);
+        };
+        if items.is_empty() || !cursors.insert(next.to_string()) {
+            return Err(
+                "ChatGPT project conversations repeated a cursor or ended prematurely".into(),
+            );
+        }
+        cursor = Some(next.to_string());
+    }
+    Err("ChatGPT project conversations exceed the page limit; refusing partial history".into())
+}
 
 fn escape(value: &str) -> Result<String, String> {
     if value.contains(['\r', '\n', '\0']) {
@@ -28,16 +224,12 @@ fn encode(value: &str) -> String {
 }
 
 fn request(path: &str) -> Result<Value, String> {
-    let bearer = std::env::var("MEMCASTLE_CHATGPT_BEARER").map_err(|_| {
-        "set MEMCASTLE_CHATGPT_BEARER in the daemon environment for the experimental web source"
-            .to_string()
-    })?;
-    let bearer = escape(&bearer)?;
+    let bearer = escape(&bearer()?)?;
     if bearer.is_empty() {
         return Err("the ChatGPT bearer session is empty".into());
     }
     let mut config = format!(
-        "url = \"https://chatgpt.com{path}\"\nheader = \"Authorization: Bearer {bearer}\"\nheader = \"Accept: application/json\"\n"
+        "url = \"https://chatgpt.com{path}\"\nheader = \"Authorization: Bearer {bearer}\"\nheader = \"Accept: application/json\"\nheader = \"User-Agent: {USER_AGENT}\"\n"
     );
     if let Ok(cookie) = std::env::var("MEMCASTLE_CHATGPT_COOKIE") {
         config.push_str(&format!("header = \"Cookie: {}\"\n", escape(&cookie)?));
@@ -137,16 +329,46 @@ fn list_status(archived: bool) -> Result<Vec<String>, String> {
     )
 }
 
-pub(super) fn list() -> Result<Vec<String>, String> {
-    let mut ids = list_status(false)?;
-    ids.extend(list_status(true)?);
-    ids.sort();
-    if ids.windows(2).any(|pair| pair[0] == pair[1]) {
-        return Err(
-            "a ChatGPT conversation changed archive status during paging; retry the mine".into(),
-        );
+pub(super) fn list(selection: Option<&[Project]>) -> Result<Vec<Listing>, String> {
+    let mut found: BTreeMap<String, Option<Project>> = BTreeMap::new();
+    if selection.is_none() {
+        for id in list_status(false)? {
+            found.insert(id, None);
+        }
+        for id in list_status(true)? {
+            if found.insert(id, None).is_some() {
+                return Err(
+                    "a ChatGPT conversation changed archive status during paging; retry the mine"
+                        .into(),
+                );
+            }
+        }
     }
-    Ok(ids)
+    let available;
+    let selected = if let Some(selected) = selection {
+        selected
+    } else {
+        available = projects()?;
+        &available
+    };
+    for project in selected {
+        for entry in project_conversations(project)? {
+            if found
+                .get(&entry.id)
+                .and_then(Option::as_ref)
+                .is_some_and(|known| known.id != project.id)
+            {
+                return Err(
+                    "a ChatGPT conversation appears in multiple projects; retry the mine".into(),
+                );
+            }
+            found.insert(entry.id, Some(project.clone()));
+        }
+    }
+    Ok(found
+        .into_iter()
+        .map(|(id, project)| Listing { id, project })
+        .collect())
 }
 
 fn assembled(id: &str, detail: &Value, mut pages: Vec<Vec<Value>>) -> Result<Value, String> {
@@ -175,11 +397,7 @@ fn assembled(id: &str, detail: &Value, mut pages: Vec<Vec<Value>>) -> Result<Val
 
 pub(super) fn conversation(id: &str) -> Result<Value, String> {
     // An opaque ID is never allowed to rewrite the fixed origin or path.
-    if id.is_empty()
-        || !id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
-    {
+    if !valid_id(id) {
         return Err("ChatGPT returned an invalid conversation ID".into());
     }
     let mut detail = request(&format!(

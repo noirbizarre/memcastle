@@ -60,10 +60,26 @@ fn validate_conversation(value: &Value) -> Result<&str, String> {
 
 fn records(source: &SourceRef) -> Result<Vec<Value>, SourceError> {
     if source.locator == "chatgpt:web" {
-        return Ok(web::list()
+        let selected = source
+            .options
+            .iter()
+            .find(|(key, _)| key == "projects")
+            .map(|(_, value)| {
+                let available = web::projects()?;
+                web::select_projects(value, &available)
+            })
+            .transpose()
+            .map_err(failed)?;
+        return Ok(web::list(selected.as_deref())
             .map_err(failed)?
             .into_iter()
-            .map(|id| json!({"id": id}))
+            .map(|listing| {
+                json!({
+                    "id": listing.id,
+                    "project_id": listing.project.as_ref().map(|project| project.id.as_str()),
+                    "project_name": listing.project.as_ref().map(|project| project.name.as_str()),
+                })
+            })
             .collect());
     }
     export::ids(&PathBuf::from(&source.locator)).map_err(failed)
@@ -231,6 +247,7 @@ impl Guest for ChatGpt {
     ) -> Result<SourceRef, SourceError> {
         let mut account = None;
         let mut mode = None;
+        let mut projects = None;
         for (key, value) in &options {
             if key == "mode" && mode.is_none() && value == "web" {
                 mode = Some(value.clone());
@@ -240,8 +257,10 @@ impl Guest for ChatGpt {
                 && value.len() <= 80
             {
                 account = Some(value.clone());
+            } else if key == "projects" && projects.is_none() {
+                projects = Some(value.clone());
             } else {
-                return Err(SourceError::InvalidInput("use mode=web account=LABEL for web, or a file path without options for an export".into()));
+                return Err(SourceError::InvalidInput("use mode=web account=LABEL projects=id:ID,name:NAME for web, or a file path without options for an export".into()));
             }
         }
         if mode.is_some() {
@@ -256,16 +275,35 @@ impl Guest for ChatGpt {
                     "mode=web does not take an export file path".into(),
                 ));
             }
+            // A web run must establish its authorization before the pipeline creates its source record or cursor.
+            web::check_auth().map_err(failed)?;
+            let mut account = account.unwrap_or_default();
+            let mut options = options;
+            if let Some(selection) = projects {
+                let available = web::projects().map_err(failed)?;
+                let selected = web::select_projects(&selection, &available)
+                    .map_err(SourceError::InvalidInput)?;
+                let ids: Vec<_> = selected.iter().map(|project| project.id.as_str()).collect();
+                account = json!({"account": account, "projects": ids}).to_string();
+                // Normalizing names into IDs pins this run's discovery to the exact slice it identified.
+                if let Some((_, value)) = options.iter_mut().find(|(key, _)| key == "projects") {
+                    *value = ids
+                        .iter()
+                        .map(|id| format!("id:{id}"))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                }
+            }
             return Ok(SourceRef {
                 source: "chatgpt".into(),
-                account,
+                account: Some(account),
                 locator: "chatgpt:web".into(),
                 options,
             });
         }
-        if account.is_some() {
+        if account.is_some() || projects.is_some() {
             return Err(SourceError::InvalidInput(
-                "account=LABEL requires mode=web".into(),
+                "account=LABEL and projects=… require mode=web; export files cannot be filtered by project".into(),
             ));
         }
         let locator = locator.ok_or_else(|| {
@@ -302,17 +340,17 @@ impl Guest for ChatGpt {
             .into_iter()
             .map(|value| {
                 id_of(&value)
-                    .map(str::to_string)
+                    .map(|id| (id.to_string(), value.clone()))
                     .ok_or_else(|| failed("a ChatGPT conversation has no id"))
             })
             .collect::<Result<_, _>>()?;
-        items.sort();
-        if items.windows(2).any(|pair| pair[0] == pair[1]) {
-            return Err(failed("the export has duplicate conversation IDs"));
+        items.sort_by(|a, b| a.0.cmp(&b.0));
+        if items.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+            return Err(failed("the ChatGPT listing has duplicate conversation IDs"));
         }
         let mut remaining: Vec<_> = items
             .iter()
-            .filter(|id| done || after.as_ref().is_none_or(|prev| *id > prev))
+            .filter(|(id, _)| done || after.as_ref().is_none_or(|prev| id > prev))
             .cloned()
             .collect();
         // The last seen conversation may have been deleted since the previous run. Restart the sweep rather than
@@ -326,10 +364,14 @@ impl Guest for ChatGpt {
             .into_iter()
             .take(count)
             .enumerate()
-            .map(|(index, id)| Candidate {
+            .map(|(index, (id, value))| Candidate {
                 cursor_after: json!({"after": id, "done": exhausted && index + 1 == count})
                     .to_string(),
-                handle: id.clone(),
+                handle: if source.locator == "chatgpt:web" {
+                    value.to_string()
+                } else {
+                    id.clone()
+                },
                 external_id: id,
             })
             .collect();
@@ -340,8 +382,22 @@ impl Guest for ChatGpt {
     }
 
     fn read(source: SourceRef, candidate: Candidate) -> Result<Option<RawDocument>, SourceError> {
+        let mut project = None;
         let value = if source.locator == "chatgpt:web" {
-            web::conversation(&candidate.handle).map_err(failed)?
+            let handle: Value = serde_json::from_str(&candidate.handle)
+                .map_err(|_| failed("ChatGPT conversation handle is invalid"))?;
+            if id_of(&handle) != Some(candidate.external_id.as_str()) {
+                return Err(failed("ChatGPT conversation handle names another document"));
+            }
+            project = match (
+                handle.get("project_id").and_then(Value::as_str),
+                handle.get("project_name").and_then(Value::as_str),
+            ) {
+                (Some(id), Some(name)) => Some((id.to_string(), name.to_string())),
+                (None, None) => None,
+                _ => return Err(failed("ChatGPT project provenance is incomplete")),
+            };
+            web::conversation(&candidate.external_id).map_err(failed)?
         } else {
             let Some(value) =
                 export::conversation(&PathBuf::from(&source.locator), &candidate.handle)
@@ -366,9 +422,13 @@ impl Guest for ChatGpt {
             external_id: candidate.external_id,
             revision: revision(&body),
             body,
-            metadata:
-                json!({"backend": if source.locator == "chatgpt:web" { "web" } else { "export" }})
-                    .to_string(),
+            metadata: if source.locator == "chatgpt:web" {
+                json!({"backend": "web", "project_id": project.as_ref().map(|p| &p.0),
+                       "project_name": project.as_ref().map(|p| &p.1)})
+                .to_string()
+            } else {
+                json!({"backend": "export"}).to_string()
+            },
             occurred_at,
         }))
     }
