@@ -42,7 +42,9 @@ An invariant nothing checks is a comment, and it will be violated.
    `source auth` never talks to a provider or keeps a token itself: the daemon runs the OAuth flow through
    `crate::credential`, and the CLI calls it over REST, shows the code or address, and waits
    (see `docs/adr/039-oauth-credentials-for-mining-sources.md`).
-   `note` also reads the project directory through `crate::project` to choose a wing and room, then calls the daemon.)
+   `note` also reads the project directory through `crate::project` to choose a wing and room, then calls the daemon.
+   `doctor` checks configuration and local prerequisites without a daemon and reads runtime state through
+   `client::DaemonClient` when one is available; it never opens storage or changes files.)
    `migrate` is a second, narrow exception alongside `serve`: it connects to storage directly (via
    `crate::migrate::run`/`status`, the same runner `serve` calls on every startup) because migration must work
    without, and before, a daemon exists — see `docs/adr/004-versioned-database-migrations.md`.

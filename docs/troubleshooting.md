@@ -1,5 +1,9 @@
 # Troubleshooting
 
+Start with `memcastle doctor` to inspect configuration and local prerequisites without changing the palace.
+When the daemon is running, it also checks storage, migrations and configured source/miner/trigger readiness over HTTP.
+See the [doctor command](cli.md#doctor) for statuses, offline behavior and exit codes.
+
 Every MemCastle failure carries a diagnostic code of the form `memcastle::<module>::<kind>` and a `help:` line saying
 what to do.
 Codes are stable, so it is safe to search for or match on them.
@@ -8,7 +12,7 @@ and shows the daemon's own code in parentheses, such as `(403, memcastle::mode::
 that inner code is the one to look up below.
 Add `-v` for the full cause chain of an error, and see [Logging](daemon.md#logging) for the daemon's own log.
 
-Start with `memcastle status`: it says whether a daemon is running, where, and whether its datastore is healthy.
+For daemon-specific details, `memcastle status` says whether it is running, where, and whether its datastore is healthy.
 
 ## The daemon
 

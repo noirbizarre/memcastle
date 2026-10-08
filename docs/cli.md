@@ -3,10 +3,12 @@
 The `memcastle` binary is one daemon plus a set of thin clients.
 `serve` runs the daemon in the foreground, `daemon start` runs it in the background,
 and `migrate` talks to storage directly.
-Every other subcommand is an HTTP call to a running daemon, so it fails with `memcastle::client::not_running`
+`doctor` checks local configuration without a daemon and uses read-only HTTP requests for runtime checks when one is available.
+Most other subcommands are HTTP calls to a running daemon, so they fail with `memcastle::client::not_running`
 (and points you at `memcastle daemon start`) when none is running.
-Seven things differ:
-`status` reports a stopped daemon instead of failing, `daemon restart` starts a daemon when none is running,
+Other commands differ:
+`status` reports a stopped daemon instead of failing, `doctor` reports offline checks without failing,
+`daemon restart` starts a daemon when none is running,
 `completions` prints a script locally and needs neither a daemon nor a configuration file,
 the local `source` commands (`init`, `build`, `test`, `package`, `index` and `keygen`) work on a project directory or on
 archives with no daemon at all,
@@ -33,7 +35,8 @@ The readable rendering is not meant to be parsed and may change between releases
 would receive.
 It is a global flag, accepted before or after any subcommand, and it never changes a command's exit code.
 
-This applies to `status`, `db`, `integration`, `migrate`, `daemon stop`, `mine` and the other commands that queue a job
+This applies to `status`, `doctor`, `db`, `integration`, `migrate`, `daemon stop`, `mine`
+and the other commands that queue a job
 (`audit`, `embed`, `extract`, `repair`, `checkpoint`), `job` (all subcommands), `search`, `recall`, `wake-up`, `diary`,
 `note`, `sources`, `miner`, every daemon-side `source` command, and the `wing`, `room` and `drawer` commands.
 Four groups of commands have no answer to render and print the same text on every stream:
@@ -99,6 +102,7 @@ See [Configuration](configuration.md) for how these flags combine with the confi
 | `memcastle daemon stop` | Ask the running daemon to shut down gracefully. |
 | `memcastle daemon restart [--bind <IP>] [--port <PORT>] [--assets-dir <DIR>]` | Stop the running daemon, start a detached new one and wait until it serves. |
 | `memcastle status` | Report whether the daemon is running, where, which palace, and whether the datastore is healthy. |
+| `memcastle doctor` | Diagnose configuration, local prerequisites, and available daemon/runtime state without changing anything. |
 | `memcastle migrate [--check \| --status]` | Apply, or just inspect, the palace's migrations without a daemon. |
 | `memcastle completions <SHELL>` | Print a shell completion script, see [Shell completion](#shell-completion). |
 
@@ -107,6 +111,59 @@ client commands find the daemon through its registry file instead.
 `--assets-dir` names a directory of runtime assets that outranks the installed and built-in ones,
 see [Runtime assets](configuration.md#runtime-assets).
 See [Running the daemon](daemon.md) for the details of each, and [Migrations and upgrades](migrations.md) for `migrate`.
+
+### Doctor
+
+Run `memcastle doctor` to check the effective configuration (defaults, file, environment and CLI overrides),
+unknown file keys, directory prerequisites, configured providers, enabled miner and trigger prerequisites,
+and the running daemon's storage and migration state when it answers.
+An absent default config file is normal; an explicitly named missing config file is an error.
+Unknown TOML keys are warnings, because normal loading currently ignores them.
+Checks that depend on invalid configuration or a stopped daemon are marked `SKIPPED`.
+A stopped daemon is a warning: offline checks can succeed without starting one.
+The command never initializes a palace, opens the database, executes a provider, contacts a provider/model or source registry,
+or writes to the filesystem; actual write access and provider/model availability remain unverified.
+It prints no credential values or raw sensitive settings.
+
+Example terminal output (a new palace with no daemon):
+
+```text
+MemCastle doctor
+
+Configuration
+  [OK] file: No default file; built-in defaults apply.
+  [OK] effective: Effective configuration passes validation.
+
+Paths
+  [SKIPPED] palace.path: Optional directory does not exist yet.
+  [SKIPPED] embedded database: Optional directory does not exist yet.
+  [SKIPPED] mining.sources_dir: Optional directory does not exist yet.
+  [SKIPPED] write access: Write access is not tested without creating files.
+
+Providers
+  [OK] embeddings: No external provider is selected.
+  [OK] extraction: No external provider is selected.
+
+Daemon and storage
+  [WARNING] daemon: No daemon is reachable for this palace.
+        Fix: Start it with `memcastle daemon start` to run online checks.
+  [SKIPPED] storage and migrations: Requires an authenticated running daemon.
+
+Sources and miners
+  [SKIPPED] runtime prerequisites: Requires an authenticated running daemon.
+```
+
+`memcastle doctor --json` (also the default when piped) returns an object with `findings` in presentation order.
+An excerpt showing one finding:
+
+```json
+{"findings":[{"area":"Daemon and storage","check":"daemon","status":"warning","summary":"No daemon is reachable for this palace.","remediation":"Start it with `memcastle daemon start` to run online checks."}]}
+```
+
+Each finding has `area`, `check`, `status` (`ok`, `warning`, `error`, `skipped`), `summary`,
+and an optional `remediation`.
+Exit status is `0` when there are no blocking `error` findings (warnings and skipped checks alone do not fail),
+or `1` when at least one check is an error; the full report is printed on standard output either way.
 
 ### Shell completion
 
