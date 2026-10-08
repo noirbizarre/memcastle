@@ -65,6 +65,8 @@ From lowest to highest, a later layer overrides an earlier one:
 
 A malformed environment variable is an error naming the variable; it is never silently ignored.
 The resolved configuration is validated once all layers are applied.
+Unknown keys in the TOML file are currently ignored by normal configuration loading.
+Run `memcastle doctor` to see warnings for unknown keys, including misspelled nested settings.
 
 Logging has one more input.
 Its precedence, highest first, is `MEMCASTLE_LOG`, `RUST_LOG`, the `-v` / `-vv` flags, then `logging.level`.

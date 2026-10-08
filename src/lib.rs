@@ -18,10 +18,10 @@
 //! `events` is the daemon's change notifications: `app`, `jobs` and the handlers publish identifiers (never content)
 //! after a write is saved, and `GET /api/events` relays them so a client re-reads instead of polling.
 //!
-//! `main.rs`/`cli.rs` are thin: every subcommand either runs `server::run`
-//! (the `serve` command) or goes through `client::DaemonClient`
-//! (everything else), with two narrow exceptions: `migrate` connects to
-//! storage itself, and `daemon start`/`daemon restart` also manage the daemon
+//! `main.rs`/`cli.rs` are thin: `serve` runs `server::run`, daemon-dependent commands
+//! go through `client::DaemonClient`, and `doctor` combines local read-only checks with
+//! daemon reads when available. `migrate` alone connects to storage from the CLI;
+//! `daemon start`/`daemon restart` also manage the daemon
 //! process (registry file plus spawning `serve`) — see `docs/architecture.md`
 //! for the full rationale. The local tooling (`source init|build|test|package|index|keygen` through [`source`], and
 //! `integration` through [`integration`]) works on files with no daemon and touches neither `store` nor `jobs`.
@@ -40,6 +40,7 @@ pub mod credential;
 pub mod dbadmin;
 pub mod dedup;
 pub mod distribution;
+pub mod doctor;
 pub mod domain;
 pub mod embed;
 pub mod error;

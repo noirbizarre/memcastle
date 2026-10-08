@@ -54,6 +54,116 @@ fn tui_refuses_json_mode() {
 }
 
 #[test]
+fn doctor_help_lists_the_offline_diagnostics_command() {
+    Command::cargo_bin("memcastle")
+        .unwrap()
+        .args(["doctor", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("Diagnose local configuration"));
+}
+
+#[test]
+fn doctor_reports_invalid_config_without_printing_secret_values() {
+    let temp = tempfile::tempdir().unwrap();
+    let config = temp.path().join("config.toml");
+    std::fs::write(
+        &config,
+        "[embeddings]\nprovider = 'secret-redaction-canary'\n",
+    )
+    .unwrap();
+    let output = Command::cargo_bin("memcastle")
+        .unwrap()
+        .args(["doctor", "--config", config.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"status\": \"error\""), "{stdout}");
+    assert!(stdout.contains("\"status\": \"skipped\""), "{stdout}");
+    assert!(!stdout.contains("secret-redaction-canary"), "{stdout}");
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("secret-redaction-canary"));
+}
+
+#[test]
+fn doctor_reports_malformed_toml_without_echoing_the_line() {
+    let temp = tempfile::tempdir().unwrap();
+    let config = temp.path().join("config.toml");
+    std::fs::write(&config, "[auth]\ntoken = 'secret-redaction-canary\n").unwrap();
+    let output = Command::cargo_bin("memcastle")
+        .unwrap()
+        .args(["doctor", "--config", config.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"status\": \"error\""), "{stdout}");
+    assert!(!stdout.contains("secret-redaction-canary"), "{stdout}");
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("secret-redaction-canary"));
+}
+
+#[test]
+fn doctor_reports_a_missing_explicit_assets_directory_as_blocking() {
+    let temp = tempfile::tempdir().unwrap();
+    let palace = temp.path().join("untouched");
+    let assets = temp.path().join("missing-assets");
+    let config = temp.path().join("config.toml");
+    std::fs::write(
+        &config,
+        format!(
+            "[palace]\npath = {:?}\n[server]\nport = 0\n[assets]\ndir = {:?}\n",
+            palace.display().to_string(),
+            assets.display().to_string()
+        ),
+    )
+    .unwrap();
+    let output = Command::cargo_bin("memcastle")
+        .unwrap()
+        .env_remove("MEMCASTLE_ASSETS_DIR")
+        .args(["doctor", "--config", config.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!output.status.success(), "{stdout}");
+    assert!(stdout.contains("\"check\": \"assets.dir\""), "{stdout}");
+    assert!(
+        stdout.contains("Required directory is missing."),
+        "{stdout}"
+    );
+    assert!(!palace.exists());
+    assert!(!assets.exists());
+}
+
+#[test]
+fn doctor_offline_warns_but_succeeds_without_creating_the_palace() {
+    let temp = tempfile::tempdir().unwrap();
+    let palace = temp.path().join("untouched");
+    let config = temp.path().join("config.toml");
+    std::fs::write(
+        &config,
+        format!(
+            "[palace]\npath = {:?}\n[server]\nport = 0\n",
+            palace.display().to_string()
+        ),
+    )
+    .unwrap();
+    let output = Command::cargo_bin("memcastle")
+        .unwrap()
+        .args(["doctor", "--config", config.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"status\": \"warning\""), "{stdout}");
+    assert!(stdout.contains("\"status\": \"skipped\""), "{stdout}");
+    assert!(!palace.exists());
+}
+
+#[test]
 fn mine_help_shows_the_source_first_grammar_and_no_longer_offers_the_old_flags() {
     Command::cargo_bin("memcastle")
         .unwrap()

@@ -124,6 +124,9 @@ pub enum Command {
     Status,
     /// Open the interactive operations console for this daemon.
     Tui,
+    /// Diagnose local configuration and prerequisites, plus daemon health when available.
+    /// Exit codes: 0 if no blocking errors (including when offline), 1 otherwise.
+    Doctor,
     /// Search palace drawer content.
     Search(SearchArgs),
     /// Retrieve palace content matching a query, returned verbatim — the

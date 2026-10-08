@@ -120,9 +120,15 @@ async fn async_main() -> ExitCode {
     // Read before `run` consumes `args`. Only these two commands open the embedded
     // datastore; every other one is an HTTP client with nothing to wait for.
     let opens_storage = matches!(args.command, Command::Serve(_) | Command::Migrate(_));
-    let outcome = match config {
-        Ok(config) => run(args, config).await,
-        Err(error) => Err(error),
+    let outcome = if matches!(args.command, Command::Doctor) {
+        let report = memcastle::doctor::run(args.config.as_deref(), args.mode, config).await;
+        print_for_terminal_or_json(|painter, _| report.render(painter), &report)
+            .map(|()| ExitCode::from(report.exit_code()))
+    } else {
+        match config {
+            Ok(config) => run(args, config).await,
+            Err(error) => Err(error),
+        }
     };
     if opens_storage {
         wait_for_datastore_shutdown().await;
@@ -231,6 +237,7 @@ async fn run_command(
         // this match stays exhaustive and a new command cannot be forgotten.
         Command::Status => Ok(()),
         Command::Tui => memcastle::tui::run(client(&config, mode)).await,
+        Command::Doctor => Ok(()),
         Command::Daemon(DaemonCommand::Start(start_args)) => {
             cmd_daemon_start(&config, config_file, mode, start_args).await
         }
