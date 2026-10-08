@@ -1,0 +1,23 @@
+[
+  {
+    "id": "conversation-a",
+    "title": "Example conversation",
+    "create_time": 1767225600,
+    "current_node": "answer-b",
+    "mapping": {
+      "root": {"id": "root", "parent": null, "children": ["question"], "message": null},
+      "question": {"id": "question", "parent": "root", "children": ["answer-a", "answer-b"], "message": {"author": {"role": "user"}, "create_time": 1767225601, "content": {"content_type": "text", "parts": ["What is a castle?"]}}},
+      "answer-a": {"id": "answer-a", "parent": "question", "children": [], "message": {"author": {"role": "assistant", "name": "Example Assistant"}, "create_time": 1767225602, "metadata": {"model_slug": "model-example", "references": [{"type": "link", "url": "https://example.invalid"}]}, "content": {"content_type": "text", "parts": ["A building."]}}},
+      "answer-b": {"id": "answer-b", "parent": "question", "children": ["tool-output"], "message": {"author": {"role": "assistant"}, "create_time": 1767225603, "content": {"content_type": "text", "parts": ["A fortress."]}}},
+      "tool-output": {"id": "tool-output", "parent": "answer-b", "children": [], "message": {"author": {"role": "tool"}, "content": {"parts": ["PRIVATE-TOOL-RESULT"]}}}
+    }
+  },
+  {
+    "id": "conversation-b",
+    "title": "Another conversation",
+    "mapping": {
+      "start": {"id": "start", "parent": null, "children": ["hello"], "message": null},
+      "hello": {"id": "hello", "parent": "start", "children": [], "message": {"author": {"role": "user"}, "content": {"content_type": "text", "parts": ["Hello"]}}}
+    }
+  }
+]

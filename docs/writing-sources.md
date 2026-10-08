@@ -181,7 +181,7 @@ The manifest lists what it asks for and nothing else is granted.
 
 | Permission | What the host does |
 |---|---|
-| `filesystem.read` | Opens the listed directories read-only, at the same path inside the sandbox as outside it, so `std::fs` on the locator works unchanged. `locator` is the directory being mined, canonicalised by the host. There is no write access. |
+| `filesystem.read` | Opens the listed directories read-only, at the same path inside the sandbox as outside it, so `std::fs` on the locator works unchanged. `locator` is canonicalised by the host; when it names a file, its parent directory is opened because WASI preopens directories. There is no write access. |
 | `network` | Opens the network, all or nothing. The host cannot yet restrict by host name, and the consent prompt says so. |
 | `process` | Lets the source call `run-process` for exactly those programs: no shell, a minimal environment (`PATH`, `HOME`, and the variables in `env`), a time limit, a cap on output (16 MiB, enforced while the program runs; its output is captured through scratch files, so a program that drops output on a pipe still answers whole). Any other program is refused. |
 | `env` | Passes the listed variables, when set, into the sandbox. It sees no others. |
@@ -350,11 +350,14 @@ Publishing one, finding one by name, updating it, signing it and trusting a publ
 `sources/directory/` is the built-in `directory` source as a Rust component, and is the worked example to read.
 `sources/pi/` is the Pi coding agent's session history, the first official source that is not a built-in: it reads a
 real, evolving format, keeps raw documents and asks for two permissions (`docs/mining-sources.md#pi`).
+`sources/chatgpt/` imports ChatGPT export ZIPs or standalone JSON, with an experimental private-web backend described in
+[ChatGPT](mining-sources.md#chatgpt).
 `sources/opencode/` is the OpenCode coding agent's session history, and the worked example of a source that wraps a
 program through `run-process` and is tested against a stand-in for it (`docs/mining-sources.md#opencode`).
-The sources that ship with MemCastle's releases, `pi` and `opencode`, are built from here and bundled without being
-compiled into the binary: they use exactly the package contract a user installs, and a release carries them unpacked, so
-they are installed from the start and `memcastle source enable pi` turns one on.
+The sources that ship with MemCastle's releases (`pi`, `opencode`, `claude`, `codex` and `chatgpt`) are built from here.
+They are bundled without being compiled into the binary.
+They use exactly the package contract a user installs; a release carries them unpacked, so they are installed from the
+start, and `memcastle source enable <name>` turns one on.
 
 ## Testing your source in CI
 
