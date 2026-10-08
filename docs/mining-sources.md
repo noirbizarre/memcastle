@@ -113,6 +113,7 @@ memcastle mine pi /backups/pi/sessions
 memcastle mine pi dir=/work/app --full
 memcastle mine opencode since=2026-09 dir=/path/to/workspace   # OpenCode session history (once installed)
 memcastle mine claude since=2026-09 dir=/path/to/workspace     # Claude Code session history (once installed)
+memcastle mine codex                                           # Codex rollout history (once installed)
 ```
 
 The first word is a source, and what follows is that source's own: at most one place to read, then `key=value` options
@@ -156,14 +157,14 @@ The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unc
 | `pi` | bundled package, `sources/pi/` | Pi coding-agent session history | modification time | yes | no |
 | `opencode` | bundled package, `sources/opencode/` | OpenCode coding-agent session history | `time_updated` of the session | yes | no |
 | `claude` | bundled package, `sources/claude/` | Claude Code session history | modification time | yes | no |
+| `codex` | bundled package, `sources/codex/` | Codex rollout history | modification time | yes | no |
 
 Only `directory` is compiled into MemCastle.
-`pi`, `opencode` and `claude` are [WebAssembly sources](writing-sources.md), built from `sources/pi/`,
-`sources/opencode/` and `sources/claude/` in
+`pi`, `opencode`, `claude` and `codex` are [WebAssembly sources](writing-sources.md), built from their directories in
 the repository and shipped alongside each release (release archives and the `.deb` and `.rpm` carry them, unpacked, under
 `share/memcastle/sources/`), so they are installed from the start and `memcastle source enable pi` is all one needs, with
 no registry and no network:
-no Pi, OpenCode or Claude Code code is part of the core, and they run under the same sandbox and the same pipeline as
+no Pi, OpenCode, Claude Code or Codex code is part of the core, and they run under the same sandbox and the same pipeline as
 any source a user writes.
 Other sources are found in [registries](publishing-sources.md).
 `directory` and `pi` have a modification-time watermark as their cursor:
@@ -395,6 +396,32 @@ Limits to know about:
 - **Each command takes a few seconds on a large database**, and a job's calls are limited to 60 seconds each
   (`mining.source_timeout_secs`).
 - **The legacy JSON history** that OpenCode wrote before 1.2 under `storage/` is not read.
+
+### `codex`
+
+The [Codex](https://developers.openai.com/codex) history source reads the dated JSONL rollout files under
+`~/.codex/sessions/YYYY/MM/DD/`, or a sessions directory named as its locator.
+It is separate from the Codex integration: this source acquires old and inactive transcripts, while the integration only
+decides when a live Codex session uses MCP.
+
+It ships with MemCastle and is installed already:
+
+```sh
+memcastle source enable codex
+memcastle mine codex
+```
+
+The source reads only files named `rollout-*.jsonl` at the documented date depth, never `history.jsonl` or another file
+under `~/.codex`.
+It asks only for read access to that sessions directory and `HOME` to locate it when no locator is supplied.
+It needs no network, process, write, or credential permission.
+
+Each rollout is a transcript document in the `codex` wing and a room named after its recorded working directory.
+The cursor is its modification time and path, and the revision is a hash of the full JSONL file, so an unchanged rollout
+is not read twice and an appended rollout preserves the chunks made from its unchanged prefix.
+It files user and assistant text and concise tool-call markers.
+It deliberately excludes model reasoning, tool output, command and file contents, injected context, and record types it
+does not understand.
 
 ## Writing a source
 

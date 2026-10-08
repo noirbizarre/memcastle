@@ -1,0 +1,20 @@
+# The Codex history source is an independently packaged WebAssembly component.
+[package]
+name = "memcastle-source-codex"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.57"
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+
+[workspace]
