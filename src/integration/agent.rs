@@ -577,6 +577,8 @@ pub(crate) mod fake {
         pub exit_on: RefCell<Option<(&'static str, &'static str)>>,
         /// Make this subcommand fail to start at all, as if the program vanished halfway.
         pub io_error_on: RefCell<Option<&'static str>>,
+        /// Fail a particular Claude plugin operation without breaking the preceding registration lookup.
+        pub claude_failure: RefCell<Option<(&'static str, bool)>>,
         /// Accept `pi install` without remembering the package, so the agent never lists it.
         pub forget_installs: RefCell<bool>,
     }
@@ -593,6 +595,7 @@ pub(crate) mod fake {
                 missing: RefCell::new(false),
                 exit_on: RefCell::new(None),
                 io_error_on: RefCell::new(None),
+                claude_failure: RefCell::new(None),
                 forget_installs: RefCell::new(false),
             }
         }
@@ -619,6 +622,15 @@ pub(crate) mod fake {
                 return Err(std::io::Error::from(std::io::ErrorKind::NotFound));
             }
             let subcommand = args.first().map(String::as_str);
+            if program == "claude"
+                && let Some((operation, io_error)) = *self.claude_failure.borrow()
+                && args.join(" ").starts_with(operation)
+            {
+                if io_error {
+                    return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+                }
+                return Ok(output(1, "", "Claude refused the operation"));
+            }
             if *self.io_error_on.borrow() == subcommand && subcommand.is_some() {
                 return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
             }
@@ -987,6 +999,78 @@ to = "."
                 .iter()
                 .all(|call| call.starts_with("claude "))
         );
+    }
+
+    #[test]
+    fn a_claude_listing_failure_is_reported_before_any_marketplace_change() {
+        for io_error in [false, true] {
+            let fake = FakeAgents::new();
+            *fake.claude_failure.borrow_mut() = Some(("plugin list", io_error));
+            let agent = for_kind(AgentKind::ClaudeCode, &fake, &locations(Path::new("/x")));
+            let registration =
+                agent.registration(Path::new("/data/claude"), &manifest_for("claude-code"));
+
+            let error = agent.register("claude-code", &registration).unwrap_err();
+            assert!(
+                matches!(error, Error::IntegrationAgentNotFound { .. }),
+                "{error}"
+            );
+            assert!(error.to_string().contains("claude plugin list"), "{error}");
+            assert_eq!(&*fake.calls.borrow(), &["claude plugin list"]);
+        }
+    }
+
+    #[test]
+    fn a_claude_install_failure_names_the_command_and_never_registers_the_plugin() {
+        for operation in ["plugin marketplace add", "plugin install"] {
+            for io_error in [false, true] {
+                let fake = FakeAgents::new();
+                *fake.claude_failure.borrow_mut() = Some((operation, io_error));
+                let agent = for_kind(AgentKind::ClaudeCode, &fake, &locations(Path::new("/x")));
+                let registration =
+                    agent.registration(Path::new("/data/claude"), &manifest_for("claude-code"));
+
+                let error = agent.register("claude-code", &registration).unwrap_err();
+                assert!(
+                    matches!(error, Error::IntegrationRegistrationFailed { .. }),
+                    "{error}"
+                );
+                assert!(
+                    error.to_string().contains(&format!("claude {operation}")),
+                    "{error}"
+                );
+                assert!(!agent.is_registered("claude-code", &registration).unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn a_claude_removal_failure_reports_the_command_and_only_uninstalls_when_permitted() {
+        for operation in ["plugin uninstall", "plugin marketplace remove"] {
+            for io_error in [false, true] {
+                let fake = FakeAgents::new();
+                let agent = for_kind(AgentKind::ClaudeCode, &fake, &locations(Path::new("/x")));
+                let registration =
+                    agent.registration(Path::new("/data/claude"), &manifest_for("claude-code"));
+                agent.register("claude-code", &registration).unwrap();
+                *fake.claude_failure.borrow_mut() = Some((operation, io_error));
+
+                let error = agent.unregister("claude-code", &registration).unwrap_err();
+                assert!(
+                    matches!(error, Error::IntegrationRegistrationFailed { .. }),
+                    "{error}"
+                );
+                assert!(
+                    error.to_string().contains(&format!("claude {operation}")),
+                    "{error}"
+                );
+                // A failed marketplace cleanup happens after uninstall, while an uninstall refusal keeps the plugin.
+                assert_eq!(
+                    agent.is_registered("claude-code", &registration).unwrap(),
+                    operation == "plugin uninstall"
+                );
+            }
+        }
     }
 
     #[test]
