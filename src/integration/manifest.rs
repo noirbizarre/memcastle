@@ -451,4 +451,17 @@ to = "dist"
         });
         assert!(message(text).contains("agent.entry is required"));
     }
+
+    #[test]
+    fn a_codex_integration_needs_the_local_marketplace_catalog_it_registers() {
+        let parsed = with(|text| text.replace("kind = \"pi\"", "kind = \"codex\"")).unwrap();
+        assert_eq!(parsed.agent.kind.program(), "codex");
+        let missing = with(|text| {
+            text.replace(
+                "kind = \"pi\"\nentry = \"extension.js\"",
+                "kind = \"codex\"",
+            )
+        });
+        assert!(message(missing).contains("agent.entry is required"));
+    }
 }
