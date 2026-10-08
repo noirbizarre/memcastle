@@ -29,6 +29,8 @@ pub enum AgentKind {
     /// Claude Code.
     #[serde(rename = "claude-code")]
     ClaudeCode,
+    /// OpenAI Codex.
+    Codex,
 }
 
 impl AgentKind {
@@ -39,6 +41,7 @@ impl AgentKind {
             Self::Pi => "pi",
             Self::Opencode => "opencode",
             Self::ClaudeCode => "claude",
+            Self::Codex => "codex",
         }
     }
 }
@@ -247,14 +250,14 @@ pub fn validate(manifest: &IntegrationManifest) -> Result<()> {
                 "agent.entry `{entry}` must be a file inside the installed copy"
             )));
         }
-        // OpenCode loads whatever file its plugin shim names, so without an entry there is nothing to name.
+        // Plugin marketplaces need an index to register; Pi discovers its entry through package metadata.
         None if matches!(
             manifest.agent.kind,
-            AgentKind::Opencode | AgentKind::ClaudeCode
+            AgentKind::Opencode | AgentKind::ClaudeCode | AgentKind::Codex
         ) =>
         {
             return Err(invalid(
-                "agent.entry is required for an OpenCode or Claude Code integration",
+                "agent.entry is required for an OpenCode, Claude Code or Codex integration",
             ));
         }
         _ => {}

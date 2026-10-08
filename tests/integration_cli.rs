@@ -34,7 +34,7 @@ name = "wake-up"
 
 /// Lay out an assets root with both integrations built, and the shared skills.
 fn assets(root: &Path) {
-    for id in ["pi", "opencode"] {
+    for id in ["pi", "opencode", "codex"] {
         let dir = root.join("integrations").join(id);
         std::fs::create_dir_all(dir.join("dist")).unwrap();
         std::fs::write(
@@ -140,7 +140,14 @@ fn the_lifecycle_installs_updates_and_removes_both_agents_from_a_development_che
         .iter()
         .map(|i| (i["id"].as_str().unwrap(), i["state"].as_str().unwrap()))
         .collect();
-    assert_eq!(states, [("opencode", "installed"), ("pi", "installed")]);
+    assert_eq!(
+        states,
+        [
+            ("codex", "installed"),
+            ("opencode", "installed"),
+            ("pi", "installed")
+        ]
+    );
     // The listing says which skills each integration exposes, so a script can tell without opening the copy.
     for integration in report["integrations"].as_array().unwrap() {
         assert_eq!(integration["skills"], serde_json::json!(["wake-up"]));
@@ -172,7 +179,11 @@ fn the_lifecycle_installs_updates_and_removes_both_agents_from_a_development_che
         .success();
     assert!(machine.pi_packages().is_empty());
     assert!(!machine.plugin_file().exists());
-    assert!(!machine.installed("pi").exists() && !machine.installed("opencode").exists());
+    assert!(
+        !machine.installed("pi").exists()
+            && !machine.installed("opencode").exists()
+            && !machine.installed("codex").exists()
+    );
 }
 
 #[test]

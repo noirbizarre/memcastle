@@ -1,0 +1,9 @@
+{
+  "name": "memcastle-local",
+  "plugins": [
+    {
+      "name": "memcastle",
+      "source": "./plugins/memcastle"
+    }
+  ]
+}

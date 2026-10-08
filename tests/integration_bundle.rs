@@ -1,7 +1,7 @@
 //! The integrations that ship with MemCastle (docs/adr/034), bundled by the script the release runs and installed from
 //! the tree it writes and from the checkout it builds in: the same lifecycle through both ways of choosing the root.
 //!
-//! This is what keeps "Pi, OpenCode and Claude Code ship with every release, with no npm package" from being a claim about the
+//! This is what keeps the shipped integrations from being a claim about the
 //! release workflow that only a tag would test. It needs bun, so it is `#[ignore]`d from the basic suite and run by
 //! `mise run integrations:check` (`cargo test --test integration_bundle -- --ignored`); an ignored test says so in the
 //! output, which a silent skip would not.
@@ -76,9 +76,9 @@ fn the_package_holds_each_integration_bundled_beside_its_manifest_and_the_skills
     assert_eq!(names(&package), ["integrations", "skills"]);
     assert_eq!(
         names(&package.join("integrations")),
-        ["claude-code", "opencode", "pi"]
+        ["claude-code", "codex", "opencode", "pi"]
     );
-    for id in ["pi", "opencode", "claude-code"] {
+    for id in ["pi", "opencode", "claude-code", "codex"] {
         let dir = package.join("integrations").join(id);
         // `dist/` and the manifest, plus a `skills/` directory only for an integration with skills of its own.
         let own: Vec<String> = names(&dir)
@@ -177,7 +177,7 @@ fn lifecycle_from(assets: &Path) {
     let machine = Machine::new();
     let flag = assets.to_str().unwrap();
 
-    for id in ["pi", "opencode", "claude-code"] {
+    for id in ["pi", "opencode", "claude-code", "codex"] {
         machine
             .memcastle()
             .args(["integration", "install", id, "--assets-dir", flag])
@@ -203,7 +203,7 @@ fn lifecycle_from(assets: &Path) {
     assert!(pi.join(extension).is_file(), "{extension}");
     assert!(pi.join("skills/wake-up/SKILL.md").is_file());
     // Whatever layout `assets` is, each integration exposes exactly the skills its own manifest names.
-    for id in ["pi", "opencode", "claude-code"] {
+    for id in ["pi", "opencode", "claude-code", "codex"] {
         let text =
             std::fs::read_to_string(assets.join("integrations").join(id).join(MANIFEST_FILE))
                 .unwrap();
@@ -245,8 +245,9 @@ fn lifecycle_from(assets: &Path) {
             .is_file()
     );
     assert_eq!(machine.claude_plugins(), ["memcastle@memcastle-local"]);
+    assert_eq!(machine.codex_plugins(), ["memcastle@memcastle-local"]);
 
-    for id in ["pi", "opencode", "claude-code"] {
+    for id in ["pi", "opencode", "claude-code", "codex"] {
         let again = machine
             .memcastle()
             .args(["integration", "install", id, "--json", "--assets-dir", flag])
@@ -263,6 +264,7 @@ fn lifecycle_from(assets: &Path) {
     assert!(
         machine.pi_packages().is_empty()
             && machine.claude_plugins().is_empty()
+            && machine.codex_plugins().is_empty()
             && !machine.plugin_file().exists()
     );
 }

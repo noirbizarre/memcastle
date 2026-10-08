@@ -8,6 +8,7 @@
 //! - OpenCode loads every file in its `plugins/` directory, so the adapter writes one file there, marked as MemCastle's,
 //!   and removes only a file that carries the mark. It never touches `opencode.json`, and never adds an `mcp.memcastle`
 //!   entry, which would show every tool twice.
+//! - Codex owns its plugin marketplace, so the adapter invokes its plugin commands rather than editing config.toml.
 //!
 //! Claude Code owns its plugin registry, so its adapter invokes marketplace commands rather than opening a settings file.
 //!
@@ -168,6 +169,7 @@ pub fn for_kind<'a>(
             plugins_dir: locations.opencode_config_dir.join("plugins"),
         }),
         AgentKind::ClaudeCode => Box::new(ClaudeCode { runner }),
+        AgentKind::Codex => Box::new(Codex { runner }),
     }
 }
 
@@ -319,6 +321,149 @@ impl Agent for ClaudeCode<'_> {
             return Err(Error::IntegrationAgentNotFound {
                 name: name.to_string(),
                 message: format!("`claude plugin list` failed: {}", failure_text(&output)),
+            });
+        }
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .any(|line| line.trim() == registration.target))
+    }
+}
+
+/// Codex, through its supported local marketplace commands.
+struct Codex<'a> {
+    runner: &'a dyn Runner,
+}
+
+impl Codex<'_> {
+    const MARKETPLACE: &'static str = "memcastle-local";
+
+    fn command(&self, name: &str, args: &[&OsStr]) -> Result<Output> {
+        self.runner
+            .run("codex", args)
+            .map_err(|e| Error::IntegrationRegistrationFailed {
+                name: name.to_string(),
+                message: format!(
+                    "`codex {}` could not run ({e})",
+                    args.iter()
+                        .map(|arg| arg.to_string_lossy())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                ),
+            })
+    }
+}
+
+impl Agent for Codex<'_> {
+    fn detect(&self, name: &str) -> Result<AgentInfo> {
+        detect_with(self.runner, AgentKind::Codex, name)
+    }
+
+    fn registration(&self, dir: &Path, manifest: &IntegrationManifest) -> Registration {
+        let entry = manifest
+            .agent
+            .entry
+            .as_deref()
+            .unwrap_or("marketplace.json");
+        Registration {
+            method: "codex-plugin-marketplace".to_string(),
+            target: format!("memcastle@{}", Self::MARKETPLACE),
+            entry: Some(dir.join(entry).display().to_string()),
+        }
+    }
+
+    fn register(&self, name: &str, registration: &Registration) -> Result<()> {
+        if self.is_registered(name, registration)? {
+            return Ok(());
+        }
+        let marketplace = registration.entry.as_deref().unwrap_or_default();
+        let add = self.command(
+            name,
+            &[
+                OsStr::new("plugin"),
+                OsStr::new("marketplace"),
+                OsStr::new("add"),
+                OsStr::new(marketplace),
+            ],
+        )?;
+        if !add.status.success() {
+            return Err(Error::IntegrationRegistrationFailed {
+                name: name.to_string(),
+                message: format!(
+                    "`codex plugin marketplace add` failed: {}",
+                    failure_text(&add)
+                ),
+            });
+        }
+        let install = self.command(
+            name,
+            &[
+                OsStr::new("plugin"),
+                OsStr::new("add"),
+                OsStr::new(&registration.target),
+            ],
+        )?;
+        if install.status.success() {
+            Ok(())
+        } else {
+            Err(Error::IntegrationRegistrationFailed {
+                name: name.to_string(),
+                message: format!("`codex plugin add` failed: {}", failure_text(&install)),
+            })
+        }
+    }
+
+    fn unregister(&self, name: &str, registration: &Registration) -> Result<Unregistered> {
+        if !self.is_registered(name, registration)? {
+            return Ok(Unregistered::NotRegistered);
+        }
+        let remove = self.command(
+            name,
+            &[
+                OsStr::new("plugin"),
+                OsStr::new("remove"),
+                OsStr::new(&registration.target),
+            ],
+        )?;
+        if !remove.status.success() {
+            return Err(Error::IntegrationRegistrationFailed {
+                name: name.to_string(),
+                message: format!("`codex plugin remove` failed: {}", failure_text(&remove)),
+            });
+        }
+        let marketplace = self.command(
+            name,
+            &[
+                OsStr::new("plugin"),
+                OsStr::new("marketplace"),
+                OsStr::new("remove"),
+                OsStr::new(Self::MARKETPLACE),
+            ],
+        )?;
+        if marketplace.status.success() {
+            Ok(Unregistered::Removed)
+        } else {
+            Err(Error::IntegrationRegistrationFailed {
+                name: name.to_string(),
+                message: format!(
+                    "`codex plugin marketplace remove` failed: {}",
+                    failure_text(&marketplace)
+                ),
+            })
+        }
+    }
+
+    fn is_registered(&self, name: &str, registration: &Registration) -> Result<bool> {
+        let output = self
+            .runner
+            .run("codex", &[OsStr::new("plugin"), OsStr::new("list")])
+            .map_err(|e| Error::IntegrationAgentNotFound {
+                name: name.to_string(),
+                message: format!("`codex plugin list` could not run ({e})"),
+            })?;
+        if !output.status.success() {
+            return Err(Error::IntegrationAgentNotFound {
+                name: name.to_string(),
+                message: format!("`codex plugin list` failed: {}", failure_text(&output)),
             });
         }
         Ok(String::from_utf8_lossy(&output.stdout)
