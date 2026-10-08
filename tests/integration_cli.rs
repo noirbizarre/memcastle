@@ -68,7 +68,7 @@ fn json(output: &[u8]) -> serde_json::Value {
 }
 
 #[test]
-fn the_lifecycle_installs_updates_and_removes_both_agents_from_a_development_checkout() {
+fn the_lifecycle_installs_updates_and_removes_every_agent_from_a_development_checkout() {
     let machine = machine();
     let assets = machine.path("assets");
     let assets = assets.to_str().unwrap();
@@ -108,6 +108,15 @@ fn the_lifecycle_installs_updates_and_removes_both_agents_from_a_development_che
         ),
         (&"opencode".into(), &"installed".into(), &"0.1.0".into())
     );
+    let installed = machine
+        .memcastle()
+        .args(["integration", "install", "codex", "--assets-dir", assets])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(json(&installed)["id"], "codex");
 
     assert!(machine.installed("pi").join("dist/index.js").is_file());
     assert!(
@@ -117,9 +126,10 @@ fn the_lifecycle_installs_updates_and_removes_both_agents_from_a_development_che
             .is_file()
     );
     assert!(!machine.installed("pi").join("skills/diary").exists());
-    assert_eq!(
-        machine.pi_packages(),
-        [machine.installed("pi").display().to_string()]
+    assert!(
+        machine
+            .pi_packages()
+            .contains(&machine.installed("pi").display().to_string())
     );
     assert!(
         std::fs::read_to_string(machine.plugin_file())
@@ -175,6 +185,11 @@ fn the_lifecycle_installs_updates_and_removes_both_agents_from_a_development_che
     machine
         .memcastle()
         .args(["integration", "remove", "opencode"])
+        .assert()
+        .success();
+    machine
+        .memcastle()
+        .args(["integration", "remove", "codex"])
         .assert()
         .success();
     assert!(machine.pi_packages().is_empty());
@@ -250,7 +265,7 @@ fn an_installation_resolves_its_integrations_from_the_prefix_the_binary_sits_in(
 
     let report = json(&listed.stdout);
     assert_eq!(report["assets_source"], "installed");
-    assert_eq!(report["integrations"].as_array().unwrap().len(), 2);
+    assert_eq!(report["integrations"].as_array().unwrap().len(), 3);
 }
 
 #[test]
