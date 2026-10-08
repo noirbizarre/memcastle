@@ -1082,4 +1082,225 @@ mod tests {
         );
         assert!(!serde_json::to_string(&report).unwrap().contains("hidden"));
     }
+
+    #[test]
+    fn paths_distinguish_optional_uncreated_directories_from_required_missing_ones() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config.palace.path = temp.path().join("future-palace");
+        config.assets.dir = Some(temp.path().join("missing-assets"));
+        config.mining.sources_dir = Some(temp.path().join("missing-sources"));
+        config.mining.bundled_dir = Some(temp.path().join("missing-bundle"));
+        config.credentials.backend = config::CredentialBackend::File;
+        config.credentials.dir = Some(temp.path().join("future-credentials"));
+        let mut report = Report::default();
+        paths(&mut report, &config);
+        assert_eq!(report.exit_code(), 1);
+        for check in [
+            "palace.path",
+            "embedded database",
+            "credentials.dir",
+            "write access",
+        ] {
+            assert!(
+                report
+                    .findings
+                    .iter()
+                    .any(|f| f.check == check && f.status == CheckStatus::Skipped),
+                "{check}"
+            );
+        }
+        for check in ["assets.dir", "mining.sources_dir", "mining.bundled_dir"] {
+            assert!(
+                report
+                    .findings
+                    .iter()
+                    .any(|f| f.check == check && f.status == CheckStatus::Error),
+                "{check}"
+            );
+        }
+        assert!(!config.palace.path.exists());
+    }
+
+    #[test]
+    fn provider_checks_only_inspect_executables_and_never_contact_models() {
+        let mut config = Config::default();
+        config.embeddings.provider = EmbeddingProvider::Command;
+        config.embeddings.command = vec!["/not-a-real-provider".into()];
+        config.extraction.provider = ExtractionProvider::Http;
+        config.extraction.url = Some("https://secret-redaction-canary.invalid/v1".into());
+        config.extraction.model = Some("private-model".into());
+        config.extraction.api_key = Some(Secret::new("secret-redaction-canary"));
+        let mut report = Report::default();
+        providers(&mut report, &config);
+        assert_eq!(report.exit_code(), 1);
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.check == "embeddings" && f.status == CheckStatus::Error)
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.check == "extraction API key" && f.status == CheckStatus::Ok)
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.check == "extraction availability" && f.status == CheckStatus::Skipped)
+        );
+        assert!(
+            !serde_json::to_string(&report)
+                .unwrap()
+                .contains("secret-redaction-canary")
+        );
+
+        config.embeddings.command = vec![std::env::current_exe().unwrap().display().to_string()];
+        config.extraction.api_key = None;
+        let mut report = Report::default();
+        providers(&mut report, &config);
+        assert_eq!(report.exit_code(), 0);
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.check == "embeddings" && f.status == CheckStatus::Ok)
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.check == "extraction API key" && f.status == CheckStatus::Skipped)
+        );
+    }
+
+    #[test]
+    fn enabled_triggers_without_setup_report_errors_while_disabled_ones_do_not() {
+        let mut config = Config::default();
+        config.triggers.push(crate::domain::TriggerDefinition {
+            name: "delivery".into(),
+            miner: "absent-miner".into(),
+            kind: crate::domain::TriggerMechanism::Webhook,
+            enabled: false,
+            credential: None,
+            settings: Default::default(),
+        });
+        let mut report = Report::default();
+        offline_miners(&mut report, &config);
+        assert_eq!(report.exit_code(), 0);
+        config.triggers[0].enabled = true;
+        let mut report = Report::default();
+        offline_miners(&mut report, &config);
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.summary.contains("no enabled miner") && f.status == CheckStatus::Error)
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.summary.contains("webhook listener") && f.status == CheckStatus::Error)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_running_daemon_reports_unavailable_sources_miners_and_triggers_without_leaking_reasons()
+     {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config.palace.path = temp.path().join("palace");
+        config.server.port = port;
+        let app = Router::new()
+            .route("/api/status", get(|| async { Json(json!({
+                "version": "older", "uptime_secs": 1, "palace_name": "default", "drawer_count": 0,
+                "jobs_queued": 0, "jobs_running": 0, "jobs_paused": 0, "mode": "full",
+                "palace_path": "/different-palace",
+                "datastore": {"ok": true, "backend": "embedded", "location": "secret-redaction-canary",
+                    "error": null, "migration_version": 1, "latest_version": 1, "pending": []}
+            })) }))
+            .route("/api/sources", get(|| async { Json(json!({
+                "adapters": [{"name": "unavailable-source", "description": "source", "capabilities": {},
+                    "state": "unavailable", "unavailable_reason": "secret-redaction-canary"}], "sources": []
+            })) }))
+            .route("/api/miners", get(|| async { Json(json!({
+                "miners": [{"name": "blocked", "source": "unavailable-source", "enabled": true,
+                    "state": "unavailable", "reason": "secret-redaction-canary"}],
+                "error": "secret-redaction-canary"
+            })) }))
+            .route("/api/triggers", get(|| async { Json(json!({
+                "triggers": [{"name": "hook", "miner": "blocked", "type": "webhook", "enabled": true,
+                    "status": "failing", "reason": "secret-redaction-canary"}],
+                "webhook": {"enabled": true, "bind": "127.0.0.1", "port": 8787, "allow_remote": false},
+                "error": "secret-redaction-canary"
+            })) }));
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let report = run(None, None, Ok(config)).await;
+        server.abort();
+        assert_eq!(report.exit_code(), 1, "{}", report.render(Painter::PLAIN));
+        for check in [
+            "palace",
+            "version",
+            "source #1",
+            "miner configuration",
+            "miner #1 runtime",
+            "trigger configuration",
+            "trigger #1 runtime",
+        ] {
+            assert!(
+                report.findings.iter().any(|f| f.check == check),
+                "{check}: {}",
+                report.render(Painter::PLAIN)
+            );
+        }
+        assert!(
+            !serde_json::to_string(&report)
+                .unwrap()
+                .contains("secret-redaction-canary")
+        );
+    }
+
+    #[tokio::test]
+    async fn unavailable_storage_skips_dependent_runtime_checks() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let app = Router::new().route("/api/status", get(|| async { Json(json!({
+            "version": env!("CARGO_PKG_VERSION"), "uptime_secs": 1, "palace_name": "default",
+            "drawer_count": 0, "jobs_queued": 0, "jobs_running": 0, "jobs_paused": 0,
+            "mode": "full", "datastore": {"ok": false, "backend": "embedded",
+                "location": "hidden", "error": "secret-redaction-canary", "migration_version": 0,
+                "latest_version": 1, "pending": []}
+        })) }));
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config.palace.path = temp.path().join("palace");
+        config.server.port = port;
+        let report = run(None, None, Ok(config)).await;
+        server.abort();
+        assert_eq!(report.exit_code(), 1);
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.check == "storage" && f.status == CheckStatus::Error)
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.check == "runtime prerequisites" && f.status == CheckStatus::Skipped)
+        );
+        assert!(
+            !serde_json::to_string(&report)
+                .unwrap()
+                .contains("secret-redaction-canary")
+        );
+    }
 }
