@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "test:cover": "bun test --timeout 60000 --coverage --coverage-reporter=lcov --coverage-dir=coverage"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",
