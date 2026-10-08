@@ -14,6 +14,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::json;
 
+pub mod fact_view;
 pub mod hit_view;
 pub mod job_view;
 pub mod mine;

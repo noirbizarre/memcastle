@@ -841,4 +841,83 @@ mod tests {
             1
         );
     }
+
+    #[tokio::test]
+    async fn correcting_an_already_replaced_assertion_cannot_open_another_successor() {
+        let store = memory_store().await;
+        let (subject, object) = two_entities(&store).await;
+        let original = open_relationship(&store, subject, object, "located_in", 0.8)
+            .await
+            .unwrap();
+        let first = RelationshipId::new();
+        store
+            .supersede_relationship(original.id, first, a_fact(subject, object), Utc::now())
+            .await
+            .unwrap();
+        let boundary = store
+            .get_relationship(original.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .valid_to;
+        let competing = RelationshipId::new();
+        let error = store
+            .supersede_relationship(original.id, competing, a_fact(subject, object), Utc::now())
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::InvalidInput { .. }), "{error:?}");
+        assert!(!store.relationship_exists(competing).await.unwrap());
+        assert_eq!(
+            store
+                .get_relationship(original.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .valid_to,
+            boundary
+        );
+        assert_eq!(
+            store
+                .list_relationships(subject, false)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn a_future_assertion_cannot_be_closed_before_its_validity_starts() {
+        let store = memory_store().await;
+        let (subject, object) = two_entities(&store).await;
+        let future = store
+            .create_relationship(
+                RelationshipId::new(),
+                a_fact(subject, object),
+                Utc::now() + chrono::Duration::days(1),
+            )
+            .await
+            .unwrap();
+        let retract = store
+            .invalidate_relationship(future.id, Utc::now())
+            .await
+            .unwrap_err();
+        assert!(matches!(retract, Error::InvalidInput { .. }), "{retract:?}");
+        let successor = RelationshipId::new();
+        let replace = store
+            .supersede_relationship(future.id, successor, a_fact(subject, object), Utc::now())
+            .await
+            .unwrap_err();
+        assert!(matches!(replace, Error::InvalidInput { .. }), "{replace:?}");
+        assert!(
+            store
+                .get_relationship(future.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .valid_to
+                .is_none()
+        );
+        assert!(!store.relationship_exists(successor).await.unwrap());
+    }
 }

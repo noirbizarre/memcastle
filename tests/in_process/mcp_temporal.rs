@@ -158,6 +158,24 @@ async fn a_bad_temporal_argument_or_history_id_is_rejected_with_an_actionable_er
     .await;
     assert_eq!(unknown.error_code(), "memcastle::palace::drawer_not_found");
 
+    for (arguments, code) in [
+        (
+            json!({"relationship_id": "not-a-uuid"}),
+            "memcastle::input::invalid",
+        ),
+        (
+            json!({"relationship_id": uuid::Uuid::new_v4(), "as_of": "not-a-date"}),
+            "memcastle::input::invalid",
+        ),
+        (
+            json!({"relationship_id": uuid::Uuid::new_v4()}),
+            "memcastle::graph::relationship_not_found",
+        ),
+    ] {
+        let result = call(&session, "memcastle_fact_history", arguments).await;
+        assert_eq!(result.error_code(), code);
+    }
+
     session.cancel().await.expect("close session");
     daemon.shutdown().await;
 }

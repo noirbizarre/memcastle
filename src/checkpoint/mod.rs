@@ -596,6 +596,137 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_explicit_refinement_keeps_both_assertions_and_is_replay_safe() {
+        let store = memory_store().await;
+        let subject = store
+            .get_or_create_entity("Ada", "person", json!({}))
+            .await
+            .unwrap()
+            .id;
+        let first = store
+            .get_or_create_entity("Paris", "place", json!({}))
+            .await
+            .unwrap()
+            .id;
+        let second = store
+            .get_or_create_entity("France", "place", json!({}))
+            .await
+            .unwrap()
+            .id;
+        let create = |to| NewRelationship {
+            from: subject,
+            to,
+            predicate: "located_in".into(),
+            confidence: 1.0,
+        };
+        let a = store
+            .create_relationship(RelationshipId::new(), create(first), Utc::now())
+            .await
+            .unwrap();
+        let b = store
+            .create_relationship(RelationshipId::new(), create(second), Utc::now())
+            .await
+            .unwrap();
+        let mut linked = item(CheckpointDestination::General, "Paris refines France");
+        linked.fact = Some(FactMutation::Link {
+            relationship_id: a.id,
+            other_id: b.id,
+            kind: crate::domain::FactLinkKind::Refines,
+            reason: "Paris is in France".into(),
+        });
+        let payload = CheckpointPayload {
+            items: vec![linked],
+        };
+        let mut job = Job::new(
+            JobKind::Checkpoint {
+                payload: payload.clone(),
+            },
+            Priority::High,
+            "test",
+        );
+        for _ in 0..2 {
+            job.checkpoint = json!({});
+            let ctx = ctx_for(&store, &job, JobControl::default());
+            run(
+                &ctx,
+                &mut job,
+                CheckpointParams {
+                    payload: payload.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        }
+        assert_eq!(
+            store
+                .list_relationships(subject, false)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+        let history = store.fact_history(a.id, None).await.unwrap();
+        assert_eq!(history.len(), 2);
+        let links = &history[0].lifecycle.as_ref().unwrap().links;
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].origin, crate::domain::FactLinkOrigin::Explicit);
+        assert_eq!(links[0].reason, "Paris is in France");
+        assert!(
+            store
+                .get_drawer(links[0].evidence.unwrap())
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_link_to_an_unknown_assertion_fails_without_inventing_a_relationship() {
+        let store = memory_store().await;
+        let subject = store
+            .get_or_create_entity("Ada", "person", json!({}))
+            .await
+            .unwrap()
+            .id;
+        let object = store
+            .get_or_create_entity("Paris", "place", json!({}))
+            .await
+            .unwrap()
+            .id;
+        let known = store
+            .create_relationship(
+                RelationshipId::new(),
+                NewRelationship {
+                    from: subject,
+                    to: object,
+                    predicate: "located_in".into(),
+                    confidence: 1.0,
+                },
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+        for (from, to) in [
+            (RelationshipId::new(), known.id),
+            (known.id, RelationshipId::new()),
+        ] {
+            let mut linked = item(
+                CheckpointDestination::General,
+                "cannot link an unknown assertion",
+            );
+            linked.fact = Some(FactMutation::Link {
+                relationship_id: from,
+                other_id: to,
+                kind: crate::domain::FactLinkKind::Confirms,
+                reason: "reviewed".into(),
+            });
+            let error = run_items(&store, vec![linked]).await.unwrap_err();
+            assert!(matches!(error, Error::InvalidInput { .. }), "{error:?}");
+        }
+        assert!(store.fact_links(&[known.id]).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn an_invalidate_fact_mutation_closes_the_edge() {
         let store = memory_store().await;
         let alice = store

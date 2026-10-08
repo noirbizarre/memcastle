@@ -264,22 +264,7 @@ async fn run_command(
                 .fact_history(&relationship_id, as_of.as_deref())
                 .await?;
             print_for_terminal_or_json(
-                |_painter, _| {
-                    facts
-                        .iter()
-                        .map(|fact| {
-                            format!(
-                                "{} {} {} → {} ({:?})",
-                                fact.id,
-                                fact.from,
-                                fact.predicate,
-                                fact.to,
-                                fact.lifecycle.as_ref().map(|l| l.state)
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                },
+                |painter, _| memcastle::client::fact_view::render_history(&facts, painter),
                 &facts,
             )?;
             Ok(())
