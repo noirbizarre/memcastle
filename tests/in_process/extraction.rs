@@ -144,6 +144,17 @@ async fn mined_fixtures_populate_the_graph_with_provenance_and_temporal_validity
     assert_eq!(provenance["origin"]["document"], "team.md");
     assert!(provenance["job_id"].is_string());
     assert!(provenance["drawer"].is_string());
+    assert_eq!(works_on["lifecycle"]["state"], "current");
+    let history = get(
+        base,
+        &format!(
+            "/api/relationships/{}/history",
+            works_on["id"].as_str().unwrap()
+        ),
+    )
+    .await;
+    assert_eq!(history.as_array().unwrap().len(), 1);
+    assert_eq!(history[0]["provenance"]["drawer"], provenance["drawer"]);
     assert!(ada.iter().any(|edge| edge["predicate"] == "member_of"));
 
     // The drawer it names is the one mined, verbatim.
@@ -281,6 +292,72 @@ async fn a_changed_document_retires_the_facts_it_no_longer_supports_and_keeps_th
         .find(|edge| edge["valid_to"].is_string())
         .expect("the old fact is closed");
     assert_ne!(closed["id"], current[0]["id"]);
+    assert_eq!(closed["lifecycle"]["state"], "superseded");
+    let history = get(
+        base,
+        &format!(
+            "/api/relationships/{}/history",
+            closed["id"].as_str().unwrap()
+        ),
+    )
+    .await;
+    assert_eq!(history.as_array().unwrap().len(), 2);
+    assert!(history.as_array().unwrap().iter().any(|fact| {
+        fact["lifecycle"]["links"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|link| link["kind"] == "supersedes")
+    }));
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_checkpoint_correction_is_explained_through_fact_history_and_as_of_reads() {
+    let daemon = daemon().await;
+    let base = &daemon.base_url;
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "a.md", "Ada works on MemCastle.", 1_000);
+    mine(base, dir.path()).await;
+    settle(base).await;
+    let old = relationships(base, "Ada", false).await.remove(0);
+    let id = old["id"].as_str().unwrap();
+    let subject = old["from"].as_str().unwrap();
+    let object = old["to"].as_str().unwrap();
+    let submitted: Job = client().post(format!("{base}/api/jobs"))
+        .json(&json!({"type": "checkpoint", "requested_by": "test", "payload": {"items": [{
+            "destination": "general", "content": "Correction: Ada still works on MemCastle.", "tags": [],
+            "source": {"kind": "manual", "agent": "test"},
+            "fact": {"op": "supersede", "relationship_id": id, "from": subject, "to": object,
+                "predicate": "works_on", "confidence": 1.0, "reason": "confirmed by Ada"}
+        }]}})).send().await.unwrap().json().await.unwrap();
+    wait_for_job_status(&client(), base, submitted.id, JobStatus::Completed).await;
+
+    let history = get(base, &format!("/api/relationships/{id}/history")).await;
+    let assertions = history.as_array().unwrap();
+    assert_eq!(assertions.len(), 2, "{history}");
+    let previous = assertions.iter().find(|fact| fact["id"] == id).unwrap();
+    assert_eq!(previous["lifecycle"]["state"], "superseded");
+    assert_eq!(
+        previous["lifecycle"]["links"][0]["reason"],
+        "confirmed by Ada"
+    );
+    let replacement = assertions.iter().find(|fact| fact["id"] != id).unwrap();
+    assert_eq!(replacement["lifecycle"]["state"], "current");
+    assert!(replacement["assertion"].is_string());
+
+    let boundary = replacement["valid_from"].as_str().unwrap();
+    let at: Value = client()
+        .get(format!("{base}/api/entities/{subject}/relationships"))
+        .query(&[("as_of", boundary)])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(at.as_array().unwrap().len(), 1, "{at}");
+    assert_eq!(at[0]["id"], replacement["id"]);
     daemon.shutdown().await;
 }
 

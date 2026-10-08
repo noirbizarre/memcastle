@@ -182,6 +182,10 @@ async fn a_disabled_session_is_rejected_by_recall_history_wake_up_and_both_diary
             serde_json::json!({ "drawer_id": "00000000-0000-4000-8000-000000000001" }),
         ),
         (
+            "memcastle_fact_history",
+            serde_json::json!({ "relationship_id": "00000000-0000-4000-8000-000000000001" }),
+        ),
+        (
             "memcastle_wake_up",
             serde_json::json!({ "agent_identity": "agent-a" }),
         ),

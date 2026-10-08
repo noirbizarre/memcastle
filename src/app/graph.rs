@@ -7,9 +7,10 @@
 
 use std::collections::HashSet;
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{Entity, EntityId, MemoryMode, Mention, Relationship};
+use crate::domain::{Entity, EntityId, MemoryMode, Mention, Relationship, RelationshipId};
 use crate::error::{Error, Result};
 use crate::events::{Action, Event};
 use crate::store::PossibleEntity;
@@ -68,6 +69,32 @@ impl AppServices {
         Self::require_read(mode, "entity_relationships")?;
         self.require_entity(entity).await?;
         self.store.list_relationships(entity, include_expired).await
+    }
+
+    /// A fact and the assertions linked to it, with their explanations at the requested time.
+    pub async fn fact_history(
+        &self,
+        id: RelationshipId,
+        at: Option<DateTime<Utc>>,
+        mode: MemoryMode,
+    ) -> Result<Vec<Relationship>> {
+        Self::require_read(mode, "fact_history")?;
+        self.store.fact_history(id, at).await
+    }
+
+    /// Relationships valid at an instant, retaining both sides of any unresolved disagreement.
+    pub async fn entity_relationships_at(
+        &self,
+        entity: EntityId,
+        at: DateTime<Utc>,
+        mode: MemoryMode,
+    ) -> Result<Vec<Relationship>> {
+        Self::require_read(mode, "entity_relationships")?;
+        self.require_entity(entity).await?;
+        let mut facts = self.store.list_relationships(entity, true).await?;
+        facts.retain(|fact| fact.valid_from <= at && fact.valid_to.is_none_or(|end| end > at));
+        self.store.attach_lifecycle(&mut facts, at).await?;
+        Ok(facts)
     }
 
     /// Every drawer that mentions an entity, with the provenance of the link.
@@ -181,7 +208,7 @@ impl AppServices {
         for hop in 0..depth {
             let mut next = Vec::new();
             for entity in &frontier {
-                for relationship in self.store.list_relationships(*entity, false).await? {
+                for relationship in self.store.list_relationships_raw(*entity, false).await? {
                     let other = if relationship.from == *entity {
                         relationship.to
                     } else {
@@ -217,6 +244,9 @@ impl AppServices {
 
         // An edge whose far end was cut by the cap is dropped: a line to a node that is not drawn is noise.
         edges.retain(|edge| seen.contains(&edge.from) && seen.contains(&edge.to));
+        self.store
+            .attach_lifecycle(&mut edges, chrono::Utc::now())
+            .await?;
         Ok(GraphView {
             nodes,
             edges,

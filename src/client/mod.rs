@@ -39,6 +39,7 @@ use crate::config::Secret;
 use crate::domain::channel::CLI as CHANNEL;
 use crate::domain::{
     CheckpointPayload, Drawer, Job, JobId, JobStatus, MemoryMode, MiningSource, Options,
+    Relationship,
 };
 use crate::error::{Error, Result};
 use crate::search::{SearchHit, SearchQuery};
@@ -140,6 +141,16 @@ pub enum EndpointSource {
 }
 
 impl DaemonClient {
+    /// Read a relationship's durable lifecycle through the daemon, never the database.
+    pub async fn fact_history(&self, id: &str, as_of: Option<&str>) -> Result<Vec<Relationship>> {
+        let mut request = self
+            .http
+            .get(self.api_url(&["relationships", id, "history"], None)?);
+        if let Some(at) = as_of {
+            request = request.query(&[("as_of", at)]);
+        }
+        self.send(request).await
+    }
     /// The URL of `/api/...`, with every segment percent-encoded.
     ///
     /// Segments are pushed one by one instead of formatted into a string: a name or id with a space, `?` or `#` in it

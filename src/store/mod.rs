@@ -54,6 +54,7 @@ mod entities;
 mod extraction;
 mod graph;
 mod jobs;
+mod lifecycle;
 mod migration_state;
 mod palace;
 mod renames;

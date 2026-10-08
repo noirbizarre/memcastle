@@ -195,6 +195,7 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
         // The knowledge graph: entities, what they relate to and which
         // drawers mention them, each with provenance and validity.
         .route("/api/graph", get(graph::graph))
+        .route("/api/relationships/{id}/history", get(graph::fact_history))
         .route("/api/entities", get(graph::list_entities))
         .route(
             "/api/entities/{id}/relationships",

@@ -148,8 +148,25 @@ DEFINE FIELD IF NOT EXISTS valid_to ON TABLE relates_to TYPE option<string>;
 -- The drawer, job and extractor an extracted fact was derived from
 -- (`domain::FactProvenance`); `NONE` for a fact somebody asserted directly.
 DEFINE FIELD IF NOT EXISTS provenance ON TABLE relates_to TYPE option<object> FLEXIBLE;
+-- A directly asserted checkpoint fact points to the canonical drawer recording the assertion.
+DEFINE FIELD IF NOT EXISTS assertion ON TABLE relates_to TYPE option<string>;
 -- Backs "close the facts whose evidence was superseded" and "what did this drawer yield".
 DEFINE INDEX IF NOT EXISTS relates_to_provenance_drawer ON TABLE relates_to FIELDS provenance.drawer;
+
+-- Decisions about assertions are separate from entity relationships. Their stable IDs make retries harmless;
+-- the original assertion and its evidence are never overwritten by an inferred disagreement.
+DEFINE TABLE IF NOT EXISTS fact_link SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS from_id ON TABLE fact_link TYPE string;
+DEFINE FIELD IF NOT EXISTS to_id ON TABLE fact_link TYPE string;
+DEFINE FIELD IF NOT EXISTS kind ON TABLE fact_link TYPE string
+    ASSERT $value IN ["supersedes", "contradicts", "confirms", "refines", "invalidates"];
+DEFINE FIELD IF NOT EXISTS origin ON TABLE fact_link TYPE string
+    ASSERT $value IN ["inferred", "explicit"];
+DEFINE FIELD IF NOT EXISTS reason ON TABLE fact_link TYPE string;
+DEFINE FIELD IF NOT EXISTS at ON TABLE fact_link TYPE datetime;
+DEFINE FIELD IF NOT EXISTS evidence ON TABLE fact_link TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS fact_link_from ON TABLE fact_link FIELDS from_id;
+DEFINE INDEX IF NOT EXISTS fact_link_to ON TABLE fact_link FIELDS to_id;
 
 -- The durable job queue. SCHEMAFULL on everything the scheduler itself
 -- reasons about (`status` in particular — an invalid status must never

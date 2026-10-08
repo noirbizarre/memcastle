@@ -643,6 +643,19 @@ The payload is JSON read from `--payload`, or from standard input when omitted;
 its shape is described in [MCP tools and REST API](mcp-and-api.md#checkpoint-payload).
 `--emergency` raises the job to the highest priority, for save-before-crash situations only.
 
+### `fact history`
+
+```sh
+memcastle fact history <RELATIONSHIP_UUID> [--as-of <RFC3339-OR-DATE>]
+```
+
+Reads a graph assertion and its linked confirmations, contradictions and explicit corrections from the daemon.
+The result includes the validity interval, evidence, lifecycle state, decision reasons and any ranking preference among
+unresolved claims; both sides of a conflict remain visible.
+`--as-of` evaluates that state at the given instant, while history still preserves the supporting assertions.
+Output is readable at a terminal and JSON when piped or when `--json` is set.
+See [the knowledge graph](mcp-and-api.md#the-knowledge-graph) for the shared REST and MCP contract.
+
 ## Wings, rooms and drawers
 
 ```sh
