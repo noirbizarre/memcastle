@@ -13,7 +13,7 @@ agent = ">=0.154.0"
 
 [agent]
 kind = "codex"
-entry = "marketplace.json"
+entry = ".agents/plugins/marketplace.json"
 
 [[assets]]
 from = "dist"

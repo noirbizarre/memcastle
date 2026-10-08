@@ -363,17 +363,40 @@ impl Agent for Codex<'_> {
             .agent
             .entry
             .as_deref()
-            .unwrap_or("marketplace.json");
+            .unwrap_or(".agents/plugins/marketplace.json");
         Registration {
             method: "codex-plugin-marketplace".to_string(),
             target: format!("memcastle@{}", Self::MARKETPLACE),
-            entry: Some(dir.join(entry).display().to_string()),
+            // Codex takes the marketplace root, not the catalog file inside it.
+            entry: Some(
+                dir.join(entry)
+                    .parent()
+                    .and_then(Path::parent)
+                    .and_then(Path::parent)
+                    .unwrap_or(dir)
+                    .display()
+                    .to_string(),
+            ),
         }
     }
 
     fn register(&self, name: &str, registration: &Registration) -> Result<()> {
         if self.is_registered(name, registration)? {
-            return Ok(());
+            // Codex caches local plugin files; an update must replace the cached copy, not only the marketplace source.
+            let remove = self.command(
+                name,
+                &[
+                    OsStr::new("plugin"),
+                    OsStr::new("remove"),
+                    OsStr::new(&registration.target),
+                ],
+            )?;
+            if !remove.status.success() {
+                return Err(Error::IntegrationRegistrationFailed {
+                    name: name.to_string(),
+                    message: format!("`codex plugin remove` failed: {}", failure_text(&remove)),
+                });
+            }
         }
         let marketplace = registration.entry.as_deref().unwrap_or_default();
         let add = self.command(
@@ -466,9 +489,10 @@ impl Agent for Codex<'_> {
                 message: format!("`codex plugin list` failed: {}", failure_text(&output)),
             });
         }
+        // Codex prints a table with status and version columns, not a bare plugin id per line.
         Ok(String::from_utf8_lossy(&output.stdout)
             .lines()
-            .any(|line| line.trim() == registration.target))
+            .any(|line| line.split_whitespace().next() == Some(registration.target.as_str())))
     }
 }
 

@@ -34,7 +34,7 @@ name = "wake-up"
 
 /// Lay out an assets root with both integrations built, and the shared skills.
 fn assets(root: &Path) {
-    for id in ["pi", "opencode", "codex"] {
+    for id in ["pi", "opencode", "claude-code", "codex"] {
         let dir = root.join("integrations").join(id);
         std::fs::create_dir_all(dir.join("dist")).unwrap();
         std::fs::write(
@@ -153,6 +153,7 @@ fn the_lifecycle_installs_updates_and_removes_every_agent_from_a_development_che
     assert_eq!(
         states,
         [
+            ("claude-code", "not_installed"),
             ("codex", "installed"),
             ("opencode", "installed"),
             ("pi", "installed")
@@ -265,7 +266,7 @@ fn an_installation_resolves_its_integrations_from_the_prefix_the_binary_sits_in(
 
     let report = json(&listed.stdout);
     assert_eq!(report["assets_source"], "installed");
-    assert_eq!(report["integrations"].as_array().unwrap().len(), 3);
+    assert_eq!(report["integrations"].as_array().unwrap().len(), 4);
 }
 
 #[test]

@@ -1,8 +1,0 @@
-{
-  "name": "memcastle",
-  "version": "0.1.0",
-  "description": "MemCastle HTTP MCP connection and shared skills for Codex",
-  "mcpServers": "./mcp.toml",
-  "skills": "../../../skills",
-  "commands": "./commands"
-}

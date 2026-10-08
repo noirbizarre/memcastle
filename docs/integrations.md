@@ -7,7 +7,8 @@ It decides *when* to call MemCastle and does nothing else; every call goes to th
 What each integration must do is the [Integration contract](integration-contract.md).
 This page is about getting one onto your machine.
 
-MemCastle ships integrations for **Pi**, **OpenCode**, **Claude Code** and **Codex**, and `memcastle integration` installs them.
+MemCastle ships integrations for **Pi**, **OpenCode**, **Claude Code** and **Codex**.
+`memcastle integration` installs them.
 Nothing is downloaded and no npm package is involved:
 the integrations are part of the MemCastle release, built and versioned with it.
 
@@ -66,7 +67,7 @@ flowchart TB
 - The agent and MemCastle versions are inside the ranges the integration declares.
   The installer refuses otherwise, before it writes anything, and tells you which version it found.
 
-You do not need bun, node or npm: the shipped integrations are single bundled files.
+You do not need bun, node or npm: shipped integrations already contain their runtime or declarative assets.
 The daemon does not have to be running to install one; it has to be running when the agent uses it.
 
 ## Install
@@ -84,7 +85,8 @@ memcastle integration install codex
 1. Finds the integration among the shipped ones and checks it against your MemCastle and your agent.
 2. Copies its files, and the [skills](skills.md) its manifest names, to `~/.local/share/memcastle/agents/<id>/`.
 3. Records what it copied, with a SHA-256 for each file, in a receipt beside them.
-4. Tells the agent about the copy: `pi install` for Pi, one plugin file for OpenCode, or a local marketplace for Codex.
+4. Tells the agent about the copy: `pi install` for Pi, one plugin file for OpenCode, or the agent's
+   local marketplace for Claude Code and Codex.
 5. Checks the result: the entry file is there, and the agent knows the copy.
 
 It reports every change it made.
@@ -132,12 +134,11 @@ Everything else in the agent's configuration is left exactly as it was:
 
 ## Configure
 
-The integrations read their settings from the environment (and, for OpenCode, plugin options), not from files that
-`install` writes.
-A default setup needs none: they find a daemon on `127.0.0.1:8420`, or through the registry file a running daemon
-writes.
+Pi and OpenCode read their settings from the environment (and OpenCode also reads plugin options).
+Codex uses its bundled MCP declaration at `http://127.0.0.1:8420/mcp` and reads a token from `MEMCASTLE_AUTH_TOKEN`.
+None of these integrations stores a token in files that `install` writes.
 The variables are listed in each guide: [Pi](integrations-pi.md#configuration),
-[OpenCode](integrations-opencode.md#configuration).
+[OpenCode](integrations-opencode.md#configuration), and [Codex](integrations-codex.md).
 
 ## Update
 
@@ -181,7 +182,13 @@ in a package and in a checkout alike:
 │   │   ├── dist/
 │   │   └── skills/                (only for skills this integration alone needs)
 │   │       └── <name>/SKILL.md
-│   └── opencode/
+│   ├── opencode/
+│   │   ├── memcastle-integration.toml
+│   │   └── dist/
+│   ├── claude-code/
+│   │   ├── memcastle-integration.toml
+│   │   └── dist/
+│   └── codex/
 │       ├── memcastle-integration.toml
 │       └── dist/
 ├── skills/                        (the shared skills, referenced by name)

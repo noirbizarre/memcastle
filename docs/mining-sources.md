@@ -164,7 +164,7 @@ Only `directory` is compiled into MemCastle.
 the repository and shipped alongside each release (release archives and the `.deb` and `.rpm` carry them, unpacked, under
 `share/memcastle/sources/`), so they are installed from the start and `memcastle source enable pi` is all one needs, with
 no registry and no network:
-no Pi, OpenCode, Claude Code or Codex code is part of the core, and they run under the same sandbox and the same pipeline as
+no Pi, OpenCode, Claude Code or Codex code is part of the core, and they run under the same sandbox and pipeline as
 any source a user writes.
 Other sources are found in [registries](publishing-sources.md).
 `directory` and `pi` have a modification-time watermark as their cursor:

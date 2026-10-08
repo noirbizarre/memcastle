@@ -32,6 +32,7 @@ nav = [
     { "Pi" = "integrations-pi.md" },
     { "OpenCode" = "integrations-opencode.md" },
     { "Claude Code" = "integrations-claude-code.md" },
+    { "Codex" = "integrations-codex.md" },
     { "Integration contract" = "integration-contract.md" },
   ] },
   { "Guides" = [

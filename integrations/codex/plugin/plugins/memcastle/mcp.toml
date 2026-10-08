@@ -1,4 +1,0 @@
-# The bearer token is read by Codex at runtime, never persisted by the installer.
-[mcp_servers.memcastle]
-url = "http://127.0.0.1:8420/mcp"
-bearer_token_env_var = "MEMCASTLE_AUTH_TOKEN"

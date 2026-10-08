@@ -17,7 +17,6 @@ case "$1" in
   --version)
     if [ -n "$FAKE_AGENT_VERSION" ]; then echo "$FAKE_AGENT_VERSION";
     elif [ "${0##*/}" = "claude" ]; then echo "2.1.83";
-    elif [ "${0##*/}" = "codex" ]; then echo "0.154.0";
     else echo "1.18.34"; fi ;;
   install) echo "$2" >> "$FAKE_AGENT_STATE" ;;
   remove) grep -vxF "$2" "$FAKE_AGENT_STATE" > "$FAKE_AGENT_STATE.tmp"; mv "$FAKE_AGENT_STATE.tmp" "$FAKE_AGENT_STATE"; true ;;
@@ -29,7 +28,9 @@ case "$1" in
         marketplace:add|marketplace:remove) true ;;
         add:*) grep -qxF "$3" "$state" || echo "$3" >> "$state" ;;
         remove:*) grep -vxF "$3" "$state" > "$state.tmp"; mv "$state.tmp" "$state"; true ;;
-        list:*) cat "$state" ;;
+        list:*)
+          printf 'PLUGIN STATUS VERSION SOURCE\n'
+          while IFS= read -r plugin; do printf '%s installed 0.1.0 /tmp\n' "$plugin"; done < "$state" ;;
         *) echo "unknown plugin command" >&2; exit 2 ;;
       esac
     else
