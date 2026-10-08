@@ -468,16 +468,18 @@ mod tests {
 
     #[tokio::test]
     async fn an_on_demand_oauth_permission_does_not_block_offline_acquisition() {
-        let mut permissions = Permissions::default();
-        permissions.oauth = Some(crate::domain::OAuthRequirement {
-            client_id: "public-client".into(),
-            scopes: vec!["read".into()],
-            token_url: "https://auth.example.com/token".into(),
-            authorize_url: Some("https://auth.example.com/authorize".into()),
-            device_authorization_url: None,
-            callback_path: None,
-            on_demand: false,
-        });
+        let mut permissions = Permissions {
+            oauth: Some(crate::domain::OAuthRequirement {
+                client_id: "public-client".into(),
+                scopes: vec!["read".into()],
+                token_url: "https://auth.example.com/token".into(),
+                authorize_url: Some("https://auth.example.com/authorize".into()),
+                device_authorization_url: None,
+                callback_path: None,
+                on_demand: false,
+            }),
+            ..Permissions::default()
+        };
         assert!(
             ensure_signed_in("example", &permissions, None)
                 .await
