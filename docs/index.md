@@ -27,9 +27,10 @@ flowchart LR
 
 ## Integrations
 
-- [Agent integrations](integrations.md): install, update and remove the Pi and OpenCode integrations,
+- [Agent integrations](integrations.md): install, update and remove the Pi, OpenCode, Claude Code and Codex integrations,
   from a package or a checkout.
-- [Pi](integrations-pi.md) and [OpenCode](integrations-opencode.md): what each installs, its settings, troubleshooting.
+- [Pi](integrations-pi.md), [OpenCode](integrations-opencode.md), [Claude Code](integrations-claude-code.md) and
+  [Codex](integrations-codex.md): what each installs, its settings and troubleshooting.
 - [Integration contract](integration-contract.md): what an agent integration must do, whatever the agent.
 
 ## Guides

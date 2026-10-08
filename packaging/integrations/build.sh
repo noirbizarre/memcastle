@@ -28,7 +28,7 @@ out="${1:-}"
 
 # Which integrations ship is a packaging decision and does not constrain the runtime (docs/adr/034): any directory
 # under `integrations/` with a `memcastle-integration.toml` and a `dist/` could be added here.
-BUNDLED=(pi opencode claude-code)
+BUNDLED=(pi opencode claude-code codex)
 
 cd "$(dirname "$0")/../.."
 root="$PWD"
@@ -84,6 +84,11 @@ bundle opencode src/index.ts --external '@opencode-ai/*' --external '@opencode/*
 rm -rf integrations/claude-code/dist
 mkdir -p integrations/claude-code/dist
 cp -R integrations/claude-code/plugin/. integrations/claude-code/dist/
+
+# Codex loads declarative marketplace assets itself, so no JavaScript runtime is bundled.
+rm -rf integrations/codex/dist
+mkdir -p integrations/codex/dist
+cp -R integrations/codex/plugin/. integrations/codex/dist/
 
 if [ -z "${out}" ]; then
   exit 0

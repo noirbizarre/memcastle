@@ -174,3 +174,6 @@ The history is the value.
 - [ADR-044](044-pi-integration-uses-pis-mcp-client-library.md) — Pi 1.0 is the minimum Pi version, and the Pi integration's
   MCP session is built on Pi's own `@earendil-works/pi-mcp` client library (bundled) instead of the MCP SDK
   (amends ADR-022 for Pi)
+- [ADR-045](045-codex-history-is-an-installed-webassembly-source.md) — Codex rollout history is an installed WebAssembly
+  source built from `sources/codex/`, with read-only access only to the dated rollout directory and no Codex-specific
+  code in the daemon core

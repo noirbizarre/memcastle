@@ -8,6 +8,7 @@
 //! - OpenCode loads every file in its `plugins/` directory, so the adapter writes one file there, marked as MemCastle's,
 //!   and removes only a file that carries the mark. It never touches `opencode.json`, and never adds an `mcp.memcastle`
 //!   entry, which would show every tool twice.
+//! - Codex owns its plugin marketplace, so the adapter invokes its plugin commands rather than editing config.toml.
 //!
 //! Claude Code owns its plugin registry, so its adapter invokes marketplace commands rather than opening a settings file.
 //!
@@ -168,6 +169,7 @@ pub fn for_kind<'a>(
             plugins_dir: locations.opencode_config_dir.join("plugins"),
         }),
         AgentKind::ClaudeCode => Box::new(ClaudeCode { runner }),
+        AgentKind::Codex => Box::new(Codex { runner }),
     }
 }
 
@@ -324,6 +326,173 @@ impl Agent for ClaudeCode<'_> {
         Ok(String::from_utf8_lossy(&output.stdout)
             .lines()
             .any(|line| line.trim() == registration.target))
+    }
+}
+
+/// Codex, through its supported local marketplace commands.
+struct Codex<'a> {
+    runner: &'a dyn Runner,
+}
+
+impl Codex<'_> {
+    const MARKETPLACE: &'static str = "memcastle-local";
+
+    fn command(&self, name: &str, args: &[&OsStr]) -> Result<Output> {
+        self.runner
+            .run("codex", args)
+            .map_err(|e| Error::IntegrationRegistrationFailed {
+                name: name.to_string(),
+                message: format!(
+                    "`codex {}` could not run ({e})",
+                    args.iter()
+                        .map(|arg| arg.to_string_lossy())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                ),
+            })
+    }
+}
+
+impl Agent for Codex<'_> {
+    fn detect(&self, name: &str) -> Result<AgentInfo> {
+        detect_with(self.runner, AgentKind::Codex, name)
+    }
+
+    fn registration(&self, dir: &Path, manifest: &IntegrationManifest) -> Registration {
+        let entry = manifest
+            .agent
+            .entry
+            .as_deref()
+            .unwrap_or(".agents/plugins/marketplace.json");
+        Registration {
+            method: "codex-plugin-marketplace".to_string(),
+            target: format!("memcastle@{}", Self::MARKETPLACE),
+            // Codex takes the marketplace root, not the catalog file inside it.
+            entry: Some(
+                dir.join(entry)
+                    .parent()
+                    .and_then(Path::parent)
+                    .and_then(Path::parent)
+                    .unwrap_or(dir)
+                    .display()
+                    .to_string(),
+            ),
+        }
+    }
+
+    fn register(&self, name: &str, registration: &Registration) -> Result<()> {
+        if self.is_registered(name, registration)? {
+            // Codex caches local plugin files; an update must replace the cached copy, not only the marketplace source.
+            let remove = self.command(
+                name,
+                &[
+                    OsStr::new("plugin"),
+                    OsStr::new("remove"),
+                    OsStr::new(&registration.target),
+                ],
+            )?;
+            if !remove.status.success() {
+                return Err(Error::IntegrationRegistrationFailed {
+                    name: name.to_string(),
+                    message: format!("`codex plugin remove` failed: {}", failure_text(&remove)),
+                });
+            }
+        }
+        let marketplace = registration.entry.as_deref().unwrap_or_default();
+        let add = self.command(
+            name,
+            &[
+                OsStr::new("plugin"),
+                OsStr::new("marketplace"),
+                OsStr::new("add"),
+                OsStr::new(marketplace),
+            ],
+        )?;
+        if !add.status.success() {
+            return Err(Error::IntegrationRegistrationFailed {
+                name: name.to_string(),
+                message: format!(
+                    "`codex plugin marketplace add` failed: {}",
+                    failure_text(&add)
+                ),
+            });
+        }
+        let install = self.command(
+            name,
+            &[
+                OsStr::new("plugin"),
+                OsStr::new("add"),
+                OsStr::new(&registration.target),
+            ],
+        )?;
+        if install.status.success() {
+            Ok(())
+        } else {
+            Err(Error::IntegrationRegistrationFailed {
+                name: name.to_string(),
+                message: format!("`codex plugin add` failed: {}", failure_text(&install)),
+            })
+        }
+    }
+
+    fn unregister(&self, name: &str, registration: &Registration) -> Result<Unregistered> {
+        if !self.is_registered(name, registration)? {
+            return Ok(Unregistered::NotRegistered);
+        }
+        let remove = self.command(
+            name,
+            &[
+                OsStr::new("plugin"),
+                OsStr::new("remove"),
+                OsStr::new(&registration.target),
+            ],
+        )?;
+        if !remove.status.success() {
+            return Err(Error::IntegrationRegistrationFailed {
+                name: name.to_string(),
+                message: format!("`codex plugin remove` failed: {}", failure_text(&remove)),
+            });
+        }
+        let marketplace = self.command(
+            name,
+            &[
+                OsStr::new("plugin"),
+                OsStr::new("marketplace"),
+                OsStr::new("remove"),
+                OsStr::new(Self::MARKETPLACE),
+            ],
+        )?;
+        if marketplace.status.success() {
+            Ok(Unregistered::Removed)
+        } else {
+            Err(Error::IntegrationRegistrationFailed {
+                name: name.to_string(),
+                message: format!(
+                    "`codex plugin marketplace remove` failed: {}",
+                    failure_text(&marketplace)
+                ),
+            })
+        }
+    }
+
+    fn is_registered(&self, name: &str, registration: &Registration) -> Result<bool> {
+        let output = self
+            .runner
+            .run("codex", &[OsStr::new("plugin"), OsStr::new("list")])
+            .map_err(|e| Error::IntegrationAgentNotFound {
+                name: name.to_string(),
+                message: format!("`codex plugin list` could not run ({e})"),
+            })?;
+        if !output.status.success() {
+            return Err(Error::IntegrationAgentNotFound {
+                name: name.to_string(),
+                message: format!("`codex plugin list` failed: {}", failure_text(&output)),
+            });
+        }
+        // Codex prints a table with status and version columns, not a bare plugin id per line.
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .any(|line| line.split_whitespace().next() == Some(registration.target.as_str())))
     }
 }
 
@@ -562,12 +731,14 @@ pub(crate) mod fake {
 
     use super::{OsStr, Runner};
 
-    /// Behaves like `pi` (a list of packages) and `opencode` (a version), and records every call.
+    /// Behaves like the agents' version and registration commands, and records every call.
     pub(crate) struct FakeAgents {
         pub pi_version: &'static str,
         pub opencode_version: &'static str,
         pub claude_version: &'static str,
+        pub codex_version: &'static str,
         pub installed: RefCell<Vec<String>>,
+        pub codex_installed: RefCell<Vec<String>>,
         pub calls: RefCell<Vec<String>>,
         /// Make `pi install` fail with this message.
         pub refuse_install: RefCell<Option<&'static str>>,
@@ -579,6 +750,8 @@ pub(crate) mod fake {
         pub io_error_on: RefCell<Option<&'static str>>,
         /// Fail a particular Claude plugin operation without breaking the preceding registration lookup.
         pub claude_failure: RefCell<Option<(&'static str, bool)>>,
+        /// Fail one Codex plugin operation without breaking its preceding registration lookup.
+        pub codex_failure: RefCell<Option<(&'static str, bool)>>,
         /// Accept `pi install` without remembering the package, so the agent never lists it.
         pub forget_installs: RefCell<bool>,
     }
@@ -589,13 +762,16 @@ pub(crate) mod fake {
                 pi_version: "1.0.1",
                 opencode_version: "1.18.34",
                 claude_version: "2.1.83",
+                codex_version: "codex-cli 0.160.1",
                 installed: RefCell::new(Vec::new()),
+                codex_installed: RefCell::new(Vec::new()),
                 calls: RefCell::new(Vec::new()),
                 refuse_install: RefCell::new(None),
                 missing: RefCell::new(false),
                 exit_on: RefCell::new(None),
                 io_error_on: RefCell::new(None),
                 claude_failure: RefCell::new(None),
+                codex_failure: RefCell::new(None),
                 forget_installs: RefCell::new(false),
             }
         }
@@ -631,6 +807,15 @@ pub(crate) mod fake {
                 }
                 return Ok(output(1, "", "Claude refused the operation"));
             }
+            if program == "codex"
+                && let Some((operation, io_error)) = *self.codex_failure.borrow()
+                && args.join(" ").starts_with(operation)
+            {
+                if io_error {
+                    return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+                }
+                return Ok(output(1, "", "Codex refused the operation"));
+            }
             if *self.io_error_on.borrow() == subcommand && subcommand.is_some() {
                 return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
             }
@@ -647,6 +832,29 @@ pub(crate) mod fake {
                 ("claude", Some("--version")) => {
                     output(0, &format!("{}\n", self.claude_version), "")
                 }
+                ("codex", Some("--version")) => output(0, &format!("{}\n", self.codex_version), ""),
+                ("codex", Some("plugin")) if args.get(1).map(String::as_str) == Some("list") => {
+                    let rows = self
+                        .codex_installed
+                        .borrow()
+                        .iter()
+                        .map(|id| format!("{id}  installed, enabled  0.1.0  /tmp\n"))
+                        .collect::<String>();
+                    output(0, &format!("PLUGIN STATUS VERSION SOURCE\n{rows}"), "")
+                }
+                ("codex", Some("plugin")) if args.get(1).map(String::as_str) == Some("add") => {
+                    let target = args.last().cloned().unwrap_or_default();
+                    if !self.codex_installed.borrow().contains(&target) {
+                        self.codex_installed.borrow_mut().push(target);
+                    }
+                    output(0, "", "")
+                }
+                ("codex", Some("plugin")) if args.get(1).map(String::as_str) == Some("remove") => {
+                    let target = args.last().cloned().unwrap_or_default();
+                    self.codex_installed.borrow_mut().retain(|id| id != &target);
+                    output(0, "", "")
+                }
+                ("codex", Some("plugin")) => output(0, "", ""),
                 ("claude", Some("plugin")) if args.get(1).map(String::as_str) == Some("list") => {
                     output(0, &self.installed.borrow().join("\n"), "")
                 }
@@ -703,6 +911,11 @@ mod tests {
     use crate::integration::manifest;
 
     fn manifest_for(kind: &str) -> IntegrationManifest {
+        let entry = if kind == "codex" {
+            ".agents/plugins/marketplace.json"
+        } else {
+            "index.js"
+        };
         manifest::parse(&format!(
             r#"format = 1
 [integration]
@@ -713,7 +926,7 @@ description = "demo"
 memcastle = "*"
 [agent]
 kind = "{kind}"
-entry = "index.js"
+entry = "{entry}"
 [[assets]]
 from = "dist"
 to = "."
@@ -726,6 +939,130 @@ to = "."
         Locations {
             agents_dir: root.join("agents"),
             opencode_config_dir: root.join("opencode"),
+        }
+    }
+
+    #[test]
+    fn codex_registers_from_its_local_marketplace_refreshes_a_cached_plugin_and_removes_only_its_own()
+     {
+        let fake = FakeAgents::new();
+        let agent = for_kind(AgentKind::Codex, &fake, &locations(Path::new("/tmp")));
+        let registration =
+            agent.registration(Path::new("/data/agents/codex"), &manifest_for("codex"));
+        assert_eq!(registration.method, "codex-plugin-marketplace");
+        assert_eq!(registration.entry.as_deref(), Some("/data/agents/codex"));
+        assert_eq!(registration.target, "memcastle@memcastle-local");
+        assert_eq!(
+            agent.detect("codex").unwrap().version.unwrap().to_string(),
+            "0.160.1"
+        );
+
+        fake.codex_installed
+            .borrow_mut()
+            .push("memcastle@other".to_string());
+        assert!(!agent.is_registered("codex", &registration).unwrap());
+        agent.register("codex", &registration).unwrap();
+        assert!(agent.is_registered("codex", &registration).unwrap());
+        // Codex caches the plugin at install: registering a changed copy must replace that cache.
+        agent.register("codex", &registration).unwrap();
+        let calls = fake.calls.borrow();
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|call| call.as_str() == "codex plugin add memcastle@memcastle-local")
+                .count(),
+            2
+        );
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|call| call.as_str() == "codex plugin remove memcastle@memcastle-local")
+                .count(),
+            1
+        );
+        assert!(
+            calls
+                .iter()
+                .any(|call| call == "codex plugin marketplace add /data/agents/codex")
+        );
+        drop(calls);
+
+        assert_eq!(
+            agent.unregister("codex", &registration).unwrap(),
+            Unregistered::Removed
+        );
+        assert_eq!(
+            agent.unregister("codex", &registration).unwrap(),
+            Unregistered::NotRegistered
+        );
+        assert_eq!(
+            fake.codex_installed.borrow().as_slice(),
+            ["memcastle@other"]
+        );
+        assert!(
+            fake.calls
+                .borrow()
+                .iter()
+                .any(|call| call == "codex plugin marketplace remove memcastle-local")
+        );
+    }
+
+    #[test]
+    fn codex_registration_failures_name_the_refused_command_and_leave_unrelated_plugins_intact() {
+        let fake = FakeAgents::new();
+        let agent = for_kind(AgentKind::Codex, &fake, &locations(Path::new("/tmp")));
+        let registration =
+            agent.registration(Path::new("/data/agents/codex"), &manifest_for("codex"));
+        fake.codex_installed
+            .borrow_mut()
+            .push("memcastle@other".to_string());
+
+        for operation in ["plugin list", "plugin marketplace add", "plugin add"] {
+            for io_error in [false, true] {
+                *fake.codex_failure.borrow_mut() = Some((operation, io_error));
+                let error = agent
+                    .register("codex", &registration)
+                    .unwrap_err()
+                    .to_string();
+                assert!(error.contains(operation), "{operation}: {error}");
+                assert!(
+                    fake.codex_installed
+                        .borrow()
+                        .contains(&"memcastle@other".to_string())
+                );
+            }
+        }
+        *fake.codex_failure.borrow_mut() = None;
+        agent.register("codex", &registration).unwrap();
+
+        *fake.codex_failure.borrow_mut() = Some(("plugin remove", false));
+        let error = agent
+            .register("codex", &registration)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("codex plugin remove"), "{error}");
+        assert!(agent.is_registered("codex", &registration).unwrap());
+        *fake.codex_failure.borrow_mut() = None;
+
+        for operation in ["plugin remove", "plugin marketplace remove"] {
+            for io_error in [false, true] {
+                *fake.codex_failure.borrow_mut() = Some((operation, io_error));
+                let error = agent
+                    .unregister("codex", &registration)
+                    .unwrap_err()
+                    .to_string();
+                assert!(error.contains(operation), "{operation}: {error}");
+                assert!(
+                    fake.codex_installed
+                        .borrow()
+                        .contains(&"memcastle@other".to_string())
+                );
+                // Once removal succeeds but the marketplace command fails, restore the plugin before retrying.
+                if operation == "plugin marketplace remove" {
+                    *fake.codex_failure.borrow_mut() = None;
+                    agent.register("codex", &registration).unwrap();
+                }
+            }
         }
     }
 

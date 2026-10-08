@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "memcastle",
+  "version": "0.1.0",
+  "description": "MemCastle HTTP MCP connection and shared skills for Codex"
+}

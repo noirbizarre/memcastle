@@ -1,0 +1,35 @@
+# Codex is registered through its local marketplace, never by editing config.toml.
+format = 1
+
+[integration]
+id = "codex"
+version = "0.1.0"
+description = "Native HTTP MCP and shared skills for Codex, installed through a local plugin marketplace"
+
+[compatibility]
+memcastle = ">=0.2"
+# Codex's plugin marketplace and HTTP MCP transport are required.
+agent = ">=0.154.0"
+
+[agent]
+kind = "codex"
+entry = ".agents/plugins/marketplace.json"
+
+[[assets]]
+from = "dist"
+to = "."
+
+[[skills]]
+name = "memcastle-setup"
+
+[[skills]]
+name = "search-before-answer"
+
+[[skills]]
+name = "checkpoint-instructions"
+
+[[skills]]
+name = "wake-up"
+
+[[skills]]
+name = "diary"

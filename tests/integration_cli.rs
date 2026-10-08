@@ -34,7 +34,7 @@ name = "wake-up"
 
 /// Lay out an assets root with both integrations built, and the shared skills.
 fn assets(root: &Path) {
-    for id in ["pi", "opencode"] {
+    for id in ["pi", "opencode", "claude-code", "codex"] {
         let dir = root.join("integrations").join(id);
         std::fs::create_dir_all(dir.join("dist")).unwrap();
         std::fs::write(
@@ -68,7 +68,7 @@ fn json(output: &[u8]) -> serde_json::Value {
 }
 
 #[test]
-fn the_lifecycle_installs_updates_and_removes_both_agents_from_a_development_checkout() {
+fn the_lifecycle_installs_updates_and_removes_every_agent_from_a_development_checkout() {
     let machine = machine();
     let assets = machine.path("assets");
     let assets = assets.to_str().unwrap();
@@ -108,6 +108,15 @@ fn the_lifecycle_installs_updates_and_removes_both_agents_from_a_development_che
         ),
         (&"opencode".into(), &"installed".into(), &"0.1.0".into())
     );
+    let installed = machine
+        .memcastle()
+        .args(["integration", "install", "codex", "--assets-dir", assets])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(json(&installed)["id"], "codex");
 
     assert!(machine.installed("pi").join("dist/index.js").is_file());
     assert!(
@@ -117,9 +126,10 @@ fn the_lifecycle_installs_updates_and_removes_both_agents_from_a_development_che
             .is_file()
     );
     assert!(!machine.installed("pi").join("skills/diary").exists());
-    assert_eq!(
-        machine.pi_packages(),
-        [machine.installed("pi").display().to_string()]
+    assert!(
+        machine
+            .pi_packages()
+            .contains(&machine.installed("pi").display().to_string())
     );
     assert!(
         std::fs::read_to_string(machine.plugin_file())
@@ -140,7 +150,15 @@ fn the_lifecycle_installs_updates_and_removes_both_agents_from_a_development_che
         .iter()
         .map(|i| (i["id"].as_str().unwrap(), i["state"].as_str().unwrap()))
         .collect();
-    assert_eq!(states, [("opencode", "installed"), ("pi", "installed")]);
+    assert_eq!(
+        states,
+        [
+            ("claude-code", "not_installed"),
+            ("codex", "installed"),
+            ("opencode", "installed"),
+            ("pi", "installed")
+        ]
+    );
     // The listing says which skills each integration exposes, so a script can tell without opening the copy.
     for integration in report["integrations"].as_array().unwrap() {
         assert_eq!(integration["skills"], serde_json::json!(["wake-up"]));
@@ -170,9 +188,18 @@ fn the_lifecycle_installs_updates_and_removes_both_agents_from_a_development_che
         .args(["integration", "remove", "opencode"])
         .assert()
         .success();
+    machine
+        .memcastle()
+        .args(["integration", "remove", "codex"])
+        .assert()
+        .success();
     assert!(machine.pi_packages().is_empty());
     assert!(!machine.plugin_file().exists());
-    assert!(!machine.installed("pi").exists() && !machine.installed("opencode").exists());
+    assert!(
+        !machine.installed("pi").exists()
+            && !machine.installed("opencode").exists()
+            && !machine.installed("codex").exists()
+    );
 }
 
 #[test]
@@ -239,7 +266,7 @@ fn an_installation_resolves_its_integrations_from_the_prefix_the_binary_sits_in(
 
     let report = json(&listed.stdout);
     assert_eq!(report["assets_source"], "installed");
-    assert_eq!(report["integrations"].as_array().unwrap().len(), 2);
+    assert_eq!(report["integrations"].as_array().unwrap().len(), 4);
 }
 
 #[test]

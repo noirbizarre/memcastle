@@ -1,0 +1,23 @@
+{
+  "name": "codex-rollouts",
+  "description": "Codex rollout transcripts in the dated layout, including reasoning and tool output that must not be filed.",
+  "locator": "tree",
+  "limit": 10,
+  "documents": [
+    {
+      "external_id": "2026/10/08/rollout-2026-10-08T10-00-00-session-a.jsonl",
+      "title": "Implement the parser.",
+      "kind": "transcript",
+      "tags": ["transcript", "codex"],
+      "room": "project",
+      "segments": [
+        "# Codex session session-a\nworking directory: /work/project\n\n",
+        "### user\nImplement the parser.\n\n",
+        "### assistant\nI will inspect the format.\n\n",
+        "[tool call: read_file]\n\n",
+        "### assistant\nThe parser is ready.\n\n"
+      ]
+    }
+  ],
+  "skipped": ["2026/10/08/history.jsonl", "2026/10/rollout-wrong-depth.jsonl"]
+}

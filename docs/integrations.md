@@ -7,14 +7,15 @@ It decides *when* to call MemCastle and does nothing else; every call goes to th
 What each integration must do is the [Integration contract](integration-contract.md).
 This page is about getting one onto your machine.
 
-MemCastle ships the integrations for **Pi**, **OpenCode**, and **Claude Code**, and `memcastle integration` installs them.
+MemCastle ships integrations for **Pi**, **OpenCode**, **Claude Code** and **Codex**.
+`memcastle integration` installs them.
 Nothing is downloaded and no npm package is involved:
 the integrations are part of the MemCastle release, built and versioned with it.
 
 ```mermaid
 flowchart LR
     subgraph machine[Your machine]
-        A[Agent: Pi or OpenCode] -->|loads| I[Installed integration]
+        A[Agent: Pi, OpenCode, Claude Code or Codex] -->|loads| I[Installed integration]
         I -->|MCP and HTTP| D[memcastle daemon]
         I -.->|exposes| S[Skills it names]
     end
@@ -52,12 +53,13 @@ flowchart TB
 | `pi` | Pi (`@earendil-works/pi-coding-agent`) | 1.0 and later | 0.2 and later | [Pi](integrations-pi.md) |
 | `opencode` | [OpenCode](https://opencode.ai) | 1.18.29 and later, including 2.x | 0.2 and later | [OpenCode](integrations-opencode.md) |
 | `claude-code` | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | 2.1.83 and later | 0.2 and later | [Claude Code](integrations-claude-code.md) |
+| `codex` | [Codex](https://developers.openai.com/codex) | 0.154.0 and later | 0.2 and later | [Codex](integrations-codex.md) |
 
 `memcastle integration list` shows the same ranges for the MemCastle you run, since they come from the integrations it ships.
 
 ## Requirements
 
-- The agent is installed and its command (`pi`, `opencode`) is on your `PATH`.
+- The agent is installed and its command (`pi`, `opencode`, `claude`, `codex`) is on your `PATH`.
   The installer runs it to read its version and, for Pi, to register the integration with it.
 - The MemCastle you run ships integrations: a native package, a release tarball or a checkout (see
   [Where integrations come from](#where-integrations-come-from)).
@@ -65,7 +67,7 @@ flowchart TB
 - The agent and MemCastle versions are inside the ranges the integration declares.
   The installer refuses otherwise, before it writes anything, and tells you which version it found.
 
-You do not need bun, node or npm: the shipped integrations are single bundled files.
+You do not need bun, node or npm: shipped integrations already contain their runtime or declarative assets.
 The daemon does not have to be running to install one; it has to be running when the agent uses it.
 
 ## Install
@@ -75,6 +77,7 @@ memcastle integration list
 memcastle integration install pi
 memcastle integration install opencode
 memcastle integration install claude-code
+memcastle integration install codex
 ```
 
 `install` does five things, in this order, and stops at the first one that fails:
@@ -82,7 +85,8 @@ memcastle integration install claude-code
 1. Finds the integration among the shipped ones and checks it against your MemCastle and your agent.
 2. Copies its files, and the [skills](skills.md) its manifest names, to `~/.local/share/memcastle/agents/<id>/`.
 3. Records what it copied, with a SHA-256 for each file, in a receipt beside them.
-4. Tells the agent about the copy: `pi install` for Pi, one plugin file for OpenCode.
+4. Tells the agent about the copy: `pi install` for Pi, one plugin file for OpenCode, or the agent's
+   local marketplace for Claude Code and Codex.
 5. Checks the result: the entry file is there, and the agent knows the copy.
 
 It reports every change it made.
@@ -105,6 +109,7 @@ working if the package that shipped it is gone.
 | Pi: its own settings, through `pi install` | one package entry pointing at that directory | `remove` |
 | OpenCode: `~/.config/opencode/plugins/memcastle.ts` | a one-line file that re-exports the installed bundle | `remove` |
 | Claude Code: its plugin registry, through `claude plugin` | `memcastle@memcastle-local` and its local marketplace | `remove` |
+| Codex: its plugin marketplace | one `memcastle` plugin from the installed marketplace | `remove` |
 
 `~/.local/share` and `~/.config` are the defaults; `XDG_DATA_HOME`, `XDG_CONFIG_HOME` and, for OpenCode,
 `OPENCODE_CONFIG_DIR` move them.
@@ -117,6 +122,8 @@ Everything else in the agent's configuration is left exactly as it was:
   The plugin connects to the daemon itself, and an MCP entry next to it would list every tool twice.
 - MemCastle never opens a Claude Code settings file.
   It uses `claude plugin marketplace add`, `claude plugin install`, and their matching removal commands.
+- MemCastle never edits Codex's `config.toml`.
+  Codex owns the marketplace and MCP registration through `codex plugin` commands.
 - A `plugins/memcastle.ts` that MemCastle did not write is never overwritten or deleted.
   The installer stops with [`conflict`](#troubleshooting) instead.
 - MemCastle never writes your [authentication token](authentication.md) anywhere.
@@ -127,12 +134,11 @@ Everything else in the agent's configuration is left exactly as it was:
 
 ## Configure
 
-The integrations read their settings from the environment (and, for OpenCode, plugin options), not from files that
-`install` writes.
-A default setup needs none: they find a daemon on `127.0.0.1:8420`, or through the registry file a running daemon
-writes.
+Pi and OpenCode read their settings from the environment (and OpenCode also reads plugin options).
+Codex uses its bundled MCP declaration at `http://127.0.0.1:8420/mcp` and reads a token from `MEMCASTLE_AUTH_TOKEN`.
+None of these integrations stores a token in files that `install` writes.
 The variables are listed in each guide: [Pi](integrations-pi.md#configuration),
-[OpenCode](integrations-opencode.md#configuration).
+[OpenCode](integrations-opencode.md#configuration), and [Codex](integrations-codex.md).
 
 ## Update
 
@@ -176,7 +182,13 @@ in a package and in a checkout alike:
 │   │   ├── dist/
 │   │   └── skills/                (only for skills this integration alone needs)
 │   │       └── <name>/SKILL.md
-│   └── opencode/
+│   ├── opencode/
+│   │   ├── memcastle-integration.toml
+│   │   └── dist/
+│   ├── claude-code/
+│   │   ├── memcastle-integration.toml
+│   │   └── dist/
+│   └── codex/
 │       ├── memcastle-integration.toml
 │       └── dist/
 ├── skills/                        (the shared skills, referenced by name)

@@ -10,6 +10,13 @@
       "repository": "noirbizarre/memcastle"
     },
     {
+      "name": "codex",
+      "description": "Codex coding-agent rollout history (JSONL files under ~/.codex/sessions), one document per rollout",
+      "homepage": "https://noirbizarre.github.io/memcastle/mining-sources/#codex",
+      "license": "MIT",
+      "repository": "noirbizarre/memcastle"
+    },
+    {
       "name": "opencode",
       "description": "OpenCode coding-agent session history, acquired through the opencode CLI, one document per session",
       "homepage": "https://noirbizarre.github.io/memcastle/mining-sources/#opencode",
