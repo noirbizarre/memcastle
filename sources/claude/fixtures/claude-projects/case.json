@@ -1,0 +1,34 @@
+{
+  "name": "claude-projects",
+  "description": "Claude Code JSONL transcripts under project directories, with private records and unrelated files excluded.",
+  "locator": "tree",
+  "limit": 1,
+  "documents": [
+    {
+      "external_id": "-work-app/session-a.jsonl",
+      "title": "How do I rotate the signing keys?",
+      "kind": "transcript",
+      "tags": ["transcript", "claude"],
+      "room": "app",
+      "segments": [
+        "# Claude Code session session-a\nworking directory: /work/app\n\n",
+        "### user · 2026-07-14T14:27:20.000Z\nHow do I rotate the signing keys?\n\n",
+        "### assistant · 2026-07-14T14:27:30.000Z\nI will inspect the rotation script.\n[tool: Read]\n\n",
+        "### assistant · 2026-07-14T14:27:40.000Z\nRun the rotation script with the new key id.\n\n"
+      ]
+    },
+    {
+      "external_id": "-work-notes/session-b.jsonl",
+      "title": "Summarize the repository state.",
+      "kind": "transcript",
+      "tags": ["transcript", "claude"],
+      "room": "notes",
+      "segments": [
+        "# Claude Code session session-b\nworking directory: /work/notes\n\n",
+        "### user · 2026-07-16T10:00:09.000Z\nSummarize the repository state.\n\n",
+        "### assistant · 2026-07-16T10:00:11.000Z\nThe working tree is clean.\n\n"
+      ]
+    }
+  ],
+  "skipped": ["-work-app/empty.jsonl", "-work-app/nested/deep.jsonl", "settings.json"]
+}

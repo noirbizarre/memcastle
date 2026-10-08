@@ -9,6 +9,8 @@
 //!   and removes only a file that carries the mark. It never touches `opencode.json`, and never adds an `mcp.memcastle`
 //!   entry, which would show every tool twice.
 //!
+//! Claude Code owns its plugin registry, so its adapter invokes marketplace commands rather than opening a settings file.
+//!
 //! Running a program goes through [`Runner`] so the adapters are tested without an agent installed.
 
 use std::ffi::OsStr;
@@ -165,6 +167,163 @@ pub fn for_kind<'a>(
             runner,
             plugins_dir: locations.opencode_config_dir.join("plugins"),
         }),
+        AgentKind::ClaudeCode => Box::new(ClaudeCode { runner }),
+    }
+}
+
+/// Claude Code, through its supported local marketplace commands.
+struct ClaudeCode<'a> {
+    runner: &'a dyn Runner,
+}
+
+impl ClaudeCode<'_> {
+    const MARKETPLACE: &'static str = "memcastle-local";
+
+    fn command(&self, name: &str, args: &[&OsStr]) -> Result<Output> {
+        self.runner
+            .run("claude", args)
+            .map_err(|e| Error::IntegrationRegistrationFailed {
+                name: name.to_string(),
+                message: format!(
+                    "`claude {}` could not run ({e})",
+                    args.iter()
+                        .map(|arg| arg.to_string_lossy())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                ),
+            })
+    }
+}
+
+impl Agent for ClaudeCode<'_> {
+    fn detect(&self, name: &str) -> Result<AgentInfo> {
+        detect_with(self.runner, AgentKind::ClaudeCode, name)
+    }
+
+    fn registration(&self, dir: &Path, manifest: &IntegrationManifest) -> Registration {
+        let entry = manifest
+            .agent
+            .entry
+            .as_deref()
+            .unwrap_or(".claude-plugin/marketplace.json");
+        Registration {
+            method: "claude-code-marketplace".to_string(),
+            // The integration id describes the package; the marketplace exposes the plugin as `memcastle`.
+            target: format!("memcastle@{}", Self::MARKETPLACE),
+            // The receipt keeps the precise local marketplace directory for later removal.
+            entry: Some(
+                dir.join(entry)
+                    // The manifest validator guarantees an entry file, so its parent is the installed copy.
+                    .parent()
+                    .unwrap_or(dir)
+                    .display()
+                    .to_string(),
+            ),
+        }
+    }
+
+    fn register(&self, name: &str, registration: &Registration) -> Result<()> {
+        if self.is_registered(name, registration)? {
+            return Ok(());
+        }
+        let marketplace = registration.entry.as_deref().unwrap_or_default();
+        let add = self.command(
+            name,
+            &[
+                OsStr::new("plugin"),
+                OsStr::new("marketplace"),
+                OsStr::new("add"),
+                OsStr::new(marketplace),
+            ],
+        )?;
+        if !add.status.success() {
+            return Err(Error::IntegrationRegistrationFailed {
+                name: name.to_string(),
+                message: format!(
+                    "`claude plugin marketplace add` failed: {}",
+                    failure_text(&add)
+                ),
+            });
+        }
+        let install = self.command(
+            name,
+            &[
+                OsStr::new("plugin"),
+                OsStr::new("install"),
+                OsStr::new("--scope"),
+                OsStr::new("user"),
+                OsStr::new(&registration.target),
+            ],
+        )?;
+        if install.status.success() {
+            Ok(())
+        } else {
+            Err(Error::IntegrationRegistrationFailed {
+                name: name.to_string(),
+                message: format!("`claude plugin install` failed: {}", failure_text(&install)),
+            })
+        }
+    }
+
+    fn unregister(&self, name: &str, registration: &Registration) -> Result<Unregistered> {
+        if !self.is_registered(name, registration)? {
+            return Ok(Unregistered::NotRegistered);
+        }
+        let uninstall = self.command(
+            name,
+            &[
+                OsStr::new("plugin"),
+                OsStr::new("uninstall"),
+                OsStr::new(&registration.target),
+            ],
+        )?;
+        if !uninstall.status.success() {
+            return Err(Error::IntegrationRegistrationFailed {
+                name: name.to_string(),
+                message: format!(
+                    "`claude plugin uninstall` failed: {}",
+                    failure_text(&uninstall)
+                ),
+            });
+        }
+        let remove = self.command(
+            name,
+            &[
+                OsStr::new("plugin"),
+                OsStr::new("marketplace"),
+                OsStr::new("remove"),
+                OsStr::new(Self::MARKETPLACE),
+            ],
+        )?;
+        if !remove.status.success() {
+            return Err(Error::IntegrationRegistrationFailed {
+                name: name.to_string(),
+                message: format!(
+                    "`claude plugin marketplace remove` failed: {}",
+                    failure_text(&remove)
+                ),
+            });
+        }
+        Ok(Unregistered::Removed)
+    }
+
+    fn is_registered(&self, name: &str, registration: &Registration) -> Result<bool> {
+        let output = self
+            .runner
+            .run("claude", &[OsStr::new("plugin"), OsStr::new("list")])
+            .map_err(|e| Error::IntegrationAgentNotFound {
+                name: name.to_string(),
+                message: format!("`claude plugin list` could not run ({e})"),
+            })?;
+        if !output.status.success() {
+            return Err(Error::IntegrationAgentNotFound {
+                name: name.to_string(),
+                message: format!("`claude plugin list` failed: {}", failure_text(&output)),
+            });
+        }
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .any(|line| line.trim() == registration.target))
     }
 }
 
@@ -407,6 +566,7 @@ pub(crate) mod fake {
     pub(crate) struct FakeAgents {
         pub pi_version: &'static str,
         pub opencode_version: &'static str,
+        pub claude_version: &'static str,
         pub installed: RefCell<Vec<String>>,
         pub calls: RefCell<Vec<String>>,
         /// Make `pi install` fail with this message.
@@ -417,6 +577,8 @@ pub(crate) mod fake {
         pub exit_on: RefCell<Option<(&'static str, &'static str)>>,
         /// Make this subcommand fail to start at all, as if the program vanished halfway.
         pub io_error_on: RefCell<Option<&'static str>>,
+        /// Fail a particular Claude plugin operation without breaking the preceding registration lookup.
+        pub claude_failure: RefCell<Option<(&'static str, bool)>>,
         /// Accept `pi install` without remembering the package, so the agent never lists it.
         pub forget_installs: RefCell<bool>,
     }
@@ -426,12 +588,14 @@ pub(crate) mod fake {
             Self {
                 pi_version: "1.0.1",
                 opencode_version: "1.18.34",
+                claude_version: "2.1.83",
                 installed: RefCell::new(Vec::new()),
                 calls: RefCell::new(Vec::new()),
                 refuse_install: RefCell::new(None),
                 missing: RefCell::new(false),
                 exit_on: RefCell::new(None),
                 io_error_on: RefCell::new(None),
+                claude_failure: RefCell::new(None),
                 forget_installs: RefCell::new(false),
             }
         }
@@ -458,6 +622,15 @@ pub(crate) mod fake {
                 return Err(std::io::Error::from(std::io::ErrorKind::NotFound));
             }
             let subcommand = args.first().map(String::as_str);
+            if program == "claude"
+                && let Some((operation, io_error)) = *self.claude_failure.borrow()
+                && args.join(" ").starts_with(operation)
+            {
+                if io_error {
+                    return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+                }
+                return Ok(output(1, "", "Claude refused the operation"));
+            }
             if *self.io_error_on.borrow() == subcommand && subcommand.is_some() {
                 return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
             }
@@ -471,6 +644,29 @@ pub(crate) mod fake {
                 ("opencode", Some("--version")) => {
                     output(0, &format!("{}\n", self.opencode_version), "")
                 }
+                ("claude", Some("--version")) => {
+                    output(0, &format!("{}\n", self.claude_version), "")
+                }
+                ("claude", Some("plugin")) if args.get(1).map(String::as_str) == Some("list") => {
+                    output(0, &self.installed.borrow().join("\n"), "")
+                }
+                ("claude", Some("plugin"))
+                    if args.get(1).map(String::as_str) == Some("install") =>
+                {
+                    let target = args.last().cloned().unwrap_or_default();
+                    if !self.installed.borrow().contains(&target) {
+                        self.installed.borrow_mut().push(target);
+                    }
+                    output(0, "", "")
+                }
+                ("claude", Some("plugin"))
+                    if args.get(1).map(String::as_str) == Some("uninstall") =>
+                {
+                    let target = args.last().cloned().unwrap_or_default();
+                    self.installed.borrow_mut().retain(|item| item != &target);
+                    output(0, "", "")
+                }
+                ("claude", Some("plugin")) => output(0, "", ""),
                 ("pi", Some("install")) => {
                     if let Some(message) = *self.refuse_install.borrow() {
                         return Ok(output(1, "", message));
@@ -769,6 +965,112 @@ to = "."
             "{error}"
         );
         assert!(error.to_string().contains("no package.json"), "{error}");
+    }
+
+    #[test]
+    fn claude_code_uses_its_marketplace_and_plugin_commands_without_a_settings_file() {
+        let root = tempfile::tempdir().unwrap();
+        let fake = FakeAgents::new();
+        let agent = for_kind(AgentKind::ClaudeCode, &fake, &locations(root.path()));
+        let registration = agent.registration(
+            Path::new("/data/agents/claude-code"),
+            &manifest_for("claude-code"),
+        );
+
+        assert_eq!(
+            agent
+                .detect("claude-code")
+                .unwrap()
+                .version
+                .unwrap()
+                .to_string(),
+            "2.1.83"
+        );
+        assert_eq!(registration.target, "memcastle@memcastle-local");
+        agent.register("claude-code", &registration).unwrap();
+        assert!(agent.is_registered("claude-code", &registration).unwrap());
+        assert_eq!(
+            agent.unregister("claude-code", &registration).unwrap(),
+            Unregistered::Removed
+        );
+        assert!(
+            fake.calls
+                .borrow()
+                .iter()
+                .all(|call| call.starts_with("claude "))
+        );
+    }
+
+    #[test]
+    fn a_claude_listing_failure_is_reported_before_any_marketplace_change() {
+        for io_error in [false, true] {
+            let fake = FakeAgents::new();
+            *fake.claude_failure.borrow_mut() = Some(("plugin list", io_error));
+            let agent = for_kind(AgentKind::ClaudeCode, &fake, &locations(Path::new("/x")));
+            let registration =
+                agent.registration(Path::new("/data/claude"), &manifest_for("claude-code"));
+
+            let error = agent.register("claude-code", &registration).unwrap_err();
+            assert!(
+                matches!(error, Error::IntegrationAgentNotFound { .. }),
+                "{error}"
+            );
+            assert!(error.to_string().contains("claude plugin list"), "{error}");
+            assert_eq!(&*fake.calls.borrow(), &["claude plugin list"]);
+        }
+    }
+
+    #[test]
+    fn a_claude_install_failure_names_the_command_and_never_registers_the_plugin() {
+        for operation in ["plugin marketplace add", "plugin install"] {
+            for io_error in [false, true] {
+                let fake = FakeAgents::new();
+                *fake.claude_failure.borrow_mut() = Some((operation, io_error));
+                let agent = for_kind(AgentKind::ClaudeCode, &fake, &locations(Path::new("/x")));
+                let registration =
+                    agent.registration(Path::new("/data/claude"), &manifest_for("claude-code"));
+
+                let error = agent.register("claude-code", &registration).unwrap_err();
+                assert!(
+                    matches!(error, Error::IntegrationRegistrationFailed { .. }),
+                    "{error}"
+                );
+                assert!(
+                    error.to_string().contains(&format!("claude {operation}")),
+                    "{error}"
+                );
+                assert!(!agent.is_registered("claude-code", &registration).unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn a_claude_removal_failure_reports_the_command_and_only_uninstalls_when_permitted() {
+        for operation in ["plugin uninstall", "plugin marketplace remove"] {
+            for io_error in [false, true] {
+                let fake = FakeAgents::new();
+                let agent = for_kind(AgentKind::ClaudeCode, &fake, &locations(Path::new("/x")));
+                let registration =
+                    agent.registration(Path::new("/data/claude"), &manifest_for("claude-code"));
+                agent.register("claude-code", &registration).unwrap();
+                *fake.claude_failure.borrow_mut() = Some((operation, io_error));
+
+                let error = agent.unregister("claude-code", &registration).unwrap_err();
+                assert!(
+                    matches!(error, Error::IntegrationRegistrationFailed { .. }),
+                    "{error}"
+                );
+                assert!(
+                    error.to_string().contains(&format!("claude {operation}")),
+                    "{error}"
+                );
+                // A failed marketplace cleanup happens after uninstall, while an uninstall refusal keeps the plugin.
+                assert_eq!(
+                    agent.is_registered("claude-code", &registration).unwrap(),
+                    operation == "plugin uninstall"
+                );
+            }
+        }
     }
 
     #[test]

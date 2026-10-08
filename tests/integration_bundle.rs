@@ -1,7 +1,7 @@
 //! The integrations that ship with MemCastle (docs/adr/034), bundled by the script the release runs and installed from
 //! the tree it writes and from the checkout it builds in: the same lifecycle through both ways of choosing the root.
 //!
-//! This is what keeps "Pi and OpenCode ship with every release, with no npm package" from being a claim about the
+//! This is what keeps "Pi, OpenCode and Claude Code ship with every release, with no npm package" from being a claim about the
 //! release workflow that only a tag would test. It needs bun, so it is `#[ignore]`d from the basic suite and run by
 //! `mise run integrations:check` (`cargo test --test integration_bundle -- --ignored`); an ignored test says so in the
 //! output, which a silent skip would not.
@@ -74,8 +74,11 @@ fn the_package_holds_each_integration_bundled_beside_its_manifest_and_the_skills
     let package = package();
 
     assert_eq!(names(&package), ["integrations", "skills"]);
-    assert_eq!(names(&package.join("integrations")), ["opencode", "pi"]);
-    for id in ["pi", "opencode"] {
+    assert_eq!(
+        names(&package.join("integrations")),
+        ["claude-code", "opencode", "pi"]
+    );
+    for id in ["pi", "opencode", "claude-code"] {
         let dir = package.join("integrations").join(id);
         // `dist/` and the manifest, plus a `skills/` directory only for an integration with skills of its own.
         let own: Vec<String> = names(&dir)
@@ -169,12 +172,12 @@ fn the_bundles_import_nothing_the_installed_copy_would_not_have() {
     }
 }
 
-/// Install both integrations from `assets`, install again, then remove them, checking the state on the way.
+/// Install every integration from `assets`, install again, then remove them, checking the state on the way.
 fn lifecycle_from(assets: &Path) {
     let machine = Machine::new();
     let flag = assets.to_str().unwrap();
 
-    for id in ["pi", "opencode"] {
+    for id in ["pi", "opencode", "claude-code"] {
         machine
             .memcastle()
             .args(["integration", "install", id, "--assets-dir", flag])
@@ -200,7 +203,7 @@ fn lifecycle_from(assets: &Path) {
     assert!(pi.join(extension).is_file(), "{extension}");
     assert!(pi.join("skills/wake-up/SKILL.md").is_file());
     // Whatever layout `assets` is, each integration exposes exactly the skills its own manifest names.
-    for id in ["pi", "opencode"] {
+    for id in ["pi", "opencode", "claude-code"] {
         let text =
             std::fs::read_to_string(assets.join("integrations").join(id).join(MANIFEST_FILE))
                 .unwrap();
@@ -241,8 +244,9 @@ fn lifecycle_from(assets: &Path) {
             .join("skills/wake-up/SKILL.md")
             .is_file()
     );
+    assert_eq!(machine.claude_plugins(), ["memcastle@memcastle-local"]);
 
-    for id in ["pi", "opencode"] {
+    for id in ["pi", "opencode", "claude-code"] {
         let again = machine
             .memcastle()
             .args(["integration", "install", id, "--json", "--assets-dir", flag])
@@ -256,18 +260,22 @@ fn lifecycle_from(assets: &Path) {
             .assert()
             .success();
     }
-    assert!(machine.pi_packages().is_empty() && !machine.plugin_file().exists());
+    assert!(
+        machine.pi_packages().is_empty()
+            && machine.claude_plugins().is_empty()
+            && !machine.plugin_file().exists()
+    );
 }
 
 #[test]
 #[ignore = "needs bun; `mise run integrations:check` runs it"]
-fn the_packaged_tree_installs_and_removes_both_integrations() {
+fn the_packaged_tree_installs_and_removes_every_integration() {
     lifecycle_from(&package());
 }
 
 #[test]
 #[ignore = "needs bun; `mise run integrations:check` runs it"]
-fn the_development_checkout_installs_and_removes_both_integrations_through_the_same_code() {
+fn the_development_checkout_installs_and_removes_every_integration_through_the_same_code() {
     // Building the package built `dist/` in the checkout, which is all development mode needs.
     package();
     lifecycle_from(&root());

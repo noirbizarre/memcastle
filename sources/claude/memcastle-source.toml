@@ -1,0 +1,39 @@
+[source]
+name = "claude"
+version = "0.1.0"
+description = "Claude Code session history (JSONL transcripts under ~/.claude/projects), one document per session"
+
+[compatibility]
+contract = "0.4"
+memcastle = ">=0.2"
+
+[capabilities]
+incremental = true
+retains_raw = true
+needs_credentials = false
+
+# `HOME` only locates Claude Code's transcript root. The component receives no credentials, process, network or write access.
+[permissions]
+env = ["HOME"]
+
+# Claude Code keeps transcripts under this directory. Deliberately grant neither its settings nor the rest of ~/.claude.
+[permissions.filesystem]
+read = ["locator", "~/.claude/projects"]
+
+[options.since]
+type = "date"
+description = "only sessions modified at or after this date (`2026-09`, `2026-09-14` or an RFC 3339 time)"
+
+[options.dir]
+type = "path"
+description = "only sessions whose recorded working directory matches this absolute path or `*` pattern"
+
+[triggers.watch]
+description = "a Claude Code transcript is created or changed under the projects directory"
+
+[build]
+command = ["cargo", "build", "--release", "--target", "wasm32-wasip2", "--target-dir", "target"]
+output = "target/wasm32-wasip2/release/memcastle_source_claude.wasm"
+
+[test]
+fixtures = "fixtures"

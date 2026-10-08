@@ -66,6 +66,17 @@ See OpenCode's [MCP servers documentation](https://opencode.ai/docs/mcp-servers/
 
 ### Claude Code
 
+The lifecycle plugin is the preferred setup:
+
+```sh
+memcastle integration install claude-code
+```
+
+It registers a local Claude Code marketplace and native HTTP MCP server without MemCastle editing Claude settings.
+See [Claude Code integration](integrations-claude-code.md) for configuration and its lifecycle limitations.
+
+For a plain MCP connection without the plugin, use:
+
 ```sh
 claude mcp add --transport http memcastle http://127.0.0.1:8420/mcp
 ```

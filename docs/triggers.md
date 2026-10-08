@@ -100,6 +100,17 @@ A source with no event mechanism, polled:
 memcastle trigger set docs-poll --miner docs --type poll --setting every=15m --enable
 ```
 
+Watch Claude Code transcripts after defining its miner.
+The source only declares the capability: neither installing it nor a Claude Code client creates or enables this trigger.
+
+```sh
+memcastle miner set claude-history --source claude --locator /home/me/.claude/projects
+memcastle trigger set claude-history-watch --miner claude-history --type watch \
+    --setting path=/home/me/.claude/projects --setting debounce=5s
+# Review the source's read permission, then opt in:
+memcastle trigger enable claude-history-watch
+```
+
 ## The webhook listener
 
 A webhook trigger is delivered to a listener of its own: a separate socket from the REST API and the MCP endpoint.

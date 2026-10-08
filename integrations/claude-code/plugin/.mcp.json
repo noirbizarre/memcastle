@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "memcastle": {
+      "type": "http",
+      "url": "${user_config.memcastle_url}",
+      "headers": {
+        "Authorization": "Bearer ${user_config.memcastle_token}"
+      }
+    }
+  }
+}

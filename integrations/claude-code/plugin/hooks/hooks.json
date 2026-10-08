@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SessionStart": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "type": "prompt",
+          "prompt": "When the MemCastle plugin is active, first call memcastle_set_mode with the configured mode. If the mode is disabled, make no other MemCastle call. Otherwise call memcastle_wake_up before relying on prior work."
+        }
+      ]
+    }
+    ],
+    "UserPromptSubmit": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "type": "prompt",
+          "prompt": "Load the installed search-before-answer skill before answering questions about previous work. Follow its guidance and quote recalled text verbatim."
+        }
+      ]
+    }
+    ]
+  }
+}

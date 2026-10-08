@@ -111,7 +111,7 @@ The history is the value.
 - [ADR-033](033-source-distribution.md) — sources are distributed as versioned packages through static JSON registry
   indexes (a URL, a `file://` URL or a directory, so offline needs no separate mechanism), pinned by SHA-256 and optionally
   signed with ed25519 under a `mining.trust` policy; bundled, registry and local sources share one lifecycle, `update`
-  never widens a source's permissions without consent, and releases bundle `pi` and `opencode` as ordinary packages
+  never widens a source's permissions without consent, and releases bundle `pi`, `opencode` and `claude` as ordinary packages
   (completes ADR-026)
 - [ADR-034](034-agent-integration-distribution.md) — integrations ship with MemCastle as bundles (no npm package, no
   `bun install`) under the one assets root beside `sources/` and `skills/`, a checkout being a valid root;

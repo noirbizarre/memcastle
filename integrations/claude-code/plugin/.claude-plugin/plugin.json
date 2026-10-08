@@ -1,0 +1,29 @@
+{
+  "name": "memcastle",
+  "version": "0.1.0",
+  "description": "MemCastle native HTTP MCP connection and shared lifecycle skills",
+  "commands": "./commands",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json",
+  "userConfig": {
+    "memcastle_mode": {
+      "type": "string",
+      "title": "MemCastle mode",
+      "description": "MemCastle mode for this Claude Code plugin: full, read-only, or off.",
+      "default": "full",
+      "options": ["full", "read-only", "off"]
+    },
+    "memcastle_url": {
+      "type": "string",
+      "title": "MemCastle MCP URL",
+      "description": "Streamable HTTP MCP endpoint. Defaults to http://127.0.0.1:8420/mcp.",
+      "default": "http://127.0.0.1:8420/mcp"
+    },
+    "memcastle_token": {
+      "type": "string",
+      "title": "MemCastle token",
+      "description": "Bearer token when the MemCastle daemon requires authentication.",
+      "sensitive": true
+    }
+  }
+}

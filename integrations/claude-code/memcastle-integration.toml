@@ -1,0 +1,36 @@
+# Claude Code is registered through its own local marketplace commands, never by editing ~/.claude settings files.
+format = 1
+
+[integration]
+id = "claude-code"
+version = "0.1.0"
+description = "Native MCP and shared skills for Claude Code, installed through a local plugin marketplace"
+
+[compatibility]
+memcastle = ">=0.2"
+# Plugin marketplaces, native HTTP MCP and manifest user configuration are required.
+agent = ">=2.1.83"
+
+[agent]
+kind = "claude-code"
+# The installer registers this file's parent directory with Claude Code.
+entry = ".claude-plugin/marketplace.json"
+
+[[assets]]
+from = "dist"
+to = "."
+
+[[skills]]
+name = "memcastle-setup"
+
+[[skills]]
+name = "search-before-answer"
+
+[[skills]]
+name = "checkpoint-instructions"
+
+[[skills]]
+name = "wake-up"
+
+[[skills]]
+name = "diary"

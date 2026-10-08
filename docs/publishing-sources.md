@@ -14,7 +14,7 @@ daemon runs it.
 | Origin | What it is | Installed by |
 |---|---|---|
 | Built in | Compiled into MemCastle (`directory`). | Nothing: it is always there and cannot be removed. |
-| Bundled | An ordinary package unpacked beside the binary (`pi`, `opencode`). | Nothing: it is installed from the start, and `memcastle source enable <name>` turns it on. |
+| Bundled | An ordinary package unpacked beside the binary (`pi`, `opencode`, `claude`). | Nothing: it is installed from the start, and `memcastle source enable <name>` turns it on. |
 | Registry | A package listed in an index you configured. | `memcastle source install <name>`. |
 | Local | A package file or a project directory on your disk. | `memcastle source install <file or directory>`. |
 
@@ -221,7 +221,8 @@ on disk after install is never run.
 
 ## Bundled sources
 
-Releases ship `pi` and `opencode` unpacked, one directory each (`pi/memcastle-source.toml`, `pi/source.wasm`), under
+Releases ship `pi`, `opencode` and `claude` unpacked, one directory each (`<name>/memcastle-source.toml`,
+`<name>/source.wasm`), under
 `share/memcastle/sources/`:
 in the release tarballs, as `/usr/share/memcastle/sources/` in the `.deb`, `.rpm` and AUR package, and under the formula's
 `share/memcastle/sources/` with Homebrew.
@@ -247,22 +248,22 @@ and it does not constrain the runtime: any directory under `sources/` could be a
 The bundle shares its root with the agent integrations and the skills: `assets.dir` is the one directory a package
 installs into, and `sources/` is one of the directories under it (see [Runtime assets](configuration.md#runtime-assets)
 and [Agent integrations](integrations.md)).
-The `pi` and `opencode` sources here mine those agents' session history; they are not the integrations that run inside the
-agent.
+The `pi`, `opencode` and `claude` sources here mine those agents' session history; they are not integrations that run
+inside an agent.
 
 ## The official registry
 
 The official registry is a static file in this repository, [`docs/registry.json`](https://github.com/noirbizarre/memcastle/blob/main/docs/registry.json),
 published with the documentation at `https://noirbizarre.github.io/memcastle/registry.json`.
-It lists no versions: it names the GitHub repositories that publish sources (`pi` and `opencode` are published by this one),
-and the daemon reads their releases.
+It lists no versions: it names the GitHub repositories that publish sources (`pi`, `opencode` and `claude` are published
+by this one), and the daemon reads their releases.
 Registering a source, or changing where it comes from, is therefore a pull request to that file, merged and deployed like
 any documentation change, and publishing a new version is a release of the source's own repository: no new release of
 MemCastle and no change to the registry.
 It is the default value of `mining.registries`, so on any installation:
 
 ```sh
-memcastle source search          # lists pi and opencode, and says which are already installed
+memcastle source search          # lists pi, opencode and claude, and says which are already installed
 memcastle source install pi      # on a build with no bundle: after you agree to its permissions
 ```
 

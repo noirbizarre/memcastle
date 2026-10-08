@@ -112,6 +112,7 @@ memcastle mine pi                        # Pi session history, from its default 
 memcastle mine pi /backups/pi/sessions
 memcastle mine pi dir=/work/app --full
 memcastle mine opencode since=2026-09 dir=/path/to/workspace   # OpenCode session history (once installed)
+memcastle mine claude since=2026-09 dir=/path/to/workspace     # Claude Code session history (once installed)
 ```
 
 The first word is a source, and what follows is that source's own: at most one place to read, then `key=value` options
@@ -154,14 +155,16 @@ The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unc
 | `directory` | built in | the text files under a directory | modification time | no | no |
 | `pi` | bundled package, `sources/pi/` | Pi coding-agent session history | modification time | yes | no |
 | `opencode` | bundled package, `sources/opencode/` | OpenCode coding-agent session history | `time_updated` of the session | yes | no |
+| `claude` | bundled package, `sources/claude/` | Claude Code session history | modification time | yes | no |
 
 Only `directory` is compiled into MemCastle.
-`pi` and `opencode` are [WebAssembly sources](writing-sources.md), built from `sources/pi/` and `sources/opencode/` in
+`pi`, `opencode` and `claude` are [WebAssembly sources](writing-sources.md), built from `sources/pi/`,
+`sources/opencode/` and `sources/claude/` in
 the repository and shipped alongside each release (release archives and the `.deb` and `.rpm` carry them, unpacked, under
 `share/memcastle/sources/`), so they are installed from the start and `memcastle source enable pi` is all one needs, with
 no registry and no network:
-no Pi or OpenCode code is part of the core, and they run under the same sandbox and the same pipeline as any source a
-user writes.
+no Pi, OpenCode or Claude Code code is part of the core, and they run under the same sandbox and the same pipeline as
+any source a user writes.
 Other sources are found in [registries](publishing-sources.md).
 `directory` and `pi` have a modification-time watermark as their cursor:
 files are ordered by modification time, then by path, and the cursor is the last one done.
@@ -243,6 +246,70 @@ follow symlinks.
 The raw session file is kept next to the drawers, because Pi's sessions are the user's to rotate away.
 Mining is incremental and idempotent: a session that has not changed is not read again, and one that grew files only its
 new tail.
+
+### `claude`
+
+The conversation history of [Claude Code](https://docs.anthropic.com/en/docs/claude-code), read straight from its
+per-session JSONL transcripts under `~/.claude/projects/<project>/<session>.jsonl`, or from a projects folder named as the
+locator.
+It works on sessions of any age and with no Claude Code process running.
+It is history mining only: it does not read Claude Code settings, credentials, prompt history or debug logs, and it is not
+the live Claude Code MCP client.
+
+It ships with your MemCastle and is installed already:
+
+```sh
+memcastle source enable claude
+memcastle mine claude
+```
+
+A checkout has no unpacked bundle, so install from the official registry or the project directory:
+
+```sh
+memcastle source install claude --enable
+# or: memcastle source install sources/claude --enable
+```
+
+It asks for read-only access to the locator and `~/.claude/projects`, and `HOME` only to find the latter when no locator
+is given.
+It asks for no network, process, write or credential permission.
+The reader lists only `.jsonl` files exactly one project directory below that root and does not follow symlinks.
+
+Each session is one `transcript` document, identified by its path under the projects root, filed in wing `claude` and
+in a room named after its recorded working directory.
+It has the `transcript` and `claude` tags; provenance is the transcript file and its recorded session id, working directory
+and start timestamp when present.
+The source keeps ordered user and assistant text plus compact tool-use markers such as `[tool: Read]`.
+It deliberately excludes thinking, tool results and output, system and compaction records, attachments, patches, malformed
+lines and unknown record kinds.
+A transcript with no retained message becomes no segments.
+
+`since=2026-09` narrows to files modified at or after that date; `dir=/work/app` narrows to the recorded working directory,
+and accepts the same `*` patterns as `pi`.
+`dir` is a separate source identity and cursor; `since` only narrows the current source.
+Files are ordered by modification time and path, so an appended transcript is discovered again without skipping a tie.
+Earlier message segments stay byte-identical when a session gains a tail.
+
+The source declares `watch`, but that is only a capability.
+It never creates a miner or enables a trigger:
+
+```toml
+[[miners]]
+name = "claude-history"
+source = "claude"
+locator = "/home/alice/.claude/projects"
+
+[[triggers]]
+name = "claude-history-watch"
+miner = "claude-history"
+type = "watch"
+enabled = false
+path = "/home/alice/.claude/projects"
+debounce = "5s"
+```
+
+Enable the trigger only after reviewing the locator and source permissions.
+Without a trigger, `memcastle miner run claude-history` is the manual fallback.
 
 ### `opencode`
 
