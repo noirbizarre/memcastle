@@ -22,7 +22,7 @@ A disconnected indicator means displayed data might be stale.
 Quote mining paths with spaces as you would in a shell; the same source-option validation as `memcastle mine` applies.
 Only actions applicable to the selected job's current status are accepted; the daemon still validates every action.
 The result appears after the daemon acknowledges it, and job status is reread instead of changed optimistically.
-An indeterminate `[…]` means the job has no meaningful total; a bar and completed/total count appear only when it does.
+An indeterminate `◌` means the job has no meaningful total; a bar and completed/total count appear only when it does.
 The job's progress message is the latest phase-like detail available, not an estimated throughput.
 
 Force-cancel asks for confirmation, durably requests cancellation, aborts a task owned by this daemon and

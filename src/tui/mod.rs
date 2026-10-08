@@ -13,9 +13,10 @@ use crossterm::terminal::{
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Wrap};
 use tokio::sync::mpsc;
 
 use crate::app::{ConfigReport, MinersReport, SourcesReport};
@@ -93,6 +94,7 @@ struct Console {
     typed: String,
     confirm: Option<JobId>,
     live: bool,
+    color: bool,
     busy: bool,
     message: String,
     last_refresh: Option<Instant>,
@@ -123,6 +125,7 @@ impl Default for Console {
             typed: String::new(),
             confirm: None,
             live: false,
+            color: std::env::var_os("NO_COLOR").is_none(),
             busy: false,
             message: "Connecting to daemon…".into(),
             last_refresh: None,
@@ -131,6 +134,14 @@ impl Default for Console {
 }
 
 impl Console {
+    fn tone(&self, color: Color) -> Style {
+        if self.color {
+            Style::default().fg(color)
+        } else {
+            Style::default()
+        }
+    }
+
     fn ordered(&self) -> Vec<&Job> {
         let mut jobs: Vec<_> = self.jobs.values().collect();
         jobs.sort_by_key(|job| std::cmp::Reverse(job.created_at));
@@ -269,14 +280,25 @@ fn progress(job: &Job) -> String {
             let filled = (job.progress.current.min(total) as usize * width) / total as usize;
             format!(
                 "[{}{}] {}/{} {detail}",
-                "#".repeat(filled),
-                "-".repeat(width - filled),
+                "━".repeat(filled),
+                "─".repeat(width - filled),
                 job.progress.current,
                 total
             )
         }
-        _ if job.status == JobStatus::Running => format!("[…] {detail}"),
+        _ if job.status == JobStatus::Running => format!("◌ {detail}"),
         _ => format!("[{state}] {detail}"),
+    }
+}
+
+fn status_mark(status: JobStatus) -> (&'static str, Color) {
+    match status {
+        JobStatus::Queued => ("◷", Color::Yellow),
+        JobStatus::Running => ("●", Color::Cyan),
+        JobStatus::Paused => ("Ⅱ", Color::Magenta),
+        JobStatus::Completed => ("✓", Color::Green),
+        JobStatus::Failed => ("✕", Color::Red),
+        JobStatus::Cancelled => ("○", Color::Gray),
     }
 }
 
@@ -301,6 +323,202 @@ fn maintenance_kind(kind: &JobKind) -> &'static str {
     }
 }
 
+fn draw_header(frame: &mut ratatui::Frame<'_>, app: &Console, area: Rect) {
+    let mut parts = vec![
+        Span::styled(
+            " 🏰 MEMCASTLE ",
+            app.tone(Color::Cyan).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("│ OPS  ", app.tone(Color::Gray)),
+    ];
+    for (number, page) in [Page::Jobs, Page::Search, Page::Readiness, Page::Maintenance]
+        .into_iter()
+        .enumerate()
+    {
+        let label = format!(" {} {} ", number + 1, page.title());
+        let style = if app.page == page {
+            app.tone(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        } else {
+            app.tone(Color::Gray)
+        };
+        parts.push(Span::styled(label, style));
+        parts.push(Span::styled("│", app.tone(Color::DarkGray)));
+    }
+    let (indicator, color) = if app.live {
+        (" ● LIVE ", Color::Green)
+    } else {
+        (" ◌ RECONNECTING ", Color::Yellow)
+    };
+    parts.push(Span::styled(
+        indicator,
+        app.tone(color).add_modifier(Modifier::BOLD),
+    ));
+    let age = app
+        .last_refresh
+        .map_or("never".into(), |at| format!("{}s", at.elapsed().as_secs()));
+    parts.push(Span::styled(
+        format!(" · sync {age}"),
+        app.tone(Color::Gray),
+    ));
+    frame.render_widget(
+        Paragraph::new(Line::from(parts)).block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(app.tone(Color::Cyan)),
+        ),
+        area,
+    );
+}
+
+fn draw_jobs(frame: &mut ratatui::Frame<'_>, app: &Console, area: Rect) {
+    let wide = area.width >= 95;
+    let panes = Layout::default()
+        .direction(if wide {
+            Direction::Horizontal
+        } else {
+            Direction::Vertical
+        })
+        .constraints(if wide {
+            [Constraint::Percentage(62), Constraint::Percentage(38)]
+        } else {
+            [Constraint::Min(5), Constraint::Length(10)]
+        })
+        .split(area);
+    let jobs = app.ordered();
+    let rows: Vec<Line<'_>> = if jobs.is_empty() {
+        vec![Line::styled(
+            "  ◌ No mining jobs yet · press n to start a run",
+            app.tone(Color::Gray),
+        )]
+    } else {
+        jobs.iter()
+            .enumerate()
+            .map(|(index, job)| {
+                let (mark, color) = status_mark(job.status);
+                let elapsed = job.started_at.map_or("—".into(), |started| {
+                    format!(
+                        "{}s",
+                        (job.completed_at.unwrap_or_else(chrono::Utc::now) - started)
+                            .num_seconds()
+                            .max(0)
+                    )
+                });
+                let text = format!(
+                    " {:<11} {:<10} {:>5}  {}",
+                    source(job),
+                    job.status,
+                    elapsed,
+                    progress(job)
+                );
+                let mut row = Line::from(vec![
+                    Span::styled(
+                        if index == app.selected {
+                            " ▸ "
+                        } else {
+                            "   "
+                        },
+                        app.tone(Color::Yellow),
+                    ),
+                    Span::styled(
+                        format!("{mark} "),
+                        app.tone(color).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        text,
+                        if index == app.selected {
+                            app.tone(Color::White).add_modifier(Modifier::BOLD)
+                        } else {
+                            app.tone(Color::Gray)
+                        },
+                    ),
+                ]);
+                if index == app.selected && app.color {
+                    row = row.style(Style::default().bg(Color::DarkGray));
+                }
+                row
+            })
+            .collect()
+    };
+    let visible = usize::from(panes[0].height.saturating_sub(2)).max(1);
+    let scroll = u16::try_from(app.selected.saturating_sub(visible - 1)).unwrap_or(u16::MAX);
+    frame.render_widget(
+        Paragraph::new(rows).scroll((scroll, 0)).block(
+            Block::default()
+                .title(format!(" MINING JOBS · {} ", jobs.len()))
+                .borders(Borders::ALL)
+                .border_style(app.tone(Color::Cyan)),
+        ),
+        panes[0],
+    );
+    draw_job_detail(frame, app, panes[1]);
+}
+
+fn draw_job_detail(frame: &mut ratatui::Frame<'_>, app: &Console, area: Rect) {
+    let block = Block::default()
+        .title(" SELECTED · DETAILS ")
+        .borders(Borders::ALL)
+        .border_style(app.tone(Color::Gray));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let Some(job) = app.selected_job() else {
+        frame.render_widget(
+            Paragraph::new(" Select a mining job to inspect its progress and actions.")
+                .style(app.tone(Color::Gray)),
+            inner,
+        );
+        return;
+    };
+    let (mark, color) = status_mark(job.status);
+    let started = job.started_at.map_or("not started".into(), |time| {
+        time.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+    });
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(
+                format!(" {mark} {}", job.status),
+                app.tone(color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(format!("  {}", source(job)), app.tone(Color::Cyan)),
+        ]),
+        Line::styled(format!(" ID       {}", job.id), app.tone(Color::Gray)),
+        Line::styled(format!(" Started  {started}"), app.tone(Color::Gray)),
+        Line::styled(
+            format!(" Progress {}", progress(job)),
+            app.tone(Color::White),
+        ),
+    ];
+    if let Some(error) = &job.error {
+        lines.push(Line::styled(format!(" ✕ {error}"), app.tone(Color::Red)));
+    }
+    if job.status == JobStatus::Running {
+        lines.push(Line::styled(
+            "  p pause  ·  c stop  ·  f force-cancel",
+            app.tone(Color::Yellow),
+        ));
+    }
+    let areas = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(4), Constraint::Length(2)])
+        .split(inner);
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), areas[0]);
+    if let Some(total) = job.progress.total.filter(|total| *total > 0) {
+        let ratio = f64::from(job.progress.current.min(total)) / f64::from(total);
+        frame.render_widget(
+            Gauge::default()
+                .gauge_style(app.tone(Color::Cyan))
+                .ratio(ratio)
+                .label(format!("{}/{}", job.progress.current, total)),
+            areas[1],
+        );
+    } else if job.status == JobStatus::Running {
+        frame.render_widget(
+            Paragraph::new(" ◌ Working · total not yet known").style(app.tone(Color::Yellow)),
+            areas[1],
+        );
+    }
+}
+
 fn draw(frame: &mut ratatui::Frame<'_>, app: &Console) {
     let parts = Layout::default()
         .direction(Direction::Vertical)
@@ -311,226 +529,280 @@ fn draw(frame: &mut ratatui::Frame<'_>, app: &Console) {
             Constraint::Length(4),
         ])
         .split(frame.area());
-    let connection = if app.live {
-        "live"
+    draw_header(frame, app, parts[0]);
+    if app.page == Page::Jobs {
+        draw_jobs(frame, app, parts[1]);
     } else {
-        "disconnected / connecting"
-    };
-    let age = app.last_refresh.map_or("never".into(), |at| {
-        format!("{}s ago", at.elapsed().as_secs())
-    });
-    frame.render_widget(Paragraph::new(format!("MemCastle | [1] Jobs  [2] Search  [3] Readiness  [4] Maintenance | {connection} | refreshed {age}")) .block(Block::default().borders(Borders::ALL).title(app.page.title())), parts[0]);
-    let lines: Vec<Line<'_>> = match app.page {
-        Page::Jobs => {
-            let jobs = app.ordered();
-            if jobs.is_empty() {
-                vec![Line::from(
-                    "No mining jobs yet. Press n to create one, or r to refresh.",
-                )]
-            } else {
-                jobs.iter()
-                    .enumerate()
-                    .map(|(index, job)| {
-                        let elapsed = job.started_at.map_or("not started".into(), |started| {
-                            format!(
-                                "{}s",
-                                (job.completed_at.unwrap_or_else(chrono::Utc::now) - started)
-                                    .num_seconds()
-                                    .max(0)
-                            )
-                        });
-                        Line::from(format!(
-                            "{} {}  {}  {}  started {}  elapsed {}  {}{}",
-                            if index == app.selected { '>' } else { ' ' },
-                            &job.id.to_string()[..8],
-                            source(job),
-                            job.status,
-                            job.started_at.map_or("—".into(), |time| time
-                                .format("%m-%d %H:%M")
-                                .to_string()),
-                            elapsed,
-                            progress(job),
-                            job.error
-                                .as_deref()
-                                .map_or(String::new(), |error| format!(" ERROR: {error}"))
-                        ))
-                    })
-                    .collect()
-            }
-        }
-        Page::Search => {
-            let mut lines = vec![Line::from(format!(
-                "Query: {} | ranking: {} | wing: {}",
-                app.query,
-                app.ranking,
-                app.wing.as_deref().unwrap_or("all")
-            ))];
-            lines.extend(app.hits.iter().take(12).map(|hit| {
-                let excerpt: String = hit
-                    .drawer
-                    .content
-                    .lines()
-                    .next()
-                    .unwrap_or("")
-                    .chars()
-                    .take(72)
-                    .collect();
-                Line::from(format!(
-                    "{} score {:.3} lexical {:?} semantic {:?} graph {:?} | {}",
-                    hit.drawer.name.as_deref().unwrap_or("unnamed"),
-                    hit.score,
-                    hit.signals.lexical,
-                    hit.signals.semantic,
-                    hit.signals.graph,
-                    excerpt
-                ))
-            }));
-            lines
-        }
-        Page::Readiness => {
-            let mut lines = Vec::new();
-            if let Some(challenge) = &app.auth_challenge {
-                lines.push(Line::from(format!("AUTH: {challenge}")));
-            }
-            if let Some(config) = &app.config {
-                lines.push(Line::from(format!(
-                    "Embeddings: {} (configured; connection untested)",
-                    config.embeddings.provider
-                )));
-                lines.push(Line::from(format!(
-                    "Extraction: {} (configured; connection untested)",
-                    config.extraction.provider
-                )));
-            } else {
-                lines.push(Line::from("Provider status unknown"));
-            }
-            if let Some(sources) = &app.sources {
-                lines.extend(sources.adapters.iter().map(|adapter| {
-                    let auth = adapter.auth.as_ref().map_or("no sign-in required", |auth| {
-                        if auth.signed_in {
-                            "signed in"
-                        } else {
-                            "not signed in (or status unavailable)"
-                        }
-                    });
-                    Line::from(format!(
-                        "source {}: {:?} | {auth} {}",
-                        adapter.name,
-                        adapter.state,
-                        adapter.unavailable_reason.as_deref().unwrap_or("")
-                    ))
-                }));
-            } else {
-                lines.push(Line::from("Source status unknown; press r to refresh."));
-            }
-            if let Some(miners) = &app.miners {
-                lines.extend(miners.miners.iter().map(|miner| {
-                    Line::from(format!(
-                        "miner {} ({}) {:?} {}",
-                        miner.name,
-                        miner.source,
-                        miner.state,
-                        miner.reason.as_deref().unwrap_or("")
-                    ))
-                }));
-            } else {
-                lines.push(Line::from("Miner status unknown; press r to refresh."));
-            }
-            lines
-        }
-        Page::Maintenance => {
-            if app.maintenance_detail {
-                let detail =
-                    app.selected_maintenance()
-                        .map_or("Job no longer listed".into(), |job| {
-                            let result = job
-                                .result
-                                .as_ref()
-                                .map(|value| {
-                                    serde_json::to_string_pretty(value).unwrap_or_default()
-                                })
-                                .unwrap_or_else(|| {
-                                    job.error.clone().unwrap_or_else(|| progress(job))
-                                });
-                            format!("Job {} ({})\n{result}", job.id, job.status)
-                        });
-                detail
-                    .lines()
-                    .map(|line| Line::from(line.to_owned()))
-                    .collect()
-            } else {
-                let mut lines = vec![
-                    Line::from("a: read-only audit · d: repair dry run"),
-                    Line::from(
-                        "e: embedding sweep · x: entity extraction sweep (providers required)",
+        let lines: Vec<Line<'_>> = match app.page {
+            Page::Jobs => unreachable!("jobs have their own split view"),
+            Page::Search => {
+                let mut lines = vec![Line::from(vec![
+                    Span::styled(
+                        " ⌕ SEARCH TEST  ",
+                        app.tone(Color::Cyan).add_modifier(Modifier::BOLD),
                     ),
-                ];
-                let mut jobs: Vec<_> = app.maintenance.values().collect();
-                jobs.sort_by_key(|job| std::cmp::Reverse(job.created_at));
-                lines.extend(jobs.into_iter().take(10).enumerate().map(|(index, job)| {
-                    let detail = job
-                        .error
-                        .as_deref()
-                        .or_else(|| {
-                            job.result
-                                .as_ref()
-                                .map(|_| "report ready · Enter to inspect")
-                        })
-                        .unwrap_or_else(|| job.progress.message.as_deref().unwrap_or("waiting"));
-                    Line::from(format!(
-                        "{} {} {}: {} | {}",
-                        if index == app.maintenance_selected {
-                            '>'
-                        } else {
-                            ' '
-                        },
-                        &job.id.to_string()[..8],
-                        maintenance_kind(&job.kind),
-                        job.status,
-                        detail
-                    ))
+                    Span::styled(
+                        format!(
+                            "{}  ",
+                            if app.query.is_empty() {
+                                "press / to run a query"
+                            } else {
+                                &app.query
+                            }
+                        ),
+                        app.tone(Color::White),
+                    ),
+                    Span::styled(
+                        format!(
+                            "◆ {}  ◇ {}",
+                            app.ranking,
+                            app.wing.as_deref().unwrap_or("all wings")
+                        ),
+                        app.tone(Color::Gray),
+                    ),
+                ])];
+                lines.extend(app.hits.iter().take(12).map(|hit| {
+                    let excerpt: String = hit
+                        .drawer
+                        .content
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .chars()
+                        .take(72)
+                        .collect();
+                    Line::from(vec![
+                        Span::styled(
+                            format!("  ◇ {}  ", hit.drawer.name.as_deref().unwrap_or("unnamed")),
+                            app.tone(Color::Cyan),
+                        ),
+                        Span::styled(format!("{:.3}  ", hit.score), app.tone(Color::Green)),
+                        Span::styled(
+                            format!(
+                                "lex {:?}  sem {:?}  graph {:?}  │  {excerpt}",
+                                hit.signals.lexical, hit.signals.semantic, hit.signals.graph
+                            ),
+                            app.tone(Color::Gray),
+                        ),
+                    ])
                 }));
                 lines
             }
-        }
-    };
-    let title = if app.maintenance_detail && app.page == Page::Maintenance {
-        "Maintenance result · Esc to close"
-    } else {
-        app.page.title()
-    };
-    let content = Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title));
-    let content = if app.page == Page::Jobs {
-        let visible = usize::from(parts[1].height.saturating_sub(2)).max(1);
-        content.scroll((
-            u16::try_from(app.selected.saturating_sub(visible - 1)).unwrap_or(u16::MAX),
-            0,
-        ))
-    } else if app.maintenance_detail && app.page == Page::Maintenance {
-        content.scroll((app.detail_scroll, 0))
-    } else if app.page == Page::Maintenance {
-        let visible = usize::from(parts[1].height.saturating_sub(2)).max(1);
-        content.scroll((
-            u16::try_from((app.maintenance_selected + 3).saturating_sub(visible))
-                .unwrap_or(u16::MAX),
-            0,
-        ))
-    } else if app.page == Page::Readiness {
-        content
-            .wrap(Wrap { trim: true })
-            .scroll((app.readiness_scroll, 0))
-    } else {
-        content.wrap(Wrap { trim: true })
-    };
-    frame.render_widget(content, parts[1]);
+            Page::Readiness => {
+                let mut lines = Vec::new();
+                if let Some(challenge) = &app.auth_challenge {
+                    lines.push(Line::styled(
+                        format!("  ◈ SIGN-IN  {challenge}"),
+                        app.tone(Color::Yellow),
+                    ));
+                }
+                if let Some(config) = &app.config {
+                    lines.push(Line::styled(
+                        "  ◈ PROVIDERS  ·  configured ≠ connected",
+                        app.tone(Color::Cyan).add_modifier(Modifier::BOLD),
+                    ));
+                    lines.push(Line::from(format!(
+                        "    Embeddings  {}",
+                        config.embeddings.provider
+                    )));
+                    lines.push(Line::from(format!(
+                        "    Extraction  {}",
+                        config.extraction.provider
+                    )));
+                } else {
+                    lines.push(Line::from("Provider status unknown"));
+                }
+                if let Some(sources) = &app.sources {
+                    lines.push(Line::styled(
+                        "  ◈ MINING SOURCES",
+                        app.tone(Color::Cyan).add_modifier(Modifier::BOLD),
+                    ));
+                    lines.extend(sources.adapters.iter().map(|adapter| {
+                        let auth = adapter.auth.as_ref().map_or("no sign-in required", |auth| {
+                            if auth.signed_in {
+                                "signed in"
+                            } else {
+                                "not signed in (or status unavailable)"
+                            }
+                        });
+                        let (icon, color) = match adapter.state {
+                            crate::domain::SourceState::Enabled => ("●", Color::Green),
+                            crate::domain::SourceState::Unavailable => ("✕", Color::Red),
+                            _ => ("○", Color::Yellow),
+                        };
+                        Line::from(vec![
+                            Span::styled(format!("    {icon} "), app.tone(color)),
+                            Span::styled(format!("{:<16}", adapter.name), app.tone(Color::White)),
+                            Span::styled(
+                                format!(
+                                    "{: <13} {auth} {}",
+                                    adapter.state,
+                                    adapter.unavailable_reason.as_deref().unwrap_or("")
+                                ),
+                                app.tone(Color::Gray),
+                            ),
+                        ])
+                    }));
+                } else {
+                    lines.push(Line::from("Source status unknown; press r to refresh."));
+                }
+                if let Some(miners) = &app.miners {
+                    lines.push(Line::styled(
+                        "  ◈ CONFIGURED MINERS",
+                        app.tone(Color::Cyan).add_modifier(Modifier::BOLD),
+                    ));
+                    lines.extend(miners.miners.iter().map(|miner| {
+                        let (icon, color) = match miner.state {
+                            crate::app::MinerState::Ready => ("●", Color::Green),
+                            crate::app::MinerState::Unavailable => ("✕", Color::Red),
+                            crate::app::MinerState::Disabled => ("○", Color::Yellow),
+                        };
+                        Line::from(vec![
+                            Span::styled(format!("    {icon} "), app.tone(color)),
+                            Span::styled(format!("{:<16}", miner.name), app.tone(Color::White)),
+                            Span::styled(
+                                format!(
+                                    "{:<12} {:?} {}",
+                                    miner.source,
+                                    miner.state,
+                                    miner.reason.as_deref().unwrap_or("")
+                                ),
+                                app.tone(Color::Gray),
+                            ),
+                        ])
+                    }));
+                } else {
+                    lines.push(Line::from("Miner status unknown; press r to refresh."));
+                }
+                lines
+            }
+            Page::Maintenance => {
+                if app.maintenance_detail {
+                    let detail =
+                        app.selected_maintenance()
+                            .map_or("Job no longer listed".into(), |job| {
+                                let result = job
+                                    .result
+                                    .as_ref()
+                                    .map(|value| {
+                                        serde_json::to_string_pretty(value).unwrap_or_default()
+                                    })
+                                    .unwrap_or_else(|| {
+                                        job.error.clone().unwrap_or_else(|| progress(job))
+                                    });
+                                format!("Job {} ({})\n{result}", job.id, job.status)
+                            });
+                    detail
+                        .lines()
+                        .map(|line| Line::from(line.to_owned()))
+                        .collect()
+                } else {
+                    let mut lines = vec![
+                        Line::styled(
+                            "  ◈ MAINTENANCE  ·  safe by default",
+                            app.tone(Color::Cyan).add_modifier(Modifier::BOLD),
+                        ),
+                        Line::styled(
+                            "    a audit  ·  d repair preview  ·  e embed  ·  x extract",
+                            app.tone(Color::Yellow),
+                        ),
+                    ];
+                    let mut jobs: Vec<_> = app.maintenance.values().collect();
+                    jobs.sort_by_key(|job| std::cmp::Reverse(job.created_at));
+                    lines.extend(jobs.into_iter().take(10).enumerate().map(|(index, job)| {
+                        let detail = job
+                            .error
+                            .as_deref()
+                            .or_else(|| {
+                                job.result
+                                    .as_ref()
+                                    .map(|_| "report ready · Enter to inspect")
+                            })
+                            .unwrap_or_else(|| {
+                                job.progress.message.as_deref().unwrap_or("waiting")
+                            });
+                        let (mark, color) = status_mark(job.status);
+                        let mut row = Line::from(vec![
+                            Span::styled(
+                                if index == app.maintenance_selected {
+                                    "  ▸ "
+                                } else {
+                                    "    "
+                                },
+                                app.tone(Color::Yellow),
+                            ),
+                            Span::styled(format!("{mark} "), app.tone(color)),
+                            Span::styled(
+                                format!("{:<10} ", maintenance_kind(&job.kind)),
+                                app.tone(Color::White),
+                            ),
+                            Span::styled(
+                                format!("{}  {}  {detail}", &job.id.to_string()[..8], job.status),
+                                app.tone(Color::Gray),
+                            ),
+                        ]);
+                        if index == app.maintenance_selected && app.color {
+                            row = row.style(Style::default().bg(Color::DarkGray));
+                        }
+                        row
+                    }));
+                    lines
+                }
+            }
+        };
+        let title = if app.maintenance_detail && app.page == Page::Maintenance {
+            "Maintenance result · Esc to close"
+        } else {
+            app.page.title()
+        };
+        let content =
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title));
+        let content = if app.maintenance_detail && app.page == Page::Maintenance {
+            content.scroll((app.detail_scroll, 0))
+        } else if app.page == Page::Maintenance {
+            let visible = usize::from(parts[1].height.saturating_sub(2)).max(1);
+            content.scroll((
+                u16::try_from((app.maintenance_selected + 3).saturating_sub(visible))
+                    .unwrap_or(u16::MAX),
+                0,
+            ))
+        } else if app.page == Page::Readiness {
+            content
+                .wrap(Wrap { trim: true })
+                .scroll((app.readiness_scroll, 0))
+        } else {
+            content.wrap(Wrap { trim: true })
+        };
+        frame.render_widget(content, parts[1]);
+    }
     let feed: Vec<ListItem<'_>> = app
         .activity
         .iter()
         .take(3)
-        .map(|entry| ListItem::new(entry.as_str()))
+        .map(|entry| {
+            let color = if entry.contains("failed")
+                || entry.contains("ERROR")
+                || entry.contains("Disconnected")
+            {
+                Color::Red
+            } else if entry.contains("queued") || entry.contains("Refreshing") {
+                Color::Yellow
+            } else {
+                Color::Green
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled("  • ", app.tone(color)),
+                Span::styled(entry.as_str(), app.tone(Color::Gray)),
+            ]))
+        })
         .collect();
     frame.render_widget(
-        List::new(feed).block(Block::default().borders(Borders::ALL).title("Activity")),
+        List::new(feed).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(app.tone(Color::Gray))
+                .title(" ACTIVITY "),
+        ),
         parts[2],
     );
     let prompt = if app.confirm.is_some() {
@@ -550,12 +822,32 @@ fn draw(frame: &mut ratatui::Frame<'_>, app: &Console) {
             "a audit · d dry run · e embed · x extract · Enter inspect result · Esc back"
         }
     };
+    let hint = Line::from(vec![
+        Span::styled("  ⌨ ", app.tone(Color::Cyan)),
+        Span::styled(keys, app.tone(Color::Yellow)),
+        Span::styled(
+            "    ·    Tab/1–4 views  ↑↓ select  r refresh  q quit",
+            app.tone(Color::Gray),
+        ),
+    ]);
     frame.render_widget(
-        Paragraph::new(format!(
-            "{prompt}\n{keys} · Tab/1-4 views · ↑↓ select · r refresh · q quit"
-        ))
+        Paragraph::new(vec![
+            Line::styled(
+                format!("  {prompt}"),
+                if app.confirm.is_some() {
+                    app.tone(Color::Red)
+                } else {
+                    app.tone(Color::White)
+                },
+            ),
+            hint,
+        ])
         .wrap(Wrap { trim: true })
-        .block(Block::default().borders(Borders::ALL)),
+        .block(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(app.tone(Color::Cyan)),
+        ),
         parts[3],
     );
 }
@@ -1064,9 +1356,9 @@ mod tests {
             total: None,
             message: Some("discovering".into()),
         };
-        assert_eq!(progress(&job), "[…] discovering");
+        assert_eq!(progress(&job), "◌ discovering");
         job.progress.total = Some(0);
-        assert_eq!(progress(&job), "[…] discovering");
+        assert_eq!(progress(&job), "◌ discovering");
         job.progress.total = Some(16);
         assert!(progress(&job).contains("8/16 discovering"));
         job.progress.total = None;
