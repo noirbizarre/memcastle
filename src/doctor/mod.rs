@@ -982,7 +982,7 @@ mod tests {
         let file = temp.path().join("config.toml");
         std::fs::write(
             &file,
-            "[embeddings]\nprovider = 'none'\nmodle = 'secret-redaction-canary'\n",
+            "[embeddings]\nprovider = 'none'\nunused_setting = 'secret-redaction-canary'\n",
         )
         .unwrap();
         let mut report = Report::default();
@@ -992,7 +992,7 @@ mod tests {
             report
                 .findings
                 .iter()
-                .any(|f| f.status == CheckStatus::Warning && f.summary.contains("modle"))
+                .any(|f| f.status == CheckStatus::Warning && f.summary.contains("unused_setting"))
         );
         assert!(
             !serde_json::to_string(&report)
