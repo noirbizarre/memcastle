@@ -363,7 +363,8 @@ real, evolving format, keeps raw documents and asks for two permissions (`docs/m
 [ChatGPT](mining-sources.md#chatgpt).
 `sources/opencode/` is the OpenCode coding agent's session history, and the worked example of a source that wraps a
 program through `run-process` and is tested against a stand-in for it (`docs/mining-sources.md#opencode`).
-The sources that ship with MemCastle's releases (`pi`, `opencode`, `claude`, `codex` and `chatgpt`) are built from here.
+The sources that ship with MemCastle's releases (`pi`, `opencode`, `claude`, `codex`, `chatgpt` and `github`)
+are built from here.
 They are bundled without being compiled into the binary.
 They use exactly the package contract a user installs; a release carries them unpacked, so they are installed from the
 start, and `memcastle source enable <name>` turns one on.
