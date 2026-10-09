@@ -1,6 +1,8 @@
 # ADR-047: Terminal operations console shares daemon events and controls
 
-Status: accepted
+## Status
+
+Accepted.
 
 ## Context
 
