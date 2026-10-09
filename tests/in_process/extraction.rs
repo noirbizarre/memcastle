@@ -531,7 +531,7 @@ async fn a_checkpoint_correction_is_explained_through_fact_history_and_as_of_rea
 
     let pretty = tokio::process::Command::new(cargo_bin("memcastle"))
         .env("MEMCASTLE_PALACE_PATH", &daemon.palace_path)
-        .env("CLICOLOR_FORCE", "1")
+        .env("FORCE_COLOR", "1")
         .stdin(Stdio::null())
         .args(["fact", "history", id])
         .output()

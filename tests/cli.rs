@@ -239,7 +239,7 @@ fn command_groups_do_not_list_a_help_entry_either() {
 fn piped_help_is_plain_text_without_escape_codes() {
     let output = Command::cargo_bin("memcastle")
         .unwrap()
-        .env_remove("CLICOLOR_FORCE")
+        .env_remove("FORCE_COLOR")
         .arg("--help")
         .output()
         .unwrap();
@@ -251,7 +251,7 @@ fn forcing_colour_colours_help_and_no_color_wins_over_a_terminal_default() {
     let forced = Command::cargo_bin("memcastle")
         .unwrap()
         .env_remove("NO_COLOR")
-        .env("CLICOLOR_FORCE", "1")
+        .env("FORCE_COLOR", "1")
         .arg("--help")
         .output()
         .unwrap();
@@ -260,11 +260,32 @@ fn forcing_colour_colours_help_and_no_color_wins_over_a_terminal_default() {
     let opted_out = Command::cargo_bin("memcastle")
         .unwrap()
         .env("NO_COLOR", "1")
-        .env_remove("CLICOLOR_FORCE")
+        .env("FORCE_COLOR", "1")
         .arg("--help")
         .output()
         .unwrap();
     assert!(!String::from_utf8_lossy(&opted_out.stdout).contains('\u{1b}'));
+}
+
+#[test]
+fn force_color_colours_piped_errors_unless_no_color_is_set() {
+    let forced = Command::cargo_bin("memcastle")
+        .unwrap()
+        .env("FORCE_COLOR", "1")
+        .env_remove("NO_COLOR")
+        .arg("unknown-command")
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&forced.stderr).contains('\u{1b}'));
+
+    let plain = Command::cargo_bin("memcastle")
+        .unwrap()
+        .env("FORCE_COLOR", "1")
+        .env("NO_COLOR", "1")
+        .arg("unknown-command")
+        .output()
+        .unwrap();
+    assert!(!String::from_utf8_lossy(&plain.stderr).contains('\u{1b}'));
 }
 
 #[test]
@@ -335,13 +356,23 @@ fn a_piped_status_report_is_json_with_no_escape_codes_even_when_colour_is_forced
     // `client::status` unit tests, since a test process has no terminal to run it in.
     let (state, palace) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let forced = status_without_a_daemon(&state, &palace)
-        .env("CLICOLOR_FORCE", "1")
+        .env("FORCE_COLOR", "1")
         .env_remove("NO_COLOR")
         .output()
         .unwrap();
     let forced = String::from_utf8_lossy(&forced.stdout);
     assert!(!forced.contains('\u{1b}'), "{forced:?}");
     serde_json::from_str::<serde_json::Value>(&forced).expect("a piped status is JSON");
+
+    let explicit = status_without_a_daemon(&state, &palace)
+        .arg("--json")
+        .env("FORCE_COLOR", "1")
+        .env_remove("NO_COLOR")
+        .output()
+        .unwrap();
+    assert!(!explicit.stdout.contains(&b'\x1b'));
+    serde_json::from_slice::<serde_json::Value>(&explicit.stdout)
+        .expect("--json in a pipe is JSON");
 }
 
 /// A `memcastle status` with no daemon, pointed at an empty palace and a

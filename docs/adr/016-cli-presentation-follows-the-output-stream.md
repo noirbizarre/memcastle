@@ -26,7 +26,8 @@ Adding the same flag to `jobs list` would make scripts opt in to what they alway
 - **A person gets decoration, a pipe gets plain data, and the stream decides.**
   The decision is made from whether the stream is a terminal, never from a flag, so a script needs no change.
 - **Colour** is on for a stream that is a terminal and wants it.
-  `NO_COLOR` turns it off, `CLICOLOR=0` turns it off, `CLICOLOR_FORCE` turns it on, and `TERM=dumb` is respected.
+  At the time, `NO_COLOR` and `CLICOLOR=0` turned it off, `CLICOLOR_FORCE` turned it on, and `TERM=dumb` was respected.
+  The current CLI instead supports `NO_COLOR` and `FORCE_COLOR`; see [the CLI reference](../cli.md#output-colour-and-prompts).
   stdout and stderr are decided independently.
   Colour surrounds words and never replaces them: with escapes stripped, a coloured report is the plain report.
   Help and clap's own errors use a palette from the same rules.
@@ -57,7 +58,7 @@ Adding the same flag to `jobs list` would make scripts opt in to what they alway
   It breaks every existing pipe until it is edited, and asks scripts to opt in to what they already had.
 - **A global `--format` or `--color`.**
   ADR-012 already rejected the former for promising a human form most commands lack.
-  The latter duplicates `NO_COLOR` and `CLICOLOR_FORCE`, which every terminal user and CI system already knows.
+  The latter duplicated the colour environment settings (then `NO_COLOR` and `CLICOLOR_FORCE`).
 - **Prompt unless `--yes` is given, even without a terminal.**
   The safest default and the one that hangs CI until a timeout kills it, or fails every script on its first run.
   The protection a prompt gives is against a typo at a keyboard, which is exactly the case a terminal check covers.
