@@ -35,13 +35,21 @@ async fn daemon() -> TestDaemon {
 #[tokio::test]
 async fn a_configured_document_criterion_explains_independent_mined_evidence() {
     let source = tempfile::tempdir().unwrap();
-    let file = source.path().join("decision.md");
-    std::fs::write(&file, "Aurora protocol routes blue messages").unwrap();
+    std::fs::write(
+        source.path().join("decision.md"),
+        "Aurora protocol routes blue messages",
+    )
+    .unwrap();
     std::fs::write(
         source.path().join("draft.md"),
         "Aurora protocol routes blue messages",
     )
     .unwrap();
+    // The adapter canonicalizes the root before recording document metadata; macOS's /var symlink and Windows path
+    // prefixes would otherwise make an exact criterion compare a different spelling of the same file.
+    let file = std::fs::canonicalize(source.path())
+        .unwrap()
+        .join("decision.md");
     let config = format!(
         "[sources.directory]\nlevel = 'low'\n[[sources.directory.criteria]]\npath = 'path'\nequals = '{}'\nlevel = 'high'",
         file.display(),
