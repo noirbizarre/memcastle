@@ -31,8 +31,10 @@ See [Output, colour and prompts](#output-colour-and-prompts).
 What the CLI shows depends on where its output goes, so a script needs no flag:
 a terminal gets a readable rendering with colour, and a pipe or a file gets plain JSON.
 The readable rendering is not meant to be parsed and may change between releases, whereas the JSON is the contract.
-`--json` forces the JSON form on a terminal, for `memcastle search auth --json | jq` or to see exactly what a script
+`--json` forces the JSON form on a terminal, for `memcastle search auth --json | jq` or to see the same data a script
 would receive.
+On a colour-capable terminal JSON is indented and syntax-highlighted; `NO_COLOR` leaves it indented but plain.
+In a pipe or a file JSON stays indented and free of escape codes, even with `FORCE_COLOR`.
 It is a global flag, accepted before or after any subcommand, and it never changes a command's exit code.
 
 This applies to `status`, `doctor`, `db`, `integration`, `migrate`, `daemon stop`, `mine`
@@ -52,14 +54,15 @@ Four groups of commands have no answer to render and print the same text on ever
 | Setting | Effect |
 |---|---|
 | `NO_COLOR` set to anything | No colour anywhere, even on a terminal. |
-| `CLICOLOR=0` | The same. |
-| `CLICOLOR_FORCE=1` | Colour in the text a pipe receives (help, diagnostics, progress), for tools that render escape codes. A command's result is still plain JSON. |
-| `TERM=dumb` | No colour. |
+| `FORCE_COLOR=1` | Colour even in piped text (help, diagnostics and progress), but never in piped JSON. |
+| `FORCE_COLOR=0` | Disable colour. |
+| `TERM=dumb` | Disable automatic colour detection; `FORCE_COLOR=1` overrides it. |
 
 Colour is added around words and never replaces them.
 It colours `--help`, `status` and `db status` reports (healthy in green, degraded or unavailable in red,
 things that need attention in yellow), the table of `job list`, the card of a job, and the diagnostics printed on failure.
-Colour belongs to the readable rendering, so a pipe never receives escape codes, even with `CLICOLOR_FORCE=1`.
+JSON is also highlighted when requested on a terminal; piped JSON never receives escape codes, even with `FORCE_COLOR=1`.
+`NO_COLOR` takes precedence when both colour variables are set.
 A job status has the same colour wherever it is shown:
 queued yellow, running cyan, paused magenta, completed green, failed red and cancelled dim.
 Standard output and standard error are decided separately:

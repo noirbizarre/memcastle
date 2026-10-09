@@ -2,11 +2,9 @@
 //! and confirmation prompts.
 //!
 //! The rule everything here follows: **a person gets decoration, a pipe gets
-//! plain data.** Colour is on only for a terminal that wants it (`console`
-//! honours `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE` and `TERM=dumb`), and a
+//! plain data.** Colour follows the output stream, `FORCE_COLOR` and `NO_COLOR`, and a
 //! prompt is shown only when both stdin and stderr are terminals. Scripts,
-//! CI and the test-suite therefore never see an escape code or block on a
-//! question.
+//! CI and the test-suite therefore never block on a question or receive coloured JSON.
 
 use std::io::IsTerminal;
 
@@ -22,6 +20,122 @@ use crate::error::{Error, Result};
 #[must_use]
 pub fn stdout_is_terminal() -> bool {
     std::io::stdout().is_terminal()
+}
+
+/// Decide colour per stream; a deliberate opt-out always wins over a forced opt-in.
+/// `TERM=dumb` only disables automatic detection, so an explicit force can override it.
+#[must_use]
+pub fn color_for(terminal: bool) -> bool {
+    color_for_env(
+        terminal,
+        std::env::var_os("NO_COLOR").is_some(),
+        std::env::var("FORCE_COLOR").ok().as_deref(),
+        std::env::var("TERM").ok().as_deref(),
+    )
+}
+
+fn color_for_env(
+    terminal: bool,
+    no_color: bool,
+    force_color: Option<&str>,
+    term: Option<&str>,
+) -> bool {
+    if no_color {
+        return false;
+    }
+    match force_color {
+        Some("0") => false,
+        Some(value) if !value.is_empty() => true,
+        _ => terminal && term != Some("dumb"),
+    }
+}
+
+/// Whether stdout should use colour for human-oriented output.
+#[must_use]
+pub fn stdout_color() -> bool {
+    color_for(stdout_is_terminal())
+}
+
+/// Whether stderr should use colour for human-oriented output.
+#[must_use]
+pub fn stderr_color() -> bool {
+    color_for(std::io::stderr().is_terminal())
+}
+
+/// Colour only JSON shown directly to a person: forced colour must not break a pipe's JSON.
+#[must_use]
+pub fn terminal_json_color() -> bool {
+    stdout_is_terminal() && stdout_color()
+}
+
+/// Highlight serialized JSON without touching its bytes or confusing an escaped quote for a delimiter.
+#[must_use]
+pub fn highlight_json(text: &str, painter: Painter) -> String {
+    if !painter.is_colored() {
+        return text.to_owned();
+    }
+    let bytes = text.as_bytes();
+    let mut output = String::with_capacity(text.len());
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let start = offset;
+        let style = match bytes[offset] {
+            b'"' => {
+                offset += 1;
+                while offset < bytes.len() {
+                    if bytes[offset] == b'\\' {
+                        offset += 2;
+                    } else if bytes[offset] == b'"' {
+                        offset += 1;
+                        break;
+                    } else {
+                        offset += 1;
+                    }
+                }
+                let is_key = bytes[offset..]
+                    .iter()
+                    .copied()
+                    .find(|byte| !byte.is_ascii_whitespace())
+                    == Some(b':');
+                if is_key {
+                    Style::new().cyan()
+                } else {
+                    Style::new().green()
+                }
+            }
+            b'-' | b'0'..=b'9' => {
+                offset += 1;
+                while offset < bytes.len()
+                    && matches!(
+                        bytes[offset],
+                        b'0'..=b'9' | b'.' | b'e' | b'E' | b'+' | b'-'
+                    )
+                {
+                    offset += 1;
+                }
+                Style::new().yellow()
+            }
+            b't' | b'f' | b'n' => {
+                offset += 1;
+                while offset < bytes.len() && bytes[offset].is_ascii_alphabetic() {
+                    offset += 1;
+                }
+                Style::new().magenta()
+            }
+            b'{' | b'}' | b'[' | b']' | b':' | b',' => {
+                offset += 1;
+                Style::new().dim()
+            }
+            _ => {
+                // An unstyled Unicode character is still a whole UTF-8 scalar, not one byte of a slice.
+                offset += text[offset..].chars().next().unwrap().len_utf8();
+                output.push_str(&text[start..offset]);
+                continue;
+            }
+        };
+        output.push_str(&painter.paint(style, &text[start..offset]));
+    }
+    output
 }
 
 /// Whether `--json` was given. Set once at startup; see [`set_json`].
@@ -84,25 +198,24 @@ pub struct Painter {
 }
 
 impl Painter {
-    /// Never colours. What every non-terminal output uses.
+    /// Never colours. What machine-readable output uses.
     pub const PLAIN: Self = Self { color: false };
 
-    /// Colours when stdout is a terminal that supports it and the user has
-    /// not opted out (`NO_COLOR`).
+    /// Colours according to stdout and the user's `FORCE_COLOR`/`NO_COLOR` settings.
     #[must_use]
     pub fn for_stdout() -> Self {
         Self {
-            color: console::colors_enabled(),
+            color: stdout_color(),
         }
     }
 
-    /// Colours when stderr is a terminal that supports it and the user has
-    /// not opted out. Separate from [`Self::for_stdout`]: `cmd | less` leaves
+    /// Colours according to stderr and the user's settings.
+    /// Separate from [`Self::for_stdout`]: `cmd | less` leaves
     /// stderr on the terminal, and the two streams are decided independently.
     #[must_use]
     pub fn for_stderr() -> Self {
         Self {
-            color: console::colors_enabled_stderr(),
+            color: stderr_color(),
         }
     }
 
@@ -331,6 +444,35 @@ mod tests {
         assert!(!is_pretty(true, true), "--json forces JSON on a terminal");
         assert!(!is_pretty(false, false), "a pipe always gets JSON");
         assert!(!is_pretty(true, false), "--json on a pipe is still JSON");
+    }
+
+    #[test]
+    fn no_color_wins_and_force_color_only_changes_colour_not_output_form() {
+        assert!(color_for_env(false, false, Some("1"), Some("dumb")));
+        assert!(!color_for_env(true, true, Some("1"), None));
+        assert!(!color_for_env(true, false, Some("0"), None));
+        assert!(!color_for_env(false, false, None, None));
+        assert!(!color_for_env(true, false, None, Some("dumb")));
+        assert!(color_for_env(true, false, None, Some("xterm")));
+        assert!(!is_pretty(true, true));
+        assert!(!is_pretty(false, false));
+    }
+
+    #[test]
+    fn highlighted_json_keeps_the_original_data_and_escapes() {
+        let text = serde_json::to_string_pretty(&serde_json::json!({
+            "key\"with\\backslash": ["unicode é 😀 and \"escaped\"", -12.5e+3, true, false, null, {"a": 0}]
+        })).unwrap();
+        assert_eq!(highlight_json(&text, Painter::PLAIN), text);
+        let highlighted = highlight_json(&text, Painter::forced());
+        assert!(highlighted.contains('\u{1b}'));
+        assert!(highlighted.contains("é 😀"));
+        assert!(text.contains("true"));
+        assert_eq!(console::strip_ansi_codes(&highlighted), text);
+        assert_eq!(
+            console::strip_ansi_codes(&highlight_json("-12.5e+3", Painter::forced())),
+            "-12.5e+3"
+        );
     }
 
     #[test]

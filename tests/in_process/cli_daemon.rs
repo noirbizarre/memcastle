@@ -619,7 +619,7 @@ async fn every_command_with_a_data_answer_prints_json_with_no_escape_codes_in_a_
         vec!["wing", "list"],
     ] {
         let output = memcastle(&daemon)
-            .env("CLICOLOR_FORCE", "1")
+            .env("FORCE_COLOR", "1")
             .args(&args)
             .output()
             .await
@@ -632,7 +632,7 @@ async fn every_command_with_a_data_answer_prints_json_with_no_escape_codes_in_a_
 
     // `mine` is the command that started this: it used to be the one that printed JSON in a terminal.
     let mined = memcastle(&daemon)
-        .env("CLICOLOR_FORCE", "1")
+        .env("FORCE_COLOR", "1")
         .current_dir(project.path())
         .args(["mine", "."])
         .output()

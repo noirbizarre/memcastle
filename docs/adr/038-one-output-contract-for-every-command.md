@@ -70,7 +70,8 @@ needs next, the job's `id`, is somewhere in the middle.
 
 - Scripts that read the text of `status`, `db` or `integration` from a pipe break and must read JSON.
   This is a breaking change and is released as one.
-- `CLICOLOR_FORCE` no longer puts colour into a command's result in a pipe, because colour belongs to the readable form.
-  It still colours help, diagnostics and the progress of the local `source` commands.
+- At the time, `CLICOLOR_FORCE` no longer put colour into a command's result in a pipe.
+  The current CLI uses `FORCE_COLOR` for help, diagnostics and progress instead;
+  JSON remains plain in pipes and is syntax-highlighted on a coloured terminal (see [the CLI reference](../cli.md#output-colour-and-prompts)).
 - The readable forms are only exercised by unit tests: no test runs the binary on a pseudo-terminal,
   so the stream decision is covered through `term::is_pretty` and through the piped output of every command.

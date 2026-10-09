@@ -15,8 +15,8 @@ use memcastle::domain::{JobStatus, MemoryMode};
 /// The colours of `--help` and of clap's own error messages.
 ///
 /// Plain ANSI palette colours (not RGB), so they follow the user's terminal
-/// theme. clap only emits them on a terminal and honours `NO_COLOR`, so piped
-/// help (and the tests that read it) stays plain.
+/// theme. The binary sets clap's colour choice before parsing so `FORCE_COLOR`
+/// and `NO_COLOR` apply even to help and parse errors.
 fn styles() -> Styles {
     Styles::styled()
         .header(AnsiColor::Yellow.on_default() | Effects::BOLD)

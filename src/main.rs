@@ -15,7 +15,7 @@
 use std::process::ExitCode;
 use std::time::Duration;
 
-use clap::{CommandFactory, Parser};
+use clap::{CommandFactory, FromArgMatches};
 use miette::MietteHandlerOpts;
 
 mod cli;
@@ -68,7 +68,22 @@ fn main() -> ExitCode {
 }
 
 async fn async_main() -> ExitCode {
-    let args = Cli::parse();
+    // Clap prints help on stdout and parse errors on stderr before the command starts.
+    // Select that stream before parsing so redirecting only one stream does not colour the other.
+    let help_or_version = std::env::args_os()
+        .any(|arg| matches!(arg.to_str(), Some("--help" | "-h" | "--version" | "-V")));
+    let matches = Cli::command()
+        .color(
+            if (help_or_version && term::stdout_color())
+                || (!help_or_version && term::stderr_color())
+            {
+                clap::ColorChoice::Always
+            } else {
+                clap::ColorChoice::Never
+            },
+        )
+        .get_matches();
+    let args = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
     // First, before anything can print: every command's output form is decided from this flag and the stream.
     term::set_json(args.json);
     // Before the configuration is loaded: a completion script depends on
@@ -321,12 +336,16 @@ fn cmd_completions(args: &CompletionsArgs) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Print `value` as pretty JSON — or fail loudly. A serialization error used
+/// Print `value` as pretty JSON, highlighting only on a coloured terminal — or fail loudly. A serialization error used
 /// to print an empty line and exit 0, which a script reads as "no results".
 fn print_json(value: &impl serde::Serialize) -> Result<()> {
     let text = serde_json::to_string_pretty(value)
         .map_err(|source| Error::serialization("the command's output", source))?;
-    println!("{text}");
+    if term::terminal_json_color() {
+        println!("{}", term::highlight_json(&text, Painter::for_stdout()));
+    } else {
+        println!("{text}");
+    }
     Ok(())
 }
 
@@ -1624,7 +1643,11 @@ fn cmd_integration(config: &Config, command: &IntegrationCommand) -> Result<()> 
         !term::pretty(),
         Painter::for_stdout(),
     )?;
-    println!("{text}");
+    if !term::pretty() && term::terminal_json_color() {
+        println!("{}", term::highlight_json(&text, Painter::for_stdout()));
+    } else {
+        println!("{text}");
+    }
     Ok(())
 }
 
@@ -2069,11 +2092,10 @@ fn print_db_status(status: &DbEndpointStatus) -> Result<()> {
 /// `--verbose` (or `RUST_BACKTRACE`, so a bug report already carries it)
 /// prints the full cause chain; otherwise only the primary diagnostic
 /// shows, since a source error the user did not ask for is noise more
-/// often than it is the answer. Colour is left to miette's own
-/// auto-detection so `NO_COLOR`/`TERM=dumb` still produce plain output.
+/// often than it is the answer. Apply the shared colour decision to diagnostics too.
 fn install_miette_hook(verbose: bool) {
     let _ = miette::set_hook(Box::new(move |_| {
-        let opts = MietteHandlerOpts::new();
+        let opts = MietteHandlerOpts::new().color(term::stderr_color());
         let opts = if verbose {
             opts.with_cause_chain()
         } else {
@@ -2086,12 +2108,11 @@ fn install_miette_hook(verbose: bool) {
 /// Structured logging with `filter` as the `EnvFilter` directive — see
 /// `Config::log_filter` for where it comes from and its precedence.
 fn init_tracing(filter: String, format: memcastle::config::LogFormat) {
-    use std::io::IsTerminal;
     let builder = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
         .with_writer(std::io::stderr)
-        // Escape codes would pollute journald and log files.
-        .with_ansi(std::io::stderr().is_terminal());
+        // Escape codes would pollute journald unless colour was explicitly forced.
+        .with_ansi(term::stderr_color());
     let _ = match format {
         memcastle::config::LogFormat::Text => builder.try_init(),
         memcastle::config::LogFormat::Json => builder.json().try_init(),

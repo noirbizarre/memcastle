@@ -125,7 +125,7 @@ impl Default for Console {
             typed: String::new(),
             confirm: None,
             live: false,
-            color: std::env::var_os("NO_COLOR").is_none(),
+            color: crate::term::stdout_color(),
             busy: false,
             message: "Connecting to daemon…".into(),
             last_refresh: None,
