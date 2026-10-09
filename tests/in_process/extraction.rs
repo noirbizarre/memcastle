@@ -77,7 +77,7 @@ async fn a_configured_document_criterion_ranks_relevant_mined_evidence_and_expla
 }
 
 #[tokio::test]
-async fn metadata_only_remining_keeps_the_old_event_time_on_historical_evidence() {
+async fn metadata_only_re_mining_keeps_the_old_event_time_on_historical_evidence() {
     let dir = tempfile::tempdir().unwrap();
     write(
         dir.path(),
