@@ -116,6 +116,7 @@ memcastle mine opencode since=2026-09 dir=/path/to/workspace   # OpenCode sessio
 memcastle mine claude since=2026-09 dir=/path/to/workspace     # Claude Code session history (once installed)
 memcastle mine codex                                           # Codex rollout history (once installed)
 memcastle mine chatgpt /path/to/chatgpt-export.zip            # ChatGPT data export (once installed)
+memcastle mine github include=acme/docs wiki_include=acme/docs # selected GitHub repository and wiki history
 ```
 
 The first word is a source, and what follows is that source's own: at most one place to read, then `key=value` options
@@ -161,14 +162,15 @@ The job's `result` reports `documents`, `created`, `superseded`, `retired`, `unc
 | `claude` | bundled package, `sources/claude/` | Claude Code session history | modification time | yes | no |
 | `codex` | bundled package, `sources/codex/` | Codex rollout history | modification time | yes | no |
 | `chatgpt` | bundled package, `sources/chatgpt/` | ChatGPT export or experimental web history | repeated sweep | yes | OAuth for web, optional manual fallback |
+| `github` | bundled package, `sources/github/` | selected repositories, issues, PRs and wiki revisions | API updates / Git history | yes | optional `GH_TOKEN` or `GITHUB_TOKEN` |
 
 Only `directory` is compiled into MemCastle.
-`pi`, `opencode`, `claude`, `codex` and `chatgpt` are [WebAssembly sources](writing-sources.md).
+`pi`, `opencode`, `claude`, `codex`, `chatgpt` and `github` are [WebAssembly sources](writing-sources.md).
 They are built from their directories in the repository and shipped alongside each release
 (release archives and the `.deb` and `.rpm` carry them, unpacked, under
 `share/memcastle/sources/`), so they are installed from the start.
 `memcastle source enable <name>` is all one needs, with no registry and no network.
-No Pi, OpenCode, Claude Code, Codex or ChatGPT code is part of the core.
+No Pi, OpenCode, Claude Code, Codex, ChatGPT or GitHub acquisition code is part of the core.
 They run under the same sandbox and pipeline as any source a user writes.
 Other sources are found in [registries](publishing-sources.md).
 `directory` and `pi` have a modification-time watermark as their cursor:
@@ -479,6 +481,33 @@ This backend is tested against synthetic replies, not yet against a fresh live s
 pagination may change.
 See [the source README](https://github.com/noirbizarre/memcastle/tree/main/sources/chatgpt) for its session setup and
 limits.
+
+### `github`
+
+The `github` source is shipped with releases, but must be enabled explicitly with `memcastle source enable github`.
+It mines only repositories selected by the required `include` option, with `exclude` taking precedence.
+An exact `owner/repo` names one repository; `org/*` enumerates repositories owned by that organization, and
+`owner/repo-*` selects a subset of an owner's repositories.
+The separate `wiki_include` and `wiki_exclude` patterns select wikis only within those repositories.
+Set `issues=false pulls=false metadata=false wiki_include=acme/docs` for a wiki-only mine.
+
+The default document kinds are repository metadata, issues and pull requests.
+Turn on `comments=true` to include conversation comments and `reviews=true` for review summaries and inline comments.
+`labels` narrows issues and PRs, `topics` narrows repositories, `paths` narrows wiki pages, and `since` is a bootstrap date.
+Changing a selecting pattern creates a new source cursor; moving `since` earlier requires `--full`.
+Git wiki history is not exposed through the REST API: the source clones each selected wiki transiently and files each
+changed Markdown page/commit as a separate document, with page path, commit and repository provenance.
+The wiki revision's URL points at the page in the repository wiki; the commit ID is also kept in its metadata.
+
+The daemon needs `curl` for the official REST API, `git` for wikis, a writable `/tmp` for temporary clones, and `rm` to
+clean them up.
+`GH_TOKEN` or `GITHUB_TOKEN` (in that order) can be set in the daemon's environment for private repositories or higher
+rate limits; no token belongs in the miner options or `memcastle.toml`.
+Public repositories can be read without a token.
+The manifest grants the two variable names and the three programs, not a general filesystem or WASI network grant.
+For an opt-in [poll or schedule trigger](triggers.md), point it at a GitHub miner; the trigger only requests a normal run.
+See the [GitHub source README](https://github.com/noirbizarre/memcastle/tree/main/sources/github) for full scope examples
+and acquisition limits.
 
 ## Writing a source
 

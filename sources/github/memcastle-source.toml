@@ -1,0 +1,84 @@
+[source]
+name = "github"
+version = "0.1.0"
+description = "Scoped GitHub repositories, issues, pull requests, comments, reviews and wiki revisions"
+
+[compatibility]
+contract = "0.4"
+memcastle = ">=0.2"
+
+[capabilities]
+incremental = true
+retains_raw = true
+needs_credentials = false
+
+[permissions]
+# The two standard token names are optional for public repositories. Programs receive no other daemon environment.
+env = ["GH_TOKEN", "GITHUB_TOKEN"]
+process = ["curl", "git", "rm"]
+
+[options.account]
+type = "string"
+description = "non-secret account label used to distinguish sources with different GitHub access"
+
+[options.include]
+type = "string"
+description = "required comma-separated repository patterns (owner/repo, org/*, owner/repo*)"
+
+[options.exclude]
+type = "string"
+description = "comma-separated repository patterns excluded from include"
+
+[options.wiki_include]
+type = "string"
+description = "repositories whose Git-backed wiki history to mine, independently of issues and PRs"
+
+[options.wiki_exclude]
+type = "string"
+description = "wiki repository exclusions (applied after wiki_include)"
+
+[options.issues]
+type = "string"
+description = "mine issues (true/false; default true)"
+
+[options.pulls]
+type = "string"
+description = "mine pull requests (true/false; default true)"
+
+[options.comments]
+type = "string"
+description = "mine issue and pull-request conversation comments (true/false; default false)"
+
+[options.reviews]
+type = "string"
+description = "mine pull-request review summaries and inline review comments (true/false; default false)"
+
+[options.metadata]
+type = "string"
+description = "mine selected repository metadata (true/false; default true)"
+
+[options.labels]
+type = "string"
+description = "only issues and PRs bearing one of these labels (comma-separated)"
+
+[options.topics]
+type = "string"
+description = "only repositories bearing one of these topics (comma-separated)"
+
+[options.paths]
+type = "string"
+description = "only wiki paths matching these comma-separated glob patterns"
+
+[options.since]
+type = "date"
+description = "bootstrap from this date; an older boundary later needs a full mine"
+
+[limits]
+timeout_secs = 600
+
+[build]
+command = ["cargo", "build", "--release", "--target", "wasm32-wasip2", "--target-dir", "target"]
+output = "target/wasm32-wasip2/release/memcastle_source_github.wasm"
+
+[test]
+fixtures = "fixtures"

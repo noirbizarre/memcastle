@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""Git wiki fixture: two edits of one page and one revision of another."""
+import os
+import sys
+
+args = sys.argv[1:]
+sha1 = "a" * 40
+sha2 = "b" * 40
+if "clone" in args:
+    assert args[-2] == "https://github.com/acme/alpha.wiki.git"
+    os.mkdir(args[-1])
+elif "log" in args:
+    sys.stdout.write(f"MC:{sha1}:2026-01-03T00:00:00Z\nHome.md\n\n"
+                     f"MC:{sha2}:2026-01-04T00:00:00Z\nHome.md\nGuide.md\n")
+elif "show" in args:
+    key = args[-1]
+    contents = {f"{sha1}:Home.md": "# Home v1\n", f"{sha2}:Home.md": "# Home v2\n",
+                f"{sha2}:Guide.md": "# Guide\n"}
+    if key not in contents:
+        raise SystemExit(1)
+    sys.stdout.write(contents[key])
+else:
+    raise SystemExit(f"unexpected Git fixture arguments: {args}")

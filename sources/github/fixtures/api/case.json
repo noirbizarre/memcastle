@@ -1,0 +1,35 @@
+{
+  "name": "github-selected-repository",
+  "description": "A selected GitHub repository has its own issue, PR and metadata; another repository is not read.",
+  "locator": "tree",
+  "options": {
+    "include": "acme/alpha"
+  },
+  "limit": 2,
+  "documents": [
+    {
+      "external_id": "acme/alpha/repository/1",
+      "title": "alpha",
+      "kind": "other",
+      "room": "repositories",
+      "tags": ["github", "repository", "repo:acme/alpha", "topic:docs"],
+      "segments": ["# alpha\n\nExample repository"]
+    },
+    {
+      "external_id": "acme/alpha/issue/10",
+      "title": "Item 1",
+      "kind": "other",
+      "room": "issues",
+      "tags": ["github", "issue", "repo:acme/alpha", "label:wanted"],
+      "segments": ["# Item 1\n\nBody 1"]
+    },
+    {
+      "external_id": "acme/alpha/pull/20",
+      "title": "Item 2",
+      "kind": "other",
+      "room": "pulls",
+      "tags": ["github", "pull", "repo:acme/alpha", "label:wanted"],
+      "segments": ["# Item 2\n\nBody 2"]
+    }
+  ]
+}
