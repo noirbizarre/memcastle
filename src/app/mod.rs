@@ -332,6 +332,7 @@ pub struct AppServices {
     extraction: Extraction,
     /// The `[dedup]` settings, for the writes the services make themselves (diary, drawer create, mentions).
     dedup: DedupConfig,
+    preferences: crate::domain::SourcePreferences,
     /// The `[mining]` settings, for where installed sources live and the limits they run under.
     mining: MiningConfig,
     /// The `[[miners]]` of the configuration file, read back from it and rewritten through it.
@@ -358,6 +359,7 @@ impl AppServices {
             embeddings: Embeddings::disabled(),
             extraction: Extraction::disabled(),
             dedup: DedupConfig::default(),
+            preferences: crate::domain::SourcePreferences::default(),
             mining: MiningConfig::default(),
             miners: Arc::new(MinerRegistry::default()),
             triggers: Arc::new(TriggerRegistry::default()),
@@ -409,6 +411,13 @@ impl AppServices {
     #[must_use]
     pub fn with_dedup(mut self, dedup: DedupConfig) -> Self {
         self.dedup = dedup;
+        self
+    }
+
+    /// Give every application read the effective source-preference policy.
+    #[must_use]
+    pub fn with_preferences(mut self, preferences: crate::domain::SourcePreferences) -> Self {
+        self.preferences = preferences;
         self
     }
 
@@ -576,7 +585,14 @@ impl AppServices {
             .map_err(|message| Error::invalid_input("temporal", message))?;
         let limit = effective_limit(Some(query.limit), DEFAULT_SEARCH_LIMIT);
         let vector = self.query_vector(&query).await?;
-        crate::search::search(&self.store, &query, limit, vector.as_deref()).await
+        crate::search::search(
+            &self.store,
+            &query,
+            limit,
+            vector.as_deref(),
+            &self.preferences,
+        )
+        .await
     }
 
     /// The vector to rank `query` with, if its mode wants one and one can be had.

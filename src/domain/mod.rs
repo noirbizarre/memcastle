@@ -20,6 +20,7 @@ mod memory_mode;
 mod miner;
 mod palace;
 mod path;
+mod preferences;
 mod resolution;
 mod search;
 mod secret;
@@ -97,3 +98,6 @@ pub use palace::{
     DEFAULT_PALACE_NAME, Deleted, DrawerSummary, Palace, Room, RoomSummary, Wing, WingSummary,
 };
 pub use path::{NameKind, PalacePath, validate_name};
+pub use preferences::{
+    ConnectorPreference, PreferenceCriterion, PreferenceLevel, PreferenceMatch, SourcePreferences,
+};

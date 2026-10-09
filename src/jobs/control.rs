@@ -13,7 +13,7 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{DedupConfig, MiningConfig};
-use crate::domain::{AccessTokens, Job, JobId, JobProgress};
+use crate::domain::{AccessTokens, Job, JobId, JobProgress, SourcePreferences};
 use crate::embed::Embeddings;
 use crate::error::Result;
 use crate::events::{Action, EventBus};
@@ -90,6 +90,7 @@ pub struct JobContext {
     extraction: Extraction,
     /// Deduplication settings (`[dedup]`), for the handlers that write drawers and entities.
     dedup: DedupConfig,
+    preferences: SourcePreferences,
     /// The access tokens of the sources that sign in with OAuth, for the mining handler. None unless the scheduler
     /// was given them.
     credentials: Option<Arc<dyn AccessTokens>>,
@@ -111,6 +112,7 @@ impl JobContext {
             mining: MiningConfig::default(),
             extraction: Extraction::disabled(),
             dedup: DedupConfig::default(),
+            preferences: SourcePreferences::default(),
             credentials: None,
             events: EventBus::new(),
         }
@@ -153,6 +155,19 @@ impl JobContext {
     #[must_use]
     pub fn dedup(&self) -> &DedupConfig {
         &self.dedup
+    }
+
+    /// Share the effective policy with this job invocation.
+    #[must_use]
+    pub fn with_preferences(mut self, preferences: SourcePreferences) -> Self {
+        self.preferences = preferences;
+        self
+    }
+
+    /// The preference policy for evidence processed by this job.
+    #[must_use]
+    pub fn preferences(&self) -> &SourcePreferences {
+        &self.preferences
     }
 
     /// Give this context the daemon's extraction provider.

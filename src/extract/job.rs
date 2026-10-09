@@ -89,14 +89,32 @@ pub async fn run(ctx: &JobContext, job: &mut Job, params: ExtractParams) -> Resu
         if let Some(stop) = ctx.stop_requested() {
             return Ok(stop);
         }
-        let drawers = store
+        let mut drawers = store
             .list_drawers_pending_extraction(wing.as_deref(), pass)
             .await?;
         if drawers.is_empty() {
             break;
         }
+        // Every member of this page remains eligible: source preference only schedules review within the page.
+        let configured = !ctx.preferences().sources.is_empty()
+            || ctx.preferences().default != Default::default();
+        if configured {
+            drawers.sort_by_key(|d| {
+                std::cmp::Reverse(ctx.preferences().resolve(d.source.origin.as_ref()).level)
+            });
+        }
         let texts: Vec<String> = drawers.iter().map(|d| d.content.clone()).collect();
-        let graphs = extraction.extract(&texts).await?;
+        let context: Vec<_> = drawers
+            .iter()
+            .map(|d| ctx.preferences().resolve(d.source.origin.as_ref()))
+            .collect();
+        let graphs = if configured {
+            extraction
+                .extract_with_preferences(&texts, &context)
+                .await?
+        } else {
+            extraction.extract(&texts).await?
+        };
         let (entities_before, relations_before) = (totals.entities, totals.relations);
         for (drawer, graph) in drawers.iter().zip(graphs) {
             let (entities, relations) =

@@ -157,6 +157,8 @@ mod tests {
             document: "a.md".into(),
             chunk: 0,
             revision: "rev1".into(),
+            metadata: None,
+            occurred_at: None,
         }
     }
 

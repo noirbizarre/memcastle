@@ -74,6 +74,9 @@ MemCastle keeps, for each source:
   A secret is never stored, logged or returned, see [Authentication](authentication.md);
 
 and for each document of a source, the **revision** last filed and the **chunks** it became.
+Each mined drawer also snapshots that revision's source metadata and event time in its origin.
+This lets [source preferences](configuration.md#source-preferences) match connector-specific metadata without changing
+how the source identifies itself, and keeps an older drawer's preference criteria explainable after a re-mine.
 
 ### What "incremental" and "idempotent" mean here
 
@@ -83,6 +86,8 @@ and for each document of a source, the **revision** last filed and the **chunks*
   revision and skipped.
   Nothing is duplicated either way, so the cursor is a speed-up, not something correctness depends on.
 - An edited document keeps the drawers whose text did not change and **supersedes** the ones that did.
+  If its metadata changes, the affected chunks are superseded even when their text is the same, to retain the
+  revision-specific evidence context.
   The old text stays as history (`valid_to`), and a search for "as of" an earlier date still finds it.
   Appending to a transcript changes only its last chunk.
 - A document that got shorter closes the chunks past its new end, so stale text is not searchable as if it were current.

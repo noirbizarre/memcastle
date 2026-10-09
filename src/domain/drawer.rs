@@ -58,6 +58,12 @@ pub struct Origin {
     pub chunk: u32,
     /// The document revision this chunk was cut from, so a later revision can be told apart.
     pub revision: String,
+    /// Immutable document metadata at the time this chunk was filed; old revisions must not inherit new criteria.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+    /// Source event time, if known; separate from when this drawer became valid in the palace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurred_at: Option<DateTime<Utc>>,
 }
 
 impl Source {

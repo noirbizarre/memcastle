@@ -115,6 +115,7 @@ pub async fn run(config: Config) -> Result<()> {
         .with_extraction(extraction.clone())
         .with_mining(config.effective_mining())
         .with_dedup(config.dedup.clone())
+        .with_preferences(config.effective_preferences())
         .with_drain_timeout(Duration::from_secs(config.jobs.drain_timeout_secs))
         .with_lease_ttl(Duration::from_secs(config.jobs.lease_ttl_secs));
     if backend.is_shared() {
@@ -154,6 +155,7 @@ pub async fn run(config: Config) -> Result<()> {
         .with_embeddings(embeddings)
         .with_extraction(extraction)
         .with_dedup(config.dedup.clone())
+        .with_preferences(config.effective_preferences())
         // Starts from what the file held at startup and reads the file again whenever it changes, so the daemon
         // and a hand edit never disagree for long (`docs/adr/037`).
         .with_miners(MinerRegistry::new(

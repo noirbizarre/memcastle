@@ -24,7 +24,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::config::{DedupConfig, MiningConfig};
-use crate::domain::{AccessTokens, Job, JobEvent, JobId, JobKind, JobStatus, Priority};
+use crate::domain::{
+    AccessTokens, Job, JobEvent, JobId, JobKind, JobStatus, Priority, SourcePreferences,
+};
 use crate::embed::Embeddings;
 use crate::error::Result;
 use crate::events::{Action, Event, EventBus};
@@ -125,6 +127,7 @@ pub struct Scheduler {
     extraction: Extraction,
     /// The `[dedup]` settings handed to every job's context.
     dedup: DedupConfig,
+    preferences: SourcePreferences,
     /// The access tokens of the sources that sign in with OAuth, handed to every job's context.
     credentials: Option<Arc<dyn AccessTokens>>,
     /// Where a job's changes are announced, and handed to every job's context for the handler's own writes.
@@ -157,6 +160,7 @@ impl Scheduler {
             mining: MiningConfig::default(),
             extraction: Extraction::disabled(),
             dedup: DedupConfig::default(),
+            preferences: SourcePreferences::default(),
             credentials: None,
             events: EventBus::new(),
         }
@@ -194,6 +198,13 @@ impl Scheduler {
     #[must_use]
     pub fn with_dedup(mut self, dedup: DedupConfig) -> Self {
         self.dedup = dedup;
+        self
+    }
+
+    /// Share the daemon's source-preference policy with extraction jobs.
+    #[must_use]
+    pub fn with_preferences(mut self, preferences: SourcePreferences) -> Self {
+        self.preferences = preferences;
         self
     }
 
@@ -857,6 +868,7 @@ impl Scheduler {
             .with_embeddings(self.embeddings.clone())
             .with_extraction(self.extraction.clone())
             .with_dedup(self.dedup.clone())
+            .with_preferences(self.preferences.clone())
             .with_mining(self.mining.clone())
             .with_credentials(self.credentials.clone())
             .with_events(self.events.clone());

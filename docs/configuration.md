@@ -82,6 +82,20 @@ Every key is optional, and a file may set only some of them.
 [palace]
 path = "/home/alice/.local/share/memcastle/default"
 
+# Global fallback for all evidence, including sources not yet installed.
+[preferences]
+default = "normal"              # "low", "normal", or "high"
+[preferences.sources.pi]
+level = "high"
+[[preferences.sources.pi.criteria]]
+path = "working_directory"      # exact JSON metadata key, or dot-separated nested keys
+equals = "/home/alice/work"     # string, number or boolean; exact match
+level = "high"
+
+# Overrides for the palace selected above; unspecified settings inherit.
+[palace.preferences.sources.opencode]
+level = "high"
+
 [server]
 bind = "127.0.0.1"
 port = 8420
@@ -199,6 +213,42 @@ When the total limit is greater than one, the effective background limit is capp
 with a total limit of one, one background job may run.
 Lower the background limit if API reads slow down during large mines or embedding sweeps;
 raise it only when the datastore and CPU have spare capacity.
+
+### Source preferences
+
+`[preferences]` supplies the global fallback; each `[preferences.sources.<connector>]` optionally sets a level and
+`[[preferences.sources.<connector>.criteria]]` can select a level for a matching source-document metadata value.
+Connector names are mining adapter names (`pi`, `opencode`, `directory`, or an installed source), not broad drawer kinds.
+There is no shared criterion vocabulary: use JSON keys actually exposed by that connector, including nested paths
+separated by dots; keys must consist of letters, digits, underscores or hyphens.
+Rules compare JSON strings, numbers and booleans exactly, without case folding or coercion.
+The longest matching path wins; equal-depth matches use their first declaration.
+An unknown connector or a drawer without a mining origin uses the default;
+an absent key or unmatched value uses its connector level, or the default when no level was set.
+An unknown connector *in configuration* is allowed so a source can be configured before it is installed.
+
+The global configuration can also contain `[palace.preferences]` with the same keys and nested connector tables.
+Optionally put a preferences-only file at `<palace.path>/preferences.toml`:
+
+```toml
+[preferences]
+default = "normal"
+[preferences.sources.pi]
+level = "normal"  # explicitly replaces a global `high`
+criteria = []     # explicitly clears inherited connector criteria
+```
+
+Precedence is built-in `normal`, global `[preferences]`, global `[palace.preferences]`, then the palace-local file.
+Only supplied fields replace earlier fields; a connector level does not erase inherited criteria.
+The selected `palace.path` (including environment and `--palace` overrides) determines which local file is read.
+This file is distinct from a project's `.config/memcastle.toml`.
+Changes take effect on daemon restart; previous source-document metadata is retained on the originating drawer.
+
+Levels shape ranks within relevant candidates and the read-side hint on unresolved conflicting facts.
+They do not exclude a source, guarantee correctness, raise an extractor's confidence, or reopen superseded memory.
+Explicit corrections and validity still win; relevance, original confidence and freshness remain decisive.
+Search-hit `signals.preference` reports the effective level, connector and matched criterion for inspection.
+See [Source preferences](adr/048-source-preferences.md) for the ranking and inheritance decision.
 
 A remote store also needs a URL and credentials:
 
@@ -470,6 +520,10 @@ and reads one from its standard output:
 ```
 
 One extraction per text, in order, and exit `0`.
+When source preferences are configured, the request also contains `"preferences"`, an array aligned with `"texts"`.
+Each entry has `level`, optional `source` and optional matched `criterion`; without preferences the original request
+shape is unchanged.
+A preference is a cue for evidence selection, not permission to invent a fact or raise its confidence.
 A non-zero exit, output that is not that JSON, or no answer within `timeout_secs` fails the call, and the program is killed.
 The program owns the model and any credential, and the daemon's own `MEMCASTLE_*` variables are removed from its environment.
 
@@ -484,6 +538,8 @@ model = "llama3.1"
 
 MemCastle posts to `{url}/chat/completions` in the OpenAI format, one request per drawer, telling the model the
 vocabulary and asking for JSON.
+With configured source preferences, an additional system message supplies the effective level, connector and matching
+criterion, and explicitly tells the model not to infer truth from that context.
 A hosted endpoint takes `MEMCASTLE_EXTRACTION_API_KEY`, sent as a bearer token.
 An endpoint that cannot be reached or answers with an error fails the job.
 A reply that is not the JSON asked for is read as "nothing found" and logged, so one odd answer cannot block the drawers

@@ -11,6 +11,7 @@
 
 pub mod miners_file;
 pub mod paths;
+pub mod preferences;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -52,12 +53,16 @@ pub struct PalaceConfig {
     /// The directory this palace's data (and, for the embedded backend, its
     /// SurrealDB files) live under.
     pub path: PathBuf,
+    /// Optional preference overrides for the palace served by this configuration.
+    #[serde(default)]
+    pub preferences: preferences::PreferenceLayer,
 }
 
 impl Default for PalaceConfig {
     fn default() -> Self {
         Self {
             path: default_palace_dir(),
+            preferences: preferences::PreferenceLayer::default(),
         }
     }
 }
@@ -836,6 +841,9 @@ impl Default for LoggingConfig {
 /// The fully resolved, validated configuration for one run of the binary.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
+    /// Global source authority preferences, before palace-specific overrides.
+    #[serde(default)]
+    pub preferences: preferences::PreferenceLayer,
     /// Where this palace's data lives.
     #[serde(default)]
     pub palace: PalaceConfig,
@@ -898,6 +906,9 @@ pub struct Config {
     /// daemon refuses to change miners rather than guess which file to write.
     #[serde(skip)]
     pub config_file: Option<PathBuf>,
+    /// Palace-local preference layer, loaded after `palace.path` is resolved.
+    #[serde(skip)]
+    local_preferences: preferences::PreferenceLayer,
 }
 
 impl Config {
@@ -929,6 +940,10 @@ impl Config {
             .or_else(paths::default_config_file);
         config.apply_env_overrides()?;
         config.apply_cli_overrides(overrides);
+        if let Some(local) = preferences::read_local(&config.palace.path.join("preferences.toml"))?
+        {
+            config.local_preferences = local;
+        }
         config.validate()?;
         Ok(config)
     }
@@ -952,6 +967,16 @@ impl Config {
             }
         }
         mining
+    }
+
+    /// Merge the three explicit layers without letting an omitted field reset an inherited setting.
+    #[must_use]
+    pub fn effective_preferences(&self) -> crate::domain::SourcePreferences {
+        let mut policy = crate::domain::SourcePreferences::default();
+        self.preferences.apply(&mut policy);
+        self.palace.preferences.apply(&mut policy);
+        self.local_preferences.apply(&mut policy);
+        policy
     }
 
     /// Apply the command-line layer, which outranks the environment so that a
@@ -1239,6 +1264,9 @@ impl Config {
     ///
     /// Returns [`Error::Config`] describing the first invariant violated.
     pub fn validate(&self) -> Result<()> {
+        self.preferences.validate()?;
+        self.palace.preferences.validate()?;
+        self.local_preferences.validate()?;
         // A relative palace path means different directories for a daemon and
         // the client started from another working directory, so the client
         // would never find the daemon's registry. It also happens when no

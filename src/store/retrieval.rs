@@ -328,6 +328,7 @@ impl SurrealStore {
                         lexical: row.ft_score,
                         semantic: row.distance.map(|d| 1.0 - d),
                         graph: None,
+                        preference: None,
                     },
                     via: Vec::new(),
                 })

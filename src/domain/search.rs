@@ -9,7 +9,7 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::{Drawer, SourceKind};
+use super::{Drawer, PreferenceMatch, SourceKind};
 
 /// The length of every stored embedding.
 ///
@@ -204,12 +204,18 @@ pub struct Signals {
     /// when it was reached through the graph.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graph: Option<f32>,
+    /// The effective authority and matched criterion used to shape this rank.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preference: Option<PreferenceMatch>,
 }
 
 impl Signals {
     /// Whether no leg contributed (nothing worth serialising).
     pub fn is_empty(&self) -> bool {
-        self.lexical.is_none() && self.semantic.is_none() && self.graph.is_none()
+        self.lexical.is_none()
+            && self.semantic.is_none()
+            && self.graph.is_none()
+            && self.preference.is_none()
     }
 }
 
@@ -224,7 +230,10 @@ pub struct SearchHit {
     pub drawer: Drawer,
     /// Relevance, higher is better. Its meaning depends on the ranking used:
     /// BM25 for lexical, cosine similarity for semantic, reciprocal-rank
-    /// fusion for hybrid. Comparable only within one response.
+    /// fusion for hybrid; when a source preference is configured, relevance is
+    /// normalized within the candidate page and adjusted for bounded authority
+    /// and freshness. Original leg scores stay in `signals`. Comparable only
+    /// within one response.
     pub score: f32,
     /// Which legs matched and how strongly.
     #[serde(default, skip_serializing_if = "Signals::is_empty")]
