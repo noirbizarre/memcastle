@@ -241,7 +241,7 @@ async fn either_standard_token_works_and_errors_do_not_disclose_it() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_configured_github_miner_passes_its_scope_to_a_durable_job_and_repeated_mining_is_idempotent()
-{
+ {
     let _fixture = Fixture::new().await;
     let daemon = TestDaemon::start().await;
     let client = reqwest::Client::new();
