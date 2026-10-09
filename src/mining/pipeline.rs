@@ -168,10 +168,11 @@ pub async fn mine<A: SourceAdapter>(
                 let existing = store
                     .get_source_document(source.id, &raw.external_id)
                     .await?;
-                if existing
-                    .as_ref()
-                    .is_some_and(|known| known.revision == raw.revision)
-                {
+                if existing.as_ref().is_some_and(|known| {
+                    known.revision == raw.revision
+                        && known.metadata == raw.metadata
+                        && known.occurred_at == raw.occurred_at
+                }) {
                     stats.unchanged += 1;
                 } else {
                     let canonical = adapter.normalize(&raw)?;
@@ -292,7 +293,16 @@ async fn ingest(
         let index = u32::try_from(position).unwrap_or(u32::MAX);
         let old = old_chunks.iter().find(|old| old.index == index);
         // The same text at the same position is already filed: nothing to write.
-        if let Some(old) = old.filter(|old| old.hash == *hash) {
+        // A metadata-only revision can change a configured criterion or event time; replace its evidence.
+        // A content revision that merely changes the source's modification time must still reuse unchanged chunks:
+        // otherwise appending one paragraph supersedes an entire large document.
+        if let Some(old) = old.filter(|old| {
+            old.hash == *hash
+                && existing.is_some_and(|known| {
+                    known.metadata == raw.metadata
+                        && (known.revision != raw.revision || known.occurred_at == raw.occurred_at)
+                })
+        }) {
             refs.push(old.clone());
             continue;
         }
@@ -333,6 +343,8 @@ async fn ingest(
                     document: raw.external_id.clone(),
                     chunk: index,
                     revision: raw.revision.clone(),
+                    metadata: Some(raw.metadata.clone()),
+                    occurred_at: raw.occurred_at,
                 }),
             },
             canonical.tags.clone(),

@@ -389,9 +389,14 @@ Every hit is the stored drawer, verbatim, plus these fields:
 }
 ```
 
-`score` means what the ranking says (BM25, cosine similarity or reciprocal-rank fusion) and is comparable only within one
-response.
+`score` normally means what the ranking says (BM25, cosine similarity or reciprocal-rank fusion),
+and is comparable only within one response.
 `signals` shows which legs matched and how strongly, and is absent when none did; `via` appears only on expanded hits.
+With source preferences configured, `score` is normalized within the candidate page and includes bounded authority and
+freshness adjustments; the original ranking legs remain in `signals`.
+`signals.preference` gives the effective `level`, the mining `source` when present, and the matched metadata `criterion`
+when one applied; the drawer's `source.origin` retains the original document metadata and revision.
+Preferences never bypass `source_kind`, wing, room or temporal filters.
 Equal scores order by drawer id, so a query ranks identically every time.
 A hit never carries the embedding vector.
 

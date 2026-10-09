@@ -184,3 +184,7 @@ The history is the value.
   performs all controls over REST; a confirmed force-cancel durably requests cancellation before aborting a locally
   owned mining worker and fences its terminal transition against the worker's lease
   (builds on ADR-006 and ADR-041)
+- [ADR-048](048-source-preferences.md) — global and palace-local source authority levels merge field-by-field;
+  connector-specific metadata criteria shape extraction context, conflict hints and relevant retrieval candidates
+  without overriding validity, explicit corrections, confidence or provenance
+  (builds on ADR-023, ADR-024, ADR-032 and ADR-046)

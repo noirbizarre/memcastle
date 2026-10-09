@@ -145,6 +145,21 @@ impl SurrealStore {
         facts: &mut [Relationship],
         at: DateTime<Utc>,
     ) -> Result<()> {
+        self.attach_lifecycle_with_preferences(
+            facts,
+            at,
+            &crate::domain::SourcePreferences::default(),
+        )
+        .await
+    }
+
+    /// Read-side conflict hint: preserve every assertion while explaining which evidence is currently strongest.
+    pub async fn attach_lifecycle_with_preferences(
+        &self,
+        facts: &mut [Relationship],
+        at: DateTime<Utc>,
+        preferences: &crate::domain::SourcePreferences,
+    ) -> Result<()> {
         let links = self
             .fact_links(&facts.iter().map(|f| f.id).collect::<Vec<_>>())
             .await?;
@@ -218,9 +233,26 @@ impl SurrealStore {
                             let explicit = |edge: &Relationship| {
                                 edge.assertion.is_some() || edge.provenance.is_none()
                             };
+                            let quality = |edge: &Relationship| {
+                                if preferences.sources.is_empty()
+                                    && preferences.default == Default::default()
+                                {
+                                    return edge.confidence;
+                                }
+                                let origin =
+                                    edge.provenance.as_ref().and_then(|p| p.origin.as_ref());
+                                let occurred_at = origin
+                                    .and_then(|origin| origin.occurred_at)
+                                    .unwrap_or(edge.valid_from);
+                                let age = (at - occurred_at).num_days().max(0) as f32;
+                                let freshness = 0.12 / (1.0 + age / 30.0);
+                                edge.confidence
+                                    + freshness
+                                    + preferences.resolve(origin).level.adjustment() * 0.5
+                            };
                             explicit(a)
                                 .cmp(&explicit(b))
-                                .then_with(|| a.confidence.total_cmp(&b.confidence))
+                                .then_with(|| quality(a).total_cmp(&quality(b)))
                                 .then_with(|| a.valid_from.cmp(&b.valid_from))
                                 .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
                         })
@@ -231,7 +263,15 @@ impl SurrealStore {
                 state,
                 links: relevant,
                 preferred,
-                basis: preferred.map(|_| "explicit assertion, then confidence, validity start, fact ID (ranking only; conflict remains unresolved)".to_string()),
+                basis: preferred.map(|id| {
+                    if preferences.sources.is_empty() && preferences.default == Default::default() {
+                        return "explicit assertion, then confidence, validity start, fact ID (ranking only; conflict remains unresolved)".to_string();
+                    }
+                    let matched = candidates.iter().find(|candidate| candidate.id == id).map(|candidate| {
+                        preferences.resolve(candidate.provenance.as_ref().and_then(|p| p.origin.as_ref()))
+                    });
+                    format!("explicit assertion, then confidence + bounded freshness + source preference ({matched:?}), validity start, fact ID (ranking only; conflict remains unresolved)")
+                }),
             });
         }
         Ok(())
@@ -242,6 +282,17 @@ impl SurrealStore {
         &self,
         id: RelationshipId,
         at: Option<DateTime<Utc>>,
+    ) -> Result<Vec<Relationship>> {
+        self.fact_history_with_preferences(id, at, &crate::domain::SourcePreferences::default())
+            .await
+    }
+
+    /// Fetch a fact's history and explain conflicts using the served palace's effective policy.
+    pub async fn fact_history_with_preferences(
+        &self,
+        id: RelationshipId,
+        at: Option<DateTime<Utc>>,
+        preferences: &crate::domain::SourcePreferences,
     ) -> Result<Vec<Relationship>> {
         let mut response = self
             .db
@@ -280,8 +331,12 @@ impl SurrealStore {
         if let Some(at) = at {
             facts.retain(|fact| fact.valid_from <= at);
         }
-        self.attach_lifecycle(&mut facts, at.unwrap_or_else(Utc::now))
-            .await?;
+        self.attach_lifecycle_with_preferences(
+            &mut facts,
+            at.unwrap_or_else(Utc::now),
+            preferences,
+        )
+        .await?;
         Ok(facts)
     }
 }
@@ -316,6 +371,121 @@ mod tests {
     use super::*;
     use crate::domain::{DrawerId, FactProvenance, NewRelationship, Predicate};
     use serde_json::json;
+
+    #[tokio::test]
+    async fn source_preference_shapes_a_conflict_without_resolving_or_hiding_either_fact() {
+        use crate::domain::{
+            ConnectorPreference, Origin, PreferenceLevel, SourceId, SourcePreferences,
+        };
+
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let subject = store
+            .get_or_create_entity("Ada", "person", json!({}))
+            .await
+            .unwrap()
+            .id;
+        let paris = store
+            .get_or_create_entity("Paris", "place", json!({}))
+            .await
+            .unwrap()
+            .id;
+        let london = store
+            .get_or_create_entity("London", "place", json!({}))
+            .await
+            .unwrap()
+            .id;
+        let mut facts = Vec::new();
+        for (source, to) in [("ordinary", paris), ("favored", london)] {
+            let fact = store
+                .create_relationship_with(
+                    RelationshipId::new(),
+                    NewRelationship {
+                        from: subject,
+                        to,
+                        predicate: "located_in".into(),
+                        confidence: 0.8,
+                    },
+                    Utc::now(),
+                    Some(FactProvenance {
+                        drawer: DrawerId::new(),
+                        origin: Some(Origin {
+                            source_id: SourceId::new(),
+                            source: source.into(),
+                            document: "d".into(),
+                            chunk: 0,
+                            revision: "r".into(),
+                            metadata: None,
+                            occurred_at: Some(Utc::now()),
+                        }),
+                        job_id: None,
+                        extractor: "test".into(),
+                        extracted_at: Utc::now(),
+                    }),
+                )
+                .await
+                .unwrap();
+            store.reconcile_extracted_fact(&fact).await.unwrap();
+            facts.push(fact);
+        }
+        let mut policy = SourcePreferences::default();
+        policy.sources.insert(
+            "favored".into(),
+            ConnectorPreference {
+                level: Some(PreferenceLevel::High),
+                ..Default::default()
+            },
+        );
+        store
+            .attach_lifecycle_with_preferences(&mut facts, Utc::now(), &policy)
+            .await
+            .unwrap();
+        assert!(
+            facts
+                .iter()
+                .all(|fact| fact.lifecycle.as_ref().unwrap().state == FactState::Conflicting)
+        );
+        assert!(
+            facts
+                .iter()
+                .all(|fact| fact.lifecycle.as_ref().unwrap().preferred == Some(facts[1].id))
+        );
+        assert!(
+            facts[0]
+                .lifecycle
+                .as_ref()
+                .unwrap()
+                .basis
+                .as_ref()
+                .unwrap()
+                .contains("source preference")
+        );
+
+        let explicit = store
+            .create_relationship(
+                RelationshipId::new(),
+                NewRelationship {
+                    from: subject,
+                    to: paris,
+                    predicate: "located_in".into(),
+                    confidence: 0.1,
+                },
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+        store.reconcile_extracted_fact(&explicit).await.unwrap();
+        let explicit_id = explicit.id;
+        facts.push(explicit);
+        store
+            .attach_lifecycle_with_preferences(&mut facts, Utc::now(), &policy)
+            .await
+            .unwrap();
+        assert_eq!(
+            facts[1].lifecycle.as_ref().unwrap().preferred,
+            Some(explicit_id),
+            "an explicit assertion must outrank even favored extracted evidence"
+        );
+    }
 
     #[tokio::test]
     async fn independent_evidence_confirms_and_disagreement_remains_visible() {

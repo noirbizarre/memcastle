@@ -68,7 +68,14 @@ impl AppServices {
     ) -> Result<Vec<Relationship>> {
         Self::require_read(mode, "entity_relationships")?;
         self.require_entity(entity).await?;
-        self.store.list_relationships(entity, include_expired).await
+        let mut facts = self
+            .store
+            .list_relationships_raw(entity, include_expired)
+            .await?;
+        self.store
+            .attach_lifecycle_with_preferences(&mut facts, Utc::now(), &self.preferences)
+            .await?;
+        Ok(facts)
     }
 
     /// A fact and the assertions linked to it, with their explanations at the requested time.
@@ -79,7 +86,9 @@ impl AppServices {
         mode: MemoryMode,
     ) -> Result<Vec<Relationship>> {
         Self::require_read(mode, "fact_history")?;
-        self.store.fact_history(id, at).await
+        self.store
+            .fact_history_with_preferences(id, at, &self.preferences)
+            .await
     }
 
     /// Relationships valid at an instant, retaining both sides of any unresolved disagreement.
@@ -91,9 +100,11 @@ impl AppServices {
     ) -> Result<Vec<Relationship>> {
         Self::require_read(mode, "entity_relationships")?;
         self.require_entity(entity).await?;
-        let mut facts = self.store.list_relationships(entity, true).await?;
+        let mut facts = self.store.list_relationships_raw(entity, true).await?;
         facts.retain(|fact| fact.valid_from <= at && fact.valid_to.is_none_or(|end| end > at));
-        self.store.attach_lifecycle(&mut facts, at).await?;
+        self.store
+            .attach_lifecycle_with_preferences(&mut facts, at, &self.preferences)
+            .await?;
         Ok(facts)
     }
 
@@ -245,7 +256,7 @@ impl AppServices {
         // An edge whose far end was cut by the cap is dropped: a line to a node that is not drawn is noise.
         edges.retain(|edge| seen.contains(&edge.from) && seen.contains(&edge.to));
         self.store
-            .attach_lifecycle(&mut edges, chrono::Utc::now())
+            .attach_lifecycle_with_preferences(&mut edges, chrono::Utc::now(), &self.preferences)
             .await?;
         Ok(GraphView {
             nodes,

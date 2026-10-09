@@ -32,6 +32,94 @@ async fn daemon() -> TestDaemon {
     .await
 }
 
+#[tokio::test]
+async fn a_configured_document_criterion_ranks_relevant_mined_evidence_and_explains_why() {
+    let source = tempfile::tempdir().unwrap();
+    let file = source.path().join("decision.md");
+    std::fs::write(&file, "Aurora protocol routes blue messages").unwrap();
+    std::fs::write(
+        source.path().join("draft.md"),
+        "Aurora protocol routes blue messages",
+    )
+    .unwrap();
+    let config = format!(
+        "[sources.directory]\nlevel = 'low'\n[[sources.directory.criteria]]\npath = 'path'\nequals = '{}'\nlevel = 'high'",
+        file.display(),
+    );
+    let daemon = TestDaemon::start_configured(move |settings| {
+        settings.preferences = toml::from_str(&config).unwrap();
+    })
+    .await;
+    let base = daemon.base_url.clone();
+    mine(&base, source.path()).await;
+    let response = client()
+        .get(format!("{base}/api/search"))
+        .query(&[("q", "Aurora protocol"), ("ranking", "lexical")])
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_success());
+    let hits: Value = response.json().await.unwrap();
+    assert_eq!(
+        hits.as_array().unwrap().len(),
+        2,
+        "both documents remain evidence"
+    );
+    let hit = &hits.as_array().unwrap()[0];
+    assert_eq!(hit["signals"]["preference"]["level"], "high");
+    assert_eq!(hit["signals"]["preference"]["source"], "directory");
+    assert_eq!(hit["signals"]["preference"]["criterion"], "path");
+    assert_eq!(
+        hit["source"]["origin"]["metadata"]["path"],
+        file.display().to_string()
+    );
+    assert_eq!(hits[1]["signals"]["preference"]["level"], "low");
+}
+
+#[tokio::test]
+async fn metadata_only_remining_keeps_the_old_event_time_on_historical_evidence() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "decision.md",
+        "Aurora protocol routes blue messages",
+        1_700_000_000,
+    );
+    let daemon = TestDaemon::start().await;
+    let base = &daemon.base_url;
+    mine(base, dir.path()).await;
+    let first = get(base, "/api/search?q=Aurora%20protocol&ranking=lexical").await;
+    let previous = &first[0];
+    let first_id = previous["id"].clone();
+    let first_time = previous["source"]["origin"]["occurred_at"].clone();
+
+    // The directory adapter's revision hashes the text, not the file's timestamp.
+    write(
+        dir.path(),
+        "decision.md",
+        "Aurora protocol routes blue messages",
+        1_700_000_100,
+    );
+    let response = client().post(format!("{base}/api/jobs"))
+        .json(&json!({"type": "mine", "path": dir.path(), "wing": "docs", "full": true, "requested_by": "test"}))
+        .send().await.unwrap();
+    assert!(response.status().is_success());
+    let job: Job = response.json().await.unwrap();
+    wait_for_job_status(&client(), base, job.id, JobStatus::Completed).await;
+    let all = get(
+        base,
+        "/api/search?q=Aurora%20protocol&ranking=lexical&include_historical=true",
+    )
+    .await;
+    let versions = all.as_array().unwrap();
+    assert_eq!(versions.len(), 2);
+    let old = versions.iter().find(|hit| hit["id"] == first_id).unwrap();
+    let new = versions.iter().find(|hit| hit["id"] != first_id).unwrap();
+    assert_eq!(old["source"]["origin"]["occurred_at"], first_time);
+    assert_ne!(new["source"]["origin"]["occurred_at"], first_time);
+    assert!(old["valid_to"].is_string());
+}
+
 /// Put `content` at `name` under `dir`, with a modification time `seconds` after the epoch so the mining cursor
 /// ordering never depends on how fast the test runs.
 fn write(dir: &Path, name: &str, content: &str, seconds: u64) {

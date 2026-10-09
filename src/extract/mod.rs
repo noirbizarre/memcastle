@@ -23,6 +23,7 @@ use serde::Deserialize;
 use crate::config::{ExtractionConfig, ExtractionProvider};
 use crate::domain::{
     EntityKind, ExtractedEntity, ExtractedGraph, ExtractedRelation, Limits, Predicate,
+    PreferenceMatch,
 };
 use crate::error::{Error, Result};
 
@@ -46,6 +47,15 @@ pub trait Extractor: Send + Sync + 'static {
 
     /// Extract from `texts`.
     fn extract<'a>(&'a self, texts: &'a [String]) -> ExtractFuture<'a>;
+
+    /// Implementations that can consume per-text evidence context override this; others still see the same text.
+    fn extract_with_preferences<'a>(
+        &'a self,
+        texts: &'a [String],
+        _context: &'a [PreferenceMatch],
+    ) -> ExtractFuture<'a> {
+        self.extract(texts)
+    }
 }
 
 /// The daemon's extraction handle: a provider, or nothing.
@@ -154,13 +164,26 @@ impl Extraction {
     /// [`Error::ExtractionNotConfigured`] without a provider, [`Error::ExtractionFailed`] when it fails or answers
     /// with the wrong number of graphs.
     pub async fn extract(&self, texts: &[String]) -> Result<Vec<ExtractedGraph>> {
+        self.extract_with_preferences(texts, &[]).await
+    }
+
+    /// Pass provenance context alongside the text without changing the stored drawer or provider confidence.
+    pub async fn extract_with_preferences(
+        &self,
+        texts: &[String],
+        context: &[PreferenceMatch],
+    ) -> Result<Vec<ExtractedGraph>> {
         let Some(provider) = &self.provider else {
             return Err(Error::ExtractionNotConfigured);
         };
         let mut graphs = Vec::with_capacity(texts.len());
-        for batch in texts.chunks(self.batch_size.max(1)) {
+        for (index, batch) in texts.chunks(self.batch_size.max(1)).enumerate() {
             let truncated: Vec<String> = batch.iter().map(|text| truncate(text)).collect();
-            let answered = provider.extract(&truncated).await?;
+            let start = index * self.batch_size.max(1);
+            let matching = context.get(start..start + batch.len()).unwrap_or(&[]);
+            let answered = provider
+                .extract_with_preferences(&truncated, matching)
+                .await?;
             if answered.len() != batch.len() {
                 return Err(Error::ExtractionFailed {
                     message: format!(

@@ -12,7 +12,7 @@
 
 use chrono::{DateTime, NaiveDate, Utc};
 
-use crate::domain::SourceKind;
+use crate::domain::{SourceKind, SourcePreferences};
 use crate::error::{Error, Result};
 use crate::store::{MatchMode, SurrealStore};
 
@@ -235,31 +235,82 @@ pub async fn search(
     query: &SearchQuery,
     limit: u32,
     vector: Option<&[f32]>,
+    preferences: &SourcePreferences,
 ) -> Result<Vec<SearchHit>> {
+    // Keep enough relevant candidates that a preference can lift a near miss without letting an unrelated memory
+    // enter the results. The original relevance leg still chooses what is eligible.
+    let pool = if preferences.sources.is_empty() && preferences.default == Default::default() {
+        limit
+    } else {
+        limit.saturating_mul(4).clamp(20, 200)
+    };
     let mut hits = match resolve_strategy(query.ranking, vector.is_some())? {
-        Strategy::Lexical => lexical_search(store, &query.text, limit, &query.filter).await?,
+        Strategy::Lexical => lexical_search(store, &query.text, pool, &query.filter).await?,
         Strategy::Semantic => {
             // `resolve_strategy` returned `Semantic` only with a vector.
             let vector = vector.unwrap_or_default();
-            store.search_vector(vector, limit, &query.filter).await?
+            store.search_vector(vector, pool, &query.filter).await?
         }
         Strategy::Hybrid => {
             let vector = vector.unwrap_or_default();
             store
-                .search_hybrid(&query.text, vector, limit, &query.filter)
+                .search_hybrid(&query.text, vector, pool, &query.filter)
                 .await?
         }
     };
+    rank_preferred(&mut hits, preferences);
+    hits.truncate(limit as usize);
     if query.expand {
         // Graph expansion enriches, it never reorders or replaces: the direct
         // hits keep their ranks and the graph-reached drawers follow them, best
         // first, each saying which entities connect it. Up to `limit` more, so
         // a full page of direct hits still gets its related memory.
         let seeds: Vec<_> = hits.iter().map(|hit| hit.drawer.id).collect();
-        let related = store.expand_via_graph(&seeds, limit, &query.filter).await?;
+        let mut related = store.expand_via_graph(&seeds, pool, &query.filter).await?;
+        rank_preferred(&mut related, preferences);
+        related.truncate(limit as usize);
         hits.extend(related);
     }
     Ok(hits)
+}
+
+/// Normalize relevance within the candidate page before adding bounded source and freshness signals.
+fn rank_preferred(hits: &mut [SearchHit], preferences: &SourcePreferences) {
+    if hits.is_empty()
+        || (preferences.sources.is_empty() && preferences.default == Default::default())
+    {
+        return;
+    }
+    let high = hits
+        .iter()
+        .map(|hit| hit.score)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let low = hits
+        .iter()
+        .map(|hit| hit.score)
+        .fold(f32::INFINITY, f32::min);
+    let range = (high - low).max(f32::EPSILON);
+    let now = chrono::Utc::now();
+    for hit in hits.iter_mut() {
+        let matched = preferences.resolve(hit.drawer.source.origin.as_ref());
+        let occurred_at = hit
+            .drawer
+            .source
+            .origin
+            .as_ref()
+            .and_then(|origin| origin.occurred_at)
+            .unwrap_or(hit.drawer.valid_from);
+        let age = (now - occurred_at).num_days().max(0) as f32;
+        let freshness = 0.12 / (1.0 + age / 30.0);
+        // Original per-leg scores remain in `signals`; a bounded normalized score is comparable within this page.
+        hit.score = (hit.score - low) / range + freshness + matched.level.adjustment();
+        hit.signals.preference = Some(matched);
+    }
+    hits.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then_with(|| a.drawer.id.to_string().cmp(&b.drawer.id.to_string()))
+    });
 }
 
 /// Search drawer content lexically, returning at most `limit` hits ordered
@@ -296,6 +347,84 @@ pub async fn lexical_search(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{Drawer, DrawerId, PreferenceLevel, Provenance, RoomId, Source};
+
+    #[test]
+    fn a_stale_preferred_hit_does_not_defeat_fresher_evidence_with_equal_relevance() {
+        let make = |source: &str, age: i64| {
+            let mut drawer = Drawer::new(
+                DrawerId::new(),
+                RoomId::new(),
+                "same terms".into(),
+                Source::new(SourceKind::File, None, None),
+                Vec::new(),
+                Provenance {
+                    requested_by: "http".into(),
+                    job_id: None,
+                },
+            );
+            drawer.source.origin = Some(crate::domain::Origin {
+                source_id: crate::domain::SourceId::new(),
+                source: source.into(),
+                document: "d".into(),
+                chunk: 0,
+                revision: "r".into(),
+                metadata: None,
+                occurred_at: Some(chrono::Utc::now() - chrono::Duration::days(age)),
+            });
+            SearchHit {
+                drawer,
+                score: 1.0,
+                signals: Signals::default(),
+                via: Vec::new(),
+            }
+        };
+        let mut policy = SourcePreferences::default();
+        policy.sources.insert(
+            "favored".into(),
+            crate::domain::ConnectorPreference {
+                level: Some(PreferenceLevel::High),
+                ..Default::default()
+            },
+        );
+        let mut hits = vec![make("favored", 365), make("ordinary", 0)];
+        rank_preferred(&mut hits, &policy);
+        assert_eq!(
+            hits[0].drawer.source.origin.as_ref().unwrap().source,
+            "ordinary"
+        );
+        assert_eq!(
+            hits[1].signals.preference.as_ref().unwrap().level,
+            PreferenceLevel::High
+        );
+    }
+
+    #[test]
+    fn a_neutral_policy_preserves_original_ranking_scores() {
+        let drawer = Drawer::new(
+            DrawerId::new(),
+            RoomId::new(),
+            "test".into(),
+            Source::new(SourceKind::Manual, None, None),
+            Vec::new(),
+            Provenance {
+                requested_by: "http".into(),
+                job_id: None,
+            },
+        );
+        let mut hits = vec![SearchHit {
+            drawer,
+            score: 4.2,
+            signals: Signals {
+                lexical: Some(4.2),
+                ..Default::default()
+            },
+            via: Vec::new(),
+        }];
+        rank_preferred(&mut hits, &SourcePreferences::default());
+        assert_eq!(hits[0].score, 4.2);
+        assert!(hits[0].signals.preference.is_none());
+    }
 
     #[test]
     fn options_default_to_a_current_auto_search() {

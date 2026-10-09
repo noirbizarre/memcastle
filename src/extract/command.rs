@@ -15,6 +15,8 @@
 //! One extraction per text, in order. A kind or predicate outside the vocabulary is read as `other` or
 //! `related_to`. The program owns credentials and the model, which is the point: a daemon that stores API keys is a
 //! daemon that has to keep them safe.
+//! With a configured source preference, an optional `preferences` array aligns with `texts` and carries each
+//! input's effective level and matching criterion; providers must still judge assertions from the text.
 
 use std::process::Stdio;
 use std::time::Duration;
@@ -24,7 +26,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 use super::{ExtractFuture, Extractor, WireGraph};
-use crate::domain::{EntityKind, ExtractedGraph, Predicate};
+use crate::domain::{EntityKind, ExtractedGraph, Predicate, PreferenceMatch};
 use crate::error::{Error, Result};
 
 /// How much of the program's stderr an error carries.
@@ -54,22 +56,29 @@ impl CommandExtractor {
         }
     }
 
-    async fn run(&self, texts: &[String]) -> Result<Vec<ExtractedGraph>> {
+    async fn run(
+        &self,
+        texts: &[String],
+        context: &[PreferenceMatch],
+    ) -> Result<Vec<ExtractedGraph>> {
         let (program, args) = self
             .argv
             .split_first()
             .ok_or_else(|| Error::ExtractionFailed {
                 message: "extraction.command is empty".to_string(),
             })?;
-        let request = serde_json::json!({
+        let mut request = serde_json::json!({
             "model": self.model,
             "vocabulary": {
                 "kinds": EntityKind::ALL.map(EntityKind::as_str),
                 "predicates": Predicate::ALL.map(Predicate::as_str),
             },
             "texts": texts,
-        })
-        .to_string();
+        });
+        if !context.is_empty() {
+            request["preferences"] = serde_json::json!(context);
+        }
+        let request = request.to_string();
 
         let mut command = Command::new(program);
         command
@@ -141,7 +150,15 @@ impl Extractor for CommandExtractor {
     }
 
     fn extract<'a>(&'a self, texts: &'a [String]) -> ExtractFuture<'a> {
-        Box::pin(self.run(texts))
+        Box::pin(self.run(texts, &[]))
+    }
+
+    fn extract_with_preferences<'a>(
+        &'a self,
+        texts: &'a [String],
+        context: &'a [PreferenceMatch],
+    ) -> ExtractFuture<'a> {
+        Box::pin(self.run(texts, context))
     }
 }
 
@@ -163,7 +180,7 @@ mod tests {
             r#"cat >/dev/null; printf '%s' '{"extractions":[{"entities":[{"name":"Ada","kind":"person"}]},{}]}'"#,
         );
         let graphs = provider
-            .run(&["a".to_string(), "b".to_string()])
+            .run(&["a".to_string(), "b".to_string()], &[])
             .await
             .expect("answers");
         assert_eq!(graphs.len(), 2);
@@ -180,14 +197,28 @@ mod tests {
                case "$req" in *'"model":"m"'*) m=1;; *) m=0;; esac
                case "$req" in *hello*) t=1;; *) t=0;; esac
                if [ "$v$m$t" = 111 ]; then printf '%s' '{"extractions":[{"entities":[{"name":"Seen"}]}]}'; else printf '%s' '{"extractions":[{}]}'; fi"#);
-        let graphs = provider.run(&["hello".to_string()]).await.unwrap();
+        let graphs = provider.run(&["hello".to_string()], &[]).await.unwrap();
         assert_eq!(graphs[0].entities.len(), 1, "the request lacked a piece");
+    }
+
+    #[tokio::test]
+    async fn a_configured_preference_reaches_the_program_alongside_its_text() {
+        let provider = sh(
+            r#"req=$(cat); case "$req" in *'"level":"high"'*'"criterion":"path"'*) printf '%s' '{"extractions":[{"entities":[{"name":"Seen"}]}]}' ;; *) printf '%s' '{"extractions":[{}]}' ;; esac"#,
+        );
+        let context = [PreferenceMatch {
+            level: crate::domain::PreferenceLevel::High,
+            source: Some("directory".into()),
+            criterion: Some("path".into()),
+        }];
+        let graphs = provider.run(&["text".into()], &context).await.unwrap();
+        assert_eq!(graphs[0].entities.len(), 1);
     }
 
     #[tokio::test]
     async fn a_failing_program_is_reported_with_its_stderr() {
         let error = sh("echo boom >&2; exit 3")
-            .run(&["x".to_string()])
+            .run(&["x".to_string()], &[])
             .await
             .expect_err("fails");
         let message = error.to_string();
@@ -200,7 +231,7 @@ mod tests {
     #[tokio::test]
     async fn output_that_is_not_the_protocol_is_reported() {
         let error = sh("cat >/dev/null; echo nope")
-            .run(&["x".to_string()])
+            .run(&["x".to_string()], &[])
             .await
             .expect_err("not json");
         assert!(matches!(error, Error::ExtractionFailed { .. }), "{error}");
@@ -214,7 +245,7 @@ mod tests {
             Duration::from_millis(200),
         );
         let error = provider
-            .run(&["x".to_string()])
+            .run(&["x".to_string()], &[])
             .await
             .expect_err("times out");
         assert!(error.to_string().contains("did not answer"), "{error}");
@@ -227,7 +258,10 @@ mod tests {
             None,
             Duration::from_secs(5),
         );
-        let error = provider.run(&["x".to_string()]).await.expect_err("missing");
+        let error = provider
+            .run(&["x".to_string()], &[])
+            .await
+            .expect_err("missing");
         assert!(
             error.to_string().contains("/nonexistent/extract-program"),
             "{error}"

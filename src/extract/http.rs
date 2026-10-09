@@ -15,7 +15,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use super::{ExtractFuture, Extractor, WireGraph};
-use crate::domain::{EntityKind, ExtractedGraph, Predicate, Secret};
+use crate::domain::{EntityKind, ExtractedGraph, Predicate, PreferenceMatch, Secret};
 use crate::error::{Error, Result};
 
 /// Calls `POST {base_url}/chat/completions`.
@@ -82,15 +82,23 @@ impl HttpExtractor {
         )
     }
 
-    async fn one(&self, text: &str) -> Result<ExtractedGraph> {
+    async fn one(
+        &self,
+        text: &str,
+        preference: Option<&PreferenceMatch>,
+    ) -> Result<ExtractedGraph> {
+        let context = preference.map(|preference| format!("Source preference: {:?} (connector: {}, matched criterion: {}). This is only a cue for what to examine; do not infer truth from it or invent facts.", preference.level, preference.source.as_deref().unwrap_or("unknown"), preference.criterion.as_deref().unwrap_or("none")));
+        let mut messages =
+            vec![serde_json::json!({"role": "system", "content": Self::system_prompt()})];
+        if let Some(context) = context {
+            messages.push(serde_json::json!({"role": "system", "content": context}));
+        }
+        messages.push(serde_json::json!({"role": "user", "content": text}));
         let mut request = self.client.post(&self.endpoint).json(&serde_json::json!({
             "model": self.model,
             "temperature": 0,
             "response_format": {"type": "json_object"},
-            "messages": [
-                {"role": "system", "content": Self::system_prompt()},
-                {"role": "user", "content": text},
-            ],
+            "messages": messages,
         }));
         if let Some(key) = &self.api_key {
             request = request.bearer_auth(key.expose());
@@ -157,7 +165,21 @@ impl Extractor for HttpExtractor {
         Box::pin(async move {
             let mut graphs = Vec::with_capacity(texts.len());
             for text in texts {
-                graphs.push(self.one(text).await?);
+                graphs.push(self.one(text, None).await?);
+            }
+            Ok(graphs)
+        })
+    }
+
+    fn extract_with_preferences<'a>(
+        &'a self,
+        texts: &'a [String],
+        context: &'a [PreferenceMatch],
+    ) -> ExtractFuture<'a> {
+        Box::pin(async move {
+            let mut graphs = Vec::with_capacity(texts.len());
+            for (index, text) in texts.iter().enumerate() {
+                graphs.push(self.one(text, context.get(index)).await?);
             }
             Ok(graphs)
         })

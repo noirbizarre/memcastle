@@ -63,6 +63,8 @@ mod tests {
             document: "notes.md".to_string(),
             chunk,
             revision: "r1".to_string(),
+            metadata: None,
+            occurred_at: None,
         }
     }
 
