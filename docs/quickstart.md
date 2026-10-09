@@ -36,8 +36,9 @@ MemCastle is running
   jobs       0 queued, 0 running, 0 paused
   mode       full
   auth       disabled
-Restart with `memcastle daemon restart`, stop with `memcastle daemon stop`.
 ```
+
+Restart with `memcastle daemon restart`, stop with `memcastle daemon stop`.
 
 The `mcp` line is the URL to give your agent, see [Connect an MCP client](mcp-clients.md).
 
