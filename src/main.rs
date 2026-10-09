@@ -266,8 +266,8 @@ async fn run_command(
         Command::Mine(args) => cmd_mine(&config, mode, args).await,
         Command::Sources => cmd_sources(&config, mode).await,
         Command::Source(command) => cmd_source(&config, mode, command).await,
-        Command::Miner(command) => cmd_miner(&config, command).await,
-        Command::Trigger(command) => cmd_trigger(&config, command).await,
+        Command::Miner(command) => cmd_miner(&config, mode, command).await,
+        Command::Trigger(command) => cmd_trigger(&config, mode, command).await,
         Command::Integration(command) => cmd_integration(&config, &command),
         Command::Note(args) => cmd_note(&config, mode, args).await,
         Command::Checkpoint(args) => cmd_checkpoint(&config, mode, args).await,
@@ -975,21 +975,22 @@ async fn cmd_source_auth(config: &Config, name: &str) -> Result<()> {
 /// `memcastle miner ...`: configure what the daemon mines.
 ///
 /// Every subcommand is an HTTP call to the daemon's miner routes, the same ones MCP's read-only tools sit beside, so
-/// the rules (validation, scope widening, the file's comments) live in one place. Administrative: no memory mode is
-/// sent, like `source install`, because the mode governs memory and not what the daemon is configured to mine.
-async fn cmd_miner(config: &Config, command: MinerCommand) -> Result<()> {
+/// the rules (validation, scope widening, the file's comments) live in one place. Only configuration changes ignore
+/// memory mode; reads and runs must carry it so `disabled` and `read_only` cannot be bypassed by the CLI.
+async fn cmd_miner(config: &Config, mode: Option<MemoryMode>, command: MinerCommand) -> Result<()> {
     use memcastle::client::miner_view as view;
     let daemon = client(config, None);
+    let session = client(config, mode);
     match command {
         MinerCommand::List => {
-            let report = daemon.list_miners().await?;
+            let report = session.list_miners().await?;
             print_for_terminal_or_json(
                 |painter, width| view::render_miners(&report, painter, width),
                 &report,
             )
         }
         MinerCommand::Get(args) => {
-            let miner = daemon.show_miner(&args.name).await?;
+            let miner = session.show_miner(&args.name).await?;
             print_for_terminal_or_json(|painter, _| view::render_miner(&miner, painter), &miner)
         }
         MinerCommand::Set(args) => {
@@ -1038,7 +1039,7 @@ async fn cmd_miner(config: &Config, command: MinerCommand) -> Result<()> {
             print_for_terminal_or_json(|painter, _| view::render_reload(&reload, painter), &reload)
         }
         MinerCommand::Run(args) => {
-            let job = daemon
+            let job = session
                 .run_miner_with_options(&args.name, args.full, &args.options, args.allow_broaden)
                 .await?;
             print_submitted(&job)
@@ -1049,21 +1050,21 @@ async fn cmd_miner(config: &Config, command: MinerCommand) -> Result<()> {
 /// `memcastle trigger ...`: configure what asks for a mining run on its own.
 ///
 /// Every subcommand is an HTTP call to the daemon's trigger routes, the same ones MCP's read-only tools sit beside.
-/// Administrative like `miner`: no memory mode is sent, because the mode governs memory and not what the daemon is
-/// configured to do unattended.
-async fn cmd_trigger(config: &Config, command: TriggerCommand) -> Result<()> {
+/// Only configuration changes ignore memory mode; reads and firing a run must carry the caller's session mode.
+async fn cmd_trigger(config: &Config, mode: Option<MemoryMode>, command: TriggerCommand) -> Result<()> {
     use memcastle::client::trigger_view as view;
     let daemon = client(config, None);
+    let session = client(config, mode);
     match command {
         TriggerCommand::List => {
-            let report = daemon.list_triggers().await?;
+            let report = session.list_triggers().await?;
             print_for_terminal_or_json(
                 |painter, width| view::render_triggers(&report, painter, width),
                 &report,
             )
         }
         TriggerCommand::Get(args) => {
-            let trigger = daemon.show_trigger(&args.name).await?;
+            let trigger = session.show_trigger(&args.name).await?;
             print_for_terminal_or_json(
                 |painter, _| view::render_trigger(&trigger, painter),
                 &trigger,
@@ -1112,7 +1113,7 @@ async fn cmd_trigger(config: &Config, command: TriggerCommand) -> Result<()> {
             print_for_terminal_or_json(|_, _| view::render_reload(&reload), &reload)
         }
         TriggerCommand::Fire(args) => {
-            let outcome = daemon.fire_trigger(&args.name).await?;
+            let outcome = session.fire_trigger(&args.name).await?;
             print_for_terminal_or_json(|painter, _| view::render_fire(&outcome, painter), &outcome)
         }
     }
