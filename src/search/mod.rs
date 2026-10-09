@@ -289,7 +289,9 @@ fn rank_preferred(hits: &mut [SearchHit], preferences: &SourcePreferences) {
         .iter()
         .map(|hit| hit.score)
         .fold(f32::INFINITY, f32::min);
-    let range = (high - low).max(f32::EPSILON);
+    // A microscopic BM25/RRF difference between equally matching documents must not become a whole point of
+    // normalized relevance. Anchor the scale to the top score, so authority can break *near* ties, never large gaps.
+    let range = (high - low).max(high.abs().max(low.abs()).max(0.01) * 0.5);
     let now = chrono::Utc::now();
     for hit in hits.iter_mut() {
         let matched = preferences.resolve(hit.drawer.source.origin.as_ref());
@@ -396,6 +398,59 @@ mod tests {
         assert_eq!(
             hits[1].signals.preference.as_ref().unwrap().level,
             PreferenceLevel::High
+        );
+    }
+
+    #[test]
+    fn a_preferred_source_wins_a_near_tie_but_not_a_substantial_relevance_gap() {
+        let hit = |source: &str, score| {
+            let mut drawer = Drawer::new(
+                DrawerId::new(),
+                RoomId::new(),
+                "same terms".into(),
+                Source::new(SourceKind::File, None, None),
+                Vec::new(),
+                Provenance {
+                    requested_by: "http".into(),
+                    job_id: None,
+                },
+            );
+            drawer.source.origin = Some(crate::domain::Origin {
+                source_id: crate::domain::SourceId::new(),
+                source: source.into(),
+                document: "d".into(),
+                chunk: 0,
+                revision: "r".into(),
+                metadata: None,
+                occurred_at: None,
+            });
+            SearchHit {
+                drawer,
+                score,
+                signals: Signals::default(),
+                via: Vec::new(),
+            }
+        };
+        let mut policy = SourcePreferences::default();
+        policy.sources.insert(
+            "favored".into(),
+            crate::domain::ConnectorPreference {
+                level: Some(PreferenceLevel::High),
+                ..Default::default()
+            },
+        );
+        let mut close = vec![hit("ordinary", 1.0), hit("favored", 0.999_999_9)];
+        rank_preferred(&mut close, &policy);
+        assert_eq!(
+            close[0].drawer.source.origin.as_ref().unwrap().source,
+            "favored"
+        );
+
+        let mut far = vec![hit("ordinary", 1.0), hit("favored", 0.1)];
+        rank_preferred(&mut far, &policy);
+        assert_eq!(
+            far[0].drawer.source.origin.as_ref().unwrap().source,
+            "ordinary"
         );
     }
 

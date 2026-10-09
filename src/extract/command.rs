@@ -208,7 +208,7 @@ mod tests {
         );
         let context = [PreferenceMatch {
             level: crate::domain::PreferenceLevel::High,
-            source: Some("directory".into()),
+            source: Some("sample-source".into()),
             criterion: Some("path".into()),
         }];
         let graphs = provider.run(&["text".into()], &context).await.unwrap();
