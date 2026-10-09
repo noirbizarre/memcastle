@@ -8,6 +8,215 @@ use crate::common;
 use common::{TestDaemon, get_job, wait_for_all_jobs_completed, wait_for_job_status};
 use futures::future::join_all;
 
+/// A bounded, real-store load: acquisition can run ahead but HTTP and MCP must still get CPU and DB time.
+#[tokio::test]
+async fn rest_and_mcp_answer_while_mines_and_embeddings_are_active() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
+    use axum::{Json, Router, routing::post};
+    use memcastle::config::EmbeddingProvider;
+    use memcastle::domain::{Job, JobStatus};
+    use rmcp::model::{CallToolRequestParams, ClientConfig};
+    use rmcp::service::serve_client;
+    use rmcp::transport::streamable_http_client::StreamableHttpClientTransport;
+    use serde_json::{Value, json};
+
+    let first_batch = Arc::new(AtomicBool::new(true));
+    let provider = Router::new().route(
+        "/v1/embeddings",
+        post(move |Json(body): Json<Value>| {
+            let first_batch = Arc::clone(&first_batch);
+            async move {
+                // Stable nonzero vectors without an external model or subprocess.
+                let data: Vec<Value> = body["input"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .enumerate()
+                    .map(|(index, _)| {
+                        let mut vector = vec![0.0f32; 768];
+                        vector[index % 768] = 1.0;
+                        json!({ "index": index, "embedding": vector })
+                    })
+                    .collect();
+                // Hold one sweep open long enough to exercise both request surfaces during embedding.
+                tokio::time::sleep(if first_batch.swap(false, Ordering::SeqCst) {
+                    Duration::from_secs(8)
+                } else {
+                    Duration::from_millis(40)
+                })
+                .await;
+                Json(json!({ "data": data }))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let provider_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let provider_handle =
+        tokio::spawn(async move { axum::serve(listener, provider).await.unwrap() });
+    let daemon = TestDaemon::start_configured(move |config| {
+        config.jobs.max_concurrency = 4;
+        config.jobs.background_concurrency = 2;
+        config.embeddings.provider = EmbeddingProvider::Http;
+        config.embeddings.url = Some(provider_url);
+        config.embeddings.model = Some("stub".into());
+    })
+    .await;
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!(
+            "{}/api/wings/load/rooms/notes/drawers",
+            daemon.base_url
+        ))
+        .json(&json!({ "content": "a drawer awaiting an embedding" }))
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_success());
+    let embed = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let jobs: Vec<Job> = client
+                .get(format!("{}/api/jobs?kind=embed&limit=5", daemon.base_url))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if let Some(job) = jobs.iter().find(|job| job.status == JobStatus::Running) {
+                break job.id;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("embedding sweep started");
+    let session = tokio::time::timeout(
+        Duration::from_secs(5),
+        serve_client(
+            ClientConfig::default(),
+            StreamableHttpClientTransport::from_uri(format!("{}/mcp", daemon.base_url)),
+        ),
+    )
+    .await
+    .expect("MCP connects while embedding runs")
+    .expect("MCP initializes");
+    let status = tokio::time::timeout(
+        Duration::from_secs(5),
+        client.get(format!("{}/api/status", daemon.base_url)).send(),
+    )
+    .await
+    .expect("REST status while embedding runs")
+    .unwrap();
+    assert!(status.status().is_success());
+    assert_ne!(
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            session
+                .peer()
+                .call_tool(CallToolRequestParams::new("memcastle_status")),
+        )
+        .await
+        .expect("MCP status while embedding runs")
+        .unwrap()
+        .is_error,
+        Some(true)
+    );
+    assert_eq!(
+        get_job(&client, &daemon.base_url, embed).await.status,
+        JobStatus::Running
+    );
+    let root = tempfile::tempdir().unwrap();
+    let mut jobs = Vec::new();
+    for run in 0..3 {
+        let dir = root.path().join(format!("run-{run}"));
+        std::fs::create_dir(&dir).unwrap();
+        for n in 0..16 {
+            std::fs::write(
+                dir.join(format!("{n:03}.txt")),
+                format!("document {run} {n} {}", "castle stone ".repeat(80)),
+            )
+            .unwrap();
+        }
+        let job: Job = client
+            .post(format!("{}/api/jobs", daemon.base_url))
+            .json(&json!({ "type": "mine", "path": dir, "requested_by": "load-test" }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        jobs.push(job.id);
+    }
+    wait_for_job_status(&client, &daemon.base_url, jobs[0], JobStatus::Running).await;
+    // Check the capacity, not *which* of the short mines is queued: one can complete
+    // between polls on a fast host, releasing a slot for the third.
+    let states: Vec<Job> = client
+        .get(format!("{}/api/jobs?kind=mine&limit=3", daemon.base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(states.len(), 3);
+    assert!(
+        states
+            .iter()
+            .filter(|job| job.status == JobStatus::Running)
+            .count()
+            <= 2
+    );
+    if states.iter().all(|job| job.status != JobStatus::Completed) {
+        assert!(states.iter().any(|job| job.status == JobStatus::Queued));
+    }
+
+    for _ in 0..3 {
+        let started = Instant::now();
+        for path in ["/api/health", "/api/status", "/api/jobs?limit=5"] {
+            let response = tokio::time::timeout(
+                Duration::from_secs(5),
+                client.get(format!("{}{path}", daemon.base_url)).send(),
+            )
+            .await
+            .unwrap_or_else(|_| panic!("{path} stalled under mining load"))
+            .unwrap();
+            assert!(
+                response.status().is_success(),
+                "{path}: {}",
+                response.status()
+            );
+            tokio::time::timeout(Duration::from_secs(5), response.bytes())
+                .await
+                .expect("REST body arrived")
+                .unwrap();
+        }
+        let answer = tokio::time::timeout(
+            Duration::from_secs(5),
+            session
+                .peer()
+                .call_tool(CallToolRequestParams::new("memcastle_status")),
+        )
+        .await
+        .expect("MCP status did not stall")
+        .expect("MCP status answered");
+        assert_ne!(answer.is_error, Some(true));
+        eprintln!("active-job REST/MCP round elapsed: {:?}", started.elapsed());
+    }
+    for id in jobs {
+        let completed =
+            wait_for_job_status(&client, &daemon.base_url, id, JobStatus::Completed).await;
+        assert_eq!(completed.result.as_ref().unwrap()["documents"], 16);
+    }
+    wait_for_job_status(&client, &daemon.base_url, embed, JobStatus::Completed).await;
+    let _ = session.cancel().await;
+    daemon.shutdown().await;
+    provider_handle.abort();
+}
+
 #[tokio::test]
 async fn concurrent_job_submissions_and_reads_all_land_correctly() {
     const N: usize = 12;

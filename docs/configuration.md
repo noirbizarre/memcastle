@@ -182,6 +182,7 @@ enable = false
 
 [jobs]
 max_concurrency = 4
+background_concurrency = 2 # mine/embed/extract jobs; leaves a slot for other jobs
 drain_timeout_secs = 10
 lease_ttl_secs = 30
 
@@ -192,6 +193,12 @@ mode = "embedded"
 # "never" (leave it to the operating system) or an interval over 100ms such as "500ms", "5s" or "1m".
 sync = "every"
 ```
+
+`jobs.background_concurrency` limits mine, embed and extract jobs independently of `jobs.max_concurrency`.
+When the total limit is greater than one, the effective background limit is capped at one less than the total;
+with a total limit of one, one background job may run.
+Lower the background limit if API reads slow down during large mines or embedding sweeps;
+raise it only when the datastore and CPU have spare capacity.
 
 A remote store also needs a URL and credentials:
 
@@ -220,6 +227,7 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `logging.level` | `MEMCASTLE_LOG` | `info` |
 | `logging.format` | `MEMCASTLE_LOG_FORMAT` | `text` (`text` or `json`) |
 | `jobs.max_concurrency` (at least 1) | `MEMCASTLE_JOBS_MAX_CONCURRENCY` | `4` |
+| `jobs.background_concurrency` (at least 1) | `MEMCASTLE_JOBS_BACKGROUND_CONCURRENCY` | `2` |
 | `jobs.drain_timeout_secs` (1 to 86400) | `MEMCASTLE_JOBS_DRAIN_TIMEOUT_SECS` | `10` |
 | `jobs.lease_ttl_secs` (3 to 86400) | `MEMCASTLE_JOBS_LEASE_TTL_SECS` | `30` |
 | `auth.enabled` (`true` or `false`) | `MEMCASTLE_AUTH_ENABLED` | `false` |

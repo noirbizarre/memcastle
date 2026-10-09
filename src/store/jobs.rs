@@ -350,11 +350,29 @@ impl SurrealStore {
         worker: &str,
         lease_ttl: chrono::Duration,
     ) -> Result<Option<Job>> {
+        self.claim_next_job_eligible(worker, lease_ttl, true).await
+    }
+
+    /// When background slots are full, skip expensive job kinds *before* claiming:
+    /// a claimed job waiting on an in-memory permit would need a lease heartbeat
+    /// and could block higher-priority work for no useful reason.
+    pub async fn claim_next_job_eligible(
+        &self,
+        worker: &str,
+        lease_ttl: chrono::Duration,
+        include_background: bool,
+    ) -> Result<Option<Job>> {
         let sql = format!(
             "SELECT {JOB_COLUMNS} FROM job WHERE status = 'queued' \
+             AND ($include_background = true OR (kind.type != 'mine' \
+                  AND kind.type != 'embed' AND kind.type != 'extract')) \
              ORDER BY priority DESC, created_at ASC LIMIT 1"
         );
-        let mut response = self.db.query(sql).await?;
+        let mut response = self
+            .db
+            .query(sql)
+            .bind(("include_background", include_background))
+            .await?;
         let candidates: Vec<Job> = super::take_rows(&mut response, 0)?;
         let Some(mut job) = candidates.into_iter().next() else {
             return Ok(None);

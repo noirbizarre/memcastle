@@ -159,53 +159,37 @@ impl SourceAdapter for DirectoryAdapter {
         limit: usize,
     ) -> Result<Discovery> {
         let after = Watermark::parse(NAME, cursor)?;
-        let mut entries = Vec::new();
-        collect(
-            Path::new(&source.locator),
-            "",
-            self.max_file_bytes,
-            &mut entries,
-        );
-        if let Some(since) = source.options.get("since") {
-            // `identify` wrote this value, so it parses; a source built by hand with a bad one reads everything, which
-            // is the safe side of a filter. Saturating, because nanoseconds since 1970 run out in 2262: a `since`
-            // beyond that must keep nothing, not wrap round to keep everything.
-            if let Ok(instant) = DateTime::parse_from_rfc3339(since) {
-                let floor = instant.timestamp().saturating_mul(1_000_000_000);
-                entries.retain(|entry| entry.mtime_ns >= floor);
+        let root = PathBuf::from(&source.locator);
+        let since = source.options.get("since").cloned();
+        let max_file_bytes = self.max_file_bytes;
+        // A large tree can take seconds to enumerate and sort. Never pin an HTTP worker on that synchronous walk.
+        tokio::task::spawn_blocking(move || {
+            let mut entries = Vec::new();
+            collect(&root, "", max_file_bytes, &mut entries);
+            if let Some(since) = since {
+                // `identify` wrote this value; a hand-built invalid one reads everything. Saturate at year 2262.
+                if let Ok(instant) = DateTime::parse_from_rfc3339(&since) {
+                    let floor = instant.timestamp().saturating_mul(1_000_000_000);
+                    entries.retain(|entry| entry.mtime_ns >= floor);
+                }
             }
-        }
-        let (candidates, exhausted) = page(entries, after.as_ref(), limit);
-        Ok(Discovery {
-            candidates,
-            exhausted,
+            let (candidates, exhausted) = page(entries, after.as_ref(), limit);
+            Discovery {
+                candidates,
+                exhausted,
+            }
         })
+        .await
+        .map_err(|error| Error::server(format!("directory discovery worker failed: {error}")))
     }
 
     async fn read(&self, source: &SourceRef, candidate: &Candidate) -> Result<Option<RawDocument>> {
         let path = Self::path_of(source, &candidate.handle);
-        // Any failure is a skip, not an error: the file may have gone, shrunk or grown since discovery, and a mixed
-        // tree of text and binary files is the normal case.
-        let Ok(metadata) = std::fs::metadata(&path) else {
-            return Ok(None);
-        };
-        if metadata.len() == 0 || metadata.len() > self.max_file_bytes {
-            return Ok(None);
-        }
-        let Ok(bytes) = std::fs::read(&path) else {
-            return Ok(None);
-        };
-        let Ok(body) = String::from_utf8(bytes) else {
-            return Ok(None);
-        };
-        let occurred_at = metadata.modified().ok().map(DateTime::<Utc>::from);
-        Ok(Some(RawDocument {
-            external_id: candidate.external_id.clone(),
-            revision: RawDocument::revision_of(&body),
-            body,
-            metadata: json!({ "path": path.display().to_string() }),
-            occurred_at,
-        }))
+        let candidate = candidate.clone();
+        let max_file_bytes = self.max_file_bytes;
+        tokio::task::spawn_blocking(move || read_file(path, candidate, max_file_bytes))
+            .await
+            .map_err(|error| Error::server(format!("directory read worker failed: {error}")))
     }
 
     fn normalize(&self, raw: &RawDocument) -> Result<CanonicalDocument> {
@@ -229,6 +213,32 @@ impl SourceAdapter for DirectoryAdapter {
             }],
         })
     }
+}
+
+/// Files can change between discovery and reading; the old skip semantics also apply on the blocking pool.
+fn read_file(path: PathBuf, candidate: Candidate, max_file_bytes: u64) -> Option<RawDocument> {
+    // Any failure is a skip, not an error: the file may have gone, shrunk or grown since discovery, and a mixed
+    // tree of text and binary files is the normal case.
+    let Ok(metadata) = std::fs::metadata(&path) else {
+        return None;
+    };
+    if metadata.len() == 0 || metadata.len() > max_file_bytes {
+        return None;
+    }
+    let Ok(bytes) = std::fs::read(&path) else {
+        return None;
+    };
+    let Ok(body) = String::from_utf8(bytes) else {
+        return None;
+    };
+    let occurred_at = metadata.modified().ok().map(DateTime::<Utc>::from);
+    Some(RawDocument {
+        external_id: candidate.external_id,
+        revision: RawDocument::revision_of(&body),
+        body,
+        metadata: json!({ "path": path.display().to_string() }),
+        occurred_at,
+    })
 }
 
 /// Recursively collect the files under `dir` (whose path relative to the root is `prefix`), skipping noisy

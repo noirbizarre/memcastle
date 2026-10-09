@@ -741,6 +741,9 @@ pub struct WebConfig {
 pub struct JobsConfig {
     /// Maximum number of jobs executing concurrently.
     pub max_concurrency: usize,
+    /// Maximum simultaneous mine, embed and extract jobs. When possible the
+    /// scheduler reserves a total slot for jobs of other kinds.
+    pub background_concurrency: usize,
     /// How long shutdown waits, in seconds, for running jobs to reach their
     /// next unit-of-work boundary, checkpoint and hand themselves back to the
     /// queue. A job still running after this is left `Running` and re-queued
@@ -774,6 +777,7 @@ impl Default for JobsConfig {
             // `num_cpus::get()` — mining is I/O- as much as CPU-bound in
             // this bootstrap, and an extra dependency isn't worth it yet.
             max_concurrency: 4,
+            background_concurrency: 2,
             // Long enough for every handler's unit of work (a file, a
             // checkpoint item, an audit chunk) to finish, short enough that
             // a stuck job cannot hold up a service manager's stop timeout.
@@ -1025,6 +1029,10 @@ impl Config {
         if let Some(n) = lookup("MEMCASTLE_JOBS_MAX_CONCURRENCY") {
             self.jobs.max_concurrency = parse_override("MEMCASTLE_JOBS_MAX_CONCURRENCY", &n)?;
         }
+        if let Some(n) = lookup("MEMCASTLE_JOBS_BACKGROUND_CONCURRENCY") {
+            self.jobs.background_concurrency =
+                parse_override("MEMCASTLE_JOBS_BACKGROUND_CONCURRENCY", &n)?;
+        }
         if let Some(n) = lookup("MEMCASTLE_JOBS_DRAIN_TIMEOUT_SECS") {
             self.jobs.drain_timeout_secs = parse_override("MEMCASTLE_JOBS_DRAIN_TIMEOUT_SECS", &n)?;
         }
@@ -1258,6 +1266,11 @@ impl Config {
         }
         if self.jobs.max_concurrency == 0 {
             return Err(Error::config("jobs.max_concurrency must be at least 1"));
+        }
+        if self.jobs.background_concurrency == 0 {
+            return Err(Error::config(
+                "jobs.background_concurrency must be at least 1",
+            ));
         }
         // Zero would skip the drain entirely, abandoning every in-flight job
         // to crash recovery on each clean shutdown; a day is far past any
@@ -1678,11 +1691,13 @@ mod tests {
                 ("MEMCASTLE_BIND", "127.0.0.2"),
                 ("MEMCASTLE_PORT", "9999"),
                 ("MEMCASTLE_JOBS_MAX_CONCURRENCY", "7"),
+                ("MEMCASTLE_JOBS_BACKGROUND_CONCURRENCY", "3"),
             ]))
             .unwrap();
         assert_eq!(config.server.bind, "127.0.0.2".parse::<IpAddr>().unwrap());
         assert_eq!(config.server.port, 9999);
         assert_eq!(config.jobs.max_concurrency, 7);
+        assert_eq!(config.jobs.background_concurrency, 3);
     }
 
     const TOKEN: &str = "mc_0123456789abcdef0123456789abcdef";
@@ -1977,6 +1992,7 @@ mod tests {
     fn a_malformed_numeric_override_is_an_error_not_a_silent_default() {
         for name in [
             "MEMCASTLE_JOBS_MAX_CONCURRENCY",
+            "MEMCASTLE_JOBS_BACKGROUND_CONCURRENCY",
             "MEMCASTLE_JOBS_DRAIN_TIMEOUT_SECS",
             "MEMCASTLE_JOBS_LEASE_TTL_SECS",
         ] {
@@ -2108,9 +2124,12 @@ mod tests {
     }
 
     #[test]
-    fn zero_concurrency_is_rejected() {
+    fn zero_job_concurrency_limits_are_rejected() {
         let mut config = Config::default();
         config.jobs.max_concurrency = 0;
+        assert!(config.validate().is_err());
+        config.jobs.max_concurrency = 4;
+        config.jobs.background_concurrency = 0;
         assert!(config.validate().is_err());
     }
 

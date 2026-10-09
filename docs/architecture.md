@@ -429,6 +429,12 @@ Default priorities: `Mine` is `Background` (so mining never delays anything else
 
 **Scheduling.** `jobs::Scheduler` is a single sequential dispatcher loop (`store.claim_next_job`, a claim-and-transition)
 that spawns bounded worker tasks (a `tokio::sync::Semaphore`, sized by `jobs.max_concurrency`).
+Mine, embed and extract jobs also share a second bound (`jobs.background_concurrency`, default 2);
+when the total limit exceeds one, the effective background limit leaves at least one job slot for other kinds.
+The dispatcher skips queued background jobs while their limit is full rather than claiming and leasing work it cannot start.
+Both limits constrain job execution, not the REST/MCP request handlers, which share the daemon's database handle.
+Mining may acquire two documents ahead, but files drawers, document records, cursors and checkpoints in candidate order;
+directory discovery and reads, chunking and heuristic extraction run on the blocking pool instead of request executor threads.
 The claim is a `SELECT` followed by a write guarded on the job still being `Queued`,
 so two daemons racing for one job cannot both win, without a distributed lock.
 The claim also leases the job (`lease_owner`, and `lease_expires_at` of now plus `jobs.lease_ttl_secs`),

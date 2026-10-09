@@ -242,6 +242,7 @@ fn safe_config_field(error: &Error) -> Option<&'static str> {
         "palace.path",
         "assets.dir",
         "jobs.max_concurrency",
+        "jobs.background_concurrency",
         "jobs.drain_timeout_secs",
         "jobs.lease_ttl_secs",
         "db.bind",
