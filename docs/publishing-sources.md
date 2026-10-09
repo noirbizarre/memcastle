@@ -18,9 +18,9 @@ daemon runs it.
 | Registry | A package listed in an index you configured. | `memcastle source install <name>`. |
 | Local | A package file or a project directory on your disk. | `memcastle source install <file or directory>`. |
 
-They are listed together and share one lifecycle, and `install` and `update` are for the last two:
-a bundled source is already installed and is updated with MemCastle, and a built-in one is MemCastle.
-The origin decides what `update` looks at.
+They are listed together and share one lifecycle, but `install` accepts registry and local packages while `update`
+follows only registry sources: a local install has no upstream.
+A bundled source is already installed and is updated with MemCastle, and a built-in one is MemCastle.
 
 ## The package format
 
