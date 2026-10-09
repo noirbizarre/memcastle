@@ -77,8 +77,9 @@ Declining the prompt exits with `memcastle::cli::aborted` and changes nothing.
 
 `source install` and `source update` are the exception, because what they ask about is code that will run with
 permissions: when a package asks for any, they ask in a terminal, and without a terminal they refuse
-(`memcastle::source::consent_required`, or exit `1` for `update`) unless `--yes` or `--consent <digest>` is given
-(see [`source`](#source)).
+(`memcastle::source::consent_required`, or exit `1` for `update`) unless `--yes` is given.
+For an unattended install, `source install --consent <digest>` agrees only to the displayed permissions digest;
+`source update` accepts `--yes` but not `--consent` (see [`source`](#source)).
 
 ## Global flags
 
