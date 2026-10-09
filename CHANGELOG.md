@@ -4,6 +4,86 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0](https://github.com/noirbizarre/memcastle/compare/0.3.0..0.4.0) - 2026-10-09
+
+### 💫 Features
+
+- **chatgpt** Add export and OAuth-backed project mining ([#249](https://github.com/noirbizarre/memcastle/issues/249)) - ([eccaae4](https://github.com/noirbizarre/memcastle/commit/eccaae4250ab2ff3cb266102dbb683778fd0c840))
+- **claude** Add Claude Code integration and history source ([#245](https://github.com/noirbizarre/memcastle/issues/245)) - ([fb5e172](https://github.com/noirbizarre/memcastle/commit/fb5e1720647978f200be59bde76239a2e71ac1ae))
+- **cli** Highlight JSON on terminals and honor FORCE_COLOR ([#263](https://github.com/noirbizarre/memcastle/issues/263)) - ([ee4f02c](https://github.com/noirbizarre/memcastle/commit/ee4f02c43e9d48b79d99fd2e6bd0445a9a0e6ed6))
+- **cli**  🚨 **breaking** Print a readable result in a terminal and JSON in a pipe, for every command ([#225](https://github.com/noirbizarre/memcastle/issues/225)) - ([8a0ed70](https://github.com/noirbizarre/memcastle/commit/8a0ed70f3c1acd7ecd7bb025b5849bb2602914fc))
+- **codex** Add Codex integration and history source ([#248](https://github.com/noirbizarre/memcastle/issues/248)) - ([7ed0fca](https://github.com/noirbizarre/memcastle/commit/7ed0fcaf20f0b03f4127d3b4ec75f984a3d90081))
+- **doctor** Add read-only configuration and runtime diagnostics ([#258](https://github.com/noirbizarre/memcastle/issues/258)) - ([3cc1d2f](https://github.com/noirbizarre/memcastle/commit/3cc1d2f786f016e0d5e9e0be094572a64a0fed8f))
+- **github** Add scoped GitHub mining source ([#261](https://github.com/noirbizarre/memcastle/issues/261)) - ([820a51a](https://github.com/noirbizarre/memcastle/commit/820a51a4f71bf5a7ba2c889c2ce85e339ad657fd))
+- **integration**  🚨 **breaking** Require Pi 1.0 and use Pi's own MCP client in the Pi integration - ([e41acc1](https://github.com/noirbizarre/memcastle/commit/e41acc13f92459f290dbcae90557098ae8a63d0c))
+- **integration** Add a confirmed palace audit and repair command to Pi and OpenCode ([#232](https://github.com/noirbizarre/memcastle/issues/232)) - ([79a4416](https://github.com/noirbizarre/memcastle/commit/79a44163c39ae801244a416fc1b7d43a762d84b7))
+- **integration**  🚨 **breaking** Declare and package skills with each agent integration ([#231](https://github.com/noirbizarre/memcastle/issues/231)) - ([d195b81](https://github.com/noirbizarre/memcastle/commit/d195b817ecb0593c30e8d86181aaf4313944debd))
+- **memory** Add configurable source preferences ([#262](https://github.com/noirbizarre/memcastle/issues/262)) - ([6558c99](https://github.com/noirbizarre/memcastle/commit/6558c99b3e1d7cc3ac577c9f1788c21ba57258f9))
+- **memory** Add auditable fact lifecycle and conflict handling ([#257](https://github.com/noirbizarre/memcastle/issues/257)) - ([efdea0a](https://github.com/noirbizarre/memcastle/commit/efdea0a1a86d6c2237ba052262e95d685511cb4a))
+- **miners** Add persistent miner configuration with CLI and read-only MCP ([#223](https://github.com/noirbizarre/memcastle/issues/223)) - ([b9911d8](https://github.com/noirbizarre/memcastle/commit/b9911d8a9b4201bc1db5e21a4fbc0bdbb191b8eb))
+- **mining**  🚨 **breaking** Mine <source> [place] [key=value]... with per-source options ([#230](https://github.com/noirbizarre/memcastle/issues/230)) - ([5d79318](https://github.com/noirbizarre/memcastle/commit/5d79318f1b4a489101012eed11429eda86539ad8))
+- **mining**  🚨 **breaking** Install bundled sources from the start and publish the official registry ([#227](https://github.com/noirbizarre/memcastle/issues/227)) - ([e3f0ad3](https://github.com/noirbizarre/memcastle/commit/e3f0ad310be80bac8dc7dd9d5ace5ce1a1c0f1f5))
+- **mining**  🚨 **breaking** Sign mining sources in with OAuth and hand them a fresh token ([#228](https://github.com/noirbizarre/memcastle/issues/228)) - ([f6d34a9](https://github.com/noirbizarre/memcastle/commit/f6d34a99193fb59cf2cf8938efb16a663af411f2))
+- **trigger**  🚨 **breaking** Add opt-in source triggers for asynchronous mining ([#241](https://github.com/noirbizarre/memcastle/issues/241)) - ([f69f0b6](https://github.com/noirbizarre/memcastle/commit/f69f0b6163dc2b7505ea883292a99e126c349096))
+- **tui** Add live terminal operations console ([#259](https://github.com/noirbizarre/memcastle/issues/259)) - ([51bee30](https://github.com/noirbizarre/memcastle/commit/51bee303c0872dece62b3c3635e5d9ff8568273e))
+- **web** Push updates to the dashboard over server-sent events ([#229](https://github.com/noirbizarre/memcastle/issues/229)) - ([b0ce74d](https://github.com/noirbizarre/memcastle/commit/b0ce74d11b5fdb3bf24afce10d7658047788d6c5))
+- **web** Add an opt-in web dashboard served under /ui ([#217](https://github.com/noirbizarre/memcastle/issues/217)) - ([af6ff96](https://github.com/noirbizarre/memcastle/commit/af6ff96a63a0167ef6d83c323ca12de4bbf430e2))
+
+### 🐛 Bug Fixes
+
+- **cli** Limit named source update checks to the requested source - ([819c583](https://github.com/noirbizarre/memcastle/commit/819c58356cc94797116679c1aba46c6c0771baa9))
+- **cli** Honor session mode for miner and trigger commands - ([71ad298](https://github.com/noirbizarre/memcastle/commit/71ad298ccce53838b31511bb37b85525e393dc60))
+- **jobs** Keep API and MCP responsive during mining ([#260](https://github.com/noirbizarre/memcastle/issues/260)) - ([60d4638](https://github.com/noirbizarre/memcastle/commit/60d463829fa43611f41813ee0251c5f5603bcee8))
+- **mining** Capture program output through files so a CLI that truncates pipes answers whole ([#224](https://github.com/noirbizarre/memcastle/issues/224)) - ([e700a2e](https://github.com/noirbizarre/memcastle/commit/e700a2e293c7f8acdbeee595d8e773d9d64f7495))
+- **source** Honor Claude RFC 3339 since cutoff - ([f4259b9](https://github.com/noirbizarre/memcastle/commit/f4259b944f45a4a3201f4f79229dfd1a4091359a))
+- **web** Render duplicates from the REST response envelope - ([25342f3](https://github.com/noirbizarre/memcastle/commit/25342f369f9de1e2301ff2fd3c2db2669e798030))
+
+### 🔨 Refactor
+
+- **miner**  🚨 **breaking** Unify source options and allow per-run overrides ([#264](https://github.com/noirbizarre/memcastle/issues/264)) - ([a1b243d](https://github.com/noirbizarre/memcastle/commit/a1b243dee7b4774be9a15e0f6bda3540e7577a05))
+
+### 📚 Documentation
+
+- **adr** Standardize status sections in recent decisions - ([dbf8399](https://github.com/noirbizarre/memcastle/commit/dbf839942ff048e533ea2ec68b174bd27331595a))
+- **api** Clarify remote datastore location in config report - ([d339f01](https://github.com/noirbizarre/memcastle/commit/d339f0181fcdffc4c81268b0951c573b2e286fcd))
+- **architecture** Account for ChatGPT web OAuth - ([16b2027](https://github.com/noirbizarre/memcastle/commit/16b2027419c340fd5865fdf4886df8a525bd444e))
+- **claude** Add Claude Code to documentation sidebar ([#246](https://github.com/noirbizarre/memcastle/issues/246)) - ([d9c94c3](https://github.com/noirbizarre/memcastle/commit/d9c94c3a588bb74d62e71130fc9a382073a20696))
+- **cli** Correct drawer command output description - ([ca6e90c](https://github.com/noirbizarre/memcastle/commit/ca6e90c7e9da405e1c80d7727642b3923b4867d8))
+- **cli** Distinguish source install and update consent flags - ([3e04ad2](https://github.com/noirbizarre/memcastle/commit/3e04ad235c2d7c4393be25faf438ec925d91df3f))
+- **integration** List all shipped agent integrations - ([a2f194b](https://github.com/noirbizarre/memcastle/commit/a2f194b3aa8183272b0328c827c277e93db3c5f3))
+- **mcp** List read-only trigger tool annotations - ([ea6fbd3](https://github.com/noirbizarre/memcastle/commit/ea6fbd3cee3912d635a9b4ccb97cc3e52bfb40f2))
+- **quickstart** Render daemon controls as instructions - ([61c3683](https://github.com/noirbizarre/memcastle/commit/61c3683d7e0620b7774454febbf01361d70a850d))
+- **source** Clarify which origins can be updated - ([2ecd750](https://github.com/noirbizarre/memcastle/commit/2ecd750da77ec1e0ccc89a6108e677b181401f48))
+- **source** Describe unpacked bundle without an index - ([4cabbf2](https://github.com/noirbizarre/memcastle/commit/4cabbf2586485b161b915a8e2132914931c138c4))
+- **source** Align bundled source lists with release packaging - ([0f6cc08](https://github.com/noirbizarre/memcastle/commit/0f6cc08c5476fb46acd1b3b9f7649ec686d4cf66))
+
+### 🧪 Tests
+
+- **db** Wait for audit before daemon shutdown ([#244](https://github.com/noirbizarre/memcastle/issues/244)) - ([5deff26](https://github.com/noirbizarre/memcastle/commit/5deff26868303abeff0e1f59560f14be81156132))
+- **retrieval** Add a reproducible retrieval evaluation and benchmark suite ([#222](https://github.com/noirbizarre/memcastle/issues/222)) - ([447b401](https://github.com/noirbizarre/memcastle/commit/447b4016b0ecae4d63e61ab41257b873b761969c))
+- **trigger** Fix flaky trigger tests and silence the macOS linker warning ([#242](https://github.com/noirbizarre/memcastle/issues/242)) - ([b71f03e](https://github.com/noirbizarre/memcastle/commit/b71f03e5a76ac3fa841b30d34455c57d02257090))
+- **trigger** Stop two trigger tests from racing the scheduler and the storage lock - ([5770efc](https://github.com/noirbizarre/memcastle/commit/5770efc8ecf3590e4550c2857190e97e87e01e94))
+
+### 🎨 Style
+
+- **cli** Format mode forwarding handlers - ([f9bb7ab](https://github.com/noirbizarre/memcastle/commit/f9bb7ab65598c98afd7898fbfb2c8670ec890990))
+
+### 🏗️ Build
+
+- **deps** Bump the rust-dependencies group with 2 updates ([#240](https://github.com/noirbizarre/memcastle/issues/240)) - ([7c78624](https://github.com/noirbizarre/memcastle/commit/7c78624c9d590e6c55ec36a10f57bd535702cde2))
+- **deps** Bump the rust-dependencies group with 2 updates ([#219](https://github.com/noirbizarre/memcastle/issues/219)) - ([44b72f6](https://github.com/noirbizarre/memcastle/commit/44b72f6a4e4bf29682d51ac508f79f3ad75c31d7))
+- **deps** Bump actions/setup-node from 4 to 7 in the actions group ([#220](https://github.com/noirbizarre/memcastle/issues/220)) - ([e1e5db3](https://github.com/noirbizarre/memcastle/commit/e1e5db322a9e223ac31f451a5bc872b07484ca1b))
+- **deps** Bump base64 from 0.22.1 to 0.23.1 ([#221](https://github.com/noirbizarre/memcastle/issues/221)) - ([9627846](https://github.com/noirbizarre/memcastle/commit/9627846804c52f5ee74f77f872efaaa46a84d60d))
+- **deps-dev** Bump @types/node from 24.19.1 to 26.6.4 in /web ([#238](https://github.com/noirbizarre/memcastle/issues/238)) - ([2e3e349](https://github.com/noirbizarre/memcastle/commit/2e3e349bf4e82cdc498f347e2b6ac6187f1852c2))
+- **deps-dev** Bump @earendil-works/pi-coding-agent - ([bc7392f](https://github.com/noirbizarre/memcastle/commit/bc7392fa72b66dc20b4f48980147cfd0e06b384c))
+- Allow the linker_messages lint for macOS's __eh_frame warning - ([7a8f348](https://github.com/noirbizarre/memcastle/commit/7a8f348bf5f01a259020ba18127bcf5d73934033))
+
+### 🔧 CI
+
+- **release** Trial mode for Publish Release, and thin LTO for the release profile ([#226](https://github.com/noirbizarre/memcastle/issues/226)) - ([f837c92](https://github.com/noirbizarre/memcastle/commit/f837c92347a73ff417183355c37fccfdea39b502))
+- Stabilize Codecov component coverage statuses ([#243](https://github.com/noirbizarre/memcastle/issues/243)) - ([ecbd83c](https://github.com/noirbizarre/memcastle/commit/ecbd83c70d7b1e3f74b6087ba0a00f80c3f3ab7b))
+- Report TypeScript coverage and add Codecov components ([#233](https://github.com/noirbizarre/memcastle/issues/233)) - ([9f572fe](https://github.com/noirbizarre/memcastle/commit/9f572fe61c0daf0ae555f2808513ebc916401064))
+
 ## [0.3.0](https://github.com/noirbizarre/memcastle/compare/0.2.0..0.3.0) - 2026-10-05
 
 ### 💫 Features
