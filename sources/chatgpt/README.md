@@ -71,11 +71,11 @@ Project membership in raw document metadata comes from those listings, even when
 Large accounts may need a higher `mining.source_timeout_secs` for discovery; each call remains bounded by both the daemon
 setting and this source's 600-second maximum.
 
-Define a persistent, scoped miner using the existing miner settings:
+Define a persistent miner with the project filter in its saved options:
 
 ```sh
 memcastle miner set chatgpt-project --source chatgpt \
-  --scope 'projects=name:Exact Name' --setting mode=web --setting account=personal
+  --option 'projects=name:Exact Name' --option mode=web --option account=personal
 memcastle miner run chatgpt-project
 ```
 

@@ -242,8 +242,7 @@ mod tests {
             locator: Some("x".to_string()),
             wing: None,
             credential,
-            scope: serde_json::Map::new(),
-            config: serde_json::Map::new(),
+            options: serde_json::Map::new(),
         }
     }
 

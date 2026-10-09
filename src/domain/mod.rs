@@ -52,7 +52,7 @@ pub use job::{
 };
 pub use memory_mode::MemoryMode;
 pub use miner::{
-    MAX_MINER_NAME_LEN, MinerDefinition, is_valid_miner_name, scope_broadening, validate_miners,
+    MAX_MINER_NAME_LEN, MinerDefinition, is_valid_miner_name, option_broadening, validate_miners,
 };
 pub use resolution::{
     EntityCandidate, MIN_TYPO_KEY_CHARS, PossibleMatch, Resolution, ResolutionRule, entity_key,
@@ -63,9 +63,9 @@ pub use search::{
 };
 pub use secret::Secret;
 pub use source::{
-    Candidate, CanonicalDocument, ChunkRef, CredentialRef, Cursor, OptionKind, OptionSpec, Options,
-    RawDocument, Segment, SourceCapabilities, SourceDocumentRecord, SourceRecord, SourceRef,
-    is_option_key, parse_since, unknown_option,
+    Candidate, CanonicalDocument, ChunkRef, CredentialRef, Cursor, OptionBreadth, OptionKind,
+    OptionSpec, Options, RawDocument, Segment, SourceCapabilities, SourceDocumentRecord,
+    SourceRecord, SourceRef, is_option_key, parse_since, unknown_option,
 };
 pub use source_index::{INDEX_FORMAT, IndexSignature, IndexedSource, IndexedVersion, SourceIndex};
 pub use source_package::{

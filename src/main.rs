@@ -1000,10 +1000,8 @@ async fn cmd_miner(config: &Config, command: MinerCommand) -> Result<()> {
                 credential_env: args.credential_env.as_deref(),
                 credential_file: args.credential_file.as_deref(),
                 credential_oauth: args.credential_oauth,
-                scope: &args.scope,
-                unset_scope: &args.unset_scope,
-                config: &args.setting,
-                unset_config: &args.unset_setting,
+                options: &args.option,
+                unset_options: &args.unset_option,
                 unset: &args.unset,
                 disabled: args.disabled,
                 allow_broaden: args.allow_broaden,
@@ -1040,7 +1038,9 @@ async fn cmd_miner(config: &Config, command: MinerCommand) -> Result<()> {
             print_for_terminal_or_json(|painter, _| view::render_reload(&reload, painter), &reload)
         }
         MinerCommand::Run(args) => {
-            let job = daemon.run_miner(&args.name, args.full).await?;
+            let job = daemon
+                .run_miner_with_options(&args.name, args.full, &args.options, args.allow_broaden)
+                .await?;
             print_submitted(&job)
         }
     }

@@ -68,6 +68,23 @@ pub enum OptionKind {
     Date,
 }
 
+/// How a source option changes the set of material it can select. Unspecified options are conservative.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OptionBreadth {
+    /// No comparison has been declared; a change needs approval.
+    #[default]
+    Unknown,
+    /// A comma-separated positive selection: more values can select more material.
+    Include,
+    /// A positive selection that selects nothing when absent (for example, optional wiki content).
+    OptInInclude,
+    /// A comma-separated exclusion: fewer values can select more material.
+    Exclude,
+    /// A later UTC start date selects no earlier material.
+    Since,
+}
+
 /// One option a source accepts: what the daemon checks a run's keys against, and what a person is shown.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OptionSpec {
@@ -78,6 +95,13 @@ pub struct OptionSpec {
     /// What its value looks like.
     #[serde(default, rename = "type")]
     pub kind: OptionKind,
+    /// Comparison policy for changes to an existing miner or a one-off run.
+    #[serde(default, skip_serializing_if = "is_unknown_breadth")]
+    pub breadth: OptionBreadth,
+}
+
+fn is_unknown_breadth(value: &OptionBreadth) -> bool {
+    *value == OptionBreadth::Unknown
 }
 
 impl OptionSpec {
@@ -88,7 +112,15 @@ impl OptionSpec {
             name: name.to_string(),
             description: description.to_string(),
             kind,
+            breadth: OptionBreadth::Unknown,
         }
+    }
+
+    /// Declare a comparison rule for a built-in source option.
+    #[must_use]
+    pub fn with_breadth(mut self, breadth: OptionBreadth) -> Self {
+        self.breadth = breadth;
+        self
     }
 }
 

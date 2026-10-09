@@ -646,6 +646,12 @@ pub struct MinerRunArgs {
     /// last run stopped. Unchanged documents are still skipped.
     #[arg(long)]
     pub full: bool,
+    /// Replace or add source options for this run only (`KEY=VALUE`).
+    #[arg(value_name = "KEY=VALUE")]
+    pub options: Vec<String>,
+    /// Acknowledge an override that may read more material than the saved miner.
+    #[arg(long)]
+    pub allow_broaden: bool,
 }
 
 /// Arguments for `memcastle miner set`.
@@ -676,23 +682,12 @@ pub struct MinerSetArgs {
     /// with OAuth.
     #[arg(long, conflicts_with_all = ["credential_env", "credential_file"])]
     pub credential_oauth: bool,
-    /// Filter what is mined: `KEY=VALUE[,VALUE...]`, always a list of strings
-    /// (`--scope groups=MemCastle,Ops`; one value needs no comma). Repeatable;
-    /// a key given again replaces the earlier value.
-    #[arg(long, value_name = "KEY=VALUES")]
-    pub scope: Vec<String>,
-    /// Remove a scope key, which makes the miner read more.
-    #[arg(long, value_name = "KEY")]
-    pub unset_scope: Vec<String>,
-    /// A source-specific setting: `KEY=VALUE`, JSON when it parses as JSON.
-    /// Repeatable.
-    ///
-    /// Not `--config`, which names the configuration file.
+    /// A saved source option: `KEY=VALUE`, JSON when it parses as JSON. Repeatable.
     #[arg(long, value_name = "KEY=VALUE")]
-    pub setting: Vec<String>,
-    /// Remove a source-specific setting.
+    pub option: Vec<String>,
+    /// Remove a saved source option.
     #[arg(long, value_name = "KEY")]
-    pub unset_setting: Vec<String>,
+    pub unset_option: Vec<String>,
     /// Clear a field: one of `locator`, `wing`, `credential`.
     #[arg(long, value_name = "FIELD", value_parser = clap::builder::PossibleValuesParser::new(["locator", "wing", "credential"]))]
     pub unset: Vec<String>,

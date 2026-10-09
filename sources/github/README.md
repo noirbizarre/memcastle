@@ -18,12 +18,11 @@ name = "acme-github"
 source = "github"
 credential = { type = "env", name = "GH_TOKEN" }
 
-[miners.scope]
+[miners.options]
 include = ["acme/*"]
 exclude = ["acme/private-experiment"]
 wiki_include = ["acme/docs"]
 
-[miners.config]
 comments = true
 reviews = true
 since = "2026-01-01"

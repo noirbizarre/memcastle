@@ -264,13 +264,7 @@ pub fn build(parsed: Parsed, adapters: Option<&[AdapterInfo]>) -> Result<(Mining
     // A value naming a place on this machine is made absolute and cleaned up here, for the reason `absolute` gives and
     // so that it reads the way the tools that recorded it wrote it down; which values those are is what the source
     // declared, not something the CLI knows by name.
-    for spec in &adapter.options {
-        if spec.kind == OptionKind::Path
-            && let Some(value) = options.get_mut(&spec.name)
-        {
-            *value = resolve_pattern(value)?;
-        }
-    }
+    normalize_options(&mut options, &adapter.options)?;
     let reads_locator = adapter
         .permissions
         .filesystem
@@ -288,6 +282,21 @@ pub fn build(parsed: Parsed, adapters: Option<&[AdapterInfo]>) -> Result<(Mining
         },
         options,
     ))
+}
+
+/// Resolve declared path options on the CLI machine, shared by `mine` and `miner run`.
+pub(crate) fn normalize_options(
+    options: &mut Options,
+    specs: &[crate::domain::OptionSpec],
+) -> Result<()> {
+    for spec in specs {
+        if spec.kind == OptionKind::Path
+            && let Some(value) = options.get_mut(&spec.name)
+        {
+            *value = resolve_pattern(value)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

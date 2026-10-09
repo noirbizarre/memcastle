@@ -55,7 +55,7 @@ pub fn render_miners(report: &MinersReport, painter: Painter, width: Option<u16>
                         miner.name.clone(),
                         miner.source.clone(),
                         state_label(miner, painter),
-                        flat(&miner.scope),
+                        flat(&miner.options),
                         miner
                             .last_run_at
                             .map_or_else(|| "never".to_string(), local_minute),
@@ -117,11 +117,8 @@ pub fn render_miner(miner: &MinerView, painter: Painter) -> String {
             }
         ));
     }
-    if !miner.scope.is_empty() {
-        lines.push(format!("  scope:      {}", flat(&miner.scope)));
-    }
-    if !miner.config.is_empty() {
-        lines.push(format!("  config:     {}", flat(&miner.config)));
+    if !miner.options.is_empty() {
+        lines.push(format!("  options:    {}", flat(&miner.options)));
     }
     lines.push(format!(
         "  mined:      {} documents, last run {}",
@@ -182,7 +179,7 @@ pub fn render_reload(reload: &MinersReload, painter: Painter) -> String {
         lines.push(format!(
             "  {}",
             painter.warn(&format!(
-                "scope widened by the file: {}",
+                "options may be broadened by the file: {}",
                 diff.broadened.join(", ")
             ))
         ));
@@ -205,7 +202,7 @@ mod tests {
         view(json!({
             "name": "signal-personal", "source": "signal", "enabled": true, "state": "unavailable",
             "reason": "the credential's environment variable `SIGNAL_TOKEN` is not set",
-            "scope": { "groups": ["MemCastle", "Ops"] },
+            "options": { "groups": ["MemCastle", "Ops"] },
             "credential": { "kind": "env", "available": false }, "documents": 3,
         }))
     }
@@ -264,7 +261,7 @@ mod tests {
     }
 
     #[test]
-    fn a_reload_lists_what_changed_and_flags_a_widened_scope() {
+    fn a_reload_lists_what_changed_and_flags_possibly_widened_options() {
         let reload = MinersReload {
             miners: 2,
             diff: MinersDiff {
@@ -275,7 +272,8 @@ mod tests {
         };
         let text = render_reload(&reload, Painter::PLAIN);
         assert!(
-            text.contains("changed: chat") && text.contains("scope widened by the file: chat"),
+            text.contains("changed: chat")
+                && text.contains("options may be broadened by the file: chat"),
             "{text}"
         );
         let none = MinersReload {

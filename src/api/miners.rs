@@ -5,6 +5,7 @@
 //! REST and CLI only, like installing a source, so an agent can see what is configured but not widen what the daemon
 //! mines. The routes sit behind the same authentication layer as everything else.
 
+use crate::domain::Options;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Json};
@@ -77,6 +78,10 @@ pub(super) struct RunBody {
     full: bool,
     /// Who asked, recorded on the job; `"http"` unless a caller says otherwise.
     requested_by: String,
+    /// Temporary replacement/addition of source options for this run.
+    options: Options,
+    /// Explicit acknowledgement of a possibly broader run.
+    allow_broaden: bool,
 }
 
 impl Default for RunBody {
@@ -84,6 +89,8 @@ impl Default for RunBody {
         Self {
             full: false,
             requested_by: default_requested_by(),
+            options: Options::new(),
+            allow_broaden: false,
         }
     }
 }
@@ -105,7 +112,14 @@ pub(super) async fn run(
     Ok(Json(
         state
             .app
-            .run_miner(&name, body.full, &body.requested_by, mode)
+            .run_miner_with_options(
+                &name,
+                body.full,
+                body.options,
+                body.allow_broaden,
+                &body.requested_by,
+                mode,
+            )
             .await?,
     ))
 }

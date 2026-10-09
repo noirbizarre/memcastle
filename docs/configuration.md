@@ -672,7 +672,7 @@ leaves the sources to the installed assets.
 
 ## Miners
 
-A miner is a named, persistent definition of what to mine and how: a source, where in it to read, a scope, a credential.
+A miner is a named, persistent definition of what to mine and how: a source, where in it to read, saved options and a credential.
 They are the `[[miners]]` entries of the configuration file, so they are declarative and survive a restart,
 and they are managed from the file, from [`memcastle miner`](cli.md#miner) and, read-only, from MCP
 ([ADR-037](adr/037-persistent-miner-configuration.md)).
@@ -686,16 +686,18 @@ locator = "+336..."               # where in the source to read; the source deci
 wing = "signal"                   # the wing its drawers go to, when it should not be the source's default
 credential = { type = "env", name = "SIGNAL_TOKEN" }   # or { type = "file", path = "/run/secrets/signal" }, or { type = "oauth" }
 
-[miners.scope]                    # a filter the source understands: strings, numbers, booleans, lists of strings
+[miners.options]                  # source options: strings, numbers, booleans, lists of strings
 contacts = ["+336..."]
 groups = ["MemCastle"]
-
-[miners.config]                   # source-specific settings that are not a filter, kept as written
 window_days = 30
 ```
 
 A key that is not listed is an error, not an ignored typo: `enable = false` must not leave a miner enabled.
-`scope` and `config` are open tables, so a source can define keys of its own.
+`options` is an open table, so a source can define keys of its own.
+Legacy `[miners.scope]` and `[miners.config]` tables must be merged by hand into `[miners.options]` before starting
+this version; keys present in both need one chosen value.
+Likewise REST callers must replace `scope` and `config` with `options`, and `unset_scope` and `unset_config` with
+`unset_options`.
 
 - **Identity.** A miner's cursor and documents belong to the *source* it points at, and not to its name.
   Renaming, enabling, disabling or changing the wing or credential keeps its cursor.
@@ -706,7 +708,7 @@ A key that is not listed is an error, not an ignored typo: `enable = false` must
   `credential` names where it comes from: an environment variable of the daemon, a file,
   or `{ type = "oauth" }` for a source that signs in with OAuth (see [Credentials](#credentials)), which names nothing
   because the daemon keeps the tokens itself.
-  A key in `scope` or `config` that reads like a secret (`password`, `token`, `secret`, `api_key`, ...)
+  A key in `options` that reads like a secret (`password`, `token`, `secret`, `api_key`, ...)
   is refused, and the daemon reports a credential only as `env`, `file` or `oauth` and whether it resolves
   (for `oauth`, whether the source is signed in), never its name or path.
   Handing an `env` or `file` credential to a source is the source's side of the contract, which does not take one yet;
@@ -717,17 +719,21 @@ A key that is not listed is an error, not an ignored typo: `enable = false` must
 - **Validation.** The shape of every entry is checked when the file is loaded, so a bad entry stops the daemon starting
   like a bad `[embeddings]` section.
   An *enabled* miner is also held to what running needs, when it is created or changed: the source is built in or
-  installed and enabled, the credential resolves, every `scope` and `config` key is one the source declares as an option,
+  installed and enabled, the credential resolves, every `options` key is one the source declares as an option,
   and for `directory` the `locator` is an absolute path.
   A disabled miner may name a source that is not installed yet, so a configuration can be written ahead of the install.
 - **Trigger.** A miner runs when asked: `memcastle miner run <name>`.
   What asks on its own is a [trigger](#triggers), which is a separate `[[triggers]]` entry and starts disabled.
-- **Scope.** A scope and the `config` table are the options of a run: `miner run` passes them to the source
+- **Options.** The `options` table holds saved source options: `miner run` passes them to the source
   exactly as `memcastle mine <source> key=value` would ([ADR-042](adr/042-mine-takes-a-source-and-its-options.md)).
-  A scalar is its text and a list of strings is comma-joined; a key the source does not declare, a key in both tables
-  and a nested table make the miner not runnable, so the daemon never mines more than a filter says.
+  A scalar is its text and a list of strings is comma-joined; an undeclared key or nested table makes the miner not
+  runnable, so the daemon never silently ignores an option.
+  `miner run NAME key=value` replaces or adds an option for that run only and leaves the saved definition unchanged.
+  A change that may include more material, whether persistent or temporary, requires `--allow-broaden`.
+  Sources can declare include/exclude/date comparisons; an option without declared comparison semantics requires
+  approval whenever its value changes.
   `directory` declares `since`; `pi`, `opencode` and `claude` declare `since` and `dir`.
-  `chatgpt` declares a web-only `projects` scope in addition to `mode` and `account` settings.
+  `chatgpt` declares a web-only `projects` filter in addition to `mode` and `account` options.
   `github` requires `include` repository patterns; `exclude` and separate wiki patterns can narrow them further.
 
 ### Claude Code history miner
@@ -742,7 +748,7 @@ source = "claude"
 locator = "/home/alice/.claude/projects"
 enabled = true
 
-[miners.scope]
+[miners.options]
 since = "2026-09"
 dir = "/home/alice/src/*"
 ```
@@ -752,7 +758,7 @@ Use a separate miner or run `memcastle mine claude --full` when a restored trans
 
 ### ChatGPT project miner
 
-The bundled `chatgpt` source can select projects on its experimental web backend using existing miner scope options.
+The bundled `chatgpt` source can select projects on its experimental web backend using miner options.
 Sign the source in with `memcastle source auth chatgpt` on the daemon's machine before running web miners.
 This source's desktop-compatible OAuth bearer was verified to read history without cookies using a browser-style
 User-Agent; the old manually supplied web session remains a fallback ([ChatGPT](mining-sources.md#chatgpt)).
@@ -762,10 +768,8 @@ User-Agent; the old manually supplied web session remains a fallback ([ChatGPT](
 name = "chatgpt-work"
 source = "chatgpt"
 
-[miners.scope]
+[miners.options]
 projects = ["name:Work", "id:g-p-example"]
-
-[miners.config]
 mode = "web"
 account = "personal"
 ```
@@ -775,7 +779,7 @@ If a name no longer exists or names collide, the run fails rather than broadenin
 Use project IDs for scheduled miners: names can be reused by another project after a rename.
 Without `projects`, a web miner includes ordinary conversations and every project's history; exports do not support
 project selection.
-Changing or removing a scope still follows the existing `--allow-broaden` rule.
+Changing or removing an option that broadens project selection still follows the `--allow-broaden` rule.
 
 ### GitHub repository and wiki miners
 
@@ -789,12 +793,10 @@ name = "acme-github"
 source = "github"
 credential = { type = "env", name = "GH_TOKEN" }
 
-[miners.scope]
+[miners.options]
 include = ["acme/*"]
 exclude = ["acme/private-experiment"]
 wiki_include = ["acme/docs"]
-
-[miners.config]
 comments = true
 reviews = true
 since = "2026-01-01"
@@ -804,10 +806,10 @@ Set `GH_TOKEN` or `GITHUB_TOKEN` in the daemon's environment; when both are set,
 The miner's env credential reference checks that variable exists, while the source's explicit manifest grant actually
 delivers it; choose the same name in both places.
 Omit `credential` for public repositories if unauthenticated GitHub rate limits suffice.
-For a wiki-only miner, set `issues = false`, `pulls = false` and `metadata = false` under `[miners.config]` and define
-`wiki_include` under `[miners.scope]`.
-CLI `memcastle miner set` accepts the same scope with repeatable `--scope 'include=acme/*'` and
-`--scope 'exclude=acme/private-experiment'` flags, and the REST miner API accepts the same tables.
+For a wiki-only miner, set `issues = false`, `pulls = false` and `metadata = false` under `[miners.options]` and define
+`wiki_include` there too.
+CLI `memcastle miner set` accepts the same options with repeatable `--option 'include=acme/*'` and
+`--option 'exclude=acme/private-experiment'` flags, and the REST miner API accepts the same table.
 MCP can list/get this miner but cannot change it.
 See [GitHub source](mining-sources.md#github) for Git prerequisites, path/label/topic filters and cursor behavior.
 
@@ -831,10 +833,12 @@ The environment and command-line overrides are not part of the file, so they are
   There is nothing to start or stop: a miner runs when `miner run` submits its job.
   A job that is already queued or running when a miner is disabled or removed finishes,
   because a job carries the source and locator and not the miner's name.
-- **A scope never widens silently.**
-  `miner set` refuses a change that removes a filter, adds a value to a list or changes a value,
-  with `memcastle::miner::scope_broadened`, unless `--allow-broaden` says it is meant.
-  A hand edit that widens an enabled miner is applied, since the file is yours, but the daemon logs it at `warn`
+- **Option changes never broaden silently.**
+  `miner set` refuses a change it cannot prove does not read more, with the existing
+  `memcastle::miner::scope_broadened` diagnostic, unless `--allow-broaden` says it is meant.
+  Positive selections narrow when values are removed; exclusions narrow when values are added; a later `since` narrows.
+  Unknown semantics require approval for changes.
+  A hand edit that may widen a miner is applied, since the file is yours, but the daemon logs it at `warn`
   and `miner reload` lists it under `broadened`.
 - **A daemon started without a configuration file** (one built in code, as in a test) lists miners but refuses to
   change them: there is nowhere to keep them.

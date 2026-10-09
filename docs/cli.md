@@ -569,14 +569,13 @@ memcastle miner list
 memcastle miner get <NAME>
 memcastle miner set <NAME> [--source <SOURCE>] [--locator <WHERE>] [--wing <WING>]
                            [--credential-env <VAR> | --credential-file <PATH> | --credential-oauth]
-                           [--scope <KEY=VALUES>]... [--unset-scope <KEY>]...
-                           [--setting <KEY=VALUE>]... [--unset-setting <KEY>]...
+                           [--option <KEY=VALUE>]... [--unset-option <KEY>]...
                            [--unset locator|wing|credential]... [--disabled] [--allow-broaden]
 memcastle miner enable <NAME>
 memcastle miner disable <NAME>
 memcastle miner remove <NAME> [--yes]
 memcastle miner reload
-memcastle miner run <NAME> [--full]
+memcastle miner run <NAME> [KEY=VALUE]... [--full] [--allow-broaden]
 ```
 
 Manages the `[[miners]]` of the configuration file: named, persistent definitions of what to mine,
@@ -586,17 +585,19 @@ Every command is a call to the daemon's `/api/miners` routes, which are the rule
 
 `set` creates the miner when there is none (it needs `--source`), and otherwise changes only what it is given:
 everything not named stays as it is, and a repeated command changes nothing.
-`--scope groups=MemCastle,Ops` sets the scope key `groups` to a list of strings, always a list, even for one value;
-`--setting window=30` takes JSON when the value parses as JSON, and a string otherwise.
-`--setting` and not `--config`, which names the configuration file.
-A field is cleared by name with `--unset`, and a scope or settings key with `--unset-scope` and `--unset-setting`.
+`--option groups=MemCastle,Ops` sets a saved source option; `--option window=30` takes JSON when the value parses as
+JSON, and a string otherwise.
+A field is cleared by name with `--unset`, and an option key with `--unset-option`.
 `--disabled` creates the miner switched off, or switches it off.
 An enabled miner is checked before anything is written (its source usable, its credential resolving, and for
-`directory` an absolute `--locator`), and a change that would widen the scope is refused unless `--allow-broaden` is
+`directory` an absolute `--locator`), and a change that might expand what is mined is refused unless `--allow-broaden` is
 given.
 `--credential-env` and `--credential-file` say where the credential is read from; the secret itself is never an argument.
 `--credential-oauth` says the source signs in with OAuth, so the daemon uses the sign-in `source auth` made;
 it is refused for a source that does not declare one.
+`miner run NAME key=value` replaces or adds that source option for this run only; the saved definition is unchanged.
+Like `mine`, a declared `path` option is resolved on the CLI machine before it reaches the daemon.
+If the override might mine more than the saved options, repeat with `--allow-broaden`.
 A miner for a source that signs in is not ready until the source is signed in, whatever its `credential` says, and the
 reason names `memcastle source auth <source>`.
 The file is edited in place: its comments and the other tables are kept.
@@ -606,10 +607,10 @@ cursor stay.
 `reload` reads the file again now and says what changed; the daemon also notices an edited file on its own.
 `run` submits the miner's mining job and prints it, like `mine`, continuing from the cursor its source has;
 it refuses a disabled miner.
-The miner's `scope` and settings are passed to the source as the run's options,
+The miner's saved options are passed to the source as the run's options,
 exactly as `memcastle mine <source> key=value` would:
 a scalar is its text, a list of strings is comma-joined,
-a key the source does not declare makes the miner not runnable, and a key in both tables or a nested table is refused.
+a key the source does not declare makes the miner not runnable, and a nested table is refused.
 
 `list` and `get` are reads, so they take `--mode` and a `disabled` session cannot use them, and `run` is a write;
 the others are administrative: `--mode` is accepted (it is a global flag) but ignored by them,

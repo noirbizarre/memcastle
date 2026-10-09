@@ -139,3 +139,13 @@ An `env` or `file` credential is still only checked and not yet handed to a sour
 refuses to be enabled with them ([ADR-042](042-mine-takes-a-source-and-its-options.md)).
 A key the source does not declare makes the miner not runnable.
 Where this record says that no adapter applies them, that was true until contract `0.4.0`.
+
+## Note, 2026-10-09: one persistent source-options table
+
+The old `scope`/`config` split was only a distinction in the configuration and broadening check: the source received
+one flattened option map and could not tell which table a key came from.
+Miners now store one `[miners.options]` table, and `miner run NAME key=value` may replace a saved option for one run.
+Sources can declare how positive selections, exclusions and start dates compare; changes without a proven narrowing
+require `--allow-broaden`.
+Existing files need a manual merge into `[miners.options]`, and REST callers must use `options`/`unset_options`.
+The diagnostic code `memcastle::miner::scope_broadened` remains stable.

@@ -28,7 +28,7 @@ A failure comes back as an MCP error result carrying the [error body](#errors) b
 | `memcastle_diary_read` | `agent_identity`, `wing`, `limit?` | Read an agent's newest diary entries. |
 | `memcastle_checkpoint` | `payload`, `emergency?` | Submit a durable checkpoint job. |
 | `memcastle_mine` | `path` or `source`, `locator?`, `options?`, `full?`, `wing?` | Submit a job that mines a directory, or a [source](mining-sources.md) such as `pi`. |
-| `memcastle_miner_list` | none | The configured [miners](configuration.md#miners): name, source, state, scope and last run. Read-only. |
+| `memcastle_miner_list` | none | The configured [miners](configuration.md#miners): name, source, state, saved options and last run. Read-only. |
 | `memcastle_miner_get` | `name` | One configured miner, and why it cannot run when it cannot. Read-only. |
 | `memcastle_trigger_list` | none | The configured [triggers](triggers.md): miner, type, whether the user enabled them, whether they work, last fired and last error. Read-only. |
 | `memcastle_trigger_get` | `name` | One configured trigger, and what it still needs when it cannot be enabled yet. Read-only. |
@@ -179,12 +179,12 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `GET /api/sources` | The mining adapters this daemon can run and the sources that have been mined: `{adapters, sources}`. A read. | none |
 | `GET /api/miners` | The configured [miners](configuration.md#miners): `{miners, config_file?, error?}`. `error` says why the configuration file cannot be read, and `miners` is then the last good copy. A read. | none |
 | `GET /api/miners/{name}` | One miner with its state (`ready`, `disabled`, `unavailable` and why), its credential as a kind and an availability, and the source it has mined. A read. | none |
-| `PUT /api/miners/{name}` | Create the miner, or change the fields the body names: `{miner, created, changed, identity_changed}`. A change that widens the scope is a `409` unless `allow_broaden` is set. | JSON body, all optional once the miner exists: `source`, `enabled`, `locator`, `wing`, `credential`, `scope`, `unset_scope`, `trigger`, `config`, `unset_config`, `unset`, `allow_broaden` |
+| `PUT /api/miners/{name}` | Create the miner, or change the fields the body names: `{miner, created, changed, identity_changed}`. A change that may broaden its options is a `409` unless `allow_broaden` is set. | JSON body, all optional once the miner exists: `source`, `enabled`, `locator`, `wing`, `credential`, `options`, `unset_options`, `unset`, `allow_broaden` |
 | `POST /api/miners/{name}/enable` | Switch a miner on, after checking that it can run. Idempotent. | none |
 | `POST /api/miners/{name}/disable` | Switch a miner off. Idempotent. | none |
 | `DELETE /api/miners/{name}` | Remove a miner's definition; what it mined stays: `{"removed": name}`. | none |
 | `POST /api/miners/reload` | Read the configuration file again now: `{miners, added, removed, changed, enabled, disabled, broadened}`. | none |
-| `POST /api/miners/{name}/run` | Submit the miner's mining job, from the cursor its source already has. Answers the job. A write, so a read-only session is refused. | optional JSON body: `full`, `requested_by` |
+| `POST /api/miners/{name}/run` | Submit the miner's mining job, from the cursor its source already has. `options` replaces/adds keys for this run only; possibly broader changes require `allow_broaden`. Answers the job. A write, so a read-only session is refused. | optional JSON body: `full`, `requested_by`, `options` (string map), `allow_broaden` |
 | `GET /api/triggers` | The configured [triggers](triggers.md): `{triggers, webhook, config_file?, error?}`. `webhook` is the listener's state (`enabled`, `bind`, `port`, `allow_remote`, `listening?`). A read. | none |
 | `GET /api/triggers/{name}` | One trigger: `status` (`disabled`, `active`, `failing`, `unavailable`), `reason`, `setup` (what enabling still needs), `running`, `endpoint` (a listening webhook's URL), counters, `next_due`, `last_error`. A read. | none |
 | `PUT /api/triggers/{name}` | Create the trigger **disabled**, or change the fields the body names: `{trigger, created, changed}`. Enabling needs every prerequisite, else `409`. | JSON body, all optional once the trigger exists: `miner`, `type`, `enabled`, `credential`, `settings`, `unset_settings`, `unset` |
@@ -558,7 +558,7 @@ which guards access to memory and not what the daemon is configured to do.
 A definition that does not validate, or an enabled miner whose source is not usable or whose credential does not resolve,
 is `400` with `memcastle::miner::invalid` and nothing is written.
 An unknown miner is `404` (`memcastle::miner::not_found`).
-A `409` is a change that would widen a scope (`memcastle::miner::scope_broadened`), a run of a disabled miner
+A `409` is a change to options that may broaden what the miner reads (`memcastle::miner::scope_broadened`), a disabled miner
 (`memcastle::miner::disabled`), a run of one that cannot run as configured (`memcastle::miner::not_runnable`),
 and a configuration file that cannot be read or was edited under the request (`memcastle::miner::config_file`).
 A credential is shown as `{kind, available}`: the variable's name or the file's path is not given back.
@@ -686,7 +686,7 @@ curl -s -X POST http://127.0.0.1:8420/api/jobs \
 
 An unknown `source` is a `400` that names the known ones, and an `options` key the source does not declare is a `400` that
 names the ones it accepts.
-Each entry of `adapters` lists them as `options: [{name, description, type}]`.
+Each entry of `adapters` lists them as `options: [{name, description, type, breadth?}]`.
 `GET /api/sources` lists the adapters and the sources that have been mined:
 
 ```json
