@@ -24,6 +24,13 @@
       "repository": "noirbizarre/memcastle"
     },
     {
+      "name": "github",
+      "description": "Scoped GitHub repositories, issues, pull requests, comments, reviews and wiki revisions",
+      "homepage": "https://noirbizarre.github.io/memcastle/mining-sources/#github",
+      "license": "MIT",
+      "repository": "noirbizarre/memcastle"
+    },
+    {
       "name": "opencode",
       "description": "OpenCode coding-agent session history, acquired through the opencode CLI, one document per session",
       "homepage": "https://noirbizarre.github.io/memcastle/mining-sources/#opencode",

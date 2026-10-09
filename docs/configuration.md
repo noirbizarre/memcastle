@@ -672,6 +672,7 @@ A key that is not listed is an error, not an ignored typo: `enable = false` must
   and a nested table make the miner not runnable, so the daemon never mines more than a filter says.
   `directory` declares `since`; `pi`, `opencode` and `claude` declare `since` and `dir`.
   `chatgpt` declares a web-only `projects` scope in addition to `mode` and `account` settings.
+  `github` requires `include` repository patterns; `exclude` and separate wiki patterns can narrow them further.
 
 ### Claude Code history miner
 
@@ -719,6 +720,40 @@ Use project IDs for scheduled miners: names can be reused by another project aft
 Without `projects`, a web miner includes ordinary conversations and every project's history; exports do not support
 project selection.
 Changing or removing a scope still follows the existing `--allow-broaden` rule.
+
+### GitHub repository and wiki miners
+
+The bundled GitHub source requires an explicit repository `include` pattern.
+`org/*` selects repositories owned by an organization; an `exclude` pattern overrides inclusion.
+The wiki can be selected independently within those repositories with `wiki_include` and `wiki_exclude`.
+
+```toml
+[[miners]]
+name = "acme-github"
+source = "github"
+credential = { type = "env", name = "GH_TOKEN" }
+
+[miners.scope]
+include = ["acme/*"]
+exclude = ["acme/private-experiment"]
+wiki_include = ["acme/docs"]
+
+[miners.config]
+comments = true
+reviews = true
+since = "2026-01-01"
+```
+
+Set `GH_TOKEN` or `GITHUB_TOKEN` in the daemon's environment; when both are set, `GH_TOKEN` wins.
+The miner's env credential reference checks that variable exists, while the source's explicit manifest grant actually
+delivers it; choose the same name in both places.
+Omit `credential` for public repositories if unauthenticated GitHub rate limits suffice.
+For a wiki-only miner, set `issues = false`, `pulls = false` and `metadata = false` under `[miners.config]` and define
+`wiki_include` under `[miners.scope]`.
+CLI `memcastle miner set` accepts the same scope with repeatable `--scope 'include=acme/*'` and
+`--scope 'exclude=acme/private-experiment'` flags, and the REST miner API accepts the same tables.
+MCP can list/get this miner but cannot change it.
+See [GitHub source](mining-sources.md#github) for Git prerequisites, path/label/topic filters and cursor behavior.
 
 ### Changing miners while the daemon runs
 
