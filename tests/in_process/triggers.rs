@@ -442,6 +442,14 @@ async fn firing_by_hand_asks_for_a_mining_job_and_says_who_asked() {
     let daemon = TestDaemon::start().await;
     let notes = notes_dir();
     put_miner(&daemon, "docs", notes.path()).await;
+    let (status, saved) = request(
+        &daemon,
+        Method::PUT,
+        "/api/miners/docs",
+        Some(json!({"options": {"since": "2999-01"}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
 
     // A disabled trigger is not fired, by hand or otherwise.
     put_trigger(
@@ -462,6 +470,11 @@ async fn firing_by_hand_asks_for_a_mining_job_and_says_who_asked() {
     let job_id = fired["job"].as_str().expect("a job").to_string();
     let (_, job) = get(&daemon, &format!("/api/jobs/{job_id}")).await;
     assert_eq!(job["kind"]["type"], "mine");
+    assert_eq!(
+        job["kind"]["options"],
+        json!({"since": "2999-01"}),
+        "a trigger uses saved miner options, not one-off run overrides"
+    );
     assert_eq!(job["requested_by"], "trigger:t:manual");
     assert_eq!(trigger(&daemon, "t").await["last_job"], job_id.as_str());
     daemon.shutdown().await;

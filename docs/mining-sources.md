@@ -142,9 +142,9 @@ Mining is a write, so a [read-only or disabled session](memory-modes.md) cannot 
 
 `memcastle mine` names a source and where to read every time.
 A **miner** is a named definition of one, kept as `[[miners]]` in the configuration file:
-a source, a locator, a scope and a reference to a credential
+a source, a locator, saved options and a reference to a credential
 ([Configuration](configuration.md#miners), [`memcastle miner`](cli.md#miner)).
-`memcastle miner run <name>` submits the same job `mine` would, with the miner's scope and settings as the options,
+`memcastle miner run <name>` submits the same job `mine` would, with the miner's saved options,
 so a miner continues from the cursor its source already has.
 The cursor belongs to the source, which is the `source` and `locator`, and not to the miner:
 renaming, disabling, re-scoping or removing a miner never loses it or what it mined.
@@ -471,7 +471,7 @@ Names must be unique and exact, and an ID is the stable choice for a scheduled m
 change what the name selects.
 A project selection has its own cursor, separate from the account's unfiltered history.
 Export files cannot be project-filtered until their project membership is verified.
-Configure the filter persistently with `memcastle miner set` and a `--scope 'projects=name:Exact Name'` flag
+Configure the filter persistently with `memcastle miner set` and an `--option 'projects=name:Exact Name'` flag
 ([Configuration](configuration.md#chatgpt-project-miner)).
 The daemon needs `curl`; run `memcastle source auth chatgpt` on its machine before web mining.
 The daemon keeps and renews the OAuth credential, and the source asks for a current bearer through the host function.

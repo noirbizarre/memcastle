@@ -946,8 +946,7 @@ mod tests {
             credential: Some(CredentialRef::File {
                 path: temp.path().join("missing-secret").display().to_string(),
             }),
-            scope: Default::default(),
-            config: Default::default(),
+            options: Default::default(),
         });
         let mut report = Report::default();
         offline_miners(&mut report, &config);

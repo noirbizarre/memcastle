@@ -40,6 +40,7 @@ description = "web selects experimental authenticated acquisition instead of an 
 
 [options.projects]
 type = "string"
+breadth = "include"
 description = "web-only projects to mine, comma-separated id:PROJECT_ID or name:EXACT_NAME; omit for all conversations"
 
 [limits]

@@ -240,7 +240,7 @@ async fn either_standard_token_works_and_errors_do_not_disclose_it() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_configured_github_miner_passes_its_scope_to_a_durable_job_and_repeated_mining_is_idempotent()
+async fn a_configured_github_miner_passes_its_options_to_a_durable_job_and_repeated_mining_is_idempotent()
  {
     let _fixture = Fixture::new().await;
     let daemon = TestDaemon::start().await;
@@ -278,9 +278,9 @@ async fn a_configured_github_miner_passes_its_scope_to_a_durable_job_and_repeate
 
     let configured: serde_json::Value = client
         .put(url("/api/miners/acme-github"))
-        .json(&json!({"source":"github", "scope": {
-            "include":["acme/*"], "exclude":["acme/other"]},
-            "config": {"comments":true, "reviews":true}
+        .json(&json!({"source":"github", "options": {
+            "include":["acme/*"], "exclude":["acme/other"],
+            "comments":true, "reviews":true}
         }))
         .send()
         .await
@@ -289,6 +289,24 @@ async fn a_configured_github_miner_passes_its_scope_to_a_durable_job_and_repeate
         .await
         .unwrap();
     assert_eq!(configured["miner"]["state"], "ready", "{configured}");
+    // Exclusions reverse the direction of a positive include: adding one narrows, removing one broadens.
+    let narrowed: serde_json::Value = client
+        .put(url("/api/miners/acme-github"))
+        .json(&json!({"options": {"exclude": ["acme/other", "acme/private"]}}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(narrowed["miner"]["state"], "ready", "{narrowed}");
+    let widened = client
+        .put(url("/api/miners/acme-github"))
+        .json(&json!({"options": {"exclude": ["acme/other"]}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(widened.status(), reqwest::StatusCode::CONFLICT);
     for expected in [6, 0] {
         let submitted = client
             .post(url("/api/miners/acme-github/run"))

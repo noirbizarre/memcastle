@@ -2,8 +2,8 @@
 //! over REST, the CLI and (read-only) MCP, with one set of rules (docs/adr/037).
 //!
 //! What is tested here is what the daemon does for any miner: validation before anything is written, hand edits being
-//! noticed, a scope never widening silently, and a source's cursor surviving every change to the miner that points at
-//! it. What a particular source does with a scope is that source's own test.
+//! noticed, option changes never broadening silently, and a source's cursor surviving every change to the miner that
+//! points at it. What a particular source does with an option is that source's own test.
 
 use crate::common;
 
@@ -206,9 +206,9 @@ async fn an_invalid_miner_is_refused_before_anything_is_written() {
             "needs a `locator`",
         ),
         (
-            "a directory with a scope",
+            "a directory with an unsupported option",
             "scoped",
-            json!({ "source": "directory", "locator": dir.path(), "scope": { "groups": ["a"] } }),
+            json!({ "source": "directory", "locator": dir.path(), "options": { "groups": ["a"] } }),
             "unknown option `groups`",
         ),
         (
@@ -223,7 +223,7 @@ async fn an_invalid_miner_is_refused_before_anything_is_written() {
         (
             "a secret pasted into a setting",
             "leak",
-            json!({ "source": "directory", "locator": dir.path(), "config": { "api_key": "hunter2" } }),
+            json!({ "source": "directory", "locator": dir.path(), "options": { "api_key": "hunter2" } }),
             "looks like a secret",
         ),
         (
@@ -282,7 +282,7 @@ async fn a_disabled_miner_may_name_a_source_that_is_not_installed_yet() {
     let (status, created) = put(
         &daemon,
         "signal-personal",
-        json!({ "source": "signal", "enabled": false, "scope": { "contacts": ["+336"] } }),
+        json!({ "source": "signal", "enabled": false, "options": { "contacts": ["+336"] } }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{created}");
@@ -302,21 +302,21 @@ async fn a_disabled_miner_may_name_a_source_that_is_not_installed_yet() {
 }
 
 #[tokio::test]
-async fn a_change_that_widens_the_scope_needs_to_say_so() {
+async fn a_change_that_may_widen_options_needs_to_say_so() {
     let daemon = TestDaemon::start().await;
     put(
         &daemon,
         "chat",
-        json!({ "source": "chat", "enabled": false, "scope": { "groups": ["a", "b"], "contacts": ["alice"] } }),
+        json!({ "source": "chat", "enabled": false, "options": { "groups": ["a", "b"], "contacts": ["alice"] } }),
     )
     .await;
 
     for (what, body) in [
         (
             "a value added to a list",
-            json!({ "scope": { "groups": ["a", "b", "c"] } }),
+            json!({ "options": { "groups": ["a", "b", "c"] } }),
         ),
-        ("a filter dropped", json!({ "unset_scope": ["contacts"] })),
+        ("a filter dropped", json!({ "unset_options": ["contacts"] })),
     ] {
         let (status, error) = put(&daemon, "chat", body).await;
         assert_eq!(
@@ -327,16 +327,16 @@ async fn a_change_that_widens_the_scope_needs_to_say_so() {
     }
     let (_, unchanged) = get(&daemon, "/api/miners/chat").await;
     assert_eq!(
-        unchanged["scope"]["groups"],
+        unchanged["options"]["groups"],
         json!(["a", "b"]),
-        "a refused change leaves the scope as it was"
+        "a refused change leaves the options as they were"
     );
 
-    // Narrowing and adding a filter are never refused.
+    // Without the source's semantics, even a seemingly narrower change needs acknowledgement.
     let (status, narrowed) = put(
         &daemon,
         "chat",
-        json!({ "scope": { "groups": ["a"], "since": ["2024"] } }),
+        json!({ "options": { "groups": ["a"], "since": ["2024"] }, "allow_broaden": true }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{narrowed}");
@@ -345,11 +345,11 @@ async fn a_change_that_widens_the_scope_needs_to_say_so() {
     let (status, widened) = put(
         &daemon,
         "chat",
-        json!({ "unset_scope": ["since"], "allow_broaden": true }),
+        json!({ "unset_options": ["since"], "allow_broaden": true }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{widened}");
-    assert!(widened["miner"]["scope"].get("since").is_none());
+    assert!(widened["miner"]["options"].get("since").is_none());
     daemon.shutdown().await;
 }
 
@@ -359,9 +359,9 @@ async fn a_hand_edit_is_noticed_without_a_restart_and_reported_by_reload() {
     let dir = notes_dir();
     put(&daemon, "docs", directory(dir.path())).await;
 
-    // The user edits the file by hand: a comment, a second miner, and a wider scope on a disabled one.
+    // The user edits the file by hand: a comment, a second miner, and options on a disabled one.
     let mut text = std::fs::read_to_string(&daemon.config_path).unwrap();
-    text.push_str("\n# written by hand\n[[miners]]\nname = \"chat\"\nsource = \"chat\"\nenabled = false\n[miners.scope]\ngroups = [\"a\"]\n");
+    text.push_str("\n# written by hand\n[[miners]]\nname = \"chat\"\nsource = \"chat\"\nenabled = false\n[miners.options]\ngroups = [\"a\"]\n");
     std::fs::write(&daemon.config_path, text).unwrap();
 
     let (_, list) = get(&daemon, "/api/miners").await;
@@ -528,7 +528,12 @@ async fn a_miners_cursor_survives_every_change_that_keeps_its_source_and_locator
 
     // Pointing the miner somewhere else *is* a different source, and the answer says so.
     let other = notes_dir();
-    let (_, moved) = put(&daemon, "docs", json!({ "locator": other.path() })).await;
+    let (_, moved) = put(
+        &daemon,
+        "docs",
+        json!({ "locator": other.path(), "allow_broaden": true }),
+    )
+    .await;
     assert_eq!(moved["identity_changed"], true);
     assert_eq!(
         moved["miner"]["documents"], 0,
@@ -549,11 +554,11 @@ async fn a_miner_that_cannot_run_says_why_and_is_not_run() {
         (StatusCode::CONFLICT, "memcastle::miner::disabled")
     );
 
-    // A miner a hand edit gave a scope the directory source does not declare: running it would mine more than it says.
+    // A hand edit naming an undeclared option cannot be silently ignored by the source.
     let text = std::fs::read_to_string(&daemon.config_path).unwrap();
     std::fs::write(
         &daemon.config_path,
-        format!("{text}\n[miners.scope]\ngroups = [\"a\"]\n")
+        format!("{text}\n[miners.options]\ngroups = [\"a\"]\n")
             .replace("enabled = false", "enabled = true"),
     )
     .unwrap();
@@ -581,15 +586,15 @@ async fn a_miner_that_cannot_run_says_why_and_is_not_run() {
 }
 
 #[tokio::test]
-async fn a_miners_scope_and_settings_are_the_options_of_its_run() {
+async fn a_miners_saved_options_are_the_options_of_its_run() {
     let daemon = TestDaemon::start().await;
     let dir = notes_dir();
-    // `since` is the one option the directory source declares, so a scope key by that name is a filter it applies; the
+    // `since` is the one option the directory source declares, so that key is a filter it applies; the
     // file `notes_dir` writes is dated sixteen minutes into 1970.
     let (status, created) = put(
         &daemon,
         "docs",
-        json!({ "source": "directory", "locator": dir.path(), "scope": { "since": "1970-01" } }),
+        json!({ "source": "directory", "locator": dir.path(), "options": { "since": "1970-01" } }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{created}");
@@ -608,20 +613,20 @@ async fn a_miners_scope_and_settings_are_the_options_of_its_run() {
     assert_eq!(
         wire["options"],
         json!({ "since": "1970-01" }),
-        "the run passes the scope on, as `memcastle mine directory <path> since=1970-01` would: {wire}"
+        "the run passes the option on, as `memcastle mine directory <path> since=1970-01` would: {wire}"
     );
     assert_eq!(
         done.result.as_ref().unwrap()["created"],
         1,
-        "the file is dated 1970-01-01 00:16, after the scope's date, so it is still mined"
+        "the file is dated 1970-01-01 00:16, after the option's date, so it is still mined"
     );
 
-    // A date in the far future filters the same file out: the scope is applied, not just carried. A second miner,
-    // because changing a scope's value would widen it, which the daemon refuses.
+    // A date in the far future filters the same file out: the option is applied, not just carried. A second miner
+    // keeps the examples independent, so its cursor cannot affect the first miner's run.
     let (status, created) = put(
         &daemon,
         "later",
-        json!({ "source": "directory", "locator": dir.path(), "scope": { "since": "2999-01" } }),
+        json!({ "source": "directory", "locator": dir.path(), "options": { "since": "2999-01" } }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{created}");
@@ -639,6 +644,91 @@ async fn a_miners_scope_and_settings_are_the_options_of_its_run() {
         0,
         "{:?}",
         done.result
+    );
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn temporary_options_are_checked_and_do_not_rewrite_the_miner() {
+    let daemon = TestDaemon::start().await;
+    let dir = notes_dir();
+    let (_, created) = put(
+        &daemon,
+        "docs",
+        json!({
+            "source": "directory", "locator": dir.path(), "options": {"since": "1970-01"}
+        }),
+    )
+    .await;
+    assert_eq!(created["miner"]["state"], "ready", "{created}");
+    let original = std::fs::read_to_string(&daemon.config_path).unwrap();
+
+    let (status, error) = request(
+        &daemon,
+        Method::POST,
+        "/api/miners/docs/run",
+        Some(json!({"options": {"since": "1969-01"}})),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::CONFLICT, "memcastle::miner::scope_broadened")
+    );
+
+    let (status, job) = request(
+        &daemon,
+        Method::POST,
+        "/api/miners/docs/run",
+        Some(json!({"options": {"since": "2999-01"}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{job}");
+    assert_eq!(job["kind"]["options"], json!({"since": "2999-01"}));
+    let (_, saved) = get(&daemon, "/api/miners/docs").await;
+    assert_eq!(saved["options"], json!({"since": "1970-01"}));
+    assert_eq!(
+        std::fs::read_to_string(&daemon.config_path).unwrap(),
+        original
+    );
+
+    let (status, job) = request(
+        &daemon,
+        Method::POST,
+        "/api/miners/docs/run",
+        Some(json!({"options": {"since": "1969-01"}, "allow_broaden": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{job}");
+    assert_eq!(job["kind"]["options"], json!({"since": "1969-01"}));
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn legacy_miner_fields_are_refused_with_a_migration_hint() {
+    let daemon = TestDaemon::start().await;
+    let dir = notes_dir();
+    put(&daemon, "docs", directory(dir.path())).await;
+    let (status, error) = put(&daemon, "docs", json!({"scope": {"since": "1970-01"}})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    let text = std::fs::read_to_string(&daemon.config_path).unwrap();
+    std::fs::write(
+        &daemon.config_path,
+        format!("{text}\n[miners.scope]\nsince = \"1970-01\"\n"),
+    )
+    .unwrap();
+    let startup = Config::load(Some(&daemon.config_path), &Overrides::default())
+        .expect_err("a new daemon must refuse a legacy table");
+    assert!(
+        startup.to_string().contains("[miners.options]"),
+        "{startup}"
+    );
+    let (_, report) = get(&daemon, "/api/miners").await;
+    assert!(
+        report["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("[miners.options]"),
+        "{report}"
     );
     daemon.shutdown().await;
 }
@@ -743,7 +833,7 @@ async fn mcp_and_rest_show_the_same_miners_and_mcp_cannot_change_them() {
     put(
         &daemon,
         "chat",
-        json!({ "source": "chat", "enabled": false, "scope": { "groups": ["a"] } }),
+        json!({ "source": "chat", "enabled": false, "options": { "groups": ["a"] } }),
     )
     .await;
 
@@ -823,7 +913,7 @@ async fn the_cli_creates_changes_and_reads_miners_through_the_same_routes() {
             locator,
             "--wing",
             "w",
-            "--scope",
+            "--option",
             "since=2020-01",
         ],
     )
@@ -833,13 +923,19 @@ async fn the_cli_creates_changes_and_reads_miners_through_the_same_routes() {
 
     // What the CLI wrote is what REST reads, and what `miner list` prints is what REST answers.
     let (_, rest) = get(&daemon, "/api/miners/docs").await;
-    assert_eq!(rest["scope"], json!({ "since": ["2020-01"] }));
+    assert_eq!(rest["options"], json!({ "since": "2020-01" }));
     let (ok, listed, stderr) = cli(&daemon, &["miner", "list"]).await;
     assert!(ok, "{stderr}");
     let (_, rest_list) = get(&daemon, "/api/miners").await;
     assert_eq!(listed, rest_list, "CLI and REST are one model");
     let (_, got, _) = cli(&daemon, &["miner", "get", "docs"]).await;
     assert_eq!(got, rest);
+
+    let (ok, job, stderr) = cli(&daemon, &["miner", "run", "docs", "since=2999-01"]).await;
+    assert!(ok, "{stderr}");
+    assert_eq!(job["kind"]["options"], json!({ "since": "2999-01" }));
+    let (_, saved) = get(&daemon, "/api/miners/docs").await;
+    assert_eq!(saved["options"], json!({ "since": "2020-01" }));
 
     let (ok, disabled, stderr) = cli(&daemon, &["miner", "disable", "docs"]).await;
     assert!(ok, "{stderr}");
@@ -851,10 +947,10 @@ async fn the_cli_creates_changes_and_reads_miners_through_the_same_routes() {
     put(
         &daemon,
         "chat",
-        json!({ "source": "chat", "enabled": false, "scope": { "groups": ["a"] } }),
+        json!({ "source": "chat", "enabled": false, "options": { "groups": ["a"] } }),
     )
     .await;
-    let (ok, _, stderr) = cli(&daemon, &["miner", "set", "chat", "--scope", "groups=a,b"]).await;
+    let (ok, _, stderr) = cli(&daemon, &["miner", "set", "chat", "--option", "groups=a,b"]).await;
     assert!(!ok);
     assert!(
         stderr.contains("memcastle::miner::scope_broadened") && stderr.contains("--allow-broaden"),
@@ -866,14 +962,14 @@ async fn the_cli_creates_changes_and_reads_miners_through_the_same_routes() {
             "miner",
             "set",
             "chat",
-            "--scope",
+            "--option",
             "groups=a,b",
             "--allow-broaden",
         ],
     )
     .await;
     assert!(ok, "{stderr}");
-    assert_eq!(widened["miner"]["scope"]["groups"], json!(["a", "b"]));
+    assert_eq!(widened["miner"]["options"]["groups"], json!("a,b"));
 
     let (ok, removed, stderr) = cli(&daemon, &["miner", "remove", "chat", "--yes"]).await;
     assert!(ok, "{stderr}");

@@ -23,18 +23,22 @@ description = "non-secret account label used to distinguish sources with differe
 
 [options.include]
 type = "string"
+breadth = "include"
 description = "required comma-separated repository patterns (owner/repo, org/*, owner/repo*)"
 
 [options.exclude]
 type = "string"
+breadth = "exclude"
 description = "comma-separated repository patterns excluded from include"
 
 [options.wiki_include]
 type = "string"
+breadth = "opt_in_include"
 description = "repositories whose Git-backed wiki history to mine, independently of issues and PRs"
 
 [options.wiki_exclude]
 type = "string"
+breadth = "exclude"
 description = "wiki repository exclusions (applied after wiki_include)"
 
 [options.issues]
@@ -59,18 +63,22 @@ description = "mine selected repository metadata (true/false; default true)"
 
 [options.labels]
 type = "string"
+breadth = "include"
 description = "only issues and PRs bearing one of these labels (comma-separated)"
 
 [options.topics]
 type = "string"
+breadth = "include"
 description = "only repositories bearing one of these topics (comma-separated)"
 
 [options.paths]
 type = "string"
+breadth = "include"
 description = "only wiki paths matching these comma-separated glob patterns"
 
 [options.since]
 type = "date"
+breadth = "since"
 description = "bootstrap from this date; an older boundary later needs a full mine"
 
 [limits]

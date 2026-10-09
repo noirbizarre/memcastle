@@ -82,6 +82,24 @@ pub fn validate(manifest: &SourceManifest, reserved: &[&str]) -> Result<()> {
                 "options.{key}.description must be one non-empty line"
             )));
         }
+        if option.breadth == crate::domain::OptionBreadth::Since
+            && option.kind != crate::domain::OptionKind::Date
+        {
+            return Err(invalid(format!(
+                "options.{key}.breadth = 'since' needs type = 'date' so dates can be compared"
+            )));
+        }
+        if matches!(
+            option.breadth,
+            crate::domain::OptionBreadth::Include
+                | crate::domain::OptionBreadth::OptInInclude
+                | crate::domain::OptionBreadth::Exclude
+        ) && option.kind != crate::domain::OptionKind::String
+        {
+            return Err(invalid(format!(
+                "options.{key}.breadth uses comma-separated strings, so type must be 'string'"
+            )));
+        }
     }
     for (key, trigger) in &manifest.triggers {
         // Only the mechanisms a source has to speak for: a timetable and a poll are the host's, for every source.
@@ -214,6 +232,24 @@ read = ["locator"]
         assert!(!manifest.capabilities.needs_credentials);
         assert!(!manifest.permissions.network);
         assert_eq!(manifest.permissions.filesystem.read, ["locator"]);
+    }
+
+    #[test]
+    fn breadth_rules_are_validated_and_exposed_with_source_options() {
+        let manifest = parse(&format!("{GOOD}\n[options.since]\ndescription = \"start date\"\ntype = \"date\"\nbreadth = \"since\"\n"), &[]).unwrap();
+        assert_eq!(
+            manifest.option_specs()[0].breadth,
+            crate::domain::OptionBreadth::Since
+        );
+        let bad = format!(
+            "{GOOD}\n[options.since]\ndescription = \"start date\"\ntype = \"string\"\nbreadth = \"since\"\n"
+        );
+        assert!(
+            parse(&bad, &[])
+                .unwrap_err()
+                .to_string()
+                .contains("type = 'date'")
+        );
     }
 
     #[test]

@@ -126,7 +126,7 @@ fixtures = "fixtures"
 | `compatibility.contract` | `MAJOR.MINOR` or `MAJOR.MINOR.PATCH`. |
 | `compatibility.memcastle` | A semver requirement. A pre-release of a release is held to the release's requirement. |
 | `permissions.filesystem.read` | `locator`, an absolute path, or a path starting with `~/`. A directory that does not exist is dropped, not an error. |
-| `options.<name>` | A key of lowercase letters, digits, `-` or `_` starting with a letter, with a one-line `description` and a `type` of `string`, `path` or `date`. Options are not permissions: they ask for nothing and are no part of what a user consents to. |
+| `options.<name>` | A key of lowercase letters, digits, `-` or `_` starting with a letter, with a one-line `description` and a `type` of `string`, `path` or `date`, and optional `breadth` (`include`, `opt_in_include`, `exclude` or `since`). Options are not permissions: they ask for nothing and are no part of what a user consents to. |
 | `triggers.<kind>` | `webhook` or `watch` (a timetable and a poll are every source's, so they are not declared), with a one-line `description`. A capability, not a permission: nothing starts because it is declared, and it is no part of what a user consents to. |
 | `permissions.process` | Bare program names (`git`), never a path or a command line. |
 | `permissions.oauth` | `client_id` and `token_url`, and `device_authorization_url`, `authorize_url` or both; every URL `https` (plain `http` only to `localhost`); each scope one word; and `capabilities.needs_credentials = true`. A declared `callback_path` replaces `/callback` on the same loopback listener; `on_demand = true` lets an offline mode proceed without a sign-in while the online mode must ask for its token at `identify`. No client secret: a public client cannot keep one. |
@@ -144,6 +144,13 @@ message that says what was expected), and returns them on the `source-ref` it gi
 from which `discover` and `read` read them.
 The `type` is for people and for the command line: a `path` value is made absolute against the shell's working directory
 before the daemon sees it, since the daemon runs somewhere else.
+The optional `breadth` describes how a *change* to this option affects a configured miner.
+Use `include` for a comma-separated positive selection where an absent option means everything (fewer values narrow),
+`opt_in_include` when absence means none (adding it broadens), `exclude` for exclusions (more values narrow), or `since`
+for a chronological lower bound (later dates narrow).
+Only declare a rule when the source's implementation proves it; an undeclared rule is conservative and requires
+`--allow-broaden` for changed saved options or one-off `miner run` overrides.
+These rules do not change the component contract or the permissions a source requests.
 
 An option either narrows or selects, and the two are not the same to the cursor, which belongs to the identity:
 

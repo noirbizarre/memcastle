@@ -112,12 +112,26 @@ fn parse<T: Section>(path: &Path, text: &str) -> Result<Vec<T>> {
     })?;
     let entries: Vec<T> = match table.remove(T::KEY) {
         None => Vec::new(),
-        Some(value) => value.try_into().map_err(|e| {
-            file_error(
-                path,
-                format!("the `[[{}]]` section does not parse: {e}", T::KEY),
-            )
-        })?,
+        Some(value) => {
+            if T::KEY == "miners"
+                && value.as_array().is_some_and(|entries| {
+                    entries
+                        .iter()
+                        .any(|entry| entry.get("scope").is_some() || entry.get("config").is_some())
+                })
+            {
+                return Err(file_error(
+                    path,
+                    "legacy [miners.scope] and [miners.config] are no longer accepted; merge their keys into [miners.options] (choose one value for duplicates)",
+                ));
+            }
+            value.try_into().map_err(|e| {
+                file_error(
+                    path,
+                    format!("the `[[{}]]` section does not parse: {e}", T::KEY),
+                )
+            })?
+        }
     };
     T::validate_all(&entries).map_err(|reason| file_error(path, reason))?;
     Ok(entries)
@@ -443,15 +457,11 @@ port = 4000
     }
 
     #[test]
-    fn nested_tables_are_written_as_tables_and_read_back_equal() {
+    fn options_are_written_as_a_table_and_read_back_equal() {
         let (_dir, path) = setup(SAMPLE);
         let loaded = read(&path).expect("read");
         let mut rich = miner("signal");
-        rich.scope = json!({"contacts": ["+336"], "groups": ["MemCastle"]})
-            .as_object()
-            .cloned()
-            .expect("map");
-        rich.config = json!({"window": {"days": 7}})
+        rich.options = json!({"contacts": ["+336"], "groups": ["MemCastle"], "window_days": 7})
             .as_object()
             .cloned()
             .expect("map");
@@ -464,7 +474,7 @@ port = 4000
 
         let text = std::fs::read_to_string(&path).expect("read back");
         assert!(
-            text.contains("[miners.scope]") || text.contains("scope"),
+            text.contains("[miners.options]") || text.contains("options"),
             "{text}"
         );
         assert_eq!(read(&path).expect("reread").miners, miners, "{text}");

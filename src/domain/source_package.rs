@@ -70,6 +70,9 @@ pub struct ManifestOption {
     /// What its value looks like: `string` (the default), `path` or `date`.
     #[serde(default, rename = "type")]
     pub kind: OptionKind,
+    /// How changes to this option affect which material can be selected.
+    #[serde(default)]
+    pub breadth: super::OptionBreadth,
 }
 
 impl SourceManifest {
@@ -96,6 +99,7 @@ impl SourceManifest {
                 name: name.clone(),
                 description: option.description.clone(),
                 kind: option.kind,
+                breadth: option.breadth,
             })
             .collect()
     }

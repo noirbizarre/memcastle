@@ -22,6 +22,7 @@ read = ["locator"]
 # What `memcastle mine directory-wasm <path> key=value` accepts. Options are not permissions: they ask for nothing.
 [options.since]
 type = "date"
+breadth = "since"
 description = "only files modified at or after this date (`2026-09`, `2026-09-14` or an RFC 3339 time)"
 
 # What can trigger a run of this source. A capability, never an activation: nothing starts until the user defines and

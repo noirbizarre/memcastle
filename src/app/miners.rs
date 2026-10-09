@@ -21,7 +21,7 @@ use super::AppServices;
 use crate::config::miners_file::{self, FileStamp};
 use crate::domain::{
     CredentialRef, Job, JobKind, JobStatus, MemoryMode, MinerDefinition, MiningSource, NameKind,
-    SourceId, SourceRecord, scope_broadening, validate_name,
+    SourceId, SourceRecord, option_broadening, validate_name,
 };
 use crate::error::{Error, Result};
 
@@ -79,8 +79,8 @@ impl MinerRegistry {
 
     /// Read the file again if it changed (or `force`), keeping the last good copy when it no longer parses.
     ///
-    /// Returns what changed. A hand edit that widens an enabled miner's scope is applied, because the file is the
-    /// user's, but it is logged: the daemon never widens a scope itself, and says when someone else did.
+    /// Returns what changed. A hand edit that may broaden options is applied because the file is the user's, but is
+    /// logged; without source metadata in this synchronous path the reload report is deliberately conservative.
     fn refresh(&self, state: &mut RegistryState, force: bool) -> Result<MinersDiff> {
         let Some(path) = self.path.as_deref() else {
             return Ok(MinersDiff::default());
@@ -93,7 +93,7 @@ impl MinerRegistry {
             Ok(loaded) => {
                 let diff = MinersDiff::between(&state.miners, &loaded.miners);
                 for name in &diff.broadened {
-                    warn!(miner = %name, "the configuration file widened this miner's scope; applied as written");
+                    warn!(miner = %name, "the configuration file may have broadened this miner's options; applied as written");
                 }
                 if !diff.is_empty() {
                     info!(
@@ -145,7 +145,7 @@ pub struct MinersDiff {
     pub enabled: Vec<String>,
     /// Changed miners that are now disabled and were not.
     pub disabled: Vec<String>,
-    /// Changed miners whose scope is now wider.
+    /// Changed miners whose options may now select more material.
     pub broadened: Vec<String>,
 }
 
@@ -166,7 +166,16 @@ impl MinersDiff {
                 (true, false) => diff.disabled.push(miner.name.clone()),
                 _ => {}
             }
-            if !scope_broadening(&before.scope, &miner.scope).is_empty() {
+            // A file reload has no source metadata in this synchronous path: unknown changes are reported conservatively.
+            if before.source != miner.source
+                || before.locator != miner.locator
+                || !option_broadening(
+                    &before.options().unwrap_or_default(),
+                    &miner.options().unwrap_or_default(),
+                    &[],
+                )
+                .is_empty()
+            {
                 diff.broadened.push(miner.name.clone());
             }
         }
@@ -232,12 +241,9 @@ pub struct MinerView {
     /// Its credential, as a kind and an availability.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential: Option<CredentialView>,
-    /// Its scope filter.
+    /// Saved source options.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
-    pub scope: Map<String, Value>,
-    /// Its source-specific settings.
-    #[serde(default, skip_serializing_if = "Map::is_empty")]
-    pub config: Map<String, Value>,
+    pub options: Map<String, Value>,
     /// The mined source this miner's cursor lives on, once something has been mined from it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_id: Option<SourceId>,
@@ -264,7 +270,7 @@ pub struct MinersReport {
 
 /// A change to one miner: what to set, and what to clear.
 ///
-/// A key that is absent is left alone. `scope` and `config` set the keys they name (replacing that key's value);
+/// A key that is absent is left alone. `options` sets the keys it names (replacing each key's value);
 /// the `unset_*` lists remove keys. Creating a miner needs `source`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -279,18 +285,21 @@ pub struct MinerPatch {
     pub wing: Option<String>,
     /// Where its credential comes from.
     pub credential: Option<CredentialRef>,
-    /// Scope keys to set.
-    pub scope: Map<String, Value>,
-    /// Scope keys to remove.
-    pub unset_scope: Vec<String>,
-    /// Source-specific settings to set.
-    pub config: Map<String, Value>,
-    /// Source-specific settings to remove.
-    pub unset_config: Vec<String>,
+    /// Source options to set.
+    pub options: Map<String, Value>,
+    /// Source options to remove.
+    pub unset_options: Vec<String>,
     /// Fields to clear: any of `locator`, `wing`, `credential`.
     pub unset: Vec<String>,
-    /// Allow the change to make the scope wider.
+    /// Allow a change that may broaden what the miner reads.
     pub allow_broaden: bool,
+}
+
+/// One-off changes to a run, carried together so triggered runs can use the empty default.
+#[derive(Default)]
+struct RunOverrides {
+    options: crate::domain::Options,
+    allow_broaden: bool,
 }
 
 /// The outcome of [`AppServices::set_miner`].
@@ -463,6 +472,32 @@ impl AppServices {
             .map(|(job, _)| job)
     }
 
+    /// Run with temporary source options, leaving the miner's saved definition intact.
+    pub async fn run_miner_with_options(
+        &self,
+        name: &str,
+        full: bool,
+        overrides: crate::domain::Options,
+        allow_broaden: bool,
+        requested_by: &str,
+        mode: MemoryMode,
+    ) -> Result<Job> {
+        Self::require_write(mode, "miner_run")?;
+        self.request_miner_run_with_options(
+            name,
+            full,
+            requested_by,
+            mode,
+            false,
+            RunOverrides {
+                options: overrides,
+                allow_broaden,
+            },
+        )
+        .await
+        .map(|(job, _)| job)
+    }
+
     /// Ask for a run of a miner: the one path every request for a run takes, whether a person made it
     /// (`memcastle miner run`) or a trigger did (docs/adr/043), so a trigger can cause nothing a person could not.
     ///
@@ -481,6 +516,26 @@ impl AppServices {
         mode: MemoryMode,
         join_waiting: bool,
     ) -> Result<(Job, bool)> {
+        self.request_miner_run_with_options(
+            name,
+            full,
+            requested_by,
+            mode,
+            join_waiting,
+            RunOverrides::default(),
+        )
+        .await
+    }
+
+    async fn request_miner_run_with_options(
+        &self,
+        name: &str,
+        full: bool,
+        requested_by: &str,
+        mode: MemoryMode,
+        join_waiting: bool,
+        overrides: RunOverrides,
+    ) -> Result<(Job, bool)> {
         let miner = {
             let mut state = self.miners.state.lock().await;
             let _ = self.miners.refresh(&mut state, false);
@@ -496,9 +551,30 @@ impl AppServices {
         if let Err(reason) = self.check_activation(&miner).await {
             return Err(not_runnable(reason));
         }
-        // The scope and the settings are the run's options; `check_activation` has already checked their keys against
+        // The saved options are the run's options; `check_activation` has already checked their keys against
         // what the source declares, so what reaches the source is what the miner says.
-        let options = miner.options().map_err(not_runnable)?;
+        let saved = miner.options().map_err(not_runnable)?;
+        let mut options = saved.clone();
+        options.extend(overrides.options);
+        let mut checked = miner.clone();
+        checked.options = options
+            .iter()
+            .map(|(key, value)| (key.clone(), Value::String(value.clone())))
+            .collect();
+        checked.validate().map_err(not_runnable)?;
+        crate::mining::registry::ensure_minable(&self.store, &self.mining, &miner.source, &options)
+            .await?;
+        // Unknown options, including unknown filtering semantics, need an explicit one-off approval.
+        let specs =
+            crate::mining::registry::option_specs_for(&self.store, &self.mining, &miner.source)
+                .await?;
+        let reasons = option_broadening(&saved, &options, &specs);
+        if !overrides.allow_broaden && !reasons.is_empty() {
+            return Err(Error::MinerScopeBroadened {
+                name: name.to_string(),
+                reasons: reasons.join("; "),
+            });
+        }
         if join_waiting && !full {
             let queued = self.store.list_jobs(Some(JobStatus::Queued)).await?;
             let waiting = queued.into_iter().find(|job| match &job.kind {
@@ -579,7 +655,24 @@ impl AppServices {
             validate_name(NameKind::Wing, wing).map_err(|e| invalid(name, e.to_string()))?;
         }
         if let Some(before) = &existing {
-            let reasons = scope_broadening(&before.scope, &candidate.scope);
+            let specs = crate::mining::registry::option_specs_for(
+                &self.store,
+                &self.mining,
+                &before.source,
+            )
+            .await
+            .unwrap_or_default();
+            let reasons = if before.source != candidate.source
+                || before.locator != candidate.locator
+            {
+                vec!["source or locator changed; the miner may read a different place".to_string()]
+            } else {
+                option_broadening(
+                    &before.options().map_err(|r| invalid(name, r))?,
+                    &candidate.options().map_err(|r| invalid(name, r))?,
+                    &specs,
+                )
+            };
             if !reasons.is_empty() && !allow_broaden {
                 return Err(Error::MinerScopeBroadened {
                     name: name.to_string(),
@@ -628,7 +721,7 @@ impl AppServices {
         &self,
         miner: &MinerDefinition,
     ) -> std::result::Result<(), String> {
-        // The scope and the settings are what a run passes as options, so their keys are the source's to accept.
+        // The saved options are what a run passes to its source, so their keys are the source's to accept.
         let options = miner.options()?;
         crate::mining::registry::ensure_minable(&self.store, &self.mining, &miner.source, &options)
             .await
@@ -775,8 +868,7 @@ impl AppServices {
             locator: miner.locator.clone(),
             wing: miner.wing.clone(),
             credential,
-            scope: miner.scope.clone(),
-            config: miner.config.clone(),
+            options: miner.options.clone(),
             source_id: record.map(|r| r.id),
             last_run_at: record.and_then(|r| r.last_run_at),
             documents,
@@ -835,8 +927,7 @@ fn apply(
                 locator: None,
                 wing: None,
                 credential: None,
-                scope: Map::new(),
-                config: Map::new(),
+                options: Map::new(),
             }
         }
     };
@@ -870,14 +961,10 @@ fn apply(
     if patch.credential.is_some() {
         miner.credential = patch.credential;
     }
-    for key in &patch.unset_scope {
-        miner.scope.remove(key);
+    for key in &patch.unset_options {
+        miner.options.remove(key);
     }
-    miner.scope.extend(patch.scope);
-    for key in &patch.unset_config {
-        miner.config.remove(key);
-    }
-    miner.config.extend(patch.config);
+    miner.options.extend(patch.options);
     miner.validate().map_err(|reason| invalid(name, reason))?;
     Ok(miner)
 }

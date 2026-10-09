@@ -30,6 +30,7 @@ read = ["locator", "~/.pi/agent/sessions"]
 # What `memcastle mine pi key=value` accepts. Options are not permissions: they ask for nothing.
 [options.since]
 type = "date"
+breadth = "since"
 description = "only sessions modified at or after this date (`2026-09`, `2026-09-14` or an RFC 3339 time)"
 
 [options.dir]

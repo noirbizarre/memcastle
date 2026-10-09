@@ -196,13 +196,12 @@ An invariant nothing checks is a comment, and it will be violated.
     (`memcastle_miner_list`, `memcastle_miner_get`) but cannot decide what the daemon mines.
     A secret is never written to the file (`credential` is a reference, and a secret-looking key is refused) nor returned
     (a credential is shown as a kind (`env`, `file` or `oauth`) and whether it resolves), and a change made through the
-    daemon never widens a
-    scope without being told to.
+    daemon never broadens the miner's effective source options without being told to.
     The rest of the file is never rewritten, only that section, in place (see
     `docs/adr/037-persistent-miner-configuration.md`).
     Enforced by `tests/in_process/auth.rs` (every `/api/miners` route guarded, and the only miner MCP tools are the two
-    read-only ones), by `tests/in_process/miners.rs` (validation before anything is written, a scope never widens
-    silently, a credential never leaks, a cursor survives every change, REST, CLI and MCP agree)
+    read-only ones), by `tests/in_process/miners.rs` (validation before anything is written, option changes never
+    broaden silently, a credential never leaks, a cursor survives every change, REST, CLI and MCP agree)
     and by `config::miners_file`'s tests (comments and other tables survive an edit, a stale write is refused).
 
 13. **Triggers are opt-in, administrative, and only ask for a run** —

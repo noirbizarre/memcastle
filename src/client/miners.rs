@@ -83,11 +83,43 @@ impl DaemonClient {
     ///
     /// As for [`Self::list_miners`]; a disabled or unrunnable miner is a 409.
     pub async fn run_miner(&self, name: &str, full: bool) -> Result<Job> {
+        self.run_miner_with_options(name, full, &[], false).await
+    }
+
+    /// Parse one-off options like `mine`, resolving path values against the caller's directory.
+    pub async fn run_miner_with_options(
+        &self,
+        name: &str,
+        full: bool,
+        words: &[String],
+        allow_broaden: bool,
+    ) -> Result<Job> {
+        let parsed = super::mine::parse(name.to_string(), words.to_vec())?;
+        if parsed.positional.is_some() {
+            return Err(crate::Error::invalid_input(
+                "options",
+                "a miner already has a locator; give only KEY=VALUE options",
+            ));
+        }
+        let mut options = parsed.options;
+        if !options.is_empty() {
+            let miner = self.show_miner(name).await?;
+            let report = self.list_sources().await?;
+            if let Some(adapter) = report
+                .adapters
+                .iter()
+                .find(|adapter| adapter.name == miner.source)
+            {
+                super::mine::normalize_options(&mut options, &adapter.options)?;
+            }
+        }
         self.send(
             self.http
                 .post(self.api_url(&["miners", name, "run"], None)?)
                 .json(&serde_json::json!({
                     "full": full,
+                    "options": options,
+                    "allow_broaden": allow_broaden,
                     "requested_by": crate::domain::channel::CLI,
                 })),
         )
@@ -112,14 +144,10 @@ pub struct SetFlags<'a> {
     pub credential_file: Option<&'a str>,
     /// `--credential-oauth`.
     pub credential_oauth: bool,
-    /// `--scope`, as `KEY=VALUES`.
-    pub scope: &'a [String],
-    /// `--unset-scope`.
-    pub unset_scope: &'a [String],
-    /// `--setting`, as `KEY=VALUE`.
-    pub config: &'a [String],
-    /// `--unset-setting`.
-    pub unset_config: &'a [String],
+    /// `--option`, as `KEY=VALUE`.
+    pub options: &'a [String],
+    /// `--unset-option`.
+    pub unset_options: &'a [String],
     /// `--unset`.
     pub unset: &'a [String],
     /// `--disabled`.
@@ -145,18 +173,6 @@ fn setting_value(raw: &str) -> serde_json::Value {
     serde_json::from_str(raw).unwrap_or_else(|_| serde_json::Value::String(raw.to_string()))
 }
 
-/// A scope's value: always a list of strings, split at commas, so `groups=MemCastle` and `groups=MemCastle,Ops` have
-/// the same shape and a later edit can add or remove a value without changing its type.
-fn scope_value(raw: &str) -> serde_json::Value {
-    serde_json::Value::Array(
-        raw.split(',')
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| serde_json::Value::String(value.to_string()))
-            .collect(),
-    )
-}
-
 impl SetFlags<'_> {
     /// The patch these flags describe.
     ///
@@ -170,8 +186,7 @@ impl SetFlags<'_> {
             wing: self.wing.map(str::to_string),
             enabled: self.disabled.then_some(false),
             allow_broaden: self.allow_broaden,
-            unset_scope: self.unset_scope.to_vec(),
-            unset_config: self.unset_config.to_vec(),
+            unset_options: self.unset_options.to_vec(),
             unset: self.unset.to_vec(),
             ..MinerPatch::default()
         };
@@ -186,16 +201,10 @@ impl SetFlags<'_> {
                 .credential_oauth
                 .then_some(crate::domain::CredentialRef::Oauth),
         };
-        for raw in self.scope {
-            let (key, value) = split_pair("--scope", raw)?;
+        for raw in self.options {
+            let (key, value) = split_pair("--option", raw)?;
             patch
-                .scope
-                .insert(key.trim().to_string(), scope_value(value));
-        }
-        for raw in self.config {
-            let (key, value) = split_pair("--setting", raw)?;
-            patch
-                .config
+                .options
                 .insert(key.trim().to_string(), setting_value(value));
         }
         Ok(patch)
@@ -209,51 +218,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scope_values_are_always_lists_of_strings() {
-        let scope = vec![
-            "groups=MemCastle".to_string(),
-            "contacts=+336, +337,".to_string(),
-        ];
-        let patch = SetFlags {
-            scope: &scope,
-            ..SetFlags::default()
-        }
-        .into_patch()
-        .expect("patch");
-        assert_eq!(patch.scope["groups"], json!(["MemCastle"]));
-        assert_eq!(patch.scope["contacts"], json!(["+336", "+337"]));
-    }
-
-    #[test]
-    fn config_values_are_json_when_they_parse_and_strings_otherwise() {
-        let config = vec![
+    fn options_are_json_when_they_parse_and_strings_otherwise() {
+        let options = vec![
             "days=7".to_string(),
             "flag=true".to_string(),
             "name=alice".to_string(),
             "l=[\"a\"]".to_string(),
         ];
         let patch = SetFlags {
-            config: &config,
+            options: &options,
             ..SetFlags::default()
         }
         .into_patch()
         .expect("patch");
-        assert_eq!(patch.config["days"], json!(7));
-        assert_eq!(patch.config["flag"], json!(true));
-        assert_eq!(patch.config["name"], json!("alice"));
-        assert_eq!(patch.config["l"], json!(["a"]));
+        assert_eq!(patch.options["days"], json!(7));
+        assert_eq!(patch.options["flag"], json!(true));
+        assert_eq!(patch.options["name"], json!("alice"));
+        assert_eq!(patch.options["l"], json!(["a"]));
     }
 
     #[test]
     fn a_pair_without_an_equals_sign_names_the_flag() {
-        let scope = vec!["groups".to_string()];
+        let options = vec!["groups".to_string()];
         let error = SetFlags {
-            scope: &scope,
+            options: &options,
             ..SetFlags::default()
         }
         .into_patch()
         .expect_err("not a pair");
-        assert!(error.to_string().contains("--scope"), "{error}");
+        assert!(error.to_string().contains("--option"), "{error}");
     }
 
     #[test]

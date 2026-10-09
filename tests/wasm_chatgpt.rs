@@ -527,8 +527,8 @@ async fn a_persistent_miner_for_multiple_projects_keeps_its_scope_and_cursor() {
     let configured = client
         .put(url("/api/miners/chatgpt-project"))
         .json(
-            &json!({"source": "chatgpt", "scope": {"projects": ["name:Beta", "id:g-p-alpha"]},
-                     "config": {"mode": "web", "account": "fixture"}}),
+            &json!({"source": "chatgpt", "options": {"projects": ["name:Beta", "id:g-p-alpha"],
+                     "mode": "web", "account": "fixture"}}),
         )
         .send()
         .await
@@ -559,7 +559,7 @@ async fn a_persistent_miner_for_multiple_projects_keeps_its_scope_and_cursor() {
     assert_eq!(second.result.as_ref().unwrap()["unchanged"], 3);
     let widened = client
         .put(url("/api/miners/chatgpt-project"))
-        .json(&json!({"unset_scope": ["projects"]}))
+        .json(&json!({"unset_options": ["projects"]}))
         .send()
         .await
         .unwrap();

@@ -114,3 +114,11 @@ With installable sources the shape stopped helping:
   Safe, and every `since` value would start a cursor of its own and read everything again.
 - **Keeping `--source` and `--locator` as hidden aliases.**
   Two spellings of one request to document and test, for a project that is not yet 1.0.
+
+## Note, 2026-10-09: one persistent options table
+
+Miners now store source options in one `[miners.options]` table, replacing `[miners.scope]` and `[miners.config]`.
+The old tables require a manual merge, and `miner run NAME key=value` can replace saved options for one run without
+changing the miner definition.
+An option's source-declared comparison semantics, rather than the table it came from, determines whether a change
+requires `--allow-broaden`; unknown changes conservatively require approval.

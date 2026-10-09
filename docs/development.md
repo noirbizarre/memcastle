@@ -150,8 +150,8 @@ Every path, environment variable, flag and the precedence between them is in [Co
   - `tests/shutdown.rs` — a stopping process lets the embedded datastore finish stopping before it exits (subprocess).
   - `tests/in_process/db_endpoint.rs` — the database admin endpoint: opt-in, loopback by default, refused origins,
     and sharing the daemon's data (in-process).
-  - `tests/in_process/miners.rs` — persistent miner configuration end to end: several miners with their own scope, creation
-    and changes validated before anything is written, a scope never widening silently, hand edits noticed and an invalid
+  - `tests/in_process/miners.rs` — persistent miner configuration end to end: several miners with their own options, creation
+    and changes validated before anything is written, a change never broadening silently, hand edits noticed and an invalid
     one keeping the last good miners, a cursor surviving every change that keeps the source, a credential never shown, and
     REST, the CLI and MCP agreeing (in-process, with the CLI as a subprocess client).
   - `tests/in_process/triggers.rs` — source triggers end to end: disabled by default and nothing started by defining a

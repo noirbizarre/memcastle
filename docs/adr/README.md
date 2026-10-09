@@ -133,9 +133,10 @@ The history is the value.
   and LongMemEval is a converter for a file the user downloads
   (relates to ADR-021, ADR-032)
 - [ADR-037](037-persistent-miner-configuration.md) — miners are named `[[miners]]` definitions in the configuration file
-  (source, locator, scope, a credential *reference*), edited in place by the daemon with comments kept and
+  (source, locator, saved options, a credential *reference*), edited in place by the daemon with comments kept and
   re-read when the file changes, read-only over MCP and administrative over REST and the CLI;
-  a cursor belongs to the source a miner points at and not to its name, a scope never widens without `--allow-broaden`,
+  a cursor belongs to the source a miner points at and not to its name, an option change that may broaden requires
+  `--allow-broaden`
   (triggers were stored but not acted on, until ADR-043 replaced them with `[[triggers]]`)
 - [ADR-038](038-one-output-contract-for-every-command.md) — every command with a data answer is readable in a terminal
   and JSON in a pipe, and the global `--json` forces JSON on a terminal
@@ -163,7 +164,7 @@ The history is the value.
   `--source` and `--locator`, with `memcastle mine <path>` kept as the directory shorthand;
   sources declare the options they accept (`[options.<name>]`) and the daemon refuses the rest before queuing,
   the source contract is `0.4.0` (`identify` takes the options, `source-ref` carries them) and the source decides which
-  options are identity and which only narrow, and a miner's scope and settings become the options of its run
+  options are identity and which only narrow; a miner's single options table becomes the defaults of its run
   (amends ADR-023, ADR-026 and ADR-037)
 - [ADR-043](043-source-triggers.md) — triggers are `[[triggers]]` entries (`schedule`, `poll`, `webhook`, `watch`), disabled
   until the user enables them, that only decide *when* and end in the request `miner run` makes,

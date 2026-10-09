@@ -45,7 +45,7 @@ pub fn is_valid_miner_name(name: &str) -> bool {
 /// One `[[miners]]` entry.
 ///
 /// Unknown top-level keys are an error (a typo in `enable` must not silently leave a miner enabled);
-/// `scope` and `config` are open, so a source can define its own keys.
+/// `options` is open, so a source can define its own keys.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MinerDefinition {
@@ -65,12 +65,9 @@ pub struct MinerDefinition {
     /// Where the source's credential is read from; never the credential itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential: Option<CredentialRef>,
-    /// What to include: a filter the source understands. Empty means everything the locator reaches.
+    /// Saved source options; the source declares which changes can select more material.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
-    pub scope: Map<String, Value>,
-    /// Source-specific settings that are not a filter.
-    #[serde(default, skip_serializing_if = "Map::is_empty")]
-    pub config: Map<String, Value>,
+    pub options: Map<String, Value>,
 }
 
 fn default_enabled() -> bool {
@@ -78,41 +75,34 @@ fn default_enabled() -> bool {
 }
 
 impl MinerDefinition {
-    /// What a run of this miner passes to its source as options: the `scope`, then the `config`, flattened to the
+    /// What a run of this miner passes to its source as options: the saved values flattened to the
     /// strings every client sends (`memcastle mine <source> key=value`), so a miner run and the same run by hand are the
     /// same request.
     ///
-    /// A scalar is its text, a list of strings is comma-joined. A key in both tables is refused rather than letting one
-    /// quietly win, and so is a nested table, which has no one-string form.
+    /// A scalar is its text, a list of strings is comma-joined; nested tables have no one-string form.
     ///
     /// # Errors
     ///
     /// A sentence naming the key and what to change.
     pub fn options(&self) -> Result<super::Options, String> {
         let mut options = super::Options::new();
-        for (table, entries) in [("scope", &self.scope), ("config", &self.config)] {
-            for (key, value) in entries {
-                let text = match value {
-                    Value::String(text) => text.clone(),
-                    Value::Bool(flag) => flag.to_string(),
-                    Value::Number(number) => number.to_string(),
-                    Value::Array(items) if items.iter().all(Value::is_string) => items
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .collect::<Vec<_>>()
-                        .join(","),
-                    Value::Null | Value::Array(_) | Value::Object(_) => {
-                        return Err(format!(
-                            "`{table}.{key}` is not a string, number, boolean or list of strings, so a run cannot pass it to the source"
-                        ));
-                    }
-                };
-                if options.insert(key.clone(), text).is_some() {
+        for (key, value) in &self.options {
+            let text = match value {
+                Value::String(text) => text.clone(),
+                Value::Bool(flag) => flag.to_string(),
+                Value::Number(number) => number.to_string(),
+                Value::Array(items) if items.iter().all(Value::is_string) => items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(","),
+                Value::Null | Value::Array(_) | Value::Object(_) => {
                     return Err(format!(
-                        "`{key}` is set in both `scope` and `config`; a source takes it once, so keep one"
+                        "`options.{key}` is not a string, number, boolean or list of strings, so a run cannot pass it to the source"
                     ));
                 }
-            }
+            };
+            options.insert(key.clone(), text);
         }
         Ok(options)
     }
@@ -148,16 +138,14 @@ impl MinerDefinition {
             }
             _ => {}
         }
-        for (key, value) in &self.scope {
+        for (key, value) in &self.options {
             if !scope_value_is_valid(value) {
                 return Err(format!(
-                    "`scope.{key}` must be a string, a number, a boolean or a list of strings"
+                    "`options.{key}` must be a string, a number, a boolean or a list of strings"
                 ));
             }
         }
-        for (table, map) in [("scope", &self.scope), ("config", &self.config)] {
-            check_open_table(table, map)?;
-        }
+        check_open_table("options", &self.options)?;
         Ok(())
     }
 }
@@ -185,7 +173,7 @@ pub fn validate_miners(miners: &[MinerDefinition]) -> Result<(), String> {
     Ok(())
 }
 
-/// A scope value is a scalar, or a list of strings: the shapes a filter can be compared and narrowed on.
+/// An option value is a scalar or a list of strings: every run option has a string representation.
 fn scope_value_is_valid(value: &Value) -> bool {
     match value {
         Value::String(_) | Value::Bool(_) | Value::Number(_) => true,
@@ -194,7 +182,7 @@ fn scope_value_is_valid(value: &Value) -> bool {
     }
 }
 
-/// An open table (`scope`, `config`) may hold anything TOML can, except a key that reads like a
+/// The options table may hold anything TOML can, except a key that reads like a
 /// secret, and never a null (TOML has none, so it could not be written back).
 fn check_open_table(table: &str, map: &Map<String, Value>) -> Result<(), String> {
     for (key, value) in map {
@@ -218,32 +206,66 @@ fn check_open_table(table: &str, map: &Map<String, Value>) -> Result<(), String>
     Ok(())
 }
 
-/// Why a new scope is wider than the old one, one sentence per reason; empty when it is the same or narrower.
-///
-/// A scope is a filter, so wider means more reaches the palace: a filter removed, a value added to a list, or a value
-/// changed to something that cannot be shown to be inside the old one. A *new* filter, or a value removed from a
-/// list, only narrows.
+/// Explain every change not proven to narrow what a source reads. Unknown semantics require explicit approval.
 #[must_use]
-pub fn scope_broadening(old: &Map<String, Value>, new: &Map<String, Value>) -> Vec<String> {
+pub fn option_broadening(
+    old: &super::Options,
+    new: &super::Options,
+    specs: &[super::OptionSpec],
+) -> Vec<String> {
+    use super::OptionBreadth;
     let mut reasons = Vec::new();
-    for (key, before) in old {
-        let Some(after) = new.get(key) else {
-            reasons.push(format!("`{key}` is no longer filtered"));
+    // One key may occur in both maps; compare it only once rather than deduplicating diagnostic text.
+    for key in old
+        .keys()
+        .chain(new.keys())
+        .collect::<std::collections::BTreeSet<_>>()
+    {
+        if old.get(key) == new.get(key) {
             continue;
+        }
+        let before = old.get(key).map(String::as_str);
+        let after = new.get(key).map(String::as_str);
+        let breadth = specs
+            .iter()
+            .find(|spec| spec.name == *key)
+            .map_or(OptionBreadth::Unknown, |spec| spec.breadth);
+        let safe = match (breadth, before, after) {
+            (OptionBreadth::Include, _, Some(next)) => {
+                before.is_none_or(|prior| parts(next).is_subset(&parts(prior)))
+            }
+            (OptionBreadth::OptInInclude, Some(prior), Some(next)) => {
+                parts(next).is_subset(&parts(prior))
+            }
+            (OptionBreadth::OptInInclude, Some(_), None) => true,
+            (OptionBreadth::Exclude, Some(prior), Some(next)) => {
+                parts(prior).is_subset(&parts(next))
+            }
+            (OptionBreadth::Exclude, None, Some(_)) => true,
+            (OptionBreadth::Since, _, Some(next)) => super::parse_since(next).is_ok_and(|later| {
+                before.is_none_or(|prior| {
+                    super::parse_since(prior).is_ok_and(|earlier| later >= earlier)
+                })
+            }),
+            _ => false,
         };
-        match (before, after) {
-            (Value::Array(before), Value::Array(after)) => {
-                for item in after.iter().filter(|item| !before.contains(item)) {
-                    reasons.push(format!("`{key}` now also includes {item}"));
-                }
-            }
-            (before, after) if before != after => {
-                reasons.push(format!("`{key}` changed from {before} to {after}"));
-            }
-            _ => {}
+        if !safe {
+            reasons.push(format!(
+                "`{key}` changed from {} to {}; this may mine more material",
+                before.unwrap_or("<unset>"),
+                after.unwrap_or("<unset>")
+            ));
         }
     }
     reasons
+}
+
+fn parts(value: &str) -> std::collections::BTreeSet<&str> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .collect()
 }
 
 #[cfg(test)]
@@ -264,12 +286,12 @@ mod tests {
     fn a_minimal_miner_is_enabled_manual_and_unscoped() {
         let m = miner("name = \"docs\"\nsource = \"directory\"\n");
         assert!(m.enabled);
-        assert!(m.scope.is_empty() && m.config.is_empty());
+        assert!(m.options.is_empty());
         assert_eq!(m.validate(), Ok(()));
     }
 
     #[test]
-    fn the_documented_example_parses_with_scope_and_credential() {
+    fn the_documented_example_parses_with_options_and_credential() {
         let m = miner(
             r#"
 name = "signal-personal"
@@ -280,12 +302,12 @@ enabled = true
 type = "env"
 name = "SIGNAL_TOKEN"
 
-[scope]
+[options]
 contacts = ["+336"]
 groups = ["MemCastle"]
 "#,
         );
-        assert_eq!(m.scope["contacts"], json!(["+336"]));
+        assert_eq!(m.options["contacts"], json!(["+336"]));
         assert_eq!(
             m.credential,
             Some(CredentialRef::Env {
@@ -315,7 +337,7 @@ groups = ["MemCastle"]
     #[test]
     fn a_miner_round_trips_through_toml() {
         let m = miner(
-            "name = \"a\"\nsource = \"b\"\nlocator = \"/x\"\n[scope]\nk = [\"v\"]\n[config]\nn = 3\n",
+            "name = \"a\"\nsource = \"b\"\nlocator = \"/x\"\n[options]\nk = [\"v\"]\nn = 3\n",
         );
         let text = toml::to_string(&m).expect("serialises");
         assert_eq!(toml::from_str::<MinerDefinition>(&text).expect("parses"), m);
@@ -343,24 +365,22 @@ groups = ["MemCastle"]
 
     #[test]
     fn a_secret_looking_key_is_refused_in_every_open_table() {
-        for table in ["scope", "config"] {
-            let text = format!("name = \"a\"\nsource = \"b\"\n[{table}]\napi_key = \"x\"\n");
-            let error = miner(&text).validate().expect_err("a secret key");
-            assert!(error.contains("looks like a secret"), "{table}: {error}");
-            assert!(error.contains("credential"), "must say what to do: {error}");
-        }
-        let nested = miner("name = \"a\"\nsource = \"b\"\n[config.auth]\nPassword = \"x\"\n");
+        let text = "name = \"a\"\nsource = \"b\"\n[options]\napi_key = \"x\"\n";
+        let error = miner(text).validate().expect_err("a secret key");
+        assert!(error.contains("looks like a secret"), "{error}");
+        assert!(error.contains("credential"), "must say what to do: {error}");
+        let nested = miner("name = \"a\"\nsource = \"b\"\n[options.auth]\nPassword = \"x\"\n");
         assert!(nested.validate().is_err(), "a nested key counts too");
     }
 
     #[test]
-    fn a_scope_value_must_be_a_scalar_or_a_list_of_strings() {
+    fn an_option_value_must_be_a_scalar_or_a_list_of_strings() {
         let mut m = miner("name = \"a\"\nsource = \"b\"\n");
         for bad in [json!({"a": 1}), json!([1, 2]), json!(null)] {
-            m.scope = map(&json!({"k": bad}));
+            m.options = map(&json!({"k": bad}));
             assert!(m.validate().is_err(), "{bad}");
         }
-        m.scope = map(&json!({"s": "x", "n": 3, "b": true, "l": ["a", "b"]}));
+        m.options = map(&json!({"s": "x", "n": 3, "b": true, "l": ["a", "b"]}));
         assert_eq!(m.validate(), Ok(()));
     }
 
@@ -399,40 +419,46 @@ groups = ["MemCastle"]
     }
 
     #[test]
-    fn scope_broadening_is_judged_per_key() {
-        let old = map(&json!({"groups": ["a", "b"], "contact": "alice"}));
-        let cases: [(Value, usize, &str); 7] = [
-            (
-                json!({"groups": ["a", "b"], "contact": "alice"}),
-                0,
-                "identical",
-            ),
-            (
-                json!({"groups": ["a"], "contact": "alice"}),
-                0,
-                "a value removed from a list",
-            ),
-            (
-                json!({"groups": ["a", "b"], "contact": "alice", "since": "2024"}),
-                0,
-                "a filter added",
-            ),
-            (
-                json!({"groups": ["a", "b", "c"], "contact": "alice"}),
-                1,
-                "a value added to a list",
-            ),
-            (json!({"groups": ["a", "b"]}), 1, "a filter dropped"),
-            (
-                json!({"groups": ["a", "b"], "contact": "bob"}),
-                1,
-                "a scalar changed",
-            ),
-            (json!({}), 2, "everything dropped"),
+    fn changing_positive_negative_and_date_filters_uses_the_sources_declared_semantics() {
+        let old = super::super::Options::from([
+            ("include".into(), "a,b".into()),
+            ("exclude".into(), "private".into()),
+            ("since".into(), "2026-01".into()),
+            ("mode".into(), "web".into()),
+        ]);
+        let specs = [
+            super::super::OptionSpec::new("include", "", super::super::OptionKind::String)
+                .with_breadth(super::super::OptionBreadth::Include),
+            super::super::OptionSpec::new("exclude", "", super::super::OptionKind::String)
+                .with_breadth(super::super::OptionBreadth::Exclude),
+            super::super::OptionSpec::new("since", "", super::super::OptionKind::Date)
+                .with_breadth(super::super::OptionBreadth::Since),
         ];
-        for (new, expected, why) in cases {
-            assert_eq!(scope_broadening(&old, &map(&new)).len(), expected, "{why}");
-        }
-        assert!(scope_broadening(&Map::new(), &map(&json!({"a": "b"}))).is_empty());
+        let mut narrowed = old.clone();
+        narrowed.insert("include".into(), "a".into());
+        narrowed.insert("exclude".into(), "private,internal".into());
+        narrowed.insert("since".into(), "2026-02".into());
+        assert!(option_broadening(&old, &narrowed, &specs).is_empty());
+        let mut wider = old.clone();
+        wider.insert("include".into(), "a,b,c".into());
+        wider.remove("exclude");
+        wider.insert("since".into(), "2025-01".into());
+        wider.insert("mode".into(), "export".into());
+        assert_eq!(option_broadening(&old, &wider, &specs).len(), 4);
+        assert_eq!(option_broadening(&old, &old, &[]).len(), 0);
+        assert_eq!(option_broadening(&old, &narrowed, &[]).len(), 3);
+    }
+
+    #[test]
+    fn an_opt_in_selection_is_broader_when_first_enabled() {
+        let specs =
+            [
+                super::super::OptionSpec::new("wiki_include", "", super::super::OptionKind::String)
+                    .with_breadth(super::super::OptionBreadth::OptInInclude),
+            ];
+        let none = super::super::Options::new();
+        let one = super::super::Options::from([("wiki_include".into(), "acme/docs".into())]);
+        assert_eq!(option_broadening(&none, &one, &specs).len(), 1);
+        assert!(option_broadening(&one, &none, &specs).is_empty());
     }
 }

@@ -904,12 +904,12 @@ pub enum Error {
         reason: String,
     },
 
-    /// A change would make a miner's scope wider than it is.
-    #[error("changing miner `{name}` would broaden its scope: {reasons}")]
+    /// A change to a miner's options may select more material than before.
+    #[error("changing miner `{name}` may broaden what it reads: {reasons}")]
     #[diagnostic(
         code(memcastle::miner::scope_broadened),
         help(
-            "a wider scope sends more into the palace; if that is intended, repeat the change with `--allow-broaden`"
+            "a wider set of options may send more into the palace; if that is intended, repeat with `--allow-broaden`"
         )
     )]
     MinerScopeBroadened {

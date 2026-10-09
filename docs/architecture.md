@@ -712,8 +712,9 @@ Installing from a registry is administrative like installing from a file: REST a
 See [Publishing and installing sources](publishing-sources.md) and [ADR-033](adr/033-source-distribution.md).
 
 **What to mine is configuration the daemon keeps in the file it was started from.**
-A miner is a named `[[miners]]` entry (a source, a locator, a scope, a credential reference), not mined data:
-the cursor stays on the source, so a miner can be renamed, disabled or re-scoped without losing where its source stopped.
+A miner is a named `[[miners]]` entry (a source, a locator, saved options, a credential reference), not mined data:
+the cursor stays on the source, so a miner can be renamed, disabled or given new options without losing
+where its source stopped.
 `app::miners` holds the last good copy, re-reads the file when it changes, and rewrites only that section in place through
 `config::miners_file`, so comments and everything else in the file survive.
 The CLI, REST and MCP's two read-only tools all call it; changing a miner has no MCP tool, like installing a source.

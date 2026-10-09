@@ -999,6 +999,22 @@ impl Config {
     fn from_file(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)
             .map_err(|source| Error::io(path.display().to_string(), source))?;
+        // An old table must be named before the generic TOML parser can report only an unknown field.
+        if let Ok(table) = toml::from_str::<toml::Table>(&text)
+            && table
+                .get("miners")
+                .and_then(toml::Value::as_array)
+                .is_some_and(|miners| {
+                    miners
+                        .iter()
+                        .any(|miner| miner.get("scope").is_some() || miner.get("config").is_some())
+                })
+        {
+            return Err(Error::MinerConfigFile {
+                path: path.display().to_string(),
+                reason: "legacy [miners.scope] and [miners.config] are no longer accepted; merge their keys into [miners.options] (choose one value for duplicates)".into(),
+            });
+        }
         Ok(toml::from_str(&text)?)
     }
 

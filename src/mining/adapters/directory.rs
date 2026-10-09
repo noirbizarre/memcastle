@@ -30,7 +30,8 @@ pub fn options() -> Vec<OptionSpec> {
         "since",
         "only files modified at or after this date (`2026-09`, `2026-09-14` or an RFC 3339 time)",
         OptionKind::Date,
-    )]
+    )
+    .with_breadth(crate::domain::OptionBreadth::Since)]
 }
 
 /// What can trigger a run of the `directory` source: a change under the directory, and a call from whatever tells you

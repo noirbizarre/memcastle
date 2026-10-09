@@ -330,6 +330,21 @@ pub async fn ensure_minable(
     }
 }
 
+/// The declared option comparison policies for a source.
+pub async fn option_specs_for(
+    store: &SurrealStore,
+    mining: &MiningConfig,
+    source: &str,
+) -> Result<Vec<OptionSpec>> {
+    if BUILTIN_NAMES.contains(&source) {
+        return Ok(directory::options());
+    }
+    match lookup(store, mining, source).await? {
+        Some(record) => Ok(record.manifest.option_specs()),
+        None => Err(unknown(store, mining, source).await),
+    }
+}
+
 /// Refuse a run's option keys the source does not declare, before a job is queued for them.
 ///
 /// Values are the source's to judge in `identify`; only the names are checked here, which is what lets a typo
