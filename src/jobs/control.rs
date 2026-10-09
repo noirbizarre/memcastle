@@ -33,6 +33,8 @@ pub struct JobControl {
     /// until they resume it, while a shutdown's pause must put the job
     /// straight back in the queue so the next daemon picks it up unasked.
     interrupted: Arc<AtomicBool>,
+    /// The outer task owns the permit; aborting and joining it releases capacity.
+    pub(crate) worker: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl JobControl {

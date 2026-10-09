@@ -141,6 +141,7 @@ async fn every_other_route_is_guarded_including_ones_that_do_not_exist() {
         (Method::POST, "/api/jobs/x/pause"),
         (Method::POST, "/api/jobs/x/resume"),
         (Method::POST, "/api/jobs/x/cancel"),
+        (Method::POST, "/api/jobs/x/force-cancel"),
         (Method::POST, "/api/jobs/x/retry"),
         // The mining sources: what was mined and where each run stopped.
         (Method::GET, "/api/sources"),

@@ -145,7 +145,7 @@ The routes that read or write memory (including `GET /api/jobs*`) accept the opt
 and `/api/status` accepts it only to report the mode
 (`full`, `read_only` or `disabled`; `full` when absent), and an unrecognized value is a `400`, never silently treated
 as `full`.
-`/api/health`, job control (pause, resume, cancel, retry) and `/api/shutdown` are never gated and ignore it.
+`/api/health`, job control (pause, resume, cancel, force-cancel, retry) and `/api/shutdown` are never gated and ignore it.
 `GET /api/events` is a read: it accepts the header and refuses a `disabled` session.
 
 A mode the daemon refuses is a `403` with the code `memcastle::mode::forbidden`.
@@ -199,6 +199,7 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `POST /api/jobs/{id}/pause` | Request a pause. | none |
 | `POST /api/jobs/{id}/resume` | Resume a paused job. | none |
 | `POST /api/jobs/{id}/cancel` | Cancel a job. | none |
+| `POST /api/jobs/{id}/force-cancel` | Best-effort abort of a locally owned running mining job. Returns `{"status":"force_cancelled"}` only after the worker has stopped and cancellation was persisted; refuses remote ownership or an invalid state. REST only. | none |
 | `POST /api/jobs/{id}/retry` | Retry a failed job. | none |
 | `POST /api/shutdown` | Shut the daemon down gracefully. | none |
 | `GET /api/wings` | List wings with their room and drawer counts. | none |

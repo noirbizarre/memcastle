@@ -207,6 +207,12 @@ fn overrides_from(args: &Cli) -> Overrides {
 /// success/failure to say (see [`cmd_status`]), so it is split off here and
 /// every other command keeps returning a plain `Result<()>`.
 async fn run(args: Cli, config: Config) -> Result<ExitCode> {
+    if matches!(&args.command, Command::Tui) && args.json {
+        return Err(Error::invalid_input(
+            "tui",
+            "--json cannot be used with the interactive console; use `memcastle job list` for JSON",
+        ));
+    }
     match args.command {
         Command::Status => cmd_status(&config, args.mode).await,
         // Like `status`, an update has more to say than success or failure: some sources may be updated while another
@@ -230,6 +236,7 @@ async fn run_command(
         // Handled by `run`, which needs the exit code; the arm exists only so
         // this match stays exhaustive and a new command cannot be forgotten.
         Command::Status => Ok(()),
+        Command::Tui => memcastle::tui::run(client(&config, mode)).await,
         Command::Doctor => Ok(()),
         Command::Daemon(DaemonCommand::Start(start_args)) => {
             cmd_daemon_start(&config, config_file, mode, start_args).await

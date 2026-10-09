@@ -24,6 +24,36 @@ fn help_lists_the_top_level_commands() {
 }
 
 #[test]
+fn tui_help_is_available_without_a_daemon() {
+    Command::cargo_bin("memcastle")
+        .unwrap()
+        .args(["tui", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("interactive operations console"));
+}
+
+#[test]
+fn tui_refuses_piped_input_instead_of_entering_raw_mode() {
+    Command::cargo_bin("memcastle")
+        .unwrap()
+        .arg("tui")
+        .assert()
+        .failure()
+        .stderr(contains("interactive stdin and stdout are required"));
+}
+
+#[test]
+fn tui_refuses_json_mode() {
+    Command::cargo_bin("memcastle")
+        .unwrap()
+        .args(["tui", "--json"])
+        .assert()
+        .failure()
+        .stderr(contains("--json cannot be used"));
+}
+
+#[test]
 fn doctor_help_lists_the_offline_diagnostics_command() {
     Command::cargo_bin("memcastle")
         .unwrap()

@@ -67,6 +67,7 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
         .route("/api/jobs/{id}/pause", post(pause_job))
         .route("/api/jobs/{id}/resume", post(resume_job))
         .route("/api/jobs/{id}/cancel", post(cancel_job))
+        .route("/api/jobs/{id}/force-cancel", post(force_cancel_job))
         .route("/api/jobs/{id}/retry", post(retry_job))
         .route("/api/sources", get(list_sources))
         // Installing, enabling and removing sources is administrative and REST-only, like the token and the database
@@ -599,6 +600,13 @@ async fn cancel_job(
 ) -> Result<impl IntoResponse, ApiError> {
     let result = state.app.cancel_job(parse_job_id(&id)?).await?;
     Ok(Json(result))
+}
+
+async fn force_cancel_job(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(state.app.force_cancel_job(parse_job_id(&id)?).await?))
 }
 
 async fn retry_job(

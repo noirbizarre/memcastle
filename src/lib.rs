@@ -59,5 +59,6 @@ pub mod source;
 pub mod store;
 pub mod term;
 pub mod trigger;
+pub mod tui;
 
 pub use error::{Error, Result};

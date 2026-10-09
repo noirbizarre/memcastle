@@ -306,6 +306,8 @@ pub enum JobControlStatus {
     Resumed,
     /// A cancel was asked for; a running job stops at its next check.
     CancelRequested,
+    /// The local mining worker has stopped and its cancellation was persisted.
+    ForceCancelled,
     /// A failed job was put back in the queue.
     Retried,
 }
@@ -1217,6 +1219,14 @@ impl AppServices {
         self.scheduler.request_cancel(id).await?;
         Ok(JobControlResult {
             status: JobControlStatus::CancelRequested,
+        })
+    }
+
+    /// Abort a locally owned running mining job, then persist its cancellation.
+    pub async fn force_cancel_job(&self, id: JobId) -> Result<JobControlResult> {
+        self.scheduler.force_cancel(id).await?;
+        Ok(JobControlResult {
+            status: JobControlStatus::ForceCancelled,
         })
     }
 

@@ -180,3 +180,7 @@ The history is the value.
 - [ADR-046](046-fact-lifecycle-and-contradictions.md) — graph assertions keep auditable confirmation, contradiction and
   supersession links; unresolved conflicts remain visible and explicit corrections retain their evidence
   (builds on ADR-024, ADR-025 and ADR-032)
+- [ADR-047](047-terminal-operations-console.md) — the TUI reads the same SSE endpoint as the web dashboard and
+  performs all controls over REST; a confirmed force-cancel durably requests cancellation before aborting a locally
+  owned mining worker and fences its terminal transition against the worker's lease
+  (builds on ADR-006 and ADR-041)

@@ -35,4 +35,5 @@ mod server;
 mod skills;
 mod sources;
 mod triggers;
+mod tui;
 mod web;
