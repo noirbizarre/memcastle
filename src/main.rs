@@ -1051,7 +1051,11 @@ async fn cmd_miner(config: &Config, mode: Option<MemoryMode>, command: MinerComm
 ///
 /// Every subcommand is an HTTP call to the daemon's trigger routes, the same ones MCP's read-only tools sit beside.
 /// Only configuration changes ignore memory mode; reads and firing a run must carry the caller's session mode.
-async fn cmd_trigger(config: &Config, mode: Option<MemoryMode>, command: TriggerCommand) -> Result<()> {
+async fn cmd_trigger(
+    config: &Config,
+    mode: Option<MemoryMode>,
+    command: TriggerCommand,
+) -> Result<()> {
     use memcastle::client::trigger_view as view;
     let daemon = client(config, None);
     let session = client(config, mode);

@@ -123,7 +123,10 @@ async fn miner_and_trigger_commands_send_the_session_mode() {
             .expect("run memcastle");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(!output.status.success(), "{command:?} should be refused");
-        assert!(stderr.contains("memcastle::mode::forbidden"), "{command:?}: {stderr}");
+        assert!(
+            stderr.contains("memcastle::mode::forbidden"),
+            "{command:?}: {stderr}"
+        );
     }
 
     daemon.shutdown().await;
