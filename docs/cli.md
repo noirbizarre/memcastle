@@ -761,7 +761,7 @@ A wing that already exists is always accepted, whatever its name.
 
 The `list`, `show`, `create` and `delete` commands of `wing`, `room` and `drawer`, and `drawer history`, print a table
 or a readable view in a terminal, and JSON when standard output is a pipe or a file.
-`drawer supersede` and `drawer mention` always print JSON.
+`drawer supersede` and `drawer mention` also print a readable view in a terminal, and JSON when output is redirected.
 `wing show` prints the wing's totals and its rooms.
 `drawer list` shows the newest drawers first with a preview of each, never the whole content,
 and `drawer show` prints the content verbatim after a few lines of metadata.
