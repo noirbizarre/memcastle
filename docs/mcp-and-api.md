@@ -63,7 +63,7 @@ and some directories reject a tool whose hint is missing.
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
 |---|---|---|---|---|
-| `memcastle_status`, `memcastle_history`, `memcastle_fact_history`, `memcastle_wake_up`, `memcastle_diary_read`, `memcastle_job_list`, `memcastle_job_get`, `memcastle_miner_list`, `memcastle_miner_get` | true | false | true | false |
+| `memcastle_status`, `memcastle_history`, `memcastle_fact_history`, `memcastle_wake_up`, `memcastle_diary_read`, `memcastle_job_list`, `memcastle_job_get`, `memcastle_miner_list`, `memcastle_miner_get`, `memcastle_trigger_list`, `memcastle_trigger_get` | true | false | true | false |
 | `memcastle_search`, `memcastle_recall` | true | false | true | true |
 | `memcastle_set_mode` | false | false | true | false |
 | `memcastle_mine` | false | false | true | true |
