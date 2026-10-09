@@ -108,6 +108,7 @@ pub async fn run(config: Config) -> Result<()> {
     // `GET /api/events` hears both.
     let events = EventBus::new();
     let mut scheduler = Scheduler::new(store.clone(), config.jobs.max_concurrency)
+        .with_background_concurrency(config.jobs.background_concurrency)
         .with_events(events.clone())
         .with_credentials(Arc::new(credentials.clone()))
         .with_embeddings(embeddings.clone())
@@ -124,6 +125,7 @@ pub async fn run(config: Config) -> Result<()> {
     let scheduler = Arc::new(scheduler);
     info!(
         max_concurrency = config.jobs.max_concurrency,
+        background_concurrency = config.jobs.background_concurrency,
         lease_ttl_secs = config.jobs.lease_ttl_secs,
         shared_store = backend.is_shared(),
         "job scheduler configured; recovering interrupted jobs"

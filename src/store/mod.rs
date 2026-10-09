@@ -830,6 +830,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_full_background_pool_skips_a_mine_and_claims_short_work() {
+        use crate::domain::{Job, JobKind, JobStatus, MiningSource, Priority};
+
+        let store = memory_store().await;
+        let mine = Job::new(
+            JobKind::Mine {
+                source: MiningSource::Directory {
+                    path: "/tmp/load".into(),
+                },
+                wing: None,
+                full: false,
+                options: Default::default(),
+            },
+            Priority::Critical,
+            "test",
+        );
+        let short = Job::new(JobKind::Demo { steps: 1 }, Priority::Normal, "test");
+        store.save_job(&mine).await.unwrap();
+        store.save_job(&short).await.unwrap();
+
+        let claimed = store
+            .claim_next_job_eligible("worker", chrono::Duration::seconds(30), false)
+            .await
+            .unwrap()
+            .expect("short job is still eligible");
+        assert_eq!(claimed.id, short.id);
+        assert_eq!(
+            store.get_job(mine.id).await.unwrap().unwrap().status,
+            JobStatus::Queued
+        );
+
+        let claimed = store
+            .claim_next_job_eligible("worker", chrono::Duration::seconds(30), true)
+            .await
+            .unwrap()
+            .expect("mine becomes eligible when a slot opens");
+        assert_eq!(claimed.id, mine.id);
+    }
+
+    #[tokio::test]
     async fn a_status_guarded_save_refuses_to_overwrite_a_job_that_moved_on() {
         use crate::domain::{JobEvent, JobStatus};
 

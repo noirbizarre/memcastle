@@ -237,14 +237,13 @@ keyring = "4.2"
 # through SurrealDB, and shares `sha2`'s digest line.
 notify = "8"
 hmac = "0.13"
+# Bounded, ordered source reads let acquisition overlap without reordering durable cursor commits.
+futures = "0.3.34"
 
 [dev-dependencies]
 assert_cmd = "2"
 predicates = "3"
 insta = { version = "1", features = ["filters"] }
-# Only `tests/in_process/concurrency.rs` needs this (`join_all` over many simulated
-# clients) — not a real dependency, so it stays out of `[dependencies]`.
-futures = "0.3.34"
 
 # The integration tests spawn the `memcastle` binary as a subprocess and need
 # tokio's `process` for that; the daemon itself never does.

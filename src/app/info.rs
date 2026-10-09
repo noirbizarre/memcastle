@@ -34,6 +34,9 @@ pub struct WebInfo {
 pub struct JobsInfo {
     /// How many jobs run at once.
     pub max_concurrency: usize,
+    /// Configured limit for mine, embed and extract jobs (clamped to leave a short-job slot).
+    #[serde(default)]
+    pub background_concurrency: usize,
     /// Seconds shutdown waits for running jobs.
     pub drain_timeout_secs: u64,
     /// Seconds a running job's lease lasts without a heartbeat.
@@ -112,6 +115,7 @@ impl ConfigReport {
             },
             jobs: JobsInfo {
                 max_concurrency: config.jobs.max_concurrency,
+                background_concurrency: config.jobs.background_concurrency,
                 drain_timeout_secs: config.jobs.drain_timeout_secs,
                 lease_ttl_secs: config.jobs.lease_ttl_secs,
             },

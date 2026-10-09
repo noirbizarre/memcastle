@@ -22,6 +22,7 @@
 //! later ones had not yet recorded. The cursor is never ahead of the data.
 
 use chrono::Utc;
+use futures::stream::{FuturesOrdered, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -134,7 +135,22 @@ pub async fn mine<A: SourceAdapter>(
         "mining source"
     );
 
-    for candidate in &discovery.candidates {
+    // A window of two overlaps acquisition with filing, but never commits out of discovery order.
+    // A slow second read must not delay the first document's cursor/checkpoint or a stop request.
+    let mut reads = FuturesOrdered::new();
+    let mut next = 0;
+    for (position, candidate) in discovery.candidates.iter().enumerate() {
+        if ctx.is_cancelled() {
+            return Ok(JobOutcome::Cancelled);
+        }
+        if ctx.should_pause() {
+            return Ok(JobOutcome::Paused);
+        }
+        while next < discovery.candidates.len() && next < position + 2 {
+            reads.push_back(adapter.read(&reference, &discovery.candidates[next]));
+            next += 1;
+        }
+        let read = reads.next().await.expect("one read for every candidate");
         if ctx.is_cancelled() {
             return Ok(JobOutcome::Cancelled);
         }
@@ -146,7 +162,7 @@ pub async fn mine<A: SourceAdapter>(
         // Compared after the document, so one event says "drawers changed" per document and not per chunk: a large
         // run would otherwise publish thousands of events a minute for a client that re-reads once anyway.
         let drawers_before = stats.created + stats.superseded + stats.retired;
-        match adapter.read(&reference, candidate).await? {
+        match read? {
             None => stats.skipped += 1,
             Some(raw) => {
                 let existing = store
@@ -255,16 +271,28 @@ async fn ingest(
     existing: Option<&SourceDocumentRecord>,
     stats: &mut Stats,
 ) -> Result<SourceDocumentRecord> {
-    let texts = chunk(&canonical.segments, ctx.chunk_chars);
+    // Chunking and hashing a large document are CPU-bound; prepare them outside HTTP's executor.
+    let segments = canonical.segments.clone();
+    let chunk_chars = ctx.chunk_chars;
+    let texts = tokio::task::spawn_blocking(move || {
+        chunk(&segments, chunk_chars)
+            .into_iter()
+            .map(|text| {
+                let hash = content_hash(&text);
+                (text, hash)
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(|error| crate::Error::server(format!("chunk worker failed: {error}")))?;
     let old_chunks: &[ChunkRef] = existing.map_or(&[], |known| known.chunks.as_slice());
     let mut refs = Vec::with_capacity(texts.len());
 
-    for (position, text) in texts.iter().enumerate() {
+    for (position, (text, hash)) in texts.iter().enumerate() {
         let index = u32::try_from(position).unwrap_or(u32::MAX);
-        let hash = content_hash(text);
         let old = old_chunks.iter().find(|old| old.index == index);
         // The same text at the same position is already filed: nothing to write.
-        if let Some(old) = old.filter(|old| old.hash == hash) {
+        if let Some(old) = old.filter(|old| old.hash == *hash) {
             refs.push(old.clone());
             continue;
         }
@@ -343,7 +371,7 @@ async fn ingest(
         }
         refs.push(ChunkRef {
             index,
-            hash,
+            hash: hash.clone(),
             drawer: id,
         });
     }
@@ -372,4 +400,148 @@ async fn ingest(
         acquired_at: Utc::now(),
         job: Some(ctx.job.id),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use super::*;
+    use crate::domain::{
+        Candidate, Cursor, JobEvent, JobKind, MiningSource, Options, Priority, Segment,
+        SourceCapabilities, SourceKind, SourceRef,
+    };
+    use crate::jobs::JobControl;
+
+    struct OutOfOrderReads {
+        active: AtomicUsize,
+        peak: AtomicUsize,
+    }
+
+    impl SourceAdapter for OutOfOrderReads {
+        fn name(&self) -> &str {
+            "test-source"
+        }
+
+        fn description(&self) -> &str {
+            "test source with out-of-order reads"
+        }
+
+        fn capabilities(&self) -> SourceCapabilities {
+            SourceCapabilities {
+                incremental: true,
+                retains_raw: false,
+                needs_credentials: false,
+            }
+        }
+
+        fn identify(&self, _: Option<&str>, _: &Options) -> Result<SourceRef> {
+            Ok(SourceRef::new(self.name(), None, "memory"))
+        }
+
+        fn default_wing(&self, _: &SourceRef) -> String {
+            "load".into()
+        }
+
+        fn default_room(&self) -> &str {
+            "files"
+        }
+
+        async fn discover(
+            &self,
+            _: &SourceRef,
+            _: &Cursor,
+            _: usize,
+        ) -> Result<super::super::adapter::Discovery> {
+            Ok(super::super::adapter::Discovery {
+                candidates: (0..3)
+                    .map(|index| Candidate {
+                        external_id: format!("doc-{index}"),
+                        handle: index.to_string(),
+                        cursor_after: json!({ "index": index + 1 }),
+                    })
+                    .collect(),
+                exhausted: true,
+            })
+        }
+
+        async fn read(&self, _: &SourceRef, candidate: &Candidate) -> Result<Option<RawDocument>> {
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.peak.fetch_max(active, Ordering::SeqCst);
+            // The second read finishes first; persisting it first would skip the first document after a crash.
+            tokio::time::sleep(Duration::from_millis(if candidate.handle == "0" {
+                70
+            } else {
+                10
+            }))
+            .await;
+            self.active.fetch_sub(1, Ordering::SeqCst);
+            let body = candidate.external_id.clone();
+            Ok(Some(RawDocument {
+                external_id: candidate.external_id.clone(),
+                revision: RawDocument::revision_of(&body),
+                body,
+                metadata: json!({}),
+                occurred_at: None,
+            }))
+        }
+
+        fn normalize(&self, raw: &RawDocument) -> Result<CanonicalDocument> {
+            Ok(CanonicalDocument {
+                title: None,
+                room: None,
+                name: None,
+                kind: SourceKind::File,
+                uri: None,
+                tags: vec![],
+                segments: vec![Segment {
+                    text: raw.body.clone(),
+                }],
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn concurrent_reads_commit_in_cursor_order_with_a_bounded_window() {
+        let store = SurrealStore::connect_memory_for_tests().await;
+        let adapter = OutOfOrderReads {
+            active: AtomicUsize::new(0),
+            peak: AtomicUsize::new(0),
+        };
+        let mut job = Job::new(
+            JobKind::Mine {
+                source: MiningSource::Named {
+                    source: adapter.name().into(),
+                    locator: None,
+                },
+                wing: None,
+                full: false,
+                options: Options::new(),
+            },
+            Priority::Background,
+            "test",
+        );
+        job.apply(JobEvent::Claim).unwrap();
+        let ctx = JobContext::new(job.id, JobControl::default(), store.clone());
+        let options = Options::new();
+        let outcome = mine(
+            &adapter,
+            &ctx,
+            &mut job,
+            Request {
+                locator: None,
+                options: &options,
+                wing: None,
+                full: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(outcome, JobOutcome::Completed);
+        assert_eq!(adapter.peak.load(Ordering::SeqCst), 2);
+        assert_eq!(job.checkpoint["cursor"], json!({ "index": 3 }));
+        assert_eq!(store.list_drawers(None).await.unwrap().len(), 3);
+    }
 }

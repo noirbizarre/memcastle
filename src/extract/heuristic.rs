@@ -106,7 +106,15 @@ impl Extractor for HeuristicExtractor {
     }
 
     fn extract<'a>(&'a self, texts: &'a [String]) -> ExtractFuture<'a> {
-        Box::pin(async move { Ok(texts.iter().map(|text| extract_one(text)).collect()) })
+        // Parsing an entire batch is CPU-bound; keep it off the workers serving REST and MCP.
+        let texts = texts.to_vec();
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                texts.iter().map(|text| extract_one(text)).collect()
+            })
+            .await
+            .map_err(|error| crate::Error::server(format!("extraction worker failed: {error}")))
+        })
     }
 }
 

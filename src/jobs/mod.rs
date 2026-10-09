@@ -92,6 +92,8 @@ pub struct Scheduler {
     store: SurrealStore,
     controls: Arc<DashMap<JobId, JobControl>>,
     semaphore: Arc<Semaphore>,
+    /// A second bound on long-running work so short jobs retain a scheduler slot.
+    background_semaphore: Arc<Semaphore>,
     /// How many permits `semaphore` was created with — needed to tell when
     /// *every* worker has finished (all permits are back).
     max_concurrency: u32,
@@ -139,6 +141,11 @@ impl Scheduler {
             store,
             controls: Arc::new(DashMap::new()),
             semaphore: Arc::new(Semaphore::new(max_concurrency)),
+            background_semaphore: Arc::new(Semaphore::new(2.min(if max_concurrency == 1 {
+                1
+            } else {
+                max_concurrency - 1
+            }))),
             max_concurrency: u32::try_from(max_concurrency).unwrap_or(u32::MAX),
             shutting_down: AtomicBool::new(false),
             worker: worker_id(),
@@ -159,6 +166,15 @@ impl Scheduler {
     #[must_use]
     pub fn with_events(mut self, events: EventBus) -> Self {
         self.events = events;
+        self
+    }
+
+    /// Keep one job slot for short work when the total limit allows it.
+    #[must_use]
+    pub fn with_background_concurrency(mut self, limit: usize) -> Self {
+        let total = self.max_concurrency as usize;
+        let effective = limit.max(1).min(if total == 1 { 1 } else { total - 1 });
+        self.background_semaphore = Arc::new(Semaphore::new(effective));
         self
     }
 
@@ -771,10 +787,22 @@ impl Scheduler {
         let Ok(permit) = Arc::clone(&self.semaphore).try_acquire_owned() else {
             return; // at capacity; try again next tick
         };
+        // Never lease a job only to park it behind another long-running job.
+        let background_permit = Arc::clone(&self.background_semaphore)
+            .try_acquire_owned()
+            .ok();
         let ttl = chrono::Duration::from_std(self.lease_ttl).unwrap_or(chrono::Duration::MAX);
-        let claimed = self.store.claim_next_job(&self.worker, ttl).await;
+        let claimed = self
+            .store
+            .claim_next_job_eligible(&self.worker, ttl, background_permit.is_some())
+            .await;
         match claimed {
             Ok(Some(job)) => {
+                let background_permit = if is_background(&job.kind) {
+                    background_permit
+                } else {
+                    None
+                };
                 info!(
                     job_id = %job.id,
                     job_type = kind_name(&job.kind),
@@ -794,6 +822,7 @@ impl Scheduler {
                 let scheduler = Arc::clone(&self);
                 let handle = tokio::spawn(async move {
                     let _permit = permit; // held for the job's whole execution
+                    let _background_permit = background_permit;
                     scheduler.execute(job, control).await;
                 });
                 // The abort handle is installed on the same control registered
@@ -966,6 +995,14 @@ impl Scheduler {
 /// The notice that `job` changed: its id, kind and status, and nothing of its input or progress line.
 fn job_event(action: Action, job: &Job) -> Event {
     Event::job(action, job.id, kind_name(&job.kind), job.status)
+}
+
+/// The kinds that can sustain heavy acquisition, index writes and provider work.
+fn is_background(kind: &JobKind) -> bool {
+    matches!(
+        kind,
+        JobKind::Mine { .. } | JobKind::Embed { .. } | JobKind::Extract { .. }
+    )
 }
 
 /// The stable `snake_case` name of a job's kind, for log fields. Never
