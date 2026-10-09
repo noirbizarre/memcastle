@@ -1299,7 +1299,11 @@ async fn cmd_source_update(config: &Config, args: &cli::SourceUpdateArgs) -> Res
     use memcastle::app::UpdateStatus;
     let daemon = client(config, None);
     if args.check {
-        let check = daemon.check_source_updates().await?;
+        let mut check = daemon.check_source_updates().await?;
+        // The daemon's check endpoint covers all sources; narrow its answer for a named CLI check.
+        if let Some(name) = args.name.as_deref() {
+            check.updates.retain(|candidate| candidate.name == name);
+        }
         print_for_terminal_or_json(
             |painter, width| memcastle::client::table::render_update_check(&check, painter, width),
             &check,
