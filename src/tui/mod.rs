@@ -219,8 +219,15 @@ impl Console {
                 self.notice(format!("Source status unavailable: {error}"));
             }
             Message::Miners(report) => {
-                self.miners = Some(report);
-                self.last_refresh = Some(Instant::now());
+                if let Some(error) = &report.error {
+                    // The daemon can return its last good copy while the file
+                    // is unreadable; calling those old miners ready would mislead operators.
+                    self.miners = None;
+                    self.notice(format!("Miner status unknown: {error}"));
+                } else {
+                    self.miners = Some(report);
+                    self.last_refresh = Some(Instant::now());
+                }
             }
             Message::MinersUnavailable(error) => {
                 self.miners = None;
@@ -497,11 +504,20 @@ fn draw_job_detail(frame: &mut ratatui::Frame<'_>, app: &Console, area: Rect) {
             app.tone(Color::Yellow),
         ));
     }
-    let areas = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(4), Constraint::Length(2)])
-        .split(inner);
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), areas[0]);
+    // A terminal job with no measurable total needs all of the available
+    // height for its error; reserving an empty gauge hid that line on short terminals.
+    let indicator =
+        job.status == JobStatus::Running || job.progress.total.is_some_and(|total| total > 0);
+    let areas = indicator.then(|| {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(4), Constraint::Length(2)])
+            .split(inner)
+    });
+    frame.render_widget(
+        Paragraph::new(lines).wrap(Wrap { trim: true }),
+        areas.as_ref().map_or(inner, |parts| parts[0]),
+    );
     if let Some(total) = job.progress.total.filter(|total| *total > 0) {
         let ratio = f64::from(job.progress.current.min(total)) / f64::from(total);
         frame.render_widget(
@@ -509,12 +525,14 @@ fn draw_job_detail(frame: &mut ratatui::Frame<'_>, app: &Console, area: Rect) {
                 .gauge_style(app.tone(Color::Cyan))
                 .ratio(ratio)
                 .label(format!("{}/{}", job.progress.current, total)),
-            areas[1],
+            areas
+                .as_ref()
+                .expect("determinate progress has an indicator")[1],
         );
     } else if job.status == JobStatus::Running {
         frame.render_widget(
             Paragraph::new(" ◌ Working · total not yet known").style(app.tone(Color::Yellow)),
-            areas[1],
+            areas.as_ref().expect("running progress has an indicator")[1],
         );
     }
 }
@@ -1323,6 +1341,21 @@ fn auth_instructions(name: &str, challenge: &crate::app::Challenge) -> String {
 mod tests {
     use super::*;
     use crate::domain::{JobProgress, Priority};
+    use ratatui::backend::TestBackend;
+
+    fn screen(app: &Console, width: u16, height: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| draw(frame, app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 
     fn mine_job() -> Job {
         Job::new(
@@ -1450,5 +1483,89 @@ mod tests {
         assert_eq!(wing.as_deref(), Some("notes"));
         assert!(full);
         assert!(parse_mine_input("directory /work --wing").is_err());
+    }
+
+    #[test]
+    fn narrow_and_wide_jobs_views_keep_the_selected_progress_and_failure_visible() {
+        let mut app = Console::default();
+        let mut running = mine_job();
+        running.apply(crate::domain::JobEvent::Claim).unwrap();
+        running.progress = JobProgress {
+            current: 2,
+            total: Some(5),
+            message: Some("filing documents".into()),
+        };
+        app.receive(Message::Job(Box::new(running)));
+        let wide = screen(&app, 120, 35);
+        assert!(wide.contains("SELECTED · DETAILS"));
+        assert!(wide.contains("2/5"));
+
+        let mut failed = mine_job();
+        failed.apply(crate::domain::JobEvent::Claim).unwrap();
+        failed.error = Some("provider refused the request".into());
+        failed.apply(crate::domain::JobEvent::Fail).unwrap();
+        app.receive(Message::Job(Box::new(failed)));
+        app.selected = app
+            .ordered()
+            .iter()
+            .position(|job| job.status == JobStatus::Failed)
+            .unwrap();
+        let narrow = screen(&app, 72, 24);
+        assert!(narrow.contains("provider refused"), "{narrow}");
+        assert!(narrow.contains("MINING JOBS"));
+    }
+
+    #[test]
+    fn readiness_and_maintenance_present_a_handoff_and_the_selected_report() {
+        let mut app = Console {
+            color: false,
+            page: Page::Readiness,
+            ..Console::default()
+        };
+        app.receive(Message::AuthChallenge(
+            "open https://example.org/verify and enter ABCD-1234".into(),
+        ));
+        let readiness = screen(&app, 100, 32);
+        assert!(readiness.contains("SIGN-IN"));
+        assert!(readiness.contains("ABCD-1234"));
+        assert!(readiness.contains("Provider status unknown"));
+
+        app.page = Page::Maintenance;
+        let mut audit = Job::new(JobKind::Audit { wing: None }, Priority::Normal, "test");
+        audit.apply(crate::domain::JobEvent::Claim).unwrap();
+        audit.result = Some(serde_json::json!({"issues": 2}));
+        audit.apply(crate::domain::JobEvent::Complete).unwrap();
+        app.receive(Message::Job(Box::new(audit)));
+        app.maintenance_detail = true;
+        assert!(screen(&app, 100, 32).contains("\"issues\": 2"));
+    }
+
+    #[test]
+    fn readiness_clears_cached_sources_and_miners_when_authoritative_checks_fail() {
+        let mut app = Console {
+            page: Page::Readiness,
+            ..Console::default()
+        };
+        app.receive(Message::Sources(SourcesReport {
+            adapters: Vec::new(),
+            sources: Vec::new(),
+        }));
+        app.receive(Message::Miners(MinersReport {
+            miners: Vec::new(),
+            config_file: None,
+            error: None,
+        }));
+        assert!(app.sources.is_some() && app.miners.is_some());
+
+        app.receive(Message::SourcesUnavailable("daemon disconnected".into()));
+        app.receive(Message::Miners(MinersReport {
+            miners: Vec::new(),
+            config_file: None,
+            error: Some("config could not be read".into()),
+        }));
+        assert!(app.sources.is_none() && app.miners.is_none());
+        let rendered = screen(&app, 100, 30);
+        assert!(rendered.contains("status unknown"));
+        assert!(!rendered.contains("CONFIGURED MINERS"));
     }
 }
