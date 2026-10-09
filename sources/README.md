@@ -19,6 +19,6 @@ on the `PATH`; run `memcastle source test` by hand with the same prefix.
 CI runs one job per directory here, found automatically, so a new source needs no workflow change.
 They are not compiled into MemCastle, and a source that ships with MemCastle's releases uses exactly the same package
 contract as one a user installs.
-`packaging/sources/build.sh` packages the bundled ones (`pi`, `opencode` and `codex`) with the index that lists them, which is
-what releases put under `share/memcastle/sources/`; `mise run sources:package` runs it locally, and
+`packaging/sources/build.sh` packages the bundled ones (`pi`, `opencode`, `claude`, `codex`, `chatgpt` and `github`) as
+unpacked packages under `share/memcastle/sources/`, with no bundle index. `mise run sources:package` runs it locally, and
 `docs/publishing-sources.md` is how a source gets from here to a user.

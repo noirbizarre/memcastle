@@ -107,6 +107,32 @@ async fn the_mode_can_also_come_from_the_environment() {
 }
 
 #[tokio::test]
+async fn miner_and_trigger_commands_send_the_session_mode() {
+    let daemon = TestDaemon::start().await;
+
+    for command in [
+        ["--mode", "disabled", "miner", "list", ""],
+        ["--mode", "disabled", "trigger", "list", ""],
+        ["--mode", "read_only", "miner", "run", "missing"],
+        ["--mode", "read_only", "trigger", "fire", "missing"],
+    ] {
+        let output = memcastle(&daemon)
+            .args(command.into_iter().filter(|arg| !arg.is_empty()))
+            .output()
+            .await
+            .expect("run memcastle");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{command:?} should be refused");
+        assert!(
+            stderr.contains("memcastle::mode::forbidden"),
+            "{command:?}: {stderr}"
+        );
+    }
+
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
 async fn an_unknown_mode_is_rejected_by_the_parser_and_lists_the_valid_ones() {
     let daemon = TestDaemon::start().await;
 

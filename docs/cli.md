@@ -77,8 +77,9 @@ Declining the prompt exits with `memcastle::cli::aborted` and changes nothing.
 
 `source install` and `source update` are the exception, because what they ask about is code that will run with
 permissions: when a package asks for any, they ask in a terminal, and without a terminal they refuse
-(`memcastle::source::consent_required`, or exit `1` for `update`) unless `--yes` or `--consent <digest>` is given
-(see [`source`](#source)).
+(`memcastle::source::consent_required`, or exit `1` for `update`) unless `--yes` is given.
+For an unattended install, `source install --consent <digest>` agrees only to the displayed permissions digest;
+`source update` accepts `--yes` but not `--consent` (see [`source`](#source)).
 
 ## Global flags
 
@@ -670,7 +671,7 @@ memcastle integration update <AGENT> [--assets-dir <DIR>]
 memcastle integration remove <AGENT>
 ```
 
-Install, update and remove the integrations MemCastle ships for coding agents: `pi` and `opencode`.
+Install, update and remove the integrations MemCastle ships for coding agents: `pi`, `opencode`, `claude-code` and `codex`.
 [Integrations](integrations.md) is the guide; this is the reference.
 
 All four are **local**: they read files and run the agent's own command, need no daemon, no palace and no network, and are
@@ -760,7 +761,7 @@ A wing that already exists is always accepted, whatever its name.
 
 The `list`, `show`, `create` and `delete` commands of `wing`, `room` and `drawer`, and `drawer history`, print a table
 or a readable view in a terminal, and JSON when standard output is a pipe or a file.
-`drawer supersede` and `drawer mention` always print JSON.
+`drawer supersede` and `drawer mention` also print a readable view in a terminal, and JSON when output is redirected.
 `wing show` prints the wing's totals and its rooms.
 `drawer list` shows the newest drawers first with a preview of each, never the whole content,
 and `drawer show` prints the content verbatim after a few lines of metadata.

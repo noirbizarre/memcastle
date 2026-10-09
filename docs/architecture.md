@@ -763,7 +763,8 @@ Deliberately out of scope, and each is structurally possible without rework give
 - Handing a static credential (an environment variable or a file) to a source: the model stores a credential
   *reference* and never a secret, and the source contract takes no static credential yet.
   What exists is an OAuth sign-in a source can declare, which the daemon runs, keeps and renews, and hands over as an
-  access token ([ADR-039](adr/039-oauth-credentials-for-mining-sources.md)); no shipped source needs one yet.
+  access token ([ADR-039](adr/039-oauth-credentials-for-mining-sources.md)); the shipped `chatgpt` source uses it in
+  [experimental web mode](mining-sources.md#chatgpt), while importing an export needs no sign-in.
 - Restricting an installed source's network access by host name and a filesystem write permission for sources: the package
   contract allows each, and neither is built.
 - A registry server and a search across registries beyond their names and descriptions: the official registry is a static

@@ -63,7 +63,7 @@ and some directories reject a tool whose hint is missing.
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
 |---|---|---|---|---|
-| `memcastle_status`, `memcastle_history`, `memcastle_fact_history`, `memcastle_wake_up`, `memcastle_diary_read`, `memcastle_job_list`, `memcastle_job_get`, `memcastle_miner_list`, `memcastle_miner_get` | true | false | true | false |
+| `memcastle_status`, `memcastle_history`, `memcastle_fact_history`, `memcastle_wake_up`, `memcastle_diary_read`, `memcastle_job_list`, `memcastle_job_get`, `memcastle_miner_list`, `memcastle_miner_get`, `memcastle_trigger_list`, `memcastle_trigger_get` | true | false | true | false |
 | `memcastle_search`, `memcastle_recall` | true | false | true | true |
 | `memcastle_set_mode` | false | false | true | false |
 | `memcastle_mine` | false | false | true | true |
@@ -167,7 +167,7 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `GET /api/health` | Liveness: `{"status": "ok"}`. Touches nothing else. | none |
 | `GET /api/status` | The full status report, also used by `memcastle status`. | none |
 | `GET /api/events` | A stream of change notices (server-sent events), so a client can read again instead of polling: see [The event stream](#the-event-stream). A read, so a `disabled` session gets a `403`. There is no MCP tool. | none |
-| `GET /api/config` | The configuration in effect, for the [dashboard's](web.md) settings page: listener, palace, datastore, whether authentication and the dashboard are on, where the runtime assets come from, scheduler limits, provider names and models, mining limits. It carries no token, key, URL or command line, and is daemon information like `status`, so no memory mode gates it. There is no MCP tool. | none |
+| `GET /api/config` | The configuration in effect, for the [dashboard's](web.md) settings page: listener, palace, datastore, whether authentication and the dashboard are on, where the runtime assets come from, scheduler limits, provider names and models, mining limits. It carries no token, key, provider URL or command line; a remote datastore location may be a URL with userinfo removed. This is daemon information like `status`, so no memory mode gates it. There is no MCP tool. | none |
 | `GET /api/search` | Search drawers. | query string: `q` (or `query`), `limit`, `wing`, `room`, `ranking`, `tags`, `source_kind`, `as_of`, `from`, `until`, `include_historical`, `expand` |
 | `POST /api/search` | The same search as a JSON [`SearchQuery`](#searching), the only way to send a `query_embedding`. | JSON body |
 | `GET /api/recall` | Recall drawers. | as `GET /api/search`, and `room` is ignored |

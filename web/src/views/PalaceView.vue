@@ -53,7 +53,7 @@ async function open(summary: DrawerSummary): Promise<void> {
     opened.value = {
       drawer,
       history: history.status === "fulfilled" ? history.value : undefined,
-      similar: similar.status === "fulfilled" ? similar.value : undefined,
+      similar: similar.status === "fulfilled" ? similar.value.similar : undefined,
     }
   } catch (caught) {
     openError.value = asApiError(caught)

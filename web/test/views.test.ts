@@ -499,7 +499,7 @@ describe("the palace page", () => {
   const answer = (request: Recorded): Answer => {
     const route = path(request)
     if (route.endsWith("/history")) return { body: { drawer: drawer.id, versions: [drawer, { ...drawer, id: "drawer:bbbb", valid_to: "2026-10-02T00:00:00Z" }] } }
-    if (route.endsWith("/duplicates")) return { body: [{ drawer: "drawer:cccc", side: "older", kind: "near", similarity: 0.91 }] }
+    if (route.endsWith("/duplicates")) return { body: { drawer: drawer.id, similar: [{ drawer: "drawer:cccc", side: "older", kind: "near", similarity: 0.91 }] } }
     if (route.endsWith("/drawers")) return { body: [summary] }
     if (route.includes("/drawers/")) return { body: drawer }
     if (route === "/api/wings/castle") return { body: { wing, rooms: [room] } }

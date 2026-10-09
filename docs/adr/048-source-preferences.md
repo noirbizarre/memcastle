@@ -1,5 +1,9 @@
 # ADR 048: Source preference is bounded evidence, with palace-local overrides
 
+## Status
+
+Accepted.
+
 ## Context
 
 Mined drawers have an adapter name and source-document metadata, but retrieval used relevance alone and conflict

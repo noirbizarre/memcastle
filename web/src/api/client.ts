@@ -215,7 +215,7 @@ export class MemCastleClient {
   drawerHistory(id: string): Promise<DrawerHistory> {
     return this.request("GET", `/api/drawers/${encodeURIComponent(id)}/history`)
   }
-  drawerDuplicates(id: string): Promise<SimilarDrawer[]> {
+  drawerDuplicates(id: string): Promise<{ drawer: string; similar: SimilarDrawer[] }> {
     return this.request("GET", `/api/drawers/${encodeURIComponent(id)}/duplicates`)
   }
 

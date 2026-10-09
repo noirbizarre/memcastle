@@ -103,12 +103,22 @@ fn days_in_month(year: i64, month: i64) -> i64 {
     }
 }
 
-/// Dates only narrow discovery, so accepting an RFC 3339 value needs only its validated calendar prefix as a floor.
+/// Use the full instant as the discovery floor; dropping the time would include earlier sessions from the same day.
 fn parse_since(value: &str) -> Result<i64, String> {
     let value = value.trim();
     let bad =
         || format!("`{value}` is not a date; use `2026-09`, `2026-09-14` or an RFC 3339 time");
-    let date = value.split(['T', 't', ' ']).next().unwrap_or_default();
+    let number = |text: &str, digits: usize| -> Option<i64> {
+        if text.len() == digits && text.bytes().all(|byte| byte.is_ascii_digit()) {
+            text.parse().ok()
+        } else {
+            None
+        }
+    };
+    let (date, time) = match value.find(['T', 't']) {
+        Some(at) => (&value[..at], Some(&value[at + 1..])),
+        None => (value, None),
+    };
     let parts: Vec<_> = date.split('-').collect();
     if !(2..=3).contains(&parts.len())
         || parts
@@ -132,7 +142,76 @@ fn parse_since(value: &str) -> Result<i64, String> {
     {
         return Err(bad());
     }
-    Ok(days_from_civil(year, month, day) * 86_400_000)
+    let mut seconds = days_from_civil(year, month, day) * 86_400;
+    let mut fraction_ms = 0;
+    if let Some(time) = time {
+        // A missing zone would make the same cutoff mean different instants on different machines.
+        let (clock, offset) = if let Some(clock) = time.strip_suffix(['Z', 'z']) {
+            (clock, 0)
+        } else {
+            let at = time.rfind(['+', '-']).ok_or_else(bad)?;
+            let (clock, zone) = time.split_at(at);
+            let sign = if zone.starts_with('-') { -1 } else { 1 };
+            let (hours, minutes) = zone[1..].split_once(':').ok_or_else(bad)?;
+            let hours = number(hours, 2).filter(|hour| *hour < 24).ok_or_else(bad)?;
+            let minutes = number(minutes, 2)
+                .filter(|minute| *minute < 60)
+                .ok_or_else(bad)?;
+            (clock, sign * (hours * 3600 + minutes * 60))
+        };
+        let (whole, fraction) = match clock.split_once('.') {
+            Some((whole, fraction)) => (whole, Some(fraction)),
+            None => (clock, None),
+        };
+        let mut fields = whole.split(':');
+        let mut next = |limit: i64| {
+            fields
+                .next()
+                .and_then(|part| number(part, 2))
+                .filter(|field| *field < limit)
+        };
+        let (hour, minute, second) = (
+            next(24).ok_or_else(bad)?,
+            next(60).ok_or_else(bad)?,
+            next(60).ok_or_else(bad)?,
+        );
+        if fields.next().is_some() {
+            return Err(bad());
+        }
+        seconds += hour * 3600 + minute * 60 + second - offset;
+        if let Some(fraction) = fraction {
+            if fraction.is_empty() || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(bad());
+            }
+            let padded: String = fraction.chars().chain("000".chars()).take(3).collect();
+            fraction_ms = padded.parse().map_err(|_| bad())?;
+        }
+    }
+    Ok(seconds * 1000 + fraction_ms)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_since;
+
+    #[test]
+    fn a_timestamp_cutoff_honors_the_clock_and_offset() {
+        let cutoff = parse_since("2026-09-14T18:00:00.250+02:00").unwrap();
+        assert_eq!(cutoff, parse_since("2026-09-14T16:00:00.250Z").unwrap());
+        assert!(cutoff > parse_since("2026-09-14").unwrap());
+        assert!(cutoff < parse_since("2026-09-15").unwrap());
+        assert_eq!(
+            parse_since("2026-09").unwrap(),
+            parse_since("2026-09-01").unwrap()
+        );
+        for invalid in [
+            "2026-09-14T25:00:00Z",
+            "2026-09-14T18:00:00",
+            "2026-09-14T18:00:00+02:99",
+        ] {
+            assert!(parse_since(invalid).is_err(), "{invalid} should be refused");
+        }
+    }
 }
 
 fn normalize_dir(value: &str) -> String {

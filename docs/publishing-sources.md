@@ -14,13 +14,13 @@ daemon runs it.
 | Origin | What it is | Installed by |
 |---|---|---|
 | Built in | Compiled into MemCastle (`directory`). | Nothing: it is always there and cannot be removed. |
-| Bundled | An ordinary package unpacked beside the binary (`pi`, `opencode`, `claude`). | Nothing: it is installed from the start, and `memcastle source enable <name>` turns it on. |
+| Bundled | An ordinary package unpacked beside the binary (`pi`, `opencode`, `claude`, `codex`, `chatgpt`, `github`). | Nothing: it is installed from the start, and `memcastle source enable <name>` turns it on. |
 | Registry | A package listed in an index you configured. | `memcastle source install <name>`. |
 | Local | A package file or a project directory on your disk. | `memcastle source install <file or directory>`. |
 
-They are listed together and share one lifecycle, and `install` and `update` are for the last two:
-a bundled source is already installed and is updated with MemCastle, and a built-in one is MemCastle.
-The origin decides what `update` looks at.
+They are listed together and share one lifecycle, but `install` accepts registry and local packages while `update`
+follows only registry sources: a local install has no upstream.
+A bundled source is already installed and is updated with MemCastle, and a built-in one is MemCastle.
 
 ## The package format
 
@@ -221,7 +221,8 @@ on disk after install is never run.
 
 ## Bundled sources
 
-Releases ship `pi`, `opencode` and `claude` unpacked, one directory each (`<name>/memcastle-source.toml`,
+Releases ship `pi`, `opencode`, `claude`, `codex`, `chatgpt` and `github` unpacked,
+one directory each (`<name>/memcastle-source.toml`,
 `<name>/source.wasm`), under
 `share/memcastle/sources/`:
 in the release tarballs, as `/usr/share/memcastle/sources/` in the `.deb`, `.rpm` and AUR package, and under the formula's
