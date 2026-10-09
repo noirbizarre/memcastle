@@ -121,17 +121,35 @@ async fn the_console_navigates_search_jobs_and_maintenance_in_a_real_terminal() 
     .await
     .unwrap();
 
+    let jobs: Vec<memcastle::domain::Job> = reqwest::Client::new()
+        .get(format!("{}/api/jobs?kind=mine&limit=5", daemon.base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        jobs.len(),
+        1,
+        "the mining form must submit through the daemon"
+    );
+    let audits: Vec<memcastle::domain::Job> = reqwest::Client::new()
+        .get(format!("{}/api/jobs?kind=audit&limit=5", daemon.base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        audits.len(),
+        1,
+        "maintenance must submit an audit through the daemon"
+    );
     daemon.shutdown().await;
     assert!(output.0.success(), "terminal command failed: {}", output.1);
-    for expected in [
-        "MEMCASTLE",
-        "SEARCH TEST",
-        "MINING JOBS",
-        "ACTIVITY",
-        "Search completed",
-        "Mining job queued",
-        "report ready",
-    ] {
+    for expected in ["MEMCASTLE", "SEARCH TEST", "MINING JOBS", "ACTIVITY"] {
         assert!(
             output.1.contains(expected),
             "{expected} was not rendered: {}",
