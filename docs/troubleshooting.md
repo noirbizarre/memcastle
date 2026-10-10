@@ -495,5 +495,5 @@ The daemon must be up at that moment; some clients do not retry.
 
 Run the failing command with `-vv`, run `memcastle serve -vv` in the foreground,
 and set `RUST_BACKTRACE=1` if an error looks like a bug.
-Then open an issue at <https://github.com/noirbizarre/memcastle/issues> with the diagnostic code,
+Then open an issue at <https://github.com/memcastle/memcastle/issues> with the diagnostic code,
 the output of `memcastle status --json`, and your MemCastle version (`memcastle --version`).

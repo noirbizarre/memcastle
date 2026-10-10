@@ -74,7 +74,7 @@ The ones you are most likely to set:
 `MEMCASTLE_MODE` takes this integration's labels (`full`, `read-only`, `off`), which are not the daemon's
 (`full`, `read_only`, `disabled`).
 The complete list is in the
-[plugin's README](https://github.com/noirbizarre/memcastle/blob/main/integrations/opencode/README.md#configuration).
+[plugin's README](https://github.com/memcastle/memcastle/blob/main/integrations/opencode/README.md#configuration).
 
 The plugin also accepts options, which win over the environment, but only when it is listed in `opencode.json`'s
 `plugin` (OpenCode 1) or `plugins` (OpenCode 2) list, and MemCastle does not edit that file.

@@ -376,6 +376,13 @@ so a job's status only ever changes through `Job::apply`.
 
 The documentation site is built by [Zensical](https://zensical.org/) from `docs/`, configured in `zensical.toml`.
 `mise run docs` serves it with live reload, and `mise run docs:build` (part of `mise run ci`) builds it.
+The documentation workflow builds pull requests without deployment and publishes merged `main` builds into the root of
+`memcastle/memcastle.github.io`'s `gh-pages` branch, where Pages serves `https://memcastle.github.io/`.
+After the first publish creates the branch (if the repository is empty), configure the destination repository's Pages
+source as Deploy from a branch (`gh-pages`, `/`).
+The source repository's `github-pages` environment needs `APP_CLIENT_ID` (variable) and `APP_PRIVATE_KEY` (secret) for a
+GitHub App installed on `memcastle/memcastle.github.io` with Contents: write; its token is scoped to that repository.
+The first publish creates the branch when the destination is empty, and subsequent identical builds make no commit.
 Documentation is part of a change, not a follow-up: a pull request that changes a flag, a setting, a tool
 or a user-visible behaviour updates the page that describes it, in the same commit series.
 

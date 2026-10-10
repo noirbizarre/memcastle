@@ -5,20 +5,20 @@
 <p align="center"><strong>Local-first, always-on memory server for AI coding agents over MCP/HTTP</strong></p>
 
 <p align="center">
-  <a href="https://github.com/noirbizarre/memcastle/actions/workflows/ci.yaml">
-    <img src="https://github.com/noirbizarre/memcastle/actions/workflows/ci.yaml/badge.svg" alt="CI">
+  <a href="https://github.com/memcastle/memcastle/actions/workflows/ci.yaml">
+    <img src="https://github.com/memcastle/memcastle/actions/workflows/ci.yaml/badge.svg" alt="CI">
   </a>
-  <a href="https://codecov.io/gh/noirbizarre/memcastle">
-    <img src="https://codecov.io/gh/noirbizarre/memcastle/graph/badge.svg" alt="Codecov">
+  <a href="https://codecov.io/gh/memcastle/memcastle">
+    <img src="https://codecov.io/gh/memcastle/memcastle/graph/badge.svg" alt="Codecov">
   </a>
-  <img src="https://img.shields.io/github/v/release/noirbizarre/memcastle" alt="Release">
-  <a href="https://noirbizarre.github.io/memcastle/">
-    <img src="https://img.shields.io/badge/docs-noirbizarre.github.io-blue" alt="Documentation">
+  <img src="https://img.shields.io/github/v/release/memcastle/memcastle" alt="Release">
+  <a href="https://memcastle.github.io/">
+    <img src="https://img.shields.io/badge/docs-memcastle.github.io-blue" alt="Documentation">
   </a>
-  <img src="https://img.shields.io/github/license/noirbizarre/memcastle" alt="License">
+  <img src="https://img.shields.io/github/license/memcastle/memcastle" alt="License">
   <!-- Kept off until the score is worth showing:
-  <a href="https://m8ven.ai/mcp/noirbizarre/memcastle?s=readme">
-    <img src="https://m8ven.ai/badge/mcp/noirbizarre/memcastle" alt="M8ven Score">
+  <a href="https://m8ven.ai/mcp/memcastle/memcastle?s=readme">
+    <img src="https://m8ven.ai/badge/mcp/memcastle/memcastle" alt="M8ven Score">
   </a>
   -->
 </p>
@@ -47,9 +47,9 @@ brew install noirbizarre/homebrew-tap/memcastle   # macOS
 paru -S memcastle-bin                             # Arch Linux (AUR)
 ```
 
-Or download a binary for your platform from the [latest release](https://github.com/noirbizarre/memcastle/releases/latest),
+Or download a binary for your platform from the [latest release](https://github.com/memcastle/memcastle/releases/latest),
 or build from source with `cargo install --path .`.
-See the [installation guide](https://noirbizarre.github.io/memcastle/installation/) for details and platform notes.
+See the [installation guide](https://memcastle.github.io/installation/) for details and platform notes.
 
 ## Quickstart
 
@@ -76,21 +76,21 @@ claude mcp add --transport http memcastle http://127.0.0.1:8420/mcp   # Claude C
 ```
 
 For OpenCode, add a `remote` server to `opencode.json`.
-The [MCP client guide](https://noirbizarre.github.io/memcastle/mcp-clients/) has the exact configuration for both.
+The [MCP client guide](https://memcastle.github.io/mcp-clients/) has the exact configuration for both.
 Stop and restart the daemon whenever you like: the palace is on disk, and it is all still there.
 
 ## Documentation
 
-The full documentation is at <https://noirbizarre.github.io/memcastle/>.
+The full documentation is at <https://memcastle.github.io/>.
 
 | To... | Read |
 |---|---|
-| Install and try it | [Installation](https://noirbizarre.github.io/memcastle/installation/), [Quickstart](https://noirbizarre.github.io/memcastle/quickstart/) |
-| Use it from an agent | [Connect an MCP client](https://noirbizarre.github.io/memcastle/mcp-clients/), [Agent integrations](https://noirbizarre.github.io/memcastle/integrations/) (`memcastle integration install`), [Agent skills](https://noirbizarre.github.io/memcastle/skills/), [MCP tools and REST API](https://noirbizarre.github.io/memcastle/mcp-and-api/) |
-| Run it day to day | [Running the daemon](https://noirbizarre.github.io/memcastle/daemon/), [Authentication](https://noirbizarre.github.io/memcastle/authentication/), [Memory modes](https://noirbizarre.github.io/memcastle/memory-modes/), [Project configuration](https://noirbizarre.github.io/memcastle/project-config/), [Mining sources](https://noirbizarre.github.io/memcastle/mining-sources/), [Deduplication](https://noirbizarre.github.io/memcastle/deduplication/), [Database access](https://noirbizarre.github.io/memcastle/database-access/), [Troubleshooting](https://noirbizarre.github.io/memcastle/troubleshooting/) |
-| Configure it | [Configuration](https://noirbizarre.github.io/memcastle/configuration/) (XDG paths on Linux and macOS, config file, environment, flags), [CLI reference](https://noirbizarre.github.io/memcastle/cli/) |
-| Know where data lives | [Storage and data](https://noirbizarre.github.io/memcastle/storage/), [Migrations and upgrades](https://noirbizarre.github.io/memcastle/migrations/) |
-| Understand or change it | [Architecture](https://noirbizarre.github.io/memcastle/architecture/), [Development](https://noirbizarre.github.io/memcastle/development/), [Architecture Decisions](https://noirbizarre.github.io/memcastle/adr/), [Writing](https://noirbizarre.github.io/memcastle/writing-sources/) and [publishing](https://noirbizarre.github.io/memcastle/publishing-sources/) sources, [Integration contract](https://noirbizarre.github.io/memcastle/integration-contract/) |
+| Install and try it | [Installation](https://memcastle.github.io/installation/), [Quickstart](https://memcastle.github.io/quickstart/) |
+| Use it from an agent | [Connect an MCP client](https://memcastle.github.io/mcp-clients/), [Agent integrations](https://memcastle.github.io/integrations/) (`memcastle integration install`), [Agent skills](https://memcastle.github.io/skills/), [MCP tools and REST API](https://memcastle.github.io/mcp-and-api/) |
+| Run it day to day | [Running the daemon](https://memcastle.github.io/daemon/), [Authentication](https://memcastle.github.io/authentication/), [Memory modes](https://memcastle.github.io/memory-modes/), [Project configuration](https://memcastle.github.io/project-config/), [Mining sources](https://memcastle.github.io/mining-sources/), [Deduplication](https://memcastle.github.io/deduplication/), [Database access](https://memcastle.github.io/database-access/), [Troubleshooting](https://memcastle.github.io/troubleshooting/) |
+| Configure it | [Configuration](https://memcastle.github.io/configuration/) (XDG paths on Linux and macOS, config file, environment, flags), [CLI reference](https://memcastle.github.io/cli/) |
+| Know where data lives | [Storage and data](https://memcastle.github.io/storage/), [Migrations and upgrades](https://memcastle.github.io/migrations/) |
+| Understand or change it | [Architecture](https://memcastle.github.io/architecture/), [Development](https://memcastle.github.io/development/), [Architecture Decisions](https://memcastle.github.io/adr/), [Writing](https://memcastle.github.io/writing-sources/) and [publishing](https://memcastle.github.io/publishing-sources/) sources, [Integration contract](https://memcastle.github.io/integration-contract/) |
 
 ## Contributing
 

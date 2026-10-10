@@ -6,7 +6,7 @@
 # version or derives a tag — this file is the whole versioning policy.
 
 [remote.github]
-owner = "noirbizarre"
+owner = "memcastle"
 repo = "memcastle"
 
 [changelog]
@@ -93,7 +93,7 @@ trim = true
 footer = ""
 postprocessors = [
   { pattern = '\n+\z', replace = "\n" },
-  { pattern = "<REPO>", replace = "https://github.com/noirbizarre/memcastle" },
+  { pattern = "<REPO>", replace = "https://github.com/memcastle/memcastle" },
 ]
 
 [git]

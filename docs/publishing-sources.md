@@ -254,8 +254,8 @@ inside an agent.
 
 ## The official registry
 
-The official registry is a static file in this repository, [`docs/registry.json`](https://github.com/noirbizarre/memcastle/blob/main/docs/registry.json),
-published with the documentation at `https://noirbizarre.github.io/memcastle/registry.json`.
+The official registry is a static file in this repository, [`docs/registry.json`](https://github.com/memcastle/memcastle/blob/main/docs/registry.json),
+published at `https://memcastle.github.io/registry.json` from the root of the documentation site's `gh-pages` branch.
 It lists no versions: it names the GitHub repositories that publish sources (`pi`, `opencode` and `claude` are published
 by this one), and the daemon reads their releases.
 Registering a source, or changing where it comes from, is therefore a pull request to that file, merged and deployed like
@@ -272,6 +272,7 @@ Nothing is fetched until you run one of those commands, and a package from it is
 `mining.trust` policy like any other registry's.
 The official packages are not signed yet, so `trust = "required"` refuses them.
 Set `mining.registries` to use other registries instead of it, or to `[]` to use none.
+For the 0.4.0-to-0.4.1 move from the old Pages URL, see [Upgrading MemCastle](migrations.md#the-041-registry-move).
 
 ### Registering a GitHub repository
 

@@ -158,10 +158,10 @@ const ASSETS_SOURCES_DIR: &str = "sources";
 /// The API `mining.github_api_url` defaults to.
 pub const DEFAULT_GITHUB_API: &str = "https://api.github.com";
 
-/// The official source registry, published with the documentation site on every release (docs/adr/040).
+/// The official source registry, published with the documentation site on every documentation merge (docs/adr/040).
 ///
 /// The one default that can reach the network, and only when someone asks to search, install or update a source.
-pub const OFFICIAL_REGISTRY: &str = "https://noirbizarre.github.io/memcastle/registry.json";
+pub const OFFICIAL_REGISTRY: &str = "https://memcastle.github.io/registry.json";
 
 const DEFAULT_BIND: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 /// The default listener port.
@@ -2828,7 +2828,7 @@ mod tests {
         let defaults = MiningConfig::default();
         assert_eq!(
             defaults.registries,
-            [OFFICIAL_REGISTRY],
+            ["https://memcastle.github.io/registry.json"],
             "the official registry is the default, and the only one"
         );
         assert_eq!(defaults.trust, TrustMode::Optional);

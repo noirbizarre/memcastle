@@ -165,7 +165,8 @@ source_memory_mib = 256     # the most memory one call into an installed source 
 source_timeout_secs = 60    # the longest one call may run; a source's own limits can only lower these
 # Where `memcastle source search|install <name>|update` look: an https URL, a file:// URL or an absolute path to a
 # memcastle-index.json (or a directory holding one). The official registry by default; a list here replaces it, and
-# `[]` means none. It is read only when you run one of those commands.
+# `[]` means none. The default is https://memcastle.github.io/registry.json.
+# It is read only when you run one of those commands.
 # registries = ["https://example.org/memcastle/index.json"]
 # The GitHub API a registry entry that names a repository is resolved through (see "Publishing and installing sources").
 # github_api_url = "https://api.github.com"

@@ -5,44 +5,44 @@
     {
       "name": "chatgpt",
       "description": "ChatGPT conversation history from an official export or an experimental web session",
-      "homepage": "https://noirbizarre.github.io/memcastle/mining-sources/#chatgpt",
+      "homepage": "https://memcastle.github.io/mining-sources/#chatgpt",
       "license": "MIT",
-      "repository": "noirbizarre/memcastle"
+      "repository": "memcastle/memcastle"
     },
     {
       "name": "claude",
       "description": "Claude Code session history (JSONL transcripts under ~/.claude/projects), one document per session",
-      "homepage": "https://noirbizarre.github.io/memcastle/mining-sources/#claude",
+      "homepage": "https://memcastle.github.io/mining-sources/#claude",
       "license": "MIT",
-      "repository": "noirbizarre/memcastle"
+      "repository": "memcastle/memcastle"
     },
     {
       "name": "codex",
       "description": "Codex coding-agent rollout history (JSONL files under ~/.codex/sessions), one document per rollout",
-      "homepage": "https://noirbizarre.github.io/memcastle/mining-sources/#codex",
+      "homepage": "https://memcastle.github.io/mining-sources/#codex",
       "license": "MIT",
-      "repository": "noirbizarre/memcastle"
+      "repository": "memcastle/memcastle"
     },
     {
       "name": "github",
       "description": "Scoped GitHub repositories, issues, pull requests, comments, reviews and wiki revisions",
-      "homepage": "https://noirbizarre.github.io/memcastle/mining-sources/#github",
+      "homepage": "https://memcastle.github.io/mining-sources/#github",
       "license": "MIT",
-      "repository": "noirbizarre/memcastle"
+      "repository": "memcastle/memcastle"
     },
     {
       "name": "opencode",
       "description": "OpenCode coding-agent session history, acquired through the opencode CLI, one document per session",
-      "homepage": "https://noirbizarre.github.io/memcastle/mining-sources/#opencode",
+      "homepage": "https://memcastle.github.io/mining-sources/#opencode",
       "license": "MIT",
-      "repository": "noirbizarre/memcastle"
+      "repository": "memcastle/memcastle"
     },
     {
       "name": "pi",
       "description": "Pi coding-agent session history (JSONL files under ~/.pi/agent/sessions), one document per session",
-      "homepage": "https://noirbizarre.github.io/memcastle/mining-sources/#pi",
+      "homepage": "https://memcastle.github.io/mining-sources/#pi",
       "license": "MIT",
-      "repository": "noirbizarre/memcastle"
+      "repository": "memcastle/memcastle"
     }
   ]
 }
