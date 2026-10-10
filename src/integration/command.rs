@@ -3,6 +3,7 @@
 //! The binary only parses arguments and prints; everything it decides lives here, where it is tested without spawning a
 //! process.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use crate::assets::InstallSearch;
@@ -67,6 +68,102 @@ pub fn execute(
         to_json(&outcome)
     } else {
         Ok(render::render_outcome(&outcome, painter))
+    }
+}
+
+/// Resolve shipped integrations and the independently installed plugins' integration modules.
+///
+/// The plugin directory is local file state, not a daemon call: integration install/uninstall must remain possible
+/// offline, and only the caller's selected module is registered with its agent.
+///
+/// # Errors
+///
+/// A missing integration, changed plugin asset or installation conflict.
+pub fn execute_with_plugins(
+    operation: &Operation,
+    assets_dir: Option<&Path>,
+    plugins_dir: &Path,
+    search: &InstallSearch,
+    ctx: &Context<'_>,
+    json: bool,
+    painter: Painter,
+) -> Result<String> {
+    if let Operation::Remove(_) = operation {
+        return execute(operation, assets_dir, search, ctx, json, painter);
+    }
+    let plugin_catalogs = Catalog::plugin_catalogs(plugins_dir)?;
+    let shipped = Catalog::open(assets_dir, search).or_else(|error| {
+        if plugin_catalogs.is_empty() || !matches!(error, Error::IntegrationAssetsMissing { .. }) {
+            return Err(error);
+        }
+        // An installation without Core-shipped integrations is still allowed to provide modules from plugins.
+        Catalog::read(
+            plugins_dir.to_path_buf(),
+            crate::assets::AssetSource::Embedded,
+        )
+    })?;
+    match operation {
+        Operation::List => {
+            let mut report = render::list(&shipped, ctx)?;
+            let mut ids: HashSet<String> = report
+                .integrations
+                .iter()
+                .map(|item| item.id.clone())
+                .collect();
+            for plugin in &plugin_catalogs {
+                let listed = render::list(plugin, ctx)?;
+                for item in listed.integrations {
+                    if !ids.insert(item.id.clone()) {
+                        return Err(Error::IntegrationConflict {
+                            name: item.id.clone(),
+                            path: plugin.root().display().to_string(),
+                        });
+                    }
+                    report.integrations.push(item);
+                }
+                report.broken.extend(listed.broken);
+            }
+            report
+                .integrations
+                .sort_by(|left, right| left.id.cmp(&right.id));
+            if json {
+                to_json(&report)
+            } else {
+                Ok(render::render_list(&report, painter))
+            }
+        }
+        Operation::Install(id) | Operation::Update(id) => {
+            if shipped.integrations().iter().any(|entry| entry.id() == id)
+                && plugin_catalogs
+                    .iter()
+                    .any(|catalog| catalog.integrations().iter().any(|entry| entry.id() == id))
+            {
+                return Err(Error::IntegrationConflict {
+                    name: id.clone(),
+                    path: format!("{} and an installed plugin", shipped.root().display()),
+                });
+            }
+            let catalog = plugin_catalogs
+                .iter()
+                .find(|catalog| {
+                    catalog
+                        .integrations()
+                        .iter()
+                        .any(|shipped| shipped.id() == id)
+                })
+                .unwrap_or(&shipped);
+            let outcome = match operation {
+                Operation::Install(_) => install::install(catalog.get(id)?, catalog, ctx)?,
+                Operation::Update(_) => install::update(catalog.get(id)?, catalog, ctx)?,
+                _ => unreachable!("only install and update reach this branch"),
+            };
+            if json {
+                to_json(&outcome)
+            } else {
+                Ok(render::render_outcome(&outcome, painter))
+            }
+        }
+        Operation::Remove(_) => unreachable!("handled before looking for plugins"),
     }
 }
 
@@ -145,6 +242,109 @@ mod tests {
             .run(&Operation::Remove("pi".to_string()), false)
             .unwrap();
         assert!(removed.starts_with("Removed pi 0.1.0"), "{removed}");
+    }
+
+    #[test]
+    fn an_installed_plugin_integration_is_selected_and_registered_locally_without_a_daemon() {
+        use crate::domain::{
+            PluginInfo, PluginManifest, PluginModule, PluginModuleKind, sha256_hex,
+        };
+        let world = World::new();
+        let manifest = b"format = 1\n[integration]\nid = 'assistant'\nversion = '0.1.0'\ndescription = 'assistant'\n[compatibility]\nmemcastle = '>=0.1'\n[agent]\nkind = 'pi'\nentry = 'extension.js'\n[[assets]]\nfrom = 'dist'\nto = '.'\n";
+        let entry = b"export default 1\n";
+        let plugin = PluginManifest {
+            format: 1,
+            plugin: PluginInfo {
+                id: "example".into(),
+                version: "0.1.0".into(),
+                provider: "example".into(),
+                description: "An integration".into(),
+                repository: "https://github.com/example/example".into(),
+                license: "MIT".into(),
+            },
+            memcastle: ">=0.1".into(),
+            dependencies: Vec::new(),
+            shared_config_schema: None,
+            authentication: None,
+            modules: vec![PluginModule {
+                id: "assistant".into(),
+                kind: PluginModuleKind::Integration,
+                version: "0.1.0".into(),
+                manifest: "modules/assistant/memcastle-integration.toml".into(),
+                manifest_sha256: sha256_hex(manifest),
+                entry: "modules/assistant/dist/extension.js".into(),
+                sha256: sha256_hex(entry),
+                optional: false,
+                contract: None,
+                config_schema: None,
+            }],
+        };
+        let files = std::collections::BTreeMap::from([
+            (
+                "plugin.toml".to_string(),
+                toml::to_string(&plugin).unwrap().into_bytes(),
+            ),
+            (
+                "modules/assistant/memcastle-integration.toml".to_string(),
+                manifest.to_vec(),
+            ),
+            (
+                "modules/assistant/dist/extension.js".to_string(),
+                entry.to_vec(),
+            ),
+        ]);
+        let archive = crate::plugin::package::pack(&files).unwrap();
+        let digest = sha256_hex(&archive);
+        let plugins_dir = world.root.path().join("plugins");
+        let generation = plugins_dir.join("example").join(&digest);
+        let projected = generation.join("integrations/assistant");
+        std::fs::create_dir_all(projected.join("dist")).unwrap();
+        std::fs::write(generation.join("package.tar.gz"), archive).unwrap();
+        std::fs::write(projected.join("memcastle-integration.toml"), manifest).unwrap();
+        std::fs::write(projected.join("dist/extension.js"), entry).unwrap();
+        std::fs::write(plugins_dir.join("example/current"), &digest).unwrap();
+        let ctx = Context::for_process(&world.locations, &world.fake);
+        let assets = world.root.path().join("assets");
+        let listed = execute_with_plugins(
+            &Operation::List,
+            Some(&assets),
+            &plugins_dir,
+            &InstallSearch::default(),
+            &ctx,
+            true,
+            Painter::PLAIN,
+        )
+        .unwrap();
+        assert!(listed.contains("assistant"), "{listed}");
+        let installed = execute_with_plugins(
+            &Operation::Install("assistant".into()),
+            Some(&assets),
+            &plugins_dir,
+            &InstallSearch::default(),
+            &ctx,
+            false,
+            Painter::PLAIN,
+        )
+        .unwrap();
+        assert!(installed.starts_with("Installed assistant"), "{installed}");
+        assert!(
+            world
+                .locations
+                .agents_dir
+                .join("assistant/.memcastle-install.json")
+                .is_file()
+        );
+        let removed = execute_with_plugins(
+            &Operation::Remove("assistant".into()),
+            Some(&assets),
+            &plugins_dir,
+            &InstallSearch::default(),
+            &ctx,
+            false,
+            Painter::PLAIN,
+        )
+        .unwrap();
+        assert!(removed.starts_with("Removed assistant"), "{removed}");
     }
 
     #[test]

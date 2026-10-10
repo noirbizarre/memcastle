@@ -1,0 +1,18 @@
+format = 1
+
+[integration]
+id = "assistant"
+version = "0.1.0"
+description = "Connect an agent session to the MemCastle daemon"
+
+[compatibility]
+memcastle = ">=0.4, <0.6"
+agent = ">=1.18.29"
+
+[agent]
+kind = "opencode"
+entry = "index.js"
+
+[[assets]]
+from = "dist"
+to = "."

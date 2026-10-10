@@ -25,6 +25,8 @@ impl IntoResponse for ApiError {
             | Error::RoomNotFound { .. }
             | Error::DrawerNotFound { .. }
             | Error::SourceNotFound { .. }
+            | Error::PluginNotFound { .. }
+            | Error::PluginNotInRegistry { .. }
             | Error::MinerNotFound { .. }
             | Error::TriggerNotFound { .. }
             // No registry offers it, or no version of it can be installed here.
@@ -40,6 +42,9 @@ impl IntoResponse for ApiError {
             // A package, manifest or consent the caller supplied is theirs to fix.
             | Error::SourceManifestInvalid { .. }
             | Error::SourcePackageInvalid { .. }
+            | Error::PluginManifestInvalid { .. }
+            | Error::PluginPackageInvalid { .. }
+            | Error::PluginUntrusted { .. }
             | Error::SourceIncompatible { .. }
             | Error::SourceConsentRequired { .. }
             | Error::SourceBuiltin { .. }
@@ -60,6 +65,8 @@ impl IntoResponse for ApiError {
             // A registry is an upstream too: unreachable, or serving something other than what it published.
             | Error::SourceRegistryUnavailable { .. }
             | Error::SourceIntegrity { .. }
+            | Error::PluginRegistryUnavailable { .. }
+            | Error::PluginIntegrity { .. }
             // An OAuth provider is an upstream too: it declined, expired the code, or could not be reached.
             | Error::CredentialFlowFailed { .. }
             | Error::CredentialRefreshFailed { .. } => StatusCode::BAD_GATEWAY,
@@ -84,6 +91,7 @@ impl IntoResponse for ApiError {
             | Error::DrawerSuperseded { .. }
             // The source exists, but its state (disabled, unavailable) conflicts with the request.
             | Error::SourceNotEnabled { .. }
+            | Error::PluginBlocked { .. }
             // A name already taken, a change that needs confirming, or a miner whose state forbids the request.
             // A hand-edited file that no longer parses is also a conflict: the request is fine, the file is not.
             | Error::MinerExists { .. }

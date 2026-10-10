@@ -209,6 +209,19 @@ pub fn describe_package(record: &SourcePackageRecord, sources_dir: &Path) -> Ada
 /// when they are intact, and are `unavailable` with the reason when they are not.
 #[must_use]
 pub fn component_dir(record: &SourcePackageRecord, mining: &MiningConfig) -> PathBuf {
+    if let (Some(plugin), Some(generation)) = (&record.plugin, &record.generation)
+        && crate::domain::is_valid_source_name(plugin)
+        && generation.len() == 64
+        && generation
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return mining
+            .plugin_dir()
+            .join(plugin)
+            .join(generation)
+            .join("modules");
+    }
     if record.origin == SourceOrigin::Bundled
         && let Some(bundle) = Bundle::find(mining)
         && bundle.contains(&record.name)
@@ -542,6 +555,8 @@ mod tests {
             registry: None,
             archive_digest: None,
             signed_by: None,
+            plugin: None,
+            generation: None,
         }
     }
 

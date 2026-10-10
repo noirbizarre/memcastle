@@ -1,0 +1,6 @@
+dist/
+!modules/*/dist/
+!modules/*/dist/**
+modules/*/target/
+modules/*/source.wasm
+__pycache__/

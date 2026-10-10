@@ -18,6 +18,7 @@
 
 mod github;
 mod location;
+pub mod plugin;
 mod trust;
 
 use crate::config::MiningConfig;
@@ -212,7 +213,7 @@ async fn resolve_repositories(index: &mut SourceIndex, github: &GitHubApi<'_>) -
     warnings
 }
 
-async fn read_releases(
+pub(super) async fn read_releases(
     github: &GitHubApi<'_>,
     repository: &str,
 ) -> std::result::Result<Vec<github::Release>, String> {

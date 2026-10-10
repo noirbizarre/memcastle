@@ -20,6 +20,8 @@ mod memory_mode;
 mod miner;
 mod palace;
 mod path;
+pub mod plugin;
+mod plugin_index;
 mod preferences;
 mod resolution;
 mod search;
@@ -67,7 +69,9 @@ pub use source::{
     OptionSpec, Options, RawDocument, Segment, SourceCapabilities, SourceDocumentRecord,
     SourceRecord, SourceRef, is_option_key, parse_since, unknown_option,
 };
-pub use source_index::{INDEX_FORMAT, IndexSignature, IndexedSource, IndexedVersion, SourceIndex};
+pub use source_index::{
+    INDEX_FORMAT, IndexSignature, IndexedSource, IndexedVersion, SourceIndex, is_repository,
+};
 pub use source_package::{
     BuildSection, CONTRACT_VERSION, Compatibility, FilesystemPermissions, MANIFEST_FORMAT,
     MAX_SOURCE_NAME_LEN, ManifestOption, ManifestSource, OAuthRequirement, PackageTransitionError,
@@ -98,6 +102,14 @@ pub use palace::{
     DEFAULT_PALACE_NAME, Deleted, DrawerSummary, Palace, Room, RoomSummary, Wing, WingSummary,
 };
 pub use path::{NameKind, PalacePath, validate_name};
+pub use plugin::{
+    PluginAuthentication, PluginDependency, PluginInfo, PluginManifest, PluginModule,
+    PluginModuleKind, PluginRecord,
+};
+pub use plugin_index::{
+    IndexedPlugin, IndexedPluginModule, IndexedPluginVersion, PLUGIN_INDEX_FORMAT, PluginIndex,
+    plugin_repository_url,
+};
 pub use preferences::{
     ConnectorPreference, PreferenceCriterion, PreferenceLevel, PreferenceMatch, SourcePreferences,
 };

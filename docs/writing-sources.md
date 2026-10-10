@@ -1,5 +1,9 @@
 # Writing a mining source
 
+For a new provider plugin, invoke [`memcastle-source.tpl`](plugins.md) directly through GitTPL and compose the module
+into the provider's parent template.
+`memcastle source init` continues to scaffold the legacy single-source package format for v0.4 compatibility.
+
 A mining source finds documents in some origin (a chat export, an issue tracker, an agent's session files),
 reads them, and puts them in MemCastle's terms.
 MemCastle does everything else: chunking, deduplication, drawers, the cursor and the durable job

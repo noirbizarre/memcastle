@@ -87,6 +87,161 @@ async fn a_read_only_cli_is_refused_a_write_with_the_mode_error() {
 }
 
 #[tokio::test]
+async fn plugin_commands_use_the_daemon_for_install_listing_and_uninstall() {
+    use memcastle::domain::{PluginInfo, PluginManifest};
+    use std::collections::BTreeMap;
+
+    let daemon = TestDaemon::start().await;
+    let scratch = tempfile::tempdir().unwrap();
+    let manifest = PluginManifest {
+        format: 1,
+        plugin: PluginInfo {
+            id: "example".into(),
+            version: "0.1.0".into(),
+            provider: "example".into(),
+            description: "CLI fixture".into(),
+            repository: "https://github.com/example/example".into(),
+            license: "MIT".into(),
+        },
+        memcastle: ">=0.4".into(),
+        dependencies: Vec::new(),
+        shared_config_schema: None,
+        authentication: None,
+        modules: Vec::new(),
+    };
+    let archive = memcastle::plugin::package::pack(&BTreeMap::from([(
+        "plugin.toml".to_string(),
+        toml::to_string(&manifest).unwrap().into_bytes(),
+    )]))
+    .unwrap();
+    let package = scratch.path().join("example-0.1.0.tar.gz");
+    std::fs::write(&package, archive).unwrap();
+    let installed = memcastle(&daemon)
+        .args(["--json", "plugin", "install"])
+        .arg(&package)
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        installed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&installed.stderr)
+    );
+    let record: serde_json::Value = serde_json::from_slice(&installed.stdout).unwrap();
+    assert_eq!(record["id"], "example");
+
+    let listed = memcastle(&daemon)
+        .args(["--json", "plugin", "list"])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        listed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    let records: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert_eq!(records[0]["id"], "example");
+
+    let removed = memcastle(&daemon)
+        .args(["--json", "plugin", "uninstall", "example", "--yes"])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        removed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&removed.stderr)
+    );
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn plugin_cli_search_install_and_update_use_a_selected_offline_catalogue() {
+    use memcastle::domain::{PluginInfo, PluginManifest, sha256_hex};
+    use std::collections::BTreeMap;
+
+    let daemon = TestDaemon::start().await;
+    let directory = tempfile::tempdir().unwrap();
+    let manifest = PluginManifest {
+        format: 1,
+        plugin: PluginInfo {
+            id: "example".into(),
+            version: "0.1.0".into(),
+            provider: "example".into(),
+            description: "CLI registry fixture".into(),
+            repository: "https://github.com/example/example".into(),
+            license: "MIT".into(),
+        },
+        memcastle: ">=0.4".into(),
+        dependencies: Vec::new(),
+        shared_config_schema: None,
+        authentication: None,
+        modules: Vec::new(),
+    };
+    let archive = memcastle::plugin::package::pack(&BTreeMap::from([(
+        "plugin.toml".to_string(),
+        toml::to_string(&manifest).unwrap().into_bytes(),
+    )]))
+    .unwrap();
+    std::fs::write(directory.path().join("example-0.1.0.tar.gz"), &archive).unwrap();
+    std::fs::write(directory.path().join("plugins.json"), serde_json::json!({
+        "format": 1, "name": "offline", "plugins": [{
+            "id": "example", "description": "CLI registry fixture", "repository": "example/example",
+            "modules": [], "versions": [{"version": "0.1.0", "url": "example-0.1.0.tar.gz", "sha256": sha256_hex(&archive)}],
+        }]
+    }).to_string()).unwrap();
+    let registry = directory.path().to_str().unwrap();
+    let searched = memcastle(&daemon)
+        .args([
+            "--json",
+            "plugin",
+            "search",
+            "example",
+            "--registry",
+            registry,
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        searched.status.success(),
+        "{}",
+        String::from_utf8_lossy(&searched.stderr)
+    );
+    let entries: serde_json::Value = serde_json::from_slice(&searched.stdout).unwrap();
+    assert_eq!(entries["plugins"][0]["id"], "example");
+    let installed = memcastle(&daemon)
+        .args([
+            "--json",
+            "plugin",
+            "install",
+            "example@0.1.0",
+            "--registry",
+            registry,
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        installed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&installed.stderr)
+    );
+    let updated = memcastle(&daemon)
+        .args(["--json", "plugin", "update", "example"])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        updated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&updated.stderr)
+    );
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
 async fn the_mode_can_also_come_from_the_environment() {
     let daemon = TestDaemon::start().await;
 

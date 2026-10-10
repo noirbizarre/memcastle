@@ -4,6 +4,7 @@
 //! only difference is how the root is chosen, and that is [`crate::assets::Assets`]'s job: `--assets-dir` (or
 //! `MEMCASTLE_ASSETS_DIR`, or `assets.dir`), else the installed package, else nothing.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -55,6 +56,125 @@ pub struct Catalog {
 }
 
 impl Catalog {
+    /// Read integration modules from each *active* installed plugin, without contacting the daemon or a registry.
+    ///
+    /// The current pointer is reconstructed from the plugin ledger after a crash. Checking the archived bytes against
+    /// its generation digest and projected assets against those bytes prevents a changed integration from being run.
+    ///
+    /// # Errors
+    ///
+    /// A broken plugin installation is reported rather than silently offering its executable assets.
+    pub fn plugin_catalogs(plugins_dir: &Path) -> Result<Vec<Self>> {
+        let mut catalogs = Vec::new();
+        if !plugins_dir.is_dir() {
+            return Ok(catalogs);
+        }
+        let entries = std::fs::read_dir(plugins_dir)
+            .map_err(|e| Error::io(plugins_dir.display().to_string(), e))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| Error::io(plugins_dir.display().to_string(), e))?;
+            let id = entry.file_name().to_string_lossy().into_owned();
+            if !crate::domain::is_valid_source_name(&id)
+                || !entry.path().is_dir()
+                || entry.path().is_symlink()
+            {
+                continue;
+            }
+            let pointer = entry.path().join("current");
+            if !pointer.is_file() || pointer.is_symlink() {
+                continue;
+            }
+            let mut current = std::fs::File::open(&pointer)
+                .map_err(|e| Error::io(pointer.display().to_string(), e))?;
+            let mut generation = String::new();
+            std::io::Read::take(&mut current, 65)
+                .read_to_string(&mut generation)
+                .map_err(|e| Error::io(pointer.display().to_string(), e))?;
+            if generation.len() != 64
+                || !generation
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            {
+                return Err(Error::PluginPackageInvalid {
+                    message: format!(
+                        "{} does not name a valid plugin generation",
+                        pointer.display()
+                    ),
+                });
+            }
+            let root = entry.path().join(&generation);
+            let archive_path = root.join("package.tar.gz");
+            let metadata = std::fs::symlink_metadata(&archive_path)
+                .map_err(|e| Error::io(archive_path.display().to_string(), e))?;
+            if !metadata.is_file()
+                || metadata.len() > crate::plugin::package::MAX_ARCHIVE_BYTES as u64
+            {
+                return Err(Error::PluginPackageInvalid {
+                    message: format!(
+                        "{} is not a bounded regular archive",
+                        archive_path.display()
+                    ),
+                });
+            }
+            let archive = std::fs::read(&archive_path)
+                .map_err(|e| Error::io(archive_path.display().to_string(), e))?;
+            if crate::domain::sha256_hex(&archive) != generation {
+                return Err(Error::PluginPackageInvalid {
+                    message: format!("plugin `{id}` archive digest no longer matches its install"),
+                });
+            }
+            let package = crate::plugin::package::unpack(&archive)?;
+            if package.manifest.plugin.id != id {
+                return Err(Error::PluginPackageInvalid {
+                    message: format!("plugin directory `{id}` holds a different package"),
+                });
+            }
+            for module in package
+                .manifest
+                .modules
+                .iter()
+                .filter(|module| module.kind == crate::domain::PluginModuleKind::Integration)
+            {
+                let prefix = format!("modules/{}/", module.id);
+                for (name, bytes) in package
+                    .files
+                    .iter()
+                    .filter(|(name, _)| name.starts_with(&prefix))
+                {
+                    let relative = name.strip_prefix(&prefix).expect("prefix matched");
+                    let projected = root.join("integrations").join(&module.id).join(relative);
+                    if !std::fs::read(&projected).is_ok_and(|actual| actual == *bytes) {
+                        return Err(Error::PluginPackageInvalid {
+                            message: format!(
+                                "plugin `{id}` integration `{}` has modified assets at {}",
+                                module.id,
+                                projected.display()
+                            ),
+                        });
+                    }
+                }
+            }
+            let catalog = Self::read(root.clone(), AssetSource::Installed(root))?;
+            for shipped in &catalog.integrations {
+                if !package.manifest.modules.iter().any(|module| {
+                    module.kind == crate::domain::PluginModuleKind::Integration
+                        && module.id == shipped.id()
+                }) {
+                    return Err(Error::PluginPackageInvalid {
+                        message: format!(
+                            "plugin `{id}` carries an undeclared integration `{}`",
+                            shipped.id()
+                        ),
+                    });
+                }
+            }
+            if !catalog.integrations.is_empty() || !catalog.broken.is_empty() {
+                catalogs.push(catalog);
+            }
+        }
+        catalogs.sort_by(|left, right| left.root.cmp(&right.root));
+        Ok(catalogs)
+    }
     /// Open the catalog: `override_dir`, else the installed package found by `search`.
     ///
     /// The search is passed in so tests cover every layout without depending on where the test binary lives; the

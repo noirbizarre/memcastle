@@ -13,7 +13,7 @@ use super::SurrealStore;
 
 /// The projection every package read shares.
 const COLUMNS: &str = "name, state, digest, manifest, <string>installed_at AS installed_at, \
-     <string>updated_at AS updated_at, origin, registry, archive_digest, signed_by";
+     <string>updated_at AS updated_at, origin, registry, archive_digest, signed_by, plugin, generation";
 
 /// A `source_package` row as stored.
 #[derive(Deserialize)]
@@ -33,6 +33,10 @@ struct Row {
     archive_digest: Option<String>,
     #[serde(default)]
     signed_by: Option<String>,
+    #[serde(default)]
+    plugin: Option<String>,
+    #[serde(default)]
+    generation: Option<String>,
 }
 
 impl Row {
@@ -51,6 +55,8 @@ impl Row {
             registry: self.registry,
             archive_digest: self.archive_digest,
             signed_by: self.signed_by,
+            plugin: self.plugin,
+            generation: self.generation,
         })
     }
 }
@@ -90,7 +96,7 @@ impl SurrealStore {
                  name = $name, state = $state, digest = $digest, manifest = $manifest, \
                  installed_at = <datetime>$installed_at, updated_at = <datetime>$updated_at, \
                  origin = $origin, registry = $registry, archive_digest = $archive_digest, \
-                 signed_by = $signed_by",
+                 signed_by = $signed_by, plugin = $plugin, generation = $generation",
             )
             .bind(("name", record.name.clone()))
             .bind(("state", super::bindable(&record.state)?))
@@ -102,6 +108,8 @@ impl SurrealStore {
             .bind(("registry", record.registry.clone()))
             .bind(("archive_digest", record.archive_digest.clone()))
             .bind(("signed_by", record.signed_by.clone()))
+            .bind(("plugin", record.plugin.clone()))
+            .bind(("generation", record.generation.clone()))
             .await?
             .check()?;
         Ok(())
@@ -176,6 +184,8 @@ mod tests {
             registry: None,
             archive_digest: None,
             signed_by: None,
+            plugin: None,
+            generation: None,
         }
     }
 

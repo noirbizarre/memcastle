@@ -12,6 +12,7 @@ mod graph;
 mod info;
 mod miners;
 mod palace;
+mod plugins;
 mod source_auth;
 mod source_packages;
 mod source_registry;
@@ -50,6 +51,7 @@ pub use miners::{
 pub use palace::{
     Created, DEFAULT_LIST_LIMIT, DrawerReplacement, EntityLink, Superseded, WingDetail,
 };
+pub use plugins::{PluginPreview, PluginRegistryPreview, PluginSearch};
 pub use source_auth::MAX_WAIT as SOURCE_AUTH_MAX_WAIT;
 pub use source_packages::InstalledSource;
 pub use source_registry::{
@@ -335,6 +337,8 @@ pub struct AppServices {
     preferences: crate::domain::SourcePreferences,
     /// The `[mining]` settings, for where installed sources live and the limits they run under.
     mining: MiningConfig,
+    /// Plugin storage/discovery, separate from the legacy source registry.
+    plugins: crate::config::PluginsConfig,
     /// The `[[miners]]` of the configuration file, read back from it and rewritten through it.
     miners: Arc<MinerRegistry>,
     /// The `[[triggers]]` of the configuration file, and the webhook listener's settings (docs/adr/043).
@@ -361,6 +365,7 @@ impl AppServices {
             dedup: DedupConfig::default(),
             preferences: crate::domain::SourcePreferences::default(),
             mining: MiningConfig::default(),
+            plugins: crate::config::PluginsConfig::default(),
             miners: Arc::new(MinerRegistry::default()),
             triggers: Arc::new(TriggerRegistry::default()),
             credentials: crate::credential::Credentials::from_config(
@@ -425,6 +430,13 @@ impl AppServices {
     #[must_use]
     pub fn with_mining(mut self, mining: MiningConfig) -> Self {
         self.mining = mining;
+        self
+    }
+
+    /// Supply the daemon's plugin data root and explicitly queried registries.
+    #[must_use]
+    pub fn with_plugins(mut self, plugins: crate::config::PluginsConfig) -> Self {
+        self.plugins = plugins;
         self
     }
 

@@ -96,6 +96,32 @@ the same runner `serve` calls on every startup, because migration must work befo
 The invariants that keep this true are listed in `AGENTS.md`, and each is enforced by a `prek` hook or a test:
 `store-isolation` greps for forbidden imports, and `single-writer` limits who may construct a store.
 
+## Provider plugins and module lifecycles
+
+The [plugin package](plugins.md) is the repository-level release and installation unit, not one source adapter.
+`distribution::plugin` discovers and verifies complete archives from the reviewed `plugins.json` catalogue,
+configured private catalogues or a directly named GitHub repository; it neither opens storage nor installs code.
+`app::plugins` preflights compatibility, dependencies, each source's permissions and loadability before staging an
+immutable artifact generation and publishing its plugin/source records through one store transaction.
+The existing source WASM host still executes each source behind `SourceAdapter` with its own state and cursor.
+An integration module is agent-side lifecycle code: the CLI selects it from a local installed plugin and registers
+only that integration, with no daemon dependency or module download.
+
+```mermaid
+flowchart LR
+    R[Reviewed plugin catalogue<br/>or direct repository] -->|verified archive| D[distribution: plugin]
+    L[Local built plugin] -->|archive| A[app: plugin lifecycle]
+    D --> A
+    A -->|immutable generation| FS[plugin files]
+    A -->|package + source rows| DB[(SurrealDB)]
+    FS -->|independent source enable| W[WASM SourceAdapter]
+    FS -->|local integration install| C[Agent integration]
+    W -->|mining job| DB
+    C -.->|HTTP and MCP| A
+```
+
+`registry.json` continues to serve legacy single-source packages; it is never interpreted as a plugin catalogue.
+
 ## Change notices: a bus, not a database feature
 
 A client that wants to know "something changed" without polling reads `GET /api/events`, a server-sent events stream

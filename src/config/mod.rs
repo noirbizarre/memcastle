@@ -163,6 +163,9 @@ pub const DEFAULT_GITHUB_API: &str = "https://api.github.com";
 /// The one default that can reach the network, and only when someone asks to search, install or update a source.
 pub const OFFICIAL_REGISTRY: &str = "https://memcastle.github.io/registry.json";
 
+/// Separate reviewed catalogue for versioned plugin packages.
+pub const OFFICIAL_PLUGIN_REGISTRY: &str = "https://memcastle.github.io/plugins.json";
+
 const DEFAULT_BIND: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 /// The default listener port.
 const DEFAULT_PORT: u16 = 8420;
@@ -572,6 +575,9 @@ pub struct MiningConfig {
     pub max_documents: usize,
     /// Where installed WebAssembly sources live (docs/adr/026). Unset means `$XDG_DATA_HOME/memcastle/sources`.
     pub sources_dir: Option<PathBuf>,
+    /// Plugin artifact root supplied by `Config::effective_mining`; not a second `[mining]` setting.
+    #[serde(skip)]
+    pub plugin_dir: Option<PathBuf>,
     /// The most linear memory, in MiB, one call into a WebAssembly source may use. A source's own `[limits]` can ask
     /// for less, never more.
     pub source_memory_mib: u32,
@@ -609,6 +615,14 @@ impl MiningConfig {
             .clone()
             .unwrap_or_else(paths::default_sources_dir)
     }
+
+    /// Immutable versions of plugins supplying source modules.
+    #[must_use]
+    pub fn plugin_dir(&self) -> PathBuf {
+        self.plugin_dir
+            .clone()
+            .unwrap_or_else(paths::default_plugins_dir)
+    }
 }
 
 impl Default for MiningConfig {
@@ -618,6 +632,7 @@ impl Default for MiningConfig {
             max_file_bytes: DEFAULT_MINING_MAX_FILE_BYTES,
             max_documents: DEFAULT_MINING_MAX_DOCUMENTS,
             sources_dir: None,
+            plugin_dir: None,
             source_memory_mib: DEFAULT_MINING_SOURCE_MEMORY_MIB,
             source_timeout_secs: DEFAULT_MINING_SOURCE_TIMEOUT_SECS,
             registries: vec![OFFICIAL_REGISTRY.to_string()],
@@ -627,6 +642,39 @@ impl Default for MiningConfig {
             github_token: None,
             bundled_dir: None,
         }
+    }
+}
+
+/// Plugin distribution settings; separate from legacy source registries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PluginsConfig {
+    /// Immutable plugin generations and integration module assets.
+    pub dir: Option<PathBuf>,
+    /// Reviewed discovery catalogues, queried only on an explicit plugin command.
+    pub registries: Vec<String>,
+    /// Trust mode for plugin archives fetched through a catalogue.
+    pub trust: TrustMode,
+    /// Public keys accepted for plugin archive signatures.
+    pub trusted_keys: Vec<String>,
+}
+
+impl Default for PluginsConfig {
+    fn default() -> Self {
+        Self {
+            dir: None,
+            registries: vec![OFFICIAL_PLUGIN_REGISTRY.to_string()],
+            trust: TrustMode::default(),
+            trusted_keys: Vec::new(),
+        }
+    }
+}
+
+impl PluginsConfig {
+    /// Resolve the data directory using the platform's configured XDG location.
+    #[must_use]
+    pub fn dir(&self) -> PathBuf {
+        self.dir.clone().unwrap_or_else(paths::default_plugins_dir)
     }
 }
 
@@ -880,6 +928,9 @@ pub struct Config {
     /// Mining settings.
     #[serde(default)]
     pub mining: MiningConfig,
+    /// Plugin package storage and discovery, separate from `[mining]` source compatibility.
+    #[serde(default)]
+    pub plugins: PluginsConfig,
     /// OAuth credential storage settings.
     #[serde(default)]
     pub credentials: CredentialsConfig,
@@ -958,6 +1009,7 @@ impl Config {
     #[must_use]
     pub fn effective_mining(&self) -> MiningConfig {
         let mut mining = self.mining.clone();
+        mining.plugin_dir = Some(self.plugins.dir());
         if mining.bundled_dir.is_none()
             && let Some(root) = &self.assets.dir
         {
@@ -1378,6 +1430,29 @@ impl Config {
         self.validate_embeddings()?;
         self.validate_extraction()?;
         self.validate_mining()?;
+        if !self.plugins.dir().is_absolute() {
+            return Err(Error::config(format!(
+                "plugins.dir {:?} is not absolute; set an absolute path or set XDG_DATA_HOME/HOME",
+                self.plugins.dir().display().to_string()
+            )));
+        }
+        for location in &self.plugins.registries {
+            crate::distribution::Location::parse(location).map_err(|reason| {
+                Error::config(format!(
+                    "plugins.registries entry {location:?} is not usable: {reason}"
+                ))
+            })?;
+        }
+        for key in &self.plugins.trusted_keys {
+            crate::source::signing::parse_public_key(key).map_err(|_| {
+                Error::config("plugins.trusted_keys must contain base64 ed25519 public keys")
+            })?;
+        }
+        if self.plugins.trust == TrustMode::Required && self.plugins.trusted_keys.is_empty() {
+            return Err(Error::config(
+                "plugins.trust = 'required' needs at least one key in plugins.trusted_keys",
+            ));
+        }
         self.validate_credentials()?;
         self.validate_dedup()?;
         validate_miners(&self.miners)?;

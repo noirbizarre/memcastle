@@ -435,7 +435,10 @@ impl AppServices {
                 .as_deref()
                 .and_then(|label| catalog.by_label(label)),
             // Built in, bundled (updated with MemCastle) or installed from a file: no registry to ask.
-            SourceOrigin::Builtin | SourceOrigin::Bundled | SourceOrigin::Package => {
+            SourceOrigin::Builtin
+            | SourceOrigin::Bundled
+            | SourceOrigin::Package
+            | SourceOrigin::Plugin => {
                 return Ok(None);
             }
         };

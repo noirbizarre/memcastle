@@ -673,6 +673,8 @@ pub enum SourceOrigin {
     Bundled,
     /// A package installed from a configured registry index.
     Registry,
+    /// A source module provided by an installed plugin; only the plugin owns its files.
+    Plugin,
 }
 
 impl std::fmt::Display for SourceOrigin {
@@ -682,6 +684,7 @@ impl std::fmt::Display for SourceOrigin {
             Self::Package => "local",
             Self::Bundled => "bundled",
             Self::Registry => "registry",
+            Self::Plugin => "plugin",
         })
     }
 }
@@ -723,6 +726,12 @@ pub struct SourcePackageRecord {
     /// The id of the key whose signature on the archive was verified at install, if there was one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signed_by: Option<String>,
+    /// Parent plugin that supplies this source, absent for legacy source packages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<String>,
+    /// Immutable plugin archive digest selecting this module's bytes, absent for legacy packages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<String>,
 }
 
 #[cfg(test)]

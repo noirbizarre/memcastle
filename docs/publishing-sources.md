@@ -1,5 +1,9 @@
 # Publishing and installing sources
 
+This page describes the format-1 single-source registry, `registry.json`, and the corresponding legacy commands.
+Provider [plugins](plugins.md) use the separate `plugins.json` discovery catalogue and install complete multi-module
+archives through `memcastle plugin install`; a module cannot be fetched on its own.
+
 A mining source is a [WebAssembly package](writing-sources.md), and this page is how one gets from its author to a user:
 the package format, the registry index that lists packages, how to publish to one, and how users find, install, update
 and trust sources.

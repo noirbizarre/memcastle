@@ -29,10 +29,13 @@ An invariant nothing checks is a comment, and it will be violated.
    daemon at all, through `crate::source`, which `tests/source_isolation.rs` holds to touching neither `store` nor `jobs`
    nor the network, and `source install` of a file or a project directory reads it locally to show its permissions before
    calling the daemon.
+   `plugin sign` is similarly local publisher tooling over a validated archive and key; it touches neither store,
+   jobs nor a daemon, and emits the digest/signature for a reviewed static plugin index.
    `integration list`, `install`, `update` and `remove` work on files and the agent's own commands with no daemon at all,
    through `crate::integration`, which `tests/integration_isolation.rs` holds to touching neither `store`, `jobs`, the
-   client nor the network, and which nothing but `main.rs` may call, so there is no MCP tool and no route that installs
-   one (see `docs/adr/034-agent-integration-distribution.md`).
+   client nor the network, and which nothing but `main.rs` may call to install one, so there is no MCP tool and no route
+   that installs one. `plugin::package` may parse the pure integration manifest in a plugin archive but never call the
+   installer (see `docs/adr/034-agent-integration-distribution.md` and `tests/integration_isolation.rs`).
    `miner` (list, get, set, enable, disable, remove, reload, run) calls only `client::DaemonClient`, like every other
    daemon command: the rules for a miner live in `app::miners` (see `docs/adr/037-persistent-miner-configuration.md`).
    `trigger` (list, get, set, enable, disable, remove, reload, fire) is the same, with its rules in `app::triggers` (see
@@ -230,6 +233,19 @@ An invariant nothing checks is a comment, and it will be violated.
     and by `config::miners_file`'s tests (the `[[triggers]]` section is rewritten in place, with the miners and every
     comment kept).
 
+14. **Plugins are the distribution unit; their modules never acquire one another's lifecycle state** —
+    the reviewed `plugins.json` catalogue is separate from the legacy `registry.json` source index, and a release
+    archive contains a versioned parent manifest plus one or more typed modules. Plugin install defaults each new
+    source to `installed`, never enables it or installs an integration in an agent; only `source enable` or the local
+    `integration install` does that. A legacy source cannot be silently claimed by a plugin: a mined legacy name needs
+    explicit `--adopt-source`, and a previously installed plugin retains ownership after uninstall so another plugin
+    cannot inherit its cursor. Each source retains its own miner, cursor, consent and permission digest, and uninstall
+    preserves everything already mined.
+    Only `app` writes plugin ownership in the palace; `plugin::package` and `distribution::plugin` touch neither store,
+    jobs nor the integration installer. Enforced by `tests/plugin_isolation.rs`, `tests/source_isolation.rs`,
+    `tests/integration_isolation.rs`, `tests/in_process/auth.rs`, `tests/in_process/plugins.rs`, `tests/wasm_plugin.rs`
+    and the plugin package/ledger unit tests.
+
 ## Layout
 
 ```text
@@ -259,6 +275,7 @@ src/
 │               WebAssembly host that runs installed sources (`wasm/`)
 ├── integration/ agent integrations: manifest, discovery under the assets root, install/update/remove with a receipt, and
 │               the Pi and OpenCode adapters (no store, no jobs, no network, no daemon)
+├── plugin/      versioned parent manifest, multi-module archive validation and local signing (no store, jobs or network)
 ├── source/     source packages: manifest, archive, scaffolding, build, signing, publishing an index, and the conformance runner
 │               (no store, no jobs, no network)
 ├── credential/ OAuth for mining sources: the device and browser sign-in flows, the keyring or owner-only file store, and

@@ -48,8 +48,38 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: 🔎 Core changes
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.paths.outputs.core }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check whether anything outside provider projects changed
+        id: paths
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ -z "$BASE" || "$BASE" =~ ^0+$ ]]; then
+            echo 'core=true' >> "$GITHUB_OUTPUT"
+          else
+            git diff --name-only "$BASE" "$GITHUB_SHA" -- > "$RUNNER_TEMP/changed-paths"
+            core=false
+            while IFS= read -r path; do
+              if [[ "$path" != plugins/* ]]; then
+                core=true
+                break
+              fi
+            done < "$RUNNER_TEMP/changed-paths"
+            echo "core=$core" >> "$GITHUB_OUTPUT"
+          fi
+
   lint:
     name: 🕵️ Lint
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -85,6 +115,8 @@ jobs:
   # and its time does not include building components. The `wasm` job below runs the rest.
   test:
     name: 🧪 Tests (${{ matrix.os.name }})
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ${{ matrix.os.runner }}
     strategy:
       fail-fast: false
@@ -174,6 +206,8 @@ jobs:
   # This job is local to this repository; the template does not have it.
   wasm:
     name: 🧬 WebAssembly tests
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -219,6 +253,8 @@ jobs:
   # workflow edit.
   sources-list:
     name: 📋 List the sources
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     outputs:
       sources: ${{ steps.list.outputs.sources }}
@@ -234,9 +270,9 @@ jobs:
 
   sources:
     name: 🧩 Source (${{ matrix.source }})
-    needs: sources-list
+    needs: [changes, sources-list]
     # A matrix with no entries is an error, not an empty run.
-    if: needs.sources-list.outputs.sources != '[]'
+    if: needs.changes.outputs.core == 'true' && needs.sources-list.outputs.sources != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -269,6 +305,8 @@ jobs:
   # This job is local to this repository; the template does not have it.
   integrations:
     name: 🔌 Integrations
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -311,6 +349,8 @@ jobs:
   # have it.
   web:
     name: 🏰 Web UI
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -354,6 +394,8 @@ jobs:
   # generate the completion files it packages and refuses an empty one.
   packaging:
     name: 📦 Packaging
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -410,6 +452,8 @@ jobs:
   # the worst possible moment — so it is checked on every pull request instead.
   ship:
     name: 🚢 Ship setup
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

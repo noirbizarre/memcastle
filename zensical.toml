@@ -48,6 +48,7 @@ nav = [
     { "Deduplication" = "deduplication.md" },
     { "Writing a mining source" = "writing-sources.md" },
     { "Publishing and installing sources" = "publishing-sources.md" },
+    { "Plugin packages" = "plugins.md" },
     { "Database access" = "database-access.md" },
     { "Migrations and upgrades" = "migrations.md" },
     { "Troubleshooting" = "troubleshooting.md" },

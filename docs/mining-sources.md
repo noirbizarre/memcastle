@@ -1,5 +1,9 @@
 # Mining sources
 
+A source module inside an installed [provider plugin](plugins.md) appears in this list with origin `plugin`.
+Installing the parent plugin leaves that source in `installed` state until `memcastle source enable <name>` is requested.
+Different modules in one provider still keep separate source identities, miner configuration and ingestion cursors.
+
 MemCastle can fill the palace itself, without an agent writing anything and without spending a model's tokens.
 Mining reads a **source**, such as a directory or an agent's session history, and files what it finds as drawers.
 This page is the model behind it and the reference for the sources MemCastle ships.

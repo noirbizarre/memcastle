@@ -11,6 +11,9 @@ MemCastle ships integrations for **Pi**, **OpenCode**, **Claude Code** and **Cod
 `memcastle integration` installs them.
 Nothing is downloaded and no npm package is involved:
 the integrations are part of the MemCastle release, built and versioned with it.
+An installed [provider plugin](plugins.md) can also supply an integration module.
+`plugin install` only makes it selectable; `integration install <module-id>` still copies and registers the selected
+agent-side files locally, and `integration remove` undoes that registration without uninstalling its parent plugin.
 
 ```mermaid
 flowchart LR

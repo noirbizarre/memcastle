@@ -128,6 +128,14 @@ pub fn default_sources_dir() -> PathBuf {
         .join("sources")
 }
 
+/// The default directory for immutable installed plugin generations.
+#[must_use]
+pub fn default_plugins_dir() -> PathBuf {
+    resolve_from_process(XdgDir::Data)
+        .unwrap_or_else(|| PathBuf::from(APP_DIR))
+        .join("plugins")
+}
+
 /// The default directory for the owner-only credential file fallback: `$XDG_DATA_HOME/memcastle/credentials`.
 ///
 /// User data and not state: a refresh token cannot be regenerated without the user signing in again. Relative when

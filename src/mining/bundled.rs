@@ -122,6 +122,8 @@ impl Bundle {
             registry: None,
             archive_digest: None,
             signed_by: None,
+            plugin: None,
+            generation: None,
         })
     }
 }

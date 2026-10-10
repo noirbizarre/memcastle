@@ -24,7 +24,7 @@ pub mod render;
 
 pub use agent::{Locations, SystemRunner};
 pub use catalog::{Catalog, Shipped};
-pub use command::{Operation, execute};
+pub use command::{Operation, execute, execute_with_plugins};
 pub use install::{
     Action, Change, ChangeKind, Context, Outcome, State, Status, inspect, install, remove, update,
 };

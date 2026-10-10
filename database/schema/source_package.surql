@@ -30,3 +30,6 @@ DEFINE FIELD IF NOT EXISTS registry ON TABLE source_package TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS archive_digest ON TABLE source_package TYPE option<string>;
 -- The id of the key whose signature on the archive was verified at install.
 DEFINE FIELD IF NOT EXISTS signed_by ON TABLE source_package TYPE option<string>;
+-- Optional ownership of a plugin source module. Existing format-1 sources have neither field.
+DEFINE FIELD IF NOT EXISTS plugin ON TABLE source_package TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS generation ON TABLE source_package TYPE option<string>;

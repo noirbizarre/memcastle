@@ -28,6 +28,7 @@ mod memory_mode;
 mod miners;
 mod notes;
 mod palace;
+mod plugins;
 mod repair;
 mod retrieval;
 mod retrieval_eval;

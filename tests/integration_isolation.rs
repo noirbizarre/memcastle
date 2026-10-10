@@ -138,6 +138,12 @@ fn only_the_binary_calls_the_installer() {
             continue;
         }
         let source = shipped_code(&file);
+        // A plugin archive validates its integration module's pure manifest; it never registers an agent.
+        let source = if relative == "src/plugin/package.rs" {
+            source.replace("crate::integration::manifest::parse", "")
+        } else {
+            source
+        };
         assert!(
             !source.contains("crate::integration"),
             "{relative} calls the integration installer; only the binary's `integration` command may"
