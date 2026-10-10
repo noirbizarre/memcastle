@@ -380,7 +380,7 @@ The documentation workflow builds pull requests without deployment and publishes
 `memcastle/memcastle.github.io`'s `gh-pages` branch, where Pages serves `https://memcastle.github.io/`.
 After the first publish creates the branch (if the repository is empty), configure the destination repository's Pages
 source as Deploy from a branch (`gh-pages`, `/`).
-The source repository's `gh-pages` environment needs `APP_CLIENT_ID` (variable) and `APP_PRIVATE_KEY` (secret) for a
+The source repository's `github-pages` environment needs `APP_CLIENT_ID` (variable) and `APP_PRIVATE_KEY` (secret) for a
 GitHub App installed on `memcastle/memcastle.github.io` with Contents: write; its token is scoped to that repository.
 The first publish creates the branch when the destination is empty, and subsequent identical builds make no commit.
 Documentation is part of a change, not a follow-up: a pull request that changes a flag, a setting, a tool
