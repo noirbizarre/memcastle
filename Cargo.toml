@@ -113,7 +113,7 @@ comfy-table = { version = "8", default-features = false, features = ["custom_sty
 # Confirmations only: no history, fuzzy matching, completion or editor prompts.
 dialoguer = { version = "0.12", default-features = false }
 # Full-screen operational console; crossterm also handles input and terminal recovery.
-ratatui = "0.29"
+ratatui = "0.30"
 crossterm = "0.29"
 # Parse quoted source/path arguments entered inside the TUI like shell words.
 shell-words = "1.1"
