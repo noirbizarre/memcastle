@@ -118,6 +118,28 @@ While a daemon is running, `memcastle status` shows the same information under i
 
 Running jobs are safe across the restart: they checkpoint on shutdown and resume on the next start.
 
+### The 0.4.1 registry move
+
+The official source registry moves from `https://noirbizarre.github.io/memcastle/registry.json`
+to `https://memcastle.github.io/registry.json` with 0.4.1.
+An installation using the default `mining.registries` picks up the new location when the daemon restarts.
+If you explicitly configured the old URL under `[mining]`, replace it with the new URL in your configuration before restarting.
+There is no database migration for this change.
+
+A source previously installed *from the old registry* keeps its original registry URL as its update origin.
+To switch that source to the new origin, install the same name again from the new registry:
+
+```sh
+memcastle source install <name> --registry https://memcastle.github.io/registry.json
+memcastle source update <name> --check
+```
+
+The install prompts for the source's permissions again, replaces the package in place, preserves its enabled state,
+and records the new registry as its origin; it does not remove stored memories or the source's sign-in.
+Sources that shipped with MemCastle are bundled and update with the MemCastle release instead.
+Do not rely on a redirect from the old GitHub Pages URL: whether it stays reachable after repository transfer must be
+checked independently; 0.4.0 users need 0.4.1 (or an explicit working registry override) to discover new sources.
+
 !!! warning
     Migrations only move forward.
     A palace migrated by a newer MemCastle may not be readable by an older one,

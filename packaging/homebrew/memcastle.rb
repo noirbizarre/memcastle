@@ -5,7 +5,7 @@
 # result is pushed to noirbizarre/homebrew-tap as Formula/memcastle.rb.
 class Memcastle < Formula
   desc "Local-first, always-on memory server for AI coding agents over MCP/HTTP"
-  homepage "https://github.com/noirbizarre/memcastle"
+  homepage "https://github.com/memcastle/memcastle"
   version "@VERSION@"
   license "MIT"
 
@@ -17,11 +17,11 @@ class Memcastle < Formula
   # This project tags without a `v` prefix, so the tag is `#{version}` as-is.
   on_macos do
     on_arm do
-      url "https://github.com/noirbizarre/memcastle/releases/download/#{version}/memcastle_#{version}_darwin-arm64"
+      url "https://github.com/memcastle/memcastle/releases/download/#{version}/memcastle_#{version}_darwin-arm64"
       sha256 "@SHA256_DARWIN_ARM64@"
     end
     on_intel do
-      url "https://github.com/noirbizarre/memcastle/releases/download/#{version}/memcastle_#{version}_darwin-amd64"
+      url "https://github.com/memcastle/memcastle/releases/download/#{version}/memcastle_#{version}_darwin-amd64"
       sha256 "@SHA256_DARWIN_AMD64@"
     end
   end
@@ -29,21 +29,21 @@ class Memcastle < Formula
   # The sources bundled with MemCastle (docs/adr/040): portable WebAssembly packages, unpacked one directory each, one
   # asset for every platform. Homebrew strips the archive's single top-level directory when it stages the resource.
   resource "sources" do
-    url "https://github.com/noirbizarre/memcastle/releases/download/#{version}/memcastle_#{version}_sources.tar.gz"
+    url "https://github.com/memcastle/memcastle/releases/download/#{version}/memcastle_#{version}_sources.tar.gz"
     sha256 "@SHA256_SOURCES@"
   end
 
   # The agent integrations and the shared skills they read (docs/adr/034): bundled JavaScript, one asset for every
   # platform, with `integrations/` and `skills/` under its single top-level directory.
   resource "integrations" do
-    url "https://github.com/noirbizarre/memcastle/releases/download/#{version}/memcastle_#{version}_integrations.tar.gz"
+    url "https://github.com/memcastle/memcastle/releases/download/#{version}/memcastle_#{version}_integrations.tar.gz"
     sha256 "@SHA256_INTEGRATIONS@"
   end
 
   # The web UI (docs/adr/035): static files, one asset for every platform, with `web/` under its single top-level
   # directory.
   resource "web" do
-    url "https://github.com/noirbizarre/memcastle/releases/download/#{version}/memcastle_#{version}_web.tar.gz"
+    url "https://github.com/memcastle/memcastle/releases/download/#{version}/memcastle_#{version}_web.tar.gz"
     sha256 "@SHA256_WEB@"
   end
 

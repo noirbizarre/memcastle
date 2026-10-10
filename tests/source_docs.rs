@@ -74,12 +74,25 @@ fn the_official_registry_published_with_the_docs_is_an_index_this_memcastle_read
     // each entry's manifest must agree with what it says about itself.
     let text = std::fs::read_to_string(root().join("docs/registry.json")).unwrap();
     let index = memcastle::domain::SourceIndex::parse(&text).unwrap();
+    assert_eq!(
+        memcastle::config::OFFICIAL_REGISTRY,
+        "https://memcastle.github.io/registry.json"
+    );
+    // The branch publisher copies docs/ to the site's root; metadata pointing elsewhere would
+    // send source discovery to a repository whose releases do not publish these archives.
+    for source in &index.sources {
+        assert_eq!(source.repository.as_deref(), Some("memcastle/memcastle"));
+        let homepage = format!(
+            "https://memcastle.github.io/mining-sources/#{}",
+            source.name
+        );
+        assert_eq!(source.homepage.as_deref(), Some(homepage.as_str()));
+    }
 
     for name in ["pi", "opencode", "claude", "codex"] {
         let source = index
             .find(name)
             .unwrap_or_else(|| panic!("the official registry does not list `{name}`"));
-        assert_eq!(source.repository.as_deref(), Some("noirbizarre/memcastle"));
         let manifest =
             std::fs::read_to_string(root().join(format!("sources/{name}/memcastle-source.toml")))
                 .unwrap();

@@ -40,7 +40,7 @@ jobs:
     # A public fork's push to main would otherwise also trigger this job,
     # which then fails noisily for lack of the App/release secrets a fork
     # does not have.
-    if: github.event_name == 'push' && github.repository_owner == 'noirbizarre'
+    if: github.event_name == 'push' && github.repository == 'memcastle/memcastle'
     runs-on: ubuntu-latest
     # `gh ship prepare` blocks on the dispatched workflow until
     # SHIP_RUN_TIMEOUT expires, 60 minutes by default. Cap the job well below
@@ -89,7 +89,7 @@ jobs:
       github.event_name == 'pull_request'
       && github.event.pull_request.merged
       && github.event.pull_request.head.ref == 'release/next'
-      && github.repository_owner == 'noirbizarre'
+      && github.repository == 'memcastle/memcastle'
     runs-on: ubuntu-latest
     # `gh ship release` waits on the publish workflow, which cross-compiles the
     # whole target matrix. Capped below the App installation token's one-hour

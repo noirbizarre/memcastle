@@ -11,7 +11,7 @@ pkgver=@VERSION@
 pkgrel=1
 pkgdesc="Local-first, always-on memory server for AI coding agents over MCP/HTTP (prebuilt binary)"
 arch=('x86_64' 'aarch64')
-url="https://github.com/noirbizarre/memcastle"
+url="https://github.com/memcastle/memcastle"
 license=('MIT')
 
 provides=("$_pkgname=$pkgver")

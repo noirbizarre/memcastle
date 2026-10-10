@@ -17,9 +17,9 @@ license = "MIT"
 # published, not this field. `author` still feeds LICENSE and, when `aur` is
 # on, the PKGBUILD's `# Maintainer:` line.
 description = "Local-first, always-on memory server for AI coding agents over MCP/HTTP"
-repository = "https://github.com/noirbizarre/memcastle"
-homepage = "https://noirbizarre.github.io/memcastle/"
-documentation = "https://noirbizarre.github.io/memcastle/"
+repository = "https://github.com/memcastle/memcastle"
+homepage = "https://memcastle.github.io/"
+documentation = "https://memcastle.github.io/"
 readme = "README.md"
 keywords = ["mcp", "memory", "agent", "search", "daemon"]
 categories = ["command-line-utilities", "database"]

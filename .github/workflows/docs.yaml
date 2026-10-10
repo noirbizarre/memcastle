@@ -1,7 +1,7 @@
 name: 📚 Documentation
 
 # A pull request builds the site, so a broken page, a bad link or a mistake in the source registry
-# (`docs/registry.json`, which is published with it) fails there. Only `main` deploys, so the registry
+# (`docs/registry.json`, which is published with it) fails there. Only `main` publishes, so the registry
 # is updated by merging a pull request and not by cutting a release (docs/adr/040).
 on:
   pull_request:
@@ -29,6 +29,7 @@ concurrency:
 jobs:
   build:
     name: 🏗️ Build
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -42,24 +43,58 @@ jobs:
       - name: Build the site
         run: mise run docs:build
 
-      # Nothing is uploaded for a pull request: there is nothing to deploy.
-      - uses: actions/upload-pages-artifact@v5
-        if: github.event_name != 'pull_request'
-        with:
-          path: site
-
-  deploy:
-    name: 🚀 Deploy
-    needs: build
+  publish:
+    name: 🚀 Publish
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    # Pages needs these two to deploy, and nothing that only builds does.
-    permissions:
-      pages: write
-      id-token: write
     environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      name: gh-pages
+      url: https://memcastle.github.io/
     steps:
-      - id: deployment
-        uses: actions/deploy-pages@v5
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@v5
+        with:
+          cache: true
+
+      - name: Build the site
+        run: mise run docs:build
+
+      # An App token is minted only after a successful build on main; the source repository's
+      # GITHUB_TOKEN cannot push to the organization site's repository.
+      - uses: actions/create-github-app-token@v3
+        id: docs-token
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: memcastle
+          repositories: memcastle.github.io
+          permission-contents: write
+
+      - name: Publish to the organization site
+        env:
+          DOCS_TOKEN: ${{ steps.docs-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          # Keep the token out of remotes and logs; git only receives it for each network operation.
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$DOCS_TOKEN" | base64 -w0)"
+          git -c http.extraheader="$auth" clone https://github.com/memcastle/memcastle.github.io.git published
+          if git -C published show-ref --verify --quiet refs/remotes/origin/gh-pages; then
+            git -C published switch gh-pages
+          else
+            # The site repository may be empty when the first documentation build lands.
+            git -C published switch --orphan gh-pages
+          fi
+          rsync -a --delete --exclude=.git site/ published/
+          # Pages must serve underscore-prefixed assets and the registry at the branch root.
+          touch published/.nojekyll
+          git -C published config user.name 'memcastle docs bot'
+          git -C published config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C published add -A
+          if git -C published diff --cached --quiet; then
+            exit 0
+          fi
+          git -C published commit -m "docs: publish ${GITHUB_SHA}"
+          git -C published -c http.extraheader="$auth" push origin gh-pages

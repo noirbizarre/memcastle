@@ -119,7 +119,7 @@ so a distribution older than that fails at run time rather than at install.
 ### Release binary
 
 Download the binary for your platform from the
-[latest release](https://github.com/noirbizarre/memcastle/releases/latest),
+[latest release](https://github.com/memcastle/memcastle/releases/latest),
 make it executable and put it on your `PATH`.
 The assets named `memcastle_<version>_<platform>` are the executable itself, not an archive:
 
@@ -173,7 +173,7 @@ repository at the release tag.
 With the [GitHub CLI](https://cli.github.com/):
 
 ```sh
-gh attestation verify memcastle_<version>_linux-amd64 --repo noirbizarre/memcastle
+gh attestation verify memcastle_<version>_linux-amd64 --repo memcastle/memcastle
 ```
 
 A software bill of materials, `memcastle-<version>.cdx.json` in CycloneDX format, lists every crate in the build.
@@ -185,7 +185,7 @@ remapped, so rebuilding a tag on the same target should give the same bytes.
 You need a Rust toolchain, version 1.90 or newer.
 
 ```sh
-git clone https://github.com/noirbizarre/memcastle
+git clone https://github.com/memcastle/memcastle
 cd memcastle
 cargo install --path .
 ```

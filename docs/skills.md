@@ -71,7 +71,7 @@ A skill you copied under the same name as one of the integration's is the one th
    The repository at a release tag holds the skills written for that release:
 
    ```sh
-   git clone --branch 0.2.0 --depth 1 https://github.com/noirbizarre/memcastle
+   git clone --branch 0.2.0 --depth 1 https://github.com/memcastle/memcastle
    ```
 
    Use the tag matching `memcastle --version`.
@@ -104,7 +104,7 @@ since the layout is the standard one and nothing needs to be built.
 
 A client with a MemCastle integration loads the skills for you.
 An integration names the skills it exposes in its manifest, and the shared ones are referenced by name:
-under [`integrations/`](https://github.com/noirbizarre/memcastle/tree/main/integrations) none carries its own copy of the
+under [`integrations/`](https://github.com/memcastle/memcastle/tree/main/integrations) none carries its own copy of the
 text.
 Both shipped integrations expose all five, in every memory mode but `off`, which exposes none.
 Pi lists them through its own skill discovery, so each has a `/skill:<name>` command, and appends

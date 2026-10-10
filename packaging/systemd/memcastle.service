@@ -2,7 +2,7 @@
 # Never edit it in place; override with `systemctl --user edit memcastle`.
 [Unit]
 Description=MemCastle memory server
-Documentation=https://github.com/noirbizarre/memcastle
+Documentation=https://github.com/memcastle/memcastle
 After=network.target
 
 [Service]

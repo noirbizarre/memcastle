@@ -9,7 +9,7 @@ section: utils
 priority: optional
 maintainer: Axel H. <noirbizarre@gmail.com>
 description: Local-first, always-on memory server for AI coding agents over MCP/HTTP.
-homepage: https://github.com/noirbizarre/memcastle
+homepage: https://github.com/memcastle/memcastle
 license: MIT
 contents:
   - src: "${BINARY}"

@@ -484,7 +484,7 @@ environment; no session value belongs in a mine option or config setting.
 It revisits conversations on every run and fails on incomplete message pages rather than filing a partial transcript.
 This backend is tested against synthetic replies, not yet against a fresh live session; endpoints, login requirements and
 pagination may change.
-See [the source README](https://github.com/noirbizarre/memcastle/tree/main/sources/chatgpt) for its session setup and
+See [the source README](https://github.com/memcastle/memcastle/tree/main/sources/chatgpt) for its session setup and
 limits.
 
 ### `github`
@@ -511,7 +511,7 @@ rate limits; no token belongs in the miner options or `memcastle.toml`.
 Public repositories can be read without a token.
 The manifest grants the two variable names and the three programs, not a general filesystem or WASI network grant.
 For an opt-in [poll or schedule trigger](triggers.md), point it at a GitHub miner; the trigger only requests a normal run.
-See the [GitHub source README](https://github.com/noirbizarre/memcastle/tree/main/sources/github) for full scope examples
+See the [GitHub source README](https://github.com/memcastle/memcastle/tree/main/sources/github) for full scope examples
 and acquisition limits.
 
 ## Writing a source

@@ -68,7 +68,7 @@ The ones you are most likely to set:
 `MEMCASTLE_MODE` takes this integration's labels (`full`, `read-only`, `off`), which are not the daemon's
 (`full`, `read_only`, `disabled`).
 The complete list, and what each [memory mode](memory-modes.md) does to a session, is in the
-[extension's README](https://github.com/noirbizarre/memcastle/blob/main/integrations/pi/README.md#configuration).
+[extension's README](https://github.com/memcastle/memcastle/blob/main/integrations/pi/README.md#configuration).
 
 ## Troubleshooting
 
