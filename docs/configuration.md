@@ -175,6 +175,14 @@ source_timeout_secs = 60    # the longest one call may run; a source's own limit
 trust = "optional"
 # trusted_keys = ["Zm9vYmFy..."]
 
+[plugins]
+# Plugin catalogues are independent of the legacy source registry. They are read on explicit search requests only.
+# registries = ["https://memcastle.github.io/plugins.json"]
+# trust = "optional"        # set "required" to accept only releases signed by a trusted key
+# trusted_keys = []         # ed25519 public keys (same format as mining.trusted_keys)
+# Immutable plugin versions live here by default: $XDG_DATA_HOME/memcastle/plugins.
+# dir = "/home/alice/.local/share/memcastle/plugins"
+
 # Where the tokens of a source signed in with OAuth are kept; see "Credentials".
 [credentials]
 backend = "auto"           # "auto" (the platform keyring, else a file), "keyring" or "file"
@@ -323,6 +331,10 @@ Keep secrets out of version control: put this file outside any repository, and r
 | `mining.trust` (`optional` or `required`) | `MEMCASTLE_MINING_TRUST` | `optional` |
 | `mining.trusted_keys` (a list of base64 public keys) | `MEMCASTLE_MINING_TRUSTED_KEYS` (comma-separated) | none |
 | `mining.bundled_dir` (an absolute path) | `MEMCASTLE_MINING_BUNDLED_DIR` | `share/memcastle/sources` of the installation |
+| `plugins.dir` (an absolute path) | none | `$XDG_DATA_HOME/memcastle/plugins` |
+| `plugins.registries` (a list of URLs or absolute paths) | none | `https://memcastle.github.io/plugins.json` |
+| `plugins.trust` (`optional` or `required`) | none | `optional` |
+| `plugins.trusted_keys` (a list of base64 public keys) | none | none |
 | `credentials.backend` (`auto`, `keyring` or `file`) | `MEMCASTLE_CREDENTIALS_BACKEND` | `auto` |
 | `credentials.dir` (an absolute path) | `MEMCASTLE_CREDENTIALS_DIR` | `$XDG_DATA_HOME/memcastle/credentials` |
 | `store.sync` (`every`, `never` or an interval over 100ms) | `MEMCASTLE_STORE_SYNC` | `every` |

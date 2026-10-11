@@ -504,6 +504,119 @@ impl DaemonClient {
             .await
     }
 
+    /// Installed plugin packages and their module inventories.
+    pub async fn list_plugins(&self) -> Result<Vec<crate::domain::PluginRecord>> {
+        self.send(self.http.get(format!("{}/api/plugins", self.base_url)))
+            .await
+    }
+
+    /// One installed package.
+    pub async fn show_plugin(&self, id: &str) -> Result<crate::domain::PluginRecord> {
+        self.send(self.http.get(self.api_url(&["plugins", id], None)?))
+            .await
+    }
+
+    /// Search the daemon's explicitly configured plugin catalogues.
+    pub async fn search_plugins(
+        &self,
+        query: Option<&str>,
+        registry: Option<&str>,
+    ) -> Result<crate::app::PluginSearch> {
+        let mut request = self
+            .http
+            .get(format!("{}/api/plugin-registry/search", self.base_url));
+        if let Some(query) = query {
+            request = request.query(&[("q", query)]);
+        }
+        if let Some(registry) = registry {
+            request = request.query(&[("registry", registry)]);
+        }
+        self.send(request).await
+    }
+
+    /// Fetch and verify a named release before consent.
+    pub async fn preview_registry_plugin(
+        &self,
+        id: &str,
+        version: Option<&str>,
+        registry: Option<&str>,
+    ) -> Result<crate::app::PluginRegistryPreview> {
+        let mut request = self
+            .http
+            .get(self.api_url(&["plugin-registry", "plugins", id], None)?);
+        if let Some(version) = version {
+            request = request.query(&[("version", version)]);
+        }
+        if let Some(registry) = registry {
+            request = request.query(&[("registry", registry)]);
+        }
+        self.send(request).await
+    }
+
+    /// Preflight an archive the CLI read locally, on the running daemon that will actually install it.
+    pub async fn preview_plugin(&self, archive: &[u8]) -> Result<crate::app::PluginPreview> {
+        self.send(
+            self.http
+                .post(format!("{}/api/plugins/preview", self.base_url))
+                .header(reqwest::header::CONTENT_TYPE, "application/gzip")
+                .body(archive.to_vec()),
+        )
+        .await
+    }
+
+    /// Upload a locally selected plugin archive after all module permissions were shown.
+    pub async fn install_plugin(
+        &self,
+        archive: Vec<u8>,
+        consents: &std::collections::BTreeMap<String, String>,
+        adopt_sources: &[String],
+    ) -> Result<crate::domain::PluginRecord> {
+        self.send(
+            self.http
+                .post(format!("{}/api/plugins", self.base_url))
+                .header(reqwest::header::CONTENT_TYPE, "application/gzip")
+                .header(
+                    "X-MemCastle-Consents",
+                    serde_json::to_string(consents)
+                        .map_err(|e| Error::serialization("plugin consents", e))?,
+                )
+                .header(
+                    "X-MemCastle-Adopt-Sources",
+                    serde_json::to_string(adopt_sources)
+                        .map_err(|e| Error::serialization("plugin source adoptions", e))?,
+                )
+                .body(archive),
+        )
+        .await
+    }
+
+    /// Ask the daemon to fetch and install a reviewed plugin release.
+    pub async fn install_registry_plugin(
+        &self,
+        id: &str,
+        version: &str,
+        registry: Option<&str>,
+        archive_digest: &str,
+        consents: &std::collections::BTreeMap<String, String>,
+        adopt_sources: &[String],
+    ) -> Result<crate::domain::PluginRecord> {
+        self.send(
+            self.http
+                .post(format!("{}/api/plugin-registry/install", self.base_url))
+                .json(
+                    &serde_json::json!({ "id": id, "version": version, "registry": registry,
+                "archive_digest": archive_digest, "consents": consents, "adopt_sources": adopt_sources }),
+                ),
+        )
+        .await
+    }
+
+    /// Remove only a plugin's code and module installation records after daemon-side preflight.
+    pub async fn uninstall_plugin(&self, id: &str) -> Result<serde_json::Value> {
+        self.send(self.http.delete(self.api_url(&["plugins", id], None)?))
+            .await
+    }
+
     /// Install a source package (the archive's bytes). `consent` is the digest of the permissions the user agreed to.
     ///
     /// # Errors

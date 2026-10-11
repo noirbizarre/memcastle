@@ -449,6 +449,44 @@ one was given, and, for each one that has been mined, how many documents it hold
 In a terminal this is two tables; piped, it is JSON with `adapters` and `sources`.
 `memcastle source list` is the same command.
 
+### `plugin`
+
+```sh
+memcastle plugin search [QUERY] [--registry LOCATION]
+memcastle plugin list
+memcastle plugin show ID
+memcastle plugin install ID[@VERSION] [--registry LOCATION] [--yes] [--consent MODULE=DIGEST]... [--adopt-source SOURCE]...
+memcastle plugin install ./package.tar.gz [--yes] [--consent MODULE=DIGEST]...
+memcastle plugin install ./built-project [--yes] [--consent MODULE=DIGEST]...
+memcastle plugin install https://github.com/OWNER/REPO [--yes] [--consent MODULE=DIGEST]...
+memcastle plugin update ID [--yes] [--consent MODULE=DIGEST]... [--adopt-source SOURCE]...
+memcastle plugin uninstall ID [--yes]
+memcastle plugin sign <ARCHIVE> --key <KEYFILE>
+```
+
+`--adopt-source SOURCE` is accepted by every `plugin install` form shown above.
+
+The daemon resolves a named plugin from `plugins.registries` and checks its archive digest, module inventory and
+compatibility before any code becomes available.
+A local archive or already-built project is read by the CLI for a preview, then sent to that same daemon for validation.
+Each source module that asks for permissions needs its own reviewed consent digest; `--yes` explicitly approves the
+displayed permissions, while a non-interactive install without `--consent MODULE=DIGEST` is refused.
+Installing a plugin never enables its sources or installs its integrations.
+`source enable` and `integration install` are separate module lifecycle operations.
+`update` preserves each source's state and its existing permissions agreement, asking again only for changed grants.
+If a source ID has mined data from a removed legacy package, `plugin install` refuses to attach it silently;
+repeat with `--adopt-source SOURCE` after reviewing the source identity and its existing history.
+`--yes` approves permissions, but never substitutes for this explicit adoption.
+`uninstall` refuses configured miners, active sources or jobs, installed integrations and dependent plugins,
+and preserves everything already mined.
+The existing `source install/search/update/remove` remain for format-1 source packages; they do not install a
+module out of a plugin package.
+`source init` remains as a deprecated compatibility scaffold for single-source v0.4 projects;
+use the GitTPL source and plugin repositories directly for new provider projects.
+`plugin sign` is local authoring tooling with no daemon or registry request.
+It reads a validated plugin archive and a private key generated with `memcastle source keygen`, then prints the
+archive SHA-256 and an ed25519 `signature` entry for a static `plugins.json` version entry.
+
 ### `source`
 
 ```sh

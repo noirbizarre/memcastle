@@ -16,6 +16,7 @@ mod graph;
 mod miners;
 mod mode;
 mod palace;
+mod plugins;
 mod source_packages;
 mod source_registry;
 mod triggers;
@@ -70,6 +71,33 @@ pub fn router(app: AppServices, shutdown: CancellationToken) -> Router {
         .route("/api/jobs/{id}/force-cancel", post(force_cancel_job))
         .route("/api/jobs/{id}/retry", post(retry_job))
         .route("/api/sources", get(list_sources))
+        .route(
+            "/api/plugins",
+            get(plugins::list)
+                .post(plugins::install)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::plugin::package::MAX_ARCHIVE_BYTES,
+                )),
+        )
+        .route("/api/plugin-registry/search", get(plugins::search))
+        .route(
+            "/api/plugin-registry/plugins/{id}",
+            get(plugins::registry_preview),
+        )
+        .route(
+            "/api/plugin-registry/install",
+            post(plugins::registry_install),
+        )
+        .route(
+            "/api/plugins/{id}",
+            get(plugins::show).delete(plugins::uninstall),
+        )
+        .route(
+            "/api/plugins/preview",
+            post(plugins::preview).layer(axum::extract::DefaultBodyLimit::max(
+                crate::plugin::package::MAX_ARCHIVE_BYTES,
+            )),
+        )
         // Installing, enabling and removing sources is administrative and REST-only, like the token and the database
         // endpoint: no MCP tool, so an agent integration cannot install code (docs/adr/026). The upload route lifts
         // axum's 2 MiB default body limit, which a component exceeds.

@@ -89,6 +89,16 @@ fn from_stored_cursor(stored: Value) -> Cursor {
 }
 
 impl SurrealStore {
+    /// Whether this source ID has ever been mined, even when its old package was removed.
+    pub async fn has_mined_source_name(&self, name: &str) -> Result<bool> {
+        let mut response = self
+            .db
+            .query("SELECT VALUE record::id(id) FROM source WHERE source = $name LIMIT 1")
+            .bind(("name", name.to_string()))
+            .await?;
+        let rows: Vec<String> = super::take_rows(&mut response, 0)?;
+        Ok(!rows.is_empty())
+    }
     /// The source with this id, or `None`.
     pub async fn get_source(&self, id: SourceId) -> Result<Option<SourceRecord>> {
         let mut response = self

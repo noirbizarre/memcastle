@@ -189,3 +189,7 @@ The history is the value.
   connector-specific metadata criteria shape extraction context, conflict hints and relevant retrieval candidates
   without overriding validity, explicit corrections, confidence or provenance
   (builds on ADR-023, ADR-024, ADR-032 and ADR-046)
+- [ADR-049](049-provider-plugins-are-distributed-as-multi-module-releases.md) — a versioned plugin repository distributes
+  independently selectable source and integration modules; a separate reviewed catalogue preserves the legacy source
+  index, module state remains independent, and provider-scoped CI/releases decouple upstream changes from Core
+  (builds on ADR-026, ADR-033 and ADR-034)

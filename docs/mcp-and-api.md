@@ -228,6 +228,14 @@ provider when none is configured (`memcastle::embed::not_configured`, `memcastle
 | `GET /api/graph` | A piece of the [knowledge graph](#the-knowledge-graph) in one answer, for drawing: `{nodes, edges, truncated}`. With `entity` it is that entity's neighbourhood (open facts, either direction); without it, the first entities by name and the facts among them. A read; there is no MCP tool. | query string: `entity`, `depth` (1 to 3, default 1), `limit` (entities, default 50, at most 200) |
 | `POST /api/auth/token` | Generate a token, replacing any previous one: `{token, algorithm, version, created_at}`. | none |
 | `DELETE /api/auth/token` | Revoke the generated token: `{"revoked": true}`. | none |
+| `GET /api/plugins` | Installed plugin versions and module inventories. | none |
+| `POST /api/plugins` | Install or update an entire validated plugin archive without activating its modules. | archive bytes (at most 64 MiB); `X-MemCastle-Consents` JSON map of source IDs to reviewed permission digests; `X-MemCastle-Adopt-Sources` JSON list of explicitly adopted legacy source IDs |
+| `GET /api/plugins/{id}` | Show one installed plugin, including its module inventory. | none |
+| `DELETE /api/plugins/{id}` | Uninstall a plugin only after its sources, integrations, miners, jobs and dependents are no longer active. Mined data stays. | none |
+| `GET /api/plugin-registry/search` | Search the configured plugin catalogues without installing code. | query string: `q` |
+| `GET /api/plugin-registry/plugins/{id}` | Fetch and verify a release, returning module-specific permission digests without installing it. | query string: `version?`, `registry?` |
+| `POST /api/plugin-registry/install` | Fetch, verify and install the selected plugin; modules remain inactive. | JSON body: `id`, `version?`, `registry?`, `consents?` (module ID to digest), `adopt_sources?` (explicit legacy IDs), `archive_digest?` (from preview) |
+| `POST /api/plugins/preview` | Validate a plugin `.tar.gz` and show per-source consent digests and legacy source IDs needing explicit adoption, without installing it. | archive bytes (at most 64 MiB) |
 | `POST /api/source-packages` | Install a [source package](writing-sources.md): the body is the `.tar.gz` itself. Answers `{source, replaced}`. | query string: `consent` (the digest of the permissions agreed to), `enable` |
 | `GET /api/source-packages/{name}` | One source, built in or installed: capabilities, state, permissions. | none |
 | `POST /api/source-packages/{name}/enable` | Allow an installed source to be mined. Idempotent. | none |

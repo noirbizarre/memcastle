@@ -1,0 +1,113 @@
+name: 🧩 Provider plugins
+
+on:
+  pull_request:
+    paths:
+      - plugins/**
+      - wit/**
+      - src/plugin/**
+      - src/domain/plugin*.rs
+      - src/app/plugins.rs
+      - src/api/plugins.rs
+      - src/store/plugins.rs
+      - database/schema/plugin*.surql
+      - src/config/mod.rs
+      - src/distribution/plugin.rs
+      - src/mining/**
+      - src/source/**
+      - src/domain/source_package.rs
+      - src/app/source_packages.rs
+      - database/schema/source_package.surql
+      - src/integration/**
+      - packaging/plugins/**
+      - tests/wasm_plugin.rs
+      - .github/workflows/plugins.yaml
+  push:
+    branches: [main]
+    paths:
+      - plugins/**
+      - wit/**
+      - src/plugin/**
+      - src/domain/plugin*.rs
+      - src/app/plugins.rs
+      - src/api/plugins.rs
+      - src/store/plugins.rs
+      - database/schema/plugin*.surql
+      - src/config/mod.rs
+      - src/distribution/plugin.rs
+      - src/mining/**
+      - src/source/**
+      - src/domain/source_package.rs
+      - src/app/source_packages.rs
+      - database/schema/source_package.surql
+      - src/integration/**
+      - packaging/plugins/**
+      - tests/wasm_plugin.rs
+      - .github/workflows/plugins.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  changed:
+    runs-on: ubuntu-latest
+    outputs:
+      providers: ${{ steps.select.outputs.providers }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Select affected providers
+        id: select
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 packaging/plugins/changed.py
+
+  provider:
+    name: 🧩 ${{ matrix.provider }}
+    needs: changed
+    if: needs.changed.outputs.providers != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: ${{ fromJSON(needs.changed.outputs.providers) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+      - name: Build and package only the selected provider
+        env:
+          PROVIDER: ${{ matrix.provider }}
+        run: |
+          python3 "plugins/$PROVIDER/scripts/package.py"
+          python3 -m unittest discover -s "plugins/$PROVIDER/tests"
+          git diff --exit-code -- "plugins/$PROVIDER/plugin.toml" || {
+            echo "::error::commit the plugin.toml artifact digests produced by packaging"
+            exit 1
+          }
+          for manifest in plugins/"$PROVIDER"/modules/*/memcastle-source.toml; do
+            if [[ -f "$manifest" ]]; then
+              lock="$(dirname "$manifest")/Cargo.lock"
+              git ls-files --error-unmatch "$lock" >/dev/null || {
+                echo "::error::commit $lock after packaging so release dependencies stay pinned"
+                exit 1
+              }
+            fi
+          done
+      - name: Conformance-test provider sources against released Core
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROVIDER: ${{ matrix.provider }}
+        run: |
+          gh release download --repo memcastle/memcastle --pattern 'memcastle_*_linux-amd64' --dir "$RUNNER_TEMP"
+          binary=("$RUNNER_TEMP"/memcastle_*_linux-amd64)
+          chmod +x "${binary[0]}"
+          for manifest in plugins/"$PROVIDER"/modules/*/memcastle-source.toml; do
+            if [[ -f "$manifest" ]]; then
+              "${binary[0]}" source test "$(dirname "$manifest")" --no-build
+            fi
+          done

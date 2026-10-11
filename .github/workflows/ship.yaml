@@ -14,6 +14,9 @@ name: 🚢 Ship
 on:
   push:
     branches: [main]
+    paths:
+      - '**'
+      - '!plugins/**'
   pull_request:
     types: [closed]
 

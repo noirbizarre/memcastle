@@ -1,5 +1,11 @@
 # Development
 
+Provider-plugin authoring uses the [three GitTPL repositories](plugins.md) directly.
+The parent template composes pinned source and integration module templates, including an initially empty plugin.
+Each generated provider has its own manifest, tests, packaging script and CI/release workflow;
+the in-tree `plugins/<provider>/` layout uses the same script and separate provider-scoped workflows.
+Move that project to a standalone repository without changing the stable plugin and module IDs.
+
 ## Prerequisites
 
 - Node and bun, only for `web/` and `integrations/` (`mise run web:check` and `integrations:check` install them for the

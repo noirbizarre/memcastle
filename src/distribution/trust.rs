@@ -37,6 +37,19 @@ impl TrustPolicy {
         })
     }
 
+    /// Use the same verification rules with independent plugin registry keys.
+    pub fn from_plugins(config: &crate::config::PluginsConfig) -> Result<Self> {
+        let keys = config
+            .trusted_keys
+            .iter()
+            .map(|key| signing::parse_public_key(key))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self {
+            mode: config.trust,
+            keys,
+        })
+    }
+
     /// Apply the policy to the archive of `name`, and answer the id of the key that vouched for it, if one did.
     ///
     /// - A signature from a trusted key must verify, in either mode: a bad signature from a key the user trusts is

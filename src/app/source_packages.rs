@@ -104,6 +104,24 @@ impl AppServices {
         let name = package.manifest.source.name.clone();
         check_compatible(&package.manifest)?;
 
+        let existing = self.store.get_source_package(&name).await?;
+        if let Some(plugin) = existing.as_ref().and_then(|record| record.plugin.as_ref()) {
+            return Err(Error::PluginBlocked {
+                name: plugin.clone(),
+                reason: format!(
+                    "source `{name}` belongs to this plugin; update its parent plugin rather than installing a standalone source"
+                ),
+            });
+        }
+        if let Some(plugin) = self.store.get_plugin_source_owner(&name).await? {
+            return Err(Error::PluginBlocked {
+                name: plugin,
+                reason: format!(
+                    "source `{name}` was supplied by this plugin; reinstall the parent plugin rather than a standalone package"
+                ),
+            });
+        }
+
         let permissions = package.manifest.permissions.normalized();
         let digest = permissions.consent_digest(&name);
         if !permissions.is_empty() && consent != Some(digest.as_str()) {
@@ -132,8 +150,6 @@ impl AppServices {
 
         let sources_dir = self.mining.sources_dir();
         package::install(&sources_dir, &package)?;
-
-        let existing = self.store.get_source_package(&name).await?;
         let now = Utc::now();
         let mut state = existing
             .as_ref()
@@ -152,6 +168,8 @@ impl AppServices {
             registry: upstream.registry,
             archive_digest: upstream.archive_digest,
             signed_by: upstream.signed_by,
+            plugin: None,
+            generation: None,
         };
         self.store.save_source_package(&record).await?;
         Ok(InstalledSource {
@@ -249,6 +267,14 @@ impl AppServices {
     /// [`Error::SourceBuiltin`], [`Error::SourceBundled`], [`Error::SourceNotFound`], and store or I/O errors.
     pub async fn remove_source_package(&self, name: &str) -> Result<()> {
         let record = self.installed(name).await?;
+        if let Some(plugin) = &record.plugin {
+            return Err(Error::PluginBlocked {
+                name: plugin.clone(),
+                reason: format!(
+                    "source `{name}` belongs to this plugin; disable it and uninstall the plugin instead"
+                ),
+            });
+        }
         if record.origin == SourceOrigin::Bundled && self.is_bundled(name) {
             return Err(Error::SourceBundled {
                 name: name.to_string(),

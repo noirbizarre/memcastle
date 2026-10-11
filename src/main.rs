@@ -23,9 +23,9 @@ mod cli;
 use cli::{
     AuditArgs, AuthCommand, CheckpointArgs, Cli, Command, CompletionsArgs, DaemonCommand,
     DbCommand, DiaryCommand, DrawerCommand, EmbedArgs, ExtractArgs, FactCommand,
-    IntegrationCommand, JobCommand, MigrateArgs, MineArgs, MinerCommand, NoteArgs, RecallArgs,
-    RepairArgs, RoomCommand, SearchArgs, ServeArgs, SourceCommand, TriggerCommand, WakeUpArgs,
-    WingCommand,
+    IntegrationCommand, JobCommand, MigrateArgs, MineArgs, MinerCommand, NoteArgs, PluginCommand,
+    RecallArgs, RepairArgs, RoomCommand, SearchArgs, ServeArgs, SourceCommand, TriggerCommand,
+    WakeUpArgs, WingCommand,
 };
 use memcastle::app::{DbEndpointRequest, DbEndpointStatus, WakeUpBudget};
 use memcastle::client::{DaemonClient, SetFlags, StatusView, TriggerSetFlags};
@@ -108,6 +108,15 @@ async fn async_main() -> ExitCode {
     {
         return match cmd_source_local(command).await {
             Ok(code) => code,
+            Err(error) => {
+                eprintln!("{:?}", miette::Report::new(error));
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if let Command::Plugin(PluginCommand::Sign { archive, key }) = &args.command {
+        return match cmd_plugin_sign(archive, key) {
+            Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("{:?}", miette::Report::new(error));
                 ExitCode::FAILURE
@@ -266,6 +275,7 @@ async fn run_command(
         Command::Mine(args) => cmd_mine(&config, mode, args).await,
         Command::Sources => cmd_sources(&config, mode).await,
         Command::Source(command) => cmd_source(&config, mode, command).await,
+        Command::Plugin(command) => cmd_plugin(&config, mode, command).await,
         Command::Miner(command) => cmd_miner(&config, mode, command).await,
         Command::Trigger(command) => cmd_trigger(&config, mode, command).await,
         Command::Integration(command) => cmd_integration(&config, &command),
@@ -662,6 +672,362 @@ async fn cmd_sources(config: &Config, mode: Option<MemoryMode>) -> Result<()> {
     )
 }
 
+/// An explicit permission digest belongs to one source module, not to its containing plugin.
+fn plugin_consents(raw: &[String]) -> Result<std::collections::BTreeMap<String, String>> {
+    let mut digests = std::collections::BTreeMap::new();
+    for item in raw {
+        let (module, digest) = item
+            .split_once('=')
+            .ok_or_else(|| Error::invalid_input("--consent", "expected MODULE=DIGEST"))?;
+        if !memcastle::domain::is_valid_source_name(module)
+            || digest.len() != 64
+            || !digest
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(Error::invalid_input(
+                "--consent",
+                "expected a valid source module ID and 64 lowercase hexadecimal digest",
+            ));
+        }
+        if digests
+            .insert(module.to_string(), digest.to_string())
+            .is_some()
+        {
+            return Err(Error::invalid_input(
+                "--consent",
+                format!("module `{module}` was provided twice"),
+            ));
+        }
+    }
+    Ok(digests)
+}
+
+/// Gather per-module consents only after the daemon checked the actual archive and compatibility.
+fn agree_to_plugin(
+    preview: &memcastle::app::PluginPreview,
+    mut given: std::collections::BTreeMap<String, String>,
+    yes: bool,
+) -> Result<std::collections::BTreeMap<String, String>> {
+    for source in &preview.source_consents {
+        if source.already_granted || given.contains_key(&source.source) {
+            continue;
+        }
+        eprintln!(
+            "{} {} {} asks to: {}",
+            Painter::for_stderr().warn("Source"),
+            source.source,
+            preview.version,
+            source.permissions
+        );
+        if yes || term::is_interactive() {
+            term::confirm(
+                "Install this module with these permissions?",
+                "installing a plugin source",
+                yes,
+            )?;
+            given.insert(source.source.clone(), source.digest.clone());
+        } else {
+            return Err(Error::SourceConsentRequired {
+                name: source.source.clone(),
+                permissions: source.permissions.clone(),
+                digest: source.digest.clone(),
+            });
+        }
+    }
+    Ok(given)
+}
+
+/// A previous source's mined history is never claimed merely because `--yes` was passed for permissions.
+fn check_plugin_adoptions(preview: &memcastle::app::PluginPreview, given: &[String]) -> Result<()> {
+    if let Some(name) = preview.adoptions.iter().find(|name| !given.contains(name)) {
+        return Err(Error::PluginBlocked {
+            name: preview.id.clone(),
+            reason: format!(
+                "source `{name}` has legacy mined data; pass `--adopt-source {name}` to attach its history explicitly"
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn cmd_plugin_sign(archive: &std::path::Path, key: &std::path::Path) -> Result<()> {
+    let bytes = std::fs::read(archive).map_err(|e| Error::io(archive.display().to_string(), e))?;
+    let signed = memcastle::plugin::signing::sign_archive(&bytes, key)?;
+    print_for_terminal_or_json(
+        |_, _| {
+            format!(
+                "SHA-256: {}\nSigning key: {}\nSignature: {}",
+                signed.sha256, signed.signature.key, signed.signature.value
+            )
+        },
+        &signed,
+    )
+}
+
+/// Plugin lifecycle commands always use the daemon for state; local archives are read only for preview/upload.
+async fn cmd_plugin(
+    config: &Config,
+    mode: Option<MemoryMode>,
+    command: PluginCommand,
+) -> Result<()> {
+    let daemon = client(config, mode);
+    match command {
+        PluginCommand::Sign { archive, key } => cmd_plugin_sign(&archive, &key),
+        PluginCommand::Search { query, registry } => {
+            let registry = registry.as_deref().map(absolute_location);
+            let answer = daemon
+                .search_plugins(query.as_deref(), registry.as_deref())
+                .await?;
+            print_for_terminal_or_json(
+                |_, _| {
+                    answer
+                        .plugins
+                        .iter()
+                        .map(|plugin| {
+                            format!(
+                                "{}  {}  {}",
+                                plugin.id,
+                                plugin.repository,
+                                plugin
+                                    .modules
+                                    .iter()
+                                    .map(|module| module.id.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                },
+                &answer,
+            )
+        }
+        PluginCommand::List => {
+            let records = daemon.list_plugins().await?;
+            print_for_terminal_or_json(
+                |_, _| {
+                    records
+                        .iter()
+                        .map(|record| {
+                            format!(
+                                "{}  {}  {} module(s)",
+                                record.id,
+                                record.manifest.plugin.version,
+                                record.manifest.modules.len()
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                },
+                &records,
+            )
+        }
+        PluginCommand::Show { id } => {
+            let record = daemon.show_plugin(&id).await?;
+            print_for_terminal_or_json(
+                |_, _| {
+                    format!(
+                        "{} {} ({})\n{}",
+                        record.id,
+                        record.manifest.plugin.version,
+                        record.manifest.plugin.provider,
+                        record
+                            .manifest
+                            .modules
+                            .iter()
+                            .map(|module| format!(
+                                "  {} ({:?}) {}",
+                                module.id, module.kind, module.version
+                            ))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    )
+                },
+                &record,
+            )
+        }
+        PluginCommand::Install(args) => {
+            let given = plugin_consents(&args.consents)?;
+            let path = std::path::Path::new(&args.target);
+            let installed = if path.exists() {
+                if args.registry.is_some() {
+                    return Err(Error::invalid_input(
+                        "--registry",
+                        "a local plugin project/archive does not use a registry",
+                    ));
+                }
+                let archive = if path.is_dir() {
+                    memcastle::plugin::package::pack_project(path)?
+                } else {
+                    std::fs::read(path).map_err(|e| Error::io(path.display().to_string(), e))?
+                };
+                let preview = daemon.preview_plugin(&archive).await?;
+                check_plugin_adoptions(&preview, &args.adopt_sources)?;
+                let consents = agree_to_plugin(&preview, given, args.yes)?;
+                daemon
+                    .install_plugin(archive, &consents, &args.adopt_sources)
+                    .await?
+            } else {
+                if memcastle::domain::plugin_repository_url(&args.target).is_some() {
+                    if args.registry.is_some() {
+                        return Err(Error::invalid_input(
+                            "--registry",
+                            "a direct repository URL is already the plugin's location",
+                        ));
+                    }
+                    let search = daemon.search_plugins(None, Some(&args.target)).await?;
+                    let plugin = search.plugins.into_iter().next().ok_or_else(|| {
+                        Error::PluginRegistryUnavailable {
+                            location: args.target.clone(),
+                            reason: format!(
+                                "no installable release: {}",
+                                search.warnings.join("; ")
+                            ),
+                        }
+                    })?;
+                    let preview = daemon
+                        .preview_registry_plugin(&plugin.id, None, Some(&args.target))
+                        .await?;
+                    check_plugin_adoptions(&preview.plugin, &args.adopt_sources)?;
+                    let consents = agree_to_plugin(&preview.plugin, given, args.yes)?;
+                    let installed = daemon
+                        .install_registry_plugin(
+                            &plugin.id,
+                            &preview.plugin.version,
+                            Some(&args.target),
+                            &preview.archive_digest,
+                            &consents,
+                            &args.adopt_sources,
+                        )
+                        .await?;
+                    return print_for_terminal_or_json(
+                        |_, _| {
+                            format!(
+                                "Installed {} {}",
+                                installed.id, installed.manifest.plugin.version
+                            )
+                        },
+                        &installed,
+                    );
+                }
+                if args.target.starts_with("http://") || args.target.starts_with("https://") {
+                    return Err(Error::invalid_input(
+                        "plugin",
+                        "direct release discovery accepts https://github.com/OWNER/REPO; use a configured catalogue or a local archive for other hosts",
+                    ));
+                }
+                if args.target.contains('/') || args.target.ends_with(".tar.gz") {
+                    return Err(Error::invalid_input(
+                        "plugin",
+                        format!("{} is not a readable local project/archive", args.target),
+                    ));
+                }
+                let (id, version) = args
+                    .target
+                    .split_once('@')
+                    .map_or((args.target.as_str(), None), |(id, version)| {
+                        (id, Some(version))
+                    });
+                let registry = args.registry.as_deref().map(absolute_location);
+                let preview = daemon
+                    .preview_registry_plugin(id, version, registry.as_deref())
+                    .await?;
+                check_plugin_adoptions(&preview.plugin, &args.adopt_sources)?;
+                let consents = agree_to_plugin(&preview.plugin, given, args.yes)?;
+                daemon
+                    .install_registry_plugin(
+                        id,
+                        &preview.plugin.version,
+                        Some(&preview.registry),
+                        &preview.archive_digest,
+                        &consents,
+                        &args.adopt_sources,
+                    )
+                    .await?
+            };
+            print_for_terminal_or_json(
+                |_, _| {
+                    format!(
+                        "Installed {} {} ({} modules)",
+                        installed.id,
+                        installed.manifest.plugin.version,
+                        installed.manifest.modules.len()
+                    )
+                },
+                &installed,
+            )
+        }
+        PluginCommand::Update(args) => {
+            let record = daemon.show_plugin(&args.id).await?;
+            let upstream = record.upstream.as_deref().ok_or_else(|| Error::PluginBlocked {
+                name: args.id.clone(), reason: "this plugin was installed from local files; install a newer archive or project explicitly".into(),
+            })?;
+            let preview = daemon
+                .preview_registry_plugin(&args.id, None, Some(upstream))
+                .await?;
+            check_plugin_adoptions(&preview.plugin, &args.adopt_sources)?;
+            if preview.plugin.version == record.manifest.plugin.version {
+                if preview.archive_digest != record.digest {
+                    return Err(Error::PluginIntegrity {
+                        name: record.id,
+                        reason: "the upstream replaced the bytes of the installed version; ask the publisher for a new version".into(),
+                    });
+                }
+                return print_for_terminal_or_json(
+                    |_, _| {
+                        format!(
+                            "{} is current at {}",
+                            record.id, record.manifest.plugin.version
+                        )
+                    },
+                    &record,
+                );
+            }
+            let consents =
+                agree_to_plugin(&preview.plugin, plugin_consents(&args.consents)?, args.yes)?;
+            let installed = daemon
+                .install_registry_plugin(
+                    &args.id,
+                    &preview.plugin.version,
+                    Some(upstream),
+                    &preview.archive_digest,
+                    &consents,
+                    &args.adopt_sources,
+                )
+                .await?;
+            print_for_terminal_or_json(
+                |_, _| {
+                    format!(
+                        "Updated {} to {}",
+                        installed.id, installed.manifest.plugin.version
+                    )
+                },
+                &installed,
+            )
+        }
+        PluginCommand::Uninstall(args) => {
+            confirm_delete(
+                "Uninstall this plugin?",
+                "uninstalling the plugin",
+                args.yes,
+                async {
+                    let record = daemon.show_plugin(&args.id).await?;
+                    Ok(format!(
+                        "{} {} ({} modules); mined data stays in the palace",
+                        record.id,
+                        record.manifest.plugin.version,
+                        record.manifest.modules.len()
+                    ))
+                },
+            )
+            .await?;
+            let removed = daemon.uninstall_plugin(&args.id).await?;
+            print_for_terminal_or_json(|_, _| format!("Uninstalled {}", args.id), &removed)
+        }
+    }
+}
+
 /// `memcastle source init|build|test|package`: working on a source project, entirely on this machine.
 ///
 /// No daemon and no configuration: these operate on a project directory and touch neither the store nor the jobs,
@@ -670,6 +1036,10 @@ async fn cmd_source_local(command: &SourceCommand) -> Result<ExitCode> {
     use memcastle::source::build::Project;
     match command {
         SourceCommand::Init(args) => {
+            eprintln!(
+                "{} `source init` creates a legacy single-source project; use the memcastle-source.tpl GitTPL repository for new modules",
+                Painter::for_stderr().warn("Deprecated:")
+            );
             let parent = match &args.parent {
                 Some(parent) => parent.clone(),
                 None => std::env::current_dir().map_err(|source| Error::io(".", source))?,
@@ -837,6 +1207,10 @@ async fn cmd_source(
             )
         }
         SourceCommand::Search(args) => {
+            eprintln!(
+                "{} `source search` uses the legacy source registry; use `plugin search` for provider packages",
+                Painter::for_stderr().warn("Deprecated:")
+            );
             let registry = args.registry.as_deref().map(absolute_location);
             let found = client(config, None)
                 .search_registry(args.query.as_deref(), registry.as_deref())
@@ -1210,6 +1584,10 @@ fn consent_for(
 
 /// `memcastle source install <file|directory|name[@version]>`.
 async fn cmd_source_install(config: &Config, args: cli::SourceInstallArgs) -> Result<()> {
+    eprintln!(
+        "{} `source install` installs a legacy source package; use `plugin install` for provider packages",
+        Painter::for_stderr().warn("Deprecated:")
+    );
     let render = |installed: &memcastle::app::InstalledSource| {
         print_for_terminal_or_json(
             |painter, _| memcastle::client::table::render_source(&installed.source, painter),
@@ -1300,6 +1678,10 @@ async fn cmd_source_install(config: &Config, args: cli::SourceInstallArgs) -> Re
 /// Exits non-zero when something could not be updated, or is waiting for consent to permissions it newly asks for, so
 /// a script that updates unattended notices.
 async fn cmd_source_update(config: &Config, args: &cli::SourceUpdateArgs) -> Result<ExitCode> {
+    eprintln!(
+        "{} `source update` uses the legacy source registry; use `plugin update` for provider packages",
+        Painter::for_stderr().warn("Deprecated:")
+    );
     use memcastle::app::UpdateStatus;
     let daemon = client(config, None);
     if args.check {
@@ -1643,9 +2025,10 @@ fn cmd_integration(config: &Config, command: &IntegrationCommand) -> Result<()> 
     let locations = Locations::from_process();
     let runner = SystemRunner;
     let ctx = Context::for_process(&locations, &runner);
-    let text = memcastle::integration::execute(
+    let text = memcastle::integration::execute_with_plugins(
         &operation,
         config.assets.dir.as_deref(),
+        &config.plugins.dir(),
         &InstallSearch::from_process(),
         &ctx,
         // `execute` renders either form itself, so the one output rule is applied here, to what it is asked for.

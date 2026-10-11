@@ -821,6 +821,118 @@ pub enum Error {
         message: String,
     },
 
+    /// A plugin manifest cannot be safely understood.
+    #[error("invalid plugin manifest: {message}")]
+    #[diagnostic(
+        code(memcastle::plugin::manifest_invalid),
+        help(
+            "fix `plugin.toml`; module IDs, entry points and compatibility must match the included artifacts"
+        )
+    )]
+    PluginManifestInvalid {
+        /// What was wrong.
+        message: String,
+    },
+
+    /// A plugin archive is incomplete or contains unexpected files.
+    #[error("invalid plugin package: {message}")]
+    #[diagnostic(
+        code(memcastle::plugin::package_invalid),
+        help("rebuild the plugin archive from its manifest and declared module artifacts")
+    )]
+    PluginPackageInvalid {
+        /// What was wrong.
+        message: String,
+    },
+
+    /// An installed plugin has live consumers and cannot be changed safely.
+    #[error("plugin `{name}` cannot be changed: {reason}")]
+    #[diagnostic(
+        code(memcastle::plugin::blocked),
+        help(
+            "disable the affected source, remove its miner/trigger configuration or uninstall its integration, then retry"
+        )
+    )]
+    PluginBlocked {
+        /// Stable plugin ID.
+        name: String,
+        /// The specific reference that blocks this operation.
+        reason: String,
+    },
+
+    /// No installed plugin has this ID.
+    #[error("no installed plugin is named `{name}`")]
+    #[diagnostic(
+        code(memcastle::plugin::not_found),
+        help(
+            "`memcastle plugin list` shows installed plugins; install the plugin before changing its modules"
+        )
+    )]
+    PluginNotFound {
+        /// Stable plugin ID asked for.
+        name: String,
+    },
+
+    /// A configured plugin catalogue cannot be used.
+    #[error("plugin registry `{location}` is unavailable: {reason}")]
+    #[diagnostic(
+        code(memcastle::plugin::registry_unavailable),
+        help(
+            "check the plugin registry URL or path, then retry; the legacy source registry is separate"
+        )
+    )]
+    PluginRegistryUnavailable {
+        /// Catalogue location.
+        location: String,
+        /// Why it could not be used.
+        reason: String,
+    },
+
+    /// No configured plugin catalogue supplies the requested compatible release.
+    #[error("plugin `{name}` is not available: {reason}")]
+    #[diagnostic(
+        code(memcastle::plugin::not_in_registry),
+        help(
+            "check the plugin ID/version with `memcastle plugin search`, or choose another registry"
+        )
+    )]
+    PluginNotInRegistry {
+        /// Requested plugin ID.
+        name: String,
+        /// Missing version or lack of compatible release.
+        reason: String,
+    },
+
+    /// Downloaded plugin bytes or inventory disagree with the published release.
+    #[error("plugin `{name}` failed integrity verification: {reason}")]
+    #[diagnostic(
+        code(memcastle::plugin::integrity),
+        help(
+            "do not install this release; ask the publisher to correct the asset or reviewed catalogue"
+        )
+    )]
+    PluginIntegrity {
+        /// The plugin that failed verification.
+        name: String,
+        /// Digest, signature or identity mismatch.
+        reason: String,
+    },
+
+    /// The registry release does not satisfy the plugin trust policy.
+    #[error("plugin `{name}` is not trusted: {reason}")]
+    #[diagnostic(
+        code(memcastle::plugin::untrusted),
+        help(
+            "choose a signed release from a trusted publisher or adjust plugins.trust and plugins.trusted_keys"
+        )
+    )]
+    PluginUntrusted {
+        /// The package rejected by the trust policy.
+        name: String,
+        /// Missing or invalid signature.
+        reason: String,
+    },
+
     /// A source cannot run on this MemCastle: its contract or version requirement is not met, or its
     /// component does not fit the contract.
     #[error("source `{name}` is incompatible with this MemCastle: {reason}")]
@@ -1844,6 +1956,35 @@ mod tests {
             Error::SourcePackageInvalid {
                 message: "no component".to_string(),
             },
+            Error::PluginManifestInvalid {
+                message: "no plugin ID".to_string(),
+            },
+            Error::PluginPackageInvalid {
+                message: "missing artifact".to_string(),
+            },
+            Error::PluginBlocked {
+                name: "acme".to_string(),
+                reason: "source enabled".to_string(),
+            },
+            Error::PluginNotFound {
+                name: "acme".to_string(),
+            },
+            Error::PluginRegistryUnavailable {
+                location: "https://example.invalid/plugins.json".into(),
+                reason: "unreachable".into(),
+            },
+            Error::PluginNotInRegistry {
+                name: "acme".into(),
+                reason: "not listed".into(),
+            },
+            Error::PluginIntegrity {
+                name: "acme".into(),
+                reason: "digest mismatch".into(),
+            },
+            Error::PluginUntrusted {
+                name: "acme".into(),
+                reason: "missing signature".into(),
+            },
             Error::SourceIncompatible {
                 name: "slack".to_string(),
                 reason: "contract 9.0".to_string(),
@@ -2056,6 +2197,14 @@ mod tests {
             | Error::SourceCursorInvalid { .. }
             | Error::SourceManifestInvalid { .. }
             | Error::SourcePackageInvalid { .. }
+            | Error::PluginManifestInvalid { .. }
+            | Error::PluginPackageInvalid { .. }
+            | Error::PluginBlocked { .. }
+            | Error::PluginNotFound { .. }
+            | Error::PluginRegistryUnavailable { .. }
+            | Error::PluginNotInRegistry { .. }
+            | Error::PluginIntegrity { .. }
+            | Error::PluginUntrusted { .. }
             | Error::SourceIncompatible { .. }
             | Error::SourceNotFound { .. }
             | Error::SourceNotEnabled { .. }

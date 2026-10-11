@@ -67,6 +67,17 @@ enum Guard {
 }
 
 impl SurrealStore {
+    /// Whether a queued, running or paused job still names one of these source modules.
+    pub async fn active_mine_job_for_sources(&self, sources: &[String]) -> Result<bool> {
+        if sources.is_empty() {
+            return Ok(false);
+        }
+        let mut response = self.db.query(
+            "SELECT VALUE record::id(id) FROM job WHERE status IN ['queued', 'running', 'paused'] AND kind.type = 'mine' AND kind.source IN $sources LIMIT 1"
+        ).bind(("sources", sources.to_vec())).await?;
+        let ids: Vec<String> = super::take_rows(&mut response, 0)?;
+        Ok(!ids.is_empty())
+    }
     /// Insert a new job, or overwrite an existing one at the same id.
     ///
     /// `UPSERT ... SET` targeting a specific id creates the record if it is

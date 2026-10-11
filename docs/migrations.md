@@ -1,5 +1,13 @@
 # Migrations and upgrades
 
+The plugin ledger is a new additive SurrealKit schema table.
+Existing `source_package` rows have no plugin owner or generation and remain valid legacy single-source installs;
+they keep their component digest, activation state, credentials and mining cursors without a data backfill.
+Installing a plugin never silently takes ownership of an existing legacy source with the same ID.
+If a legacy source was removed after mining, `plugin install --adopt-source <id>` is the explicit handoff of its
+preserved cursor and drawers to the plugin supplying that same source kind.
+Mined drawers and source cursors live in separate tables and survive plugin updates and uninstall.
+
 MemCastle keeps its data in a versioned shape.
 When a release changes that shape, it ships a migration, and the daemon applies it before it serves anyone.
 For most upgrades you do nothing: install the new version and start it.

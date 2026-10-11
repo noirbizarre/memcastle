@@ -57,6 +57,7 @@ mod jobs;
 mod lifecycle;
 mod migration_state;
 mod palace;
+mod plugins;
 mod renames;
 mod resolution;
 mod retrieval;

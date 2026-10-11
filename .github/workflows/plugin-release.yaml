@@ -1,0 +1,70 @@
+name: 📦 Publish provider plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Directory under plugins/ whose independent release to publish
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main' && github.repository == 'memcastle/memcastle'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+      - name: Validate and package the selected provider only
+        env:
+          PROVIDER: ${{ inputs.provider }}
+        run: |
+          [[ "$PROVIDER" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] && test -f "plugins/$PROVIDER/plugin.toml"
+          python3 "plugins/$PROVIDER/scripts/package.py"
+          python3 -m unittest discover -s "plugins/$PROVIDER/tests"
+          git diff --exit-code -- "plugins/$PROVIDER/plugin.toml" || {
+            echo "::error::commit the plugin.toml artifact digests produced by packaging"
+            exit 1
+          }
+          for manifest in plugins/"$PROVIDER"/modules/*/memcastle-source.toml; do
+            if [[ -f "$manifest" ]]; then
+              lock="$(dirname "$manifest")/Cargo.lock"
+              git ls-files --error-unmatch "$lock" >/dev/null || {
+                echo "::error::commit $lock after packaging so release dependencies stay pinned"
+                exit 1
+              }
+            fi
+          done
+      - name: Check every source against released Core before publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROVIDER: ${{ inputs.provider }}
+        run: |
+          gh release download --repo memcastle/memcastle --pattern 'memcastle_*_linux-amd64' --dir "$RUNNER_TEMP"
+          binary=("$RUNNER_TEMP"/memcastle_*_linux-amd64)
+          chmod +x "${binary[0]}"
+          for manifest in plugins/"$PROVIDER"/modules/*/memcastle-source.toml; do
+            if [[ -f "$manifest" ]]; then
+              "${binary[0]}" source test "$(dirname "$manifest")" --no-build
+            fi
+          done
+      - name: Publish its own versioned release
+        env:
+          PROVIDER: ${{ inputs.provider }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(python3 -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["plugin"]["version"])' "plugins/$PROVIDER/plugin.toml")
+          tag="plugin/$PROVIDER/v$version"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::release $tag already exists; bump the provider version before publishing new bytes"
+            exit 1
+          fi
+          # GitHub's auto-notes would include unrelated Core/provider commits in this monorepo.
+          gh release create "$tag" "plugins/$PROVIDER/dist/"*.tar.gz --target "$GITHUB_SHA" \
+            --title "$PROVIDER $version" --notes "Independent $PROVIDER provider plugin release."

@@ -152,6 +152,7 @@ pub async fn run(config: Config) -> Result<()> {
         .with_events(events)
         .with_credentials(credentials)
         .with_mining(config.effective_mining())
+        .with_plugins(config.plugins.clone())
         .with_embeddings(embeddings)
         .with_extraction(extraction)
         .with_dedup(config.dedup.clone())
@@ -185,6 +186,7 @@ pub async fn run(config: Config) -> Result<()> {
         // explicit `memcastle db start` (`docs/adr/015`), so a plain daemon
         // opens exactly the one listener it always did.
         .with_db_endpoint(DbEndpoint::new(config.db.clone(), shutdown.clone()));
+    app.recover_plugin_pointers().await?;
     if config.auth.enabled {
         info!(
             "authentication is enabled: every route except GET /api/health requires a bearer token"

@@ -103,3 +103,13 @@ fn the_official_registry_published_with_the_docs_is_an_index_this_memcastle_read
         );
     }
 }
+
+#[test]
+fn plugin_discovery_does_not_reinterpret_the_legacy_source_index() {
+    let legacy = std::fs::read_to_string(root().join("docs/registry.json")).unwrap();
+    let plugins = std::fs::read_to_string(root().join("docs/plugins.json")).unwrap();
+    assert!(memcastle::domain::SourceIndex::parse(&legacy).is_ok());
+    assert!(memcastle::domain::PluginIndex::parse(&plugins).is_ok());
+    assert!(memcastle::domain::SourceIndex::parse(&plugins).is_err());
+    assert!(memcastle::domain::PluginIndex::parse(&legacy).is_err());
+}

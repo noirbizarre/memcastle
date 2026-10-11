@@ -67,6 +67,11 @@ impl TestDaemon {
         // The official source registry is the default, and a test must never reach the network by accident: one that
         // is about registries sets its own.
         config.mining.registries.clear();
+        config.mining.sources_dir = Some(tempdir.path().join("sources"));
+        // A developer's installed release bundle must not change a test's adapter listing.
+        config.mining.bundled_dir = Some(tempdir.path().join("no-bundle"));
+        config.plugins.registries.clear();
+        config.plugins.dir = Some(tempdir.path().join("plugins"));
         // In-process daemons are never killed mid-write, so what a flush per
         // commit protects against cannot happen here, while paying for it
         // cost seconds per boot on a slow disk (Windows CI). A test that is
